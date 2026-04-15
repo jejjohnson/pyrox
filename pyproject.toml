@@ -23,7 +23,7 @@ dependencies = [
     "jax>=0.4",
     "equinox>=0.11",
     "numpyro>=0.15",
-    "gaussx>=0.0.1",
+    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@main",
     "lineax>=0.0.5",
 ]
 
