@@ -4,8 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-<!-- TODO: Replace with your project description -->
-A Python package. Built with Python 3.12+, uv, pytest, and MkDocs.
+pyrox: probabilistic modeling with Equinox and NumPyro. Bayesian neural networks, Gaussian processes, and composable GP building blocks. Built with Python 3.12+, uv, pytest, and MkDocs.
+
+Top-level areas:
+
+- `pyrox._core` — Equinox-to-NumPyro bridge (PyroxModule, PyroxParam, PyroxSample, Parameterized).
+- `pyrox.gp` — Gaussian process building blocks and protocols.
+- `pyrox.nn` — Bayesian and uncertainty-aware neural network layers.
 
 ## Common Commands
 
@@ -14,7 +19,7 @@ make install              # Install all deps (uv sync --all-groups) + pre-commit
 make test                 # Run tests: uv run pytest -v
 make format               # Auto-fix: ruff format . && ruff check --fix .
 make lint                 # Lint code: ruff check .
-make typecheck            # Type check: ty check src/mypackage
+make typecheck            # Type check: ty check src/pyrox
 make precommit            # Run pre-commit on all files
 make docs-serve           # Local docs server
 ```
@@ -29,28 +34,31 @@ uv run pytest tests/test_example.py::TestClass::test_method -v
 
 ```bash
 uv run pytest -v                              # Tests
-uv run --group lint ruff check .              # Lint — ENTIRE repo, not just src/mypackage/
+uv run --group lint ruff check .              # Lint — ENTIRE repo, not just src/pyrox/
 uv run --group lint ruff format --check .     # Format — ENTIRE repo
-uv run --group typecheck ty check src/mypackage  # Typecheck — package only
+uv run --group typecheck ty check src/pyrox   # Typecheck — package only
 ```
 
-**Critical**: Always lint/format with `.` (repo root), not `src/mypackage/`. CI runs `ruff check .` which includes `tests/` and `scripts/`.
+**Critical**: Always lint/format with `.` (repo root), not `src/pyrox/`. CI runs `ruff check .` which includes `tests/` and `scripts/`.
 
 ## Architecture
 
 ### Package structure
 
-All implementation lives in `src/mypackage/`. The public API is re-exported through `src/mypackage/__init__.py`.
+All implementation lives in `src/pyrox/`. The public API is re-exported through `src/pyrox/__init__.py`.
 
 ### Key directories
 
 | Path | Purpose |
 |------|---------|
-| `src/mypackage/` | Main package source code |
+| `src/pyrox/` | Main package source code |
+| `src/pyrox/_core/` | Equinox-to-NumPyro bridge primitives |
+| `src/pyrox/gp/` | Gaussian process building blocks |
+| `src/pyrox/nn/` | Bayesian/uncertainty-aware NN layers |
 | `tests/` | Test suite |
 | `docs/` | Documentation (MkDocs) |
+| `design_docs/pyrox/` | Design documents (vision, architecture, boundaries, decisions, API, examples) |
 | `notebooks/` | Jupyter notebooks |
-| `scripts/` | Example scripts |
 
 ## Documentation Examples
 
@@ -73,7 +81,7 @@ See `.github/instructions/docs-examples.instructions.md` for full standards.
 
 ## Plans
 
-Plans and design documents go in `.plans/` (gitignored, never committed). Track work via GitHub issues instead.
+Plans and design documents go in `.plans/` (gitignored, never committed) or `design_docs/pyrox/` (committed design references). Track work via GitHub issues instead.
 
 ## PR Review Comments
 
