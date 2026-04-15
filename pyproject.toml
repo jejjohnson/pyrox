@@ -70,6 +70,10 @@ gaussx = { git = "https://github.com/jejjohnson/gaussx.git", branch = "main" }
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.metadata]
+# gaussx is declared via a PEP 508 direct URL until it ships to PyPI.
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/pyrox"]
 
