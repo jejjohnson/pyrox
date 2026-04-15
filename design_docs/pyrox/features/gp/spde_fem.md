@@ -207,9 +207,12 @@ def build_precision(
 ) -> SparseArray:
     """Sparse precision matrix Q.
 
+    Here `C` denotes the lumped diagonal mass matrix approximation
+    (written as tilde{C} in the derivation).
+
     alpha=1: Q = tau^2 * (kappa^2 C + G)
-    alpha=2: Q = tau^2 * K C^{-1} K    where K = kappa^2 C + G
-    alpha=3: Q = tau^2 * K C^{-1} Q_1 C^{-1} K
+    alpha=2: Q = tau^2 * K tilde{C}^{-1} K    where K = kappa^2 C + G
+    alpha=3: Q = tau^2 * K tilde{C}^{-1} Q_1 tilde{C}^{-1} K
 
     Complexity: O(nnz) where nnz = number of nonzeros in Q.
     """

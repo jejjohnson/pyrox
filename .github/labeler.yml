@@ -39,28 +39,36 @@
   - changed-files:
     - any-glob-to-any-file: "src/**"
 
-# --- Layer scopes — edit to match your project's layer stack --------------
-# Example layout for a library with a three-layer stack
-# (primitives → components → public models). Delete or rename if your
-# project doesn't have a formal layer split.
+# --- Layer scopes — aligned to pyrox.gp's documented layout ---------------
+# See `design_docs/pyrox/architecture.md` for the full layer stack.
+# Layer 0 primitives live under `src/pyrox/gp/_src/`; higher-level GP
+# components and public models/entry points sit in dedicated subpackages
+# under `src/pyrox/gp/`.
 
 "layer:0-primitives":
   - changed-files:
     - any-glob-to-any-file:
-      - "src/**/_primitives/**"
-      - "src/**/_src/primitives*.py"
+      - "src/pyrox/gp/_src/**"
 
 "layer:1-components":
   - changed-files:
     - any-glob-to-any-file:
-      - "src/**/_components/**"
-      - "src/**/_src/components*.py"
+      - "src/pyrox/gp/kernels/**"
+      - "src/pyrox/gp/covs/**"
+      - "src/pyrox/gp/solvers/**"
+      - "src/pyrox/gp/integrators/**"
+      - "src/pyrox/gp/inducing_features/**"
+      - "src/pyrox/gp/multi_output/**"
+      - "src/pyrox/gp/sampling/**"
+      - "src/pyrox/gp/temporal/**"
+      - "src/pyrox/gp/guides/**"
 
 "layer:2-models":
   - changed-files:
     - any-glob-to-any-file:
-      - "src/**/_models/**"
-      - "src/**/_src/models*.py"
+      - "src/pyrox/gp/priors/**"
+      - "src/pyrox/gp/inference/**"
+      - "src/pyrox/gp/ops.py"
 
 # --- Default / legacy labels retained for Dependabot compatibility ---------
 

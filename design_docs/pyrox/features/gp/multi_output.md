@@ -175,12 +175,14 @@ class ICMKernel(eqx.Module):
 **Mixing structure:** Orthogonal $W \in \mathbb{R}^{P \times Q}$ with $W^\top W = I_Q$, $Q \leq P$.
 
 **Math:** The orthogonality constraint on $W$ enables exact decoupling of the
-multi-output posterior into $Q$ independent single-output problems. Given:
+multi-output posterior into $Q$ independent single-output problems. Using a
+row-major data layout with observations stacked as $Y \in \mathbb{R}^{N \times P}$:
 
 $$\mathbf{f}(x) = W\, \mathbf{g}(x) + \epsilon, \qquad \epsilon \sim \mathcal{N}(0, \sigma^2 I_P)$$
 
-the projected observations $\tilde{y} = W^\top y \in \mathbb{R}^Q$ yield
-$Q$ independent scalar GP regression problems:
+the projected observations $\tilde{Y} = Y W \in \mathbb{R}^{N \times Q}$ yield
+$Q$ independent scalar GP regression problems, one for each projected column
+$\tilde{y}_q \in \mathbb{R}^N$:
 
 $$\tilde{y}_q | g_q \sim \mathcal{N}\bigl(g_q(X), \sigma^2 I_N\bigr)$$
 
@@ -220,7 +222,7 @@ class OILMMKernel(eqx.Module):
         ...
 ```
 
-**Ref:** Bruinsma, Perim, Tebbutt, Sherrington,"; Nowozin & Turner (2020). *Scalable Exact Inference in Multi-Output Gaussian Processes.* ICML.
+**Ref:** Bruinsma, Perim, Tebbutt, Sherrington, Nowozin & Turner (2020). *Scalable Exact Inference in Multi-Output Gaussian Processes.* ICML.
 
 ---
 

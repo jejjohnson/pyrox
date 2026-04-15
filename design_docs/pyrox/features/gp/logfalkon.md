@@ -6,7 +6,7 @@ version: 0.1.0
 # pyrox.gp x LogFalkon / GSC-Falkon
 
 **Subject:** LogFalkon (Meanti et al. 2020) — Newton outer loop for non-quadratic
-losses with Falkon-preconditioned conjugate gradient inner solve. Extends Nystr\"om
+losses with Falkon-preconditioned conjugate gradient inner solve. Extends Nyström
 kernel methods from squared loss to logistic, exponential, and other generalized
 self-concordant (GSC) losses with convergence guarantees.
 
@@ -16,26 +16,26 @@ self-concordant (GSC) losses with convergence guarantees.
 
 ## 1  Background -- Falkon
 
-Falkon (Rudi et al. 2017) is a preconditioned Nystr\"om solver for kernel ridge
-regression (squared loss). Given $N$ data points and $M \ll N$ Nystr\"om centers,
+Falkon (Rudi et al. 2017) is a preconditioned Nyström solver for kernel ridge
+regression (squared loss). Given $N$ data points and $M \ll N$ Nyström centers,
 it solves the kernel ridge regression problem without ever forming the full
 $N \times N$ kernel matrix.
 
-### The Nystr\"om approximation
+### The Nyström approximation
 
 Select $M$ centers $\{z_j\}_{j=1}^M$ (uniformly at random or via leverage-score
 sampling) from the training data. Form the rectangular kernel matrix
 $K_{NM} \in \mathbb{R}^{N \times M}$ with $(K_{NM})_{ij} = k(x_i, z_j)$ and the
 small square $K_{MM} \in \mathbb{R}^{M \times M}$ with $(K_{MM})_{ij} = k(z_i, z_j)$.
 
-The Nystr\"om approximation to the full kernel matrix is:
+The Nyström approximation to the full kernel matrix is:
 
 $$K_{NN} \approx K_{NM}\,K_{MM}^{-1}\,K_{MN}$$
 
 ### The Falkon system
 
 Standard kernel ridge regression solves $(K_{NN} + \lambda I)\,\alpha = y$, which
-costs $O(N^3)$. The Nystr\"om substitution reduces this to an $M \times M$ system:
+costs $O(N^3)$. The Nyström substitution reduces this to an $M \times M$ system:
 
 $$(K_{MN}\,K_{NM} + \lambda\,K_{MM})\,\beta = K_{MN}\,y$$
 
@@ -131,7 +131,7 @@ preconditioned CG inner loop. The full algorithm proceeds as follows.
 
 ### Initialization
 
-1. Select $M$ Nystr\"om centers $\{z_j\}$ from training data
+1. Select $M$ Nyström centers $\{z_j\}$ from training data
 2. Compute $K_{MM}$ and its Cholesky factor $K_{MM} = L_{MM}\,L_{MM}^\top$
 3. Compute $K_{NM}$
 4. Initialize predictions $f_0 = 0 \in \mathbb{R}^N$
@@ -146,7 +146,7 @@ $$w_t^{(i)} = \ell''(y_i,\, f_t^{(i)}), \qquad g_t^{(i)} = \frac{\ell'(y_i,\, f_
 
 Define $W_t = \text{diag}(w_t) \in \mathbb{R}^{N \times N}$.
 
-**Step 2: Form the weighted Nystr\"om system.**
+**Step 2: Form the weighted Nyström system.**
 
 The Newton step requires solving:
 
@@ -223,7 +223,7 @@ of $B$ weighted by $W_t$, which can be more memory-efficient.
 
 | | Standard Kernel Logistic Regression | LogFalkon |
 |---|---|---|
-| Parameters | $N$ (dual) | $M$ (Nystr\"om) |
+| Parameters | $N$ (dual) | $M$ (Nyström) |
 | Per Newton step | $O(N^3)$ (solve $N \times N$ system) | $O(NM^2 + NM \cdot t_\text{cg})$ |
 | Newton steps | $T$ | $T$ |
 | Preconditioner | N/A or $O(N^3)$ | $O(NM^2 + M^3)$ per step |
@@ -505,10 +505,10 @@ compatibility. The CG inner loop can similarly use `jax.lax.while_loop` or a fix
 
 1. Meanti, G., Carratino, L., Rosasco, L. & Rudi, A. (2020). *Kernel Methods through the Roof: Handling Billions of Points Efficiently.* NeurIPS. -- LogFalkon algorithm, GSC-Falkon extension, weighted preconditioner.
 
-2. Rudi, A., Carratino, L. & Rosasco, L. (2017). *FALKON: An Optimal Large Scale Kernel Method.* NeurIPS. -- Original Falkon for squared loss, Nystr\"om preconditioner, statistical optimality.
+2. Rudi, A., Carratino, L. & Rosasco, L. (2017). *FALKON: An Optimal Large Scale Kernel Method.* NeurIPS. -- Original Falkon for squared loss, Nyström preconditioner, statistical optimality.
 
 3. Marteau-Ferey, U., Ostrovskii, D., Bach, F. & Rudi, A. (2019). *Beyond Least-Squares: Fast Rates for Regularized Empirical Risk Minimization through Self-Concordance.* COLT. -- GSC loss framework, convergence theory for Newton with GSC losses.
 
-4. Rudi, A., Calandriello, D., Carratino, L. & Rosasco, L. (2018). *On Fast Leverage Score Sampling and Optimal Learning.* NeurIPS. -- Leverage score sampling for Nystr\"om center selection.
+4. Rudi, A., Calandriello, D., Carratino, L. & Rosasco, L. (2018). *On Fast Leverage Score Sampling and Optimal Learning.* NeurIPS. -- Leverage score sampling for Nyström center selection.
 
 5. Nesterov, Y. & Nemirovski, A. (1994). *Interior-Point Polynomial Algorithms in Convex Optimization.* SIAM. -- Original self-concordance theory.
