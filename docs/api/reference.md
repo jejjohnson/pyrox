@@ -1,3 +1,15 @@
 # API Reference
 
-::: mypackage
+::: pyrox
+
+## Core
+
+::: pyrox._core
+
+## GP
+
+::: pyrox.gp
+
+## NN
+
+::: pyrox.nn
