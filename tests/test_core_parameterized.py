@@ -12,6 +12,8 @@ from pyrox._core.parameterized import _State
 
 
 class RBFKernel(Parameterized):
+    pyrox_name = "RBFKernel"
+
     @pyrox_method
     def __call__(self, X1, X2):
         v = self.get_param("variance")
@@ -47,7 +49,7 @@ def test_setup_is_invoked_on_construction():
 
 def test_register_param_before_set_prior_raises_keyerror():
     class Empty(Parameterized):
-        pass
+        pyrox_name = "Empty"
 
     k = Empty()
     with pytest.raises(KeyError, match="not registered"):
@@ -78,6 +80,8 @@ def test_guide_mode_delta_uses_param_site():
 
 def test_guide_mode_normal_adds_variational_params():
     class NK(Parameterized):
+        pyrox_name = "NK"
+
         @pyrox_method
         def __call__(self):
             return self.get_param("v")
@@ -96,6 +100,43 @@ def test_guide_mode_normal_adds_variational_params():
     assert tr["NK.v"]["type"] == "sample"
 
 
+def test_guide_mode_normal_respects_positive_constraint():
+    """Regression for PR #57 review: the `normal` guide must keep draws
+    inside the prior's support. A positive-support param with a LogNormal
+    prior and `autoguide("normal")` must never sample negative values.
+    """
+
+    class PosK(Parameterized):
+        pyrox_name = "PosK"
+
+        @pyrox_method
+        def __call__(self):
+            return self.get_param("v")
+
+        def setup(self):
+            self.register_param(
+                "v",
+                jnp.array(1.0),
+                constraint=dist.constraints.positive,
+            )
+            self.set_prior("v", dist.LogNormal(0.0, 1.0))
+            self.autoguide("v", "normal")
+
+    k = PosK()
+    k.set_mode("guide")
+    samples = []
+    for seed in range(30):
+        with handlers.trace() as tr, handlers.seed(rng_seed=seed):
+            _ = k()
+        samples.append(float(tr["PosK.v"]["value"]))
+    # Every guide draw must stay in the prior's (positive) support.
+    assert all(s > 0.0 for s in samples)
+    # The guide distribution is a TransformedDistribution wrapping the
+    # unconstrained Normal — not a bare Normal.
+    site_fn = tr["PosK.v"]["fn"]
+    assert isinstance(site_fn, dist.TransformedDistribution)
+
+
 def test_autoguide_rejects_unknown_guide_type():
     k = RBFKernel()
     with pytest.raises(ValueError, match="guide_type must be"):
@@ -110,6 +151,8 @@ def test_set_mode_rejects_unknown_mode():
 
 def test_mvn_guide_raises_not_implemented_at_get_param():
     class MK(Parameterized):
+        pyrox_name = "MK"
+
         @pyrox_method
         def __call__(self):
             return self.get_param("v")

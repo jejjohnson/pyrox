@@ -40,6 +40,7 @@ from pyrox._core import Parameterized, PyroxModule, pyrox_method
 class Linear(PyroxModule):
     """Minimal Pattern A module — one sample site, one param site."""
 
+    pyrox_name = "Linear"
     in_features: int
     out_features: int
 
@@ -58,6 +59,8 @@ class Linear(PyroxModule):
 class Scalar(PyroxModule):
     """Single scalar sample site for simple primitive tests."""
 
+    pyrox_name = "Scalar"
+
     @pyrox_method
     def __call__(self):
         return self.pyrox_sample("x", dist.Normal(0.0, 1.0))
@@ -65,6 +68,8 @@ class Scalar(PyroxModule):
 
 class RBF(Parameterized):
     """Pattern C kernel with one prior-bearing param and one plain param."""
+
+    pyrox_name = "RBF"
 
     def setup(self):
         self.register_param(
@@ -296,6 +301,7 @@ def test_infer_config_propagates_to_sample_site():
 
 def test_plate_batches_pyrox_sample_sites():
     class Plated(PyroxModule):
+        pyrox_name = "Plated"
         n: int
 
         @pyrox_method

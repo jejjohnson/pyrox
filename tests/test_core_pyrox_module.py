@@ -51,6 +51,7 @@ def test_context_inactive_set_is_noop():
 
 
 class BayesianLinear(PyroxModule):
+    pyrox_name = "BayesianLinear"
     in_features: int
     out_features: int
 
@@ -80,6 +81,8 @@ def test_pyrox_method_deduplicates_repeated_sample_access():
     """Two reads of the same site inside one call must hit the cache once."""
 
     class TwiceReferenced(PyroxModule):
+        pyrox_name = "TwiceReferenced"
+
         @pyrox_method
         def __call__(self):
             a = self.pyrox_sample("w", dist.Normal(0.0, 1.0))
@@ -96,6 +99,8 @@ def test_pyrox_method_deduplicates_repeated_sample_access():
 
 def test_dependent_prior_resolves_callable():
     class LocationScale(PyroxModule):
+        pyrox_name = "LocationScale"
+
         @pyrox_method
         def __call__(self):
             loc = self.pyrox_sample("loc", dist.Normal(0.0, 1.0))
@@ -113,13 +118,56 @@ def test_dependent_prior_resolves_callable():
     assert "LocationScale.scale" in tr
 
 
-def test_fullname_prefixes_class_name():
+def test_fullname_uses_pyrox_name_when_set():
     m = BayesianLinear(in_features=1, out_features=1)
+    assert m._pyrox_scope_name() == "BayesianLinear"
     assert m._pyrox_fullname("w") == "BayesianLinear.w"
+
+
+def test_fullname_falls_back_to_class_plus_id_without_pyrox_name():
+    """Unnamed sibling instances of the same class must NOT collide."""
+
+    class Anon(PyroxModule):
+        @pyrox_method
+        def __call__(self):
+            return self.pyrox_sample("w", dist.Normal(0.0, 1.0))
+
+    a = Anon()
+    b = Anon()
+    # Instance-qualified scope → distinct fullnames for distinct instances.
+    assert a._pyrox_scope_name() != b._pyrox_scope_name()
+    assert a._pyrox_fullname("w") != b._pyrox_fullname("w")
+    assert a._pyrox_scope_name().startswith("Anon_")
+
+
+def test_two_same_class_instances_register_distinct_sites_in_one_trace():
+    """Two module instances of the same class inside one model should
+    produce distinct sites — regression for PR #57 review: site-name
+    collisions when multiple layers of the same class appear together.
+    """
+
+    class Layer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return self.pyrox_sample("w", dist.Normal(0.0, 1.0)) + x
+
+    a, b = Layer(), Layer()
+
+    def model():
+        y = a(jnp.array(0.0))
+        return b(y)
+
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        model()
+    site_names = list(tr)
+    assert len(site_names) == 2
+    assert site_names[0] != site_names[1]
 
 
 def test_pyrox_sample_with_non_distribution_uses_deterministic():
     class PlainValue(PyroxModule):
+        pyrox_name = "PlainValue"
+
         @pyrox_method
         def __call__(self):
             return self.pyrox_sample("v", jnp.array(3.14))

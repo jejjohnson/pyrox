@@ -95,8 +95,23 @@ class PyroxModule(eqx.Module):
                 weakref.finalize(self, PyroxModule._contexts.pop, key, None)
         return ctx
 
+    def _pyrox_scope_name(self) -> str:
+        """Per-instance scope used when building fully-qualified site names.
+
+        Uses an explicit ``pyrox_name`` attribute if the subclass defines
+        one (as a field or class variable); otherwise falls back to a
+        ``{ClassName}_{id}`` tag so sibling instances of the same class
+        register distinct sites within a single trace. The id-based
+        fallback is stable within a Python process but not across runs —
+        set ``pyrox_name`` explicitly for checkpoint-portable names.
+        """
+        name = getattr(self, "pyrox_name", None)
+        if isinstance(name, str) and name:
+            return name
+        return f"{type(self).__name__}_{id(self):x}"
+
     def _pyrox_fullname(self, name: str) -> str:
-        return f"{type(self).__name__}.{name}"
+        return f"{self._pyrox_scope_name()}.{name}"
 
     def pyrox_param(
         self,

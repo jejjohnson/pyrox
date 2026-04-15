@@ -32,6 +32,7 @@ import jax.numpy as jnp
 import numpyro.distributions as dist
 
 from .pyrox_module import PyroxModule
+from .utils import _biject_to, _is_real_support
 
 
 GuideType = Literal["delta", "normal", "mvn"]
@@ -142,14 +143,36 @@ class Parameterized(PyroxModule):
         if guide == "delta":
             return self.pyrox_param(name, entry.init_value, constraint=entry.constraint)
         if guide == "normal":
-            loc = self.pyrox_param(f"{name}_loc", entry.init_value)
-            scale = self.pyrox_param(
-                f"{name}_scale",
-                jnp.ones_like(jnp.asarray(entry.init_value)) * 0.1,
-                constraint=dist.constraints.positive,
-            )
-            return self.pyrox_sample(name, dist.Normal(loc, scale))
+            return self._guide_normal(name, entry)
         raise NotImplementedError(
             f"guide_type {guide!r} is not yet supported at the "
             "get_param level; materialize via a dedicated guide layer."
         )
+
+    def _guide_normal(self, name: str, entry: _Entry) -> Any:
+        """Mean-field normal guide in unconstrained space.
+
+        When ``entry.constraint`` is non-trivial, the latent site is a
+        ``TransformedDistribution`` wrapping ``Normal(loc, scale)`` with
+        the constraint's bijection, so guide draws always land in the
+        prior's support. ``loc`` is initialized by the inverse transform
+        of ``init_value`` so guide and prior agree at step zero.
+        """
+        init = jnp.asarray(entry.init_value)
+        if _is_real_support(entry.constraint):
+            loc = self.pyrox_param(f"{name}_loc", init)
+            scale = self.pyrox_param(
+                f"{name}_scale",
+                jnp.ones_like(init) * 0.1,
+                constraint=dist.constraints.positive,
+            )
+            return self.pyrox_sample(name, dist.Normal(loc, scale))
+        transform = _biject_to(entry.constraint)
+        loc = self.pyrox_param(f"{name}_loc", transform.inv(init))
+        scale = self.pyrox_param(
+            f"{name}_scale",
+            jnp.ones_like(init) * 0.1,
+            constraint=dist.constraints.positive,
+        )
+        base = dist.Normal(loc, scale)
+        return self.pyrox_sample(name, dist.TransformedDistribution(base, transform))
