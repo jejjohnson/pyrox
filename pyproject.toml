@@ -1,6 +1,6 @@
 [project]
 name = "pyrox"
-version = "0.0.0"
+version = "0.0.1"
 description = "Probabilistic modeling with Equinox and NumPyro: Bayesian neural networks, Gaussian processes, and composable GP building blocks."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
