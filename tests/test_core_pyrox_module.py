@@ -47,7 +47,7 @@ def test_context_inactive_set_is_noop():
     assert ctx.get("a") is None
 
 
-# --- Pattern A: PyroxModule -------------------------------------------------
+# --- Pattern B: PyroxModule -------------------------------------------------
 
 
 class BayesianLinear(PyroxModule):
@@ -65,7 +65,7 @@ class BayesianLinear(PyroxModule):
         return x @ W + b
 
 
-def test_pattern_a_registers_sample_and_param_sites():
+def test_pattern_b_registers_sample_and_param_sites():
     m = BayesianLinear(in_features=3, out_features=2)
     x = jnp.ones((4, 3))
     with handlers.trace() as tr, handlers.seed(rng_seed=0):
@@ -179,7 +179,7 @@ def test_pyrox_sample_with_non_distribution_uses_deterministic():
     assert tr["PlainValue.v"]["type"] == "deterministic"
 
 
-def test_pattern_a_jits_end_to_end():
+def test_pattern_b_jits_end_to_end():
     m = BayesianLinear(in_features=3, out_features=2)
     x = jnp.ones((4, 3))
 

@@ -1,6 +1,6 @@
 """Integration tests — PyroxModule/Parameterized against NumPyro primitives.
 
-Exercises Pattern A and Pattern C modules under the full NumPyro surface:
+Exercises Pattern B and Pattern C modules under the full NumPyro surface:
 handlers (seed/trace/scope/substitute/condition/block/mask/scale/reparam/
 do/lift/infer_config), primitives (plate/factor/deterministic), inference
 (MCMC/NUTS, SVI with AutoGuides, Predictive), and JAX transforms
@@ -33,12 +33,12 @@ from pyrox._core import Parameterized, PyroxModule, pyrox_method
 
 
 # ---------------------------------------------------------------------------
-# Fixtures: minimal Pattern A and Pattern C modules
+# Fixtures: minimal Pattern B and Pattern C modules
 # ---------------------------------------------------------------------------
 
 
 class Linear(PyroxModule):
-    """Minimal Pattern A module — one sample site, one param site."""
+    """Minimal Pattern B module — one sample site, one param site."""
 
     pyrox_name = "Linear"
     in_features: int
@@ -353,7 +353,7 @@ def test_deterministic_outside_module():
 # ---------------------------------------------------------------------------
 
 
-def test_mcmc_nuts_round_trip_pattern_a():
+def test_mcmc_nuts_round_trip_pattern_b():
     """Tiny BNN posterior — verifies pyrox sites are NUTS-compatible."""
     rng = jr.PRNGKey(0)
     x = jnp.linspace(-1.0, 1.0, 8)[:, None]

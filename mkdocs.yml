@@ -42,9 +42,13 @@ plugins:
 
 nav:
   - Home: index.md
+  - API Reference:
+      - Overview: api/reference.md
+      - Core: api/core.md
+      - GP: api/gp.md
+      - NN: api/nn.md
   - Examples:
       - Demo: notebooks/example_demo.py
-  - API Reference: api/reference.md
   - Contributing: contributing.md
   - Changelog: CHANGELOG.md
 
