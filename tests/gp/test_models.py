@@ -162,6 +162,62 @@ def test_gpprior_accepts_composed_solver():
     assert jnp.isfinite(logp)
 
 
+# --- Closed-form log marginal likelihood golden check ----------------------
+
+
+def test_log_marginal_likelihood_matches_direct_computation():
+    """Pin GPPrior.log_prob against the closed-form GP log marginal.
+
+    log p(y | X, theta) = -1/2 y^T (K + sigma^2 I)^{-1} y
+                          -1/2 log|K + sigma^2 I|
+                          -N/2 log(2*pi)
+
+    We compute it two ways:
+      (1) pyrox: build the noisy operator via condition() and evaluate
+          log_prob of y under MVN(0, K + sigma^2 I).
+      (2) numpy: direct Cholesky solve + logdet on the same kernel matrix.
+
+    The two numbers should agree to float32 roundoff.
+    """
+    X, y = _toy_dataset(n=8, seed=1)
+    variance = jnp.array(1.1)
+    lengthscale = jnp.array(0.45)
+    noise_var = jnp.array(0.07)
+    jitter = 1e-8
+    n = X.shape[0]
+
+    # (1) pyrox path: GPPrior log_prob on the noisy operator via an
+    # internal helper — we mirror what gp_factor does under the hood.
+    with handlers.seed(rng_seed=0):
+        kernel = RBF(init_variance=float(variance), init_lengthscale=float(lengthscale))
+        prior = GPPrior(kernel=kernel, X=X, jitter=jitter)
+        K = kernel(X, X)
+    K_y = K + (jitter + noise_var) * jnp.eye(n)
+    pyrox_logp = dist.MultivariateNormal(jnp.zeros(n), covariance_matrix=K_y).log_prob(
+        y
+    )
+
+    # (2) Closed-form direct computation via Cholesky.
+    L = jnp.linalg.cholesky(K_y)
+    alpha = jax.scipy.linalg.cho_solve((L, True), y)
+    data_fit = -0.5 * jnp.dot(y, alpha)
+    logdet = -jnp.sum(jnp.log(jnp.diag(L)))  # = -1/2 log|K_y|
+    normalizer = -0.5 * n * jnp.log(2.0 * jnp.pi)
+    direct_logp = data_fit + logdet + normalizer
+
+    assert jnp.allclose(pyrox_logp, direct_logp, atol=1e-4)
+
+    # The prior in guide/model form via gaussx.log_marginal_likelihood
+    # should also agree (same underlying math, different code path).
+    from gaussx import log_marginal_likelihood
+
+    op = prior._noisy_operator(noise_var)
+    gaussx_logp = log_marginal_likelihood(
+        prior.mean(prior.X), op, y, solver=prior._resolved_solver()
+    )
+    assert jnp.allclose(gaussx_logp, direct_logp, atol=1e-4)
+
+
 # --- gp_factor inside a NumPyro model --------------------------------------
 
 

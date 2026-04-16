@@ -48,7 +48,8 @@ nav:
       - GP: api/gp.md
       - NN: api/nn.md
   - Examples:
-      - Demo: notebooks/example_demo.py
+      - Exact GP Regression: notebooks/exact_gp_regression.ipynb
+      - Latent GP Classification: notebooks/latent_gp_classification.ipynb
   - Contributing: contributing.md
   - Changelog: CHANGELOG.md
 
