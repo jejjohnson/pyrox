@@ -154,7 +154,11 @@ class Periodic(_ParameterizedKernel):
 
 
 class Linear(_ParameterizedKernel):
-    """Linear kernel ``sigma^2 x^T x' + bias``."""
+    """Linear kernel ``sigma^2 x^T x' + bias``.
+
+    ``bias`` is constrained nonnegative because ``k = sigma^2 X X^T + b 1 1^T``
+    is only PSD for ``b >= 0`` (e.g. ``X = 0`` gives eigenvalue ``N*b``).
+    """
 
     pyrox_name: str = "Linear"
     init_variance: float = 1.0
@@ -166,7 +170,11 @@ class Linear(_ParameterizedKernel):
             jnp.asarray(self.init_variance),
             constraint=dist.constraints.positive,
         )
-        self.register_param("bias", jnp.asarray(self.init_bias))
+        self.register_param(
+            "bias",
+            jnp.asarray(self.init_bias),
+            constraint=dist.constraints.nonnegative,
+        )
 
     @pyrox_method
     def __call__(
@@ -229,7 +237,9 @@ class Polynomial(_ParameterizedKernel):
     """Polynomial kernel ``sigma^2 (x^T x' + bias)^degree``.
 
     ``degree`` is a static class field (it selects an integer power, not
-    an optimization target).
+    an optimization target). ``bias`` is constrained nonnegative — the
+    ``degree=1`` case reduces to :class:`Linear` and has the same
+    PSD-requires-``b>=0`` failure mode.
     """
 
     pyrox_name: str = "Polynomial"
@@ -243,7 +253,11 @@ class Polynomial(_ParameterizedKernel):
             jnp.asarray(self.init_variance),
             constraint=dist.constraints.positive,
         )
-        self.register_param("bias", jnp.asarray(self.init_bias))
+        self.register_param(
+            "bias",
+            jnp.asarray(self.init_bias),
+            constraint=dist.constraints.nonnegative,
+        )
 
     @pyrox_method
     def __call__(

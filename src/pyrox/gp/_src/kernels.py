@@ -34,11 +34,16 @@ def _pairwise_sq_dist(
 ) -> Float[Array, "N1 N2"]:
     """Squared Euclidean distance matrix ``||X1[i] - X2[j]||^2``.
 
-    Expressed as ``(X1 - X2)`` broadcast over index axes ``n1`` and ``n2``,
-    with the feature axis ``d`` reduced by :func:`einops.einsum`.
+    Expanded as :math:`\\|x\\|^2 + \\|x'\\|^2 - 2\\,x^\\top x'` so all
+    intermediates stay at ``(N1,)``, ``(N2,)``, or ``(N1, N2)`` — no
+    ``(N1, N2, D)`` broadcast tensor. Clipped at zero to absorb the
+    small negative values that arise from float cancellation on
+    near-identical points.
     """
-    diff = rearrange(X1, "n1 d -> n1 1 d") - rearrange(X2, "n2 d -> 1 n2 d")
-    return einsum(diff, diff, "n1 n2 d, n1 n2 d -> n1 n2")
+    n1 = einsum(X1, X1, "n1 d, n1 d -> n1")
+    n2 = einsum(X2, X2, "n2 d, n2 d -> n2")
+    cross = einsum(X1, X2, "n1 d, n2 d -> n1 n2")
+    return jnp.clip(n1[:, None] + n2[None, :] - 2.0 * cross, min=0.0)
 
 
 def rbf_kernel(
@@ -137,7 +142,8 @@ def periodic_kernel(
         ``(N1, N2)`` Gram matrix.
     """
     sq = _pairwise_sq_dist(X1, X2)
-    r = jnp.sqrt(jnp.clip(sq, min=0.0))
+    # Jitter inside sqrt avoids NaN gradients at r = 0 (sqrt' is undefined).
+    r = jnp.sqrt(jnp.clip(sq, min=1e-30))
     sinsq = jnp.sin(jnp.pi * r / period) ** 2
     return variance * jnp.exp(-2.0 * sinsq / (lengthscale * lengthscale))
 
@@ -255,7 +261,8 @@ def cosine_kernel(
         ``(N1, N2)`` Gram matrix.
     """
     sq = _pairwise_sq_dist(X1, X2)
-    r = jnp.sqrt(jnp.clip(sq, min=0.0))
+    # Jitter inside sqrt avoids NaN gradients at r = 0 (sqrt' is undefined).
+    r = jnp.sqrt(jnp.clip(sq, min=1e-30))
     return variance * jnp.cos(2.0 * jnp.pi * r / period)
 
 

@@ -1,8 +1,9 @@
 """Layer 0 — pure JAX kernel functions.
 
-pyrox owns the *math definitions* of stationary kernel forms (RBF,
-Matern, Periodic, Linear) as small, self-contained closed-form
-expressions. These are tutorial-grade and read in ten lines.
+pyrox owns the *math definitions* of kernel forms (RBF, Matern,
+Periodic, Linear, RationalQuadratic, Polynomial, Cosine, White,
+Constant) as small, self-contained closed-form expressions. These are
+tutorial-grade and read in ten lines.
 
 The companion *scalable construction* surface — numerically stable
 matrix assembly, mixed-precision accumulation, structured operators,

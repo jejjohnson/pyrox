@@ -2,7 +2,9 @@
 
 Verify (1) that each class evaluates to the same thing as its pure-math
 counterpart, (2) that Parameterized state (priors, mode switching) composes
-correctly, and (3) that sibling instances do not collide on site names.
+correctly, and (3) site-name scoping — sibling instances share a site
+by design when ``pyrox_name`` is the same, while distinct ``pyrox_name``
+values keep their sites separate so stacked kernels compose cleanly.
 """
 
 from __future__ import annotations

@@ -52,10 +52,11 @@ def test_rbf_is_symmetric():
 
 
 def test_rbf_gram_is_psd():
+    """Min eigenvalue should be nonnegative up to float32 roundoff."""
     X = jax.random.normal(jax.random.PRNGKey(1), (8, 2))
     K = rbf_kernel(X, X, jnp.array(1.3), jnp.array(0.5))
     eigs = jnp.linalg.eigvalsh(K + 1e-8 * jnp.eye(8))
-    assert float(eigs.min()) > 0.0
+    assert float(eigs.min()) > -1e-6
 
 
 # --- matern ---------------------------------------------------------------
@@ -140,6 +141,18 @@ def test_periodic_diagonal_equals_variance():
     assert jnp.allclose(jnp.diag(K), 2.0)
 
 
+def test_periodic_grad_is_finite_at_zero_distance():
+    """Sqrt clipping must keep grad finite when X1 == X2."""
+
+    def loss(ls):
+        X = jnp.array([[0.5], [0.5]])
+        K = periodic_kernel(X, X, jnp.array(1.0), ls, jnp.array(1.0))
+        return jnp.sum(K)
+
+    g = jax.grad(loss)(jnp.array(0.7))
+    assert jnp.isfinite(g)
+
+
 # --- linear ----------------------------------------------------------------
 
 
@@ -215,6 +228,18 @@ def test_cosine_negates_at_half_period():
     x2 = jnp.array([[1.0]])  # half of period 2 -> cos(pi) = -1
     K = cosine_kernel(x1, x2, jnp.array(1.0), jnp.array(2.0))
     assert jnp.allclose(K, -1.0, atol=1e-5)
+
+
+def test_cosine_grad_is_finite_at_zero_distance():
+    """Sqrt clipping must keep grad finite when X1 == X2."""
+
+    def loss(period):
+        X = jnp.array([[0.5], [0.5]])
+        K = cosine_kernel(X, X, jnp.array(1.0), period)
+        return jnp.sum(K)
+
+    g = jax.grad(loss)(jnp.array(1.0))
+    assert jnp.isfinite(g)
 
 
 # --- white -----------------------------------------------------------------
