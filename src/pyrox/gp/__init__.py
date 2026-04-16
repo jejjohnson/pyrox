@@ -1,7 +1,5 @@
 """Gaussian process building blocks.
 
-Wave 2 ships:
-
 * Pure kernel *functions* in :mod:`pyrox.gp._src.kernels` — closed-form
   math primitives (RBF, Matern, Periodic, Linear, RationalQuadratic,
   Polynomial, Cosine, White, Constant).
@@ -9,11 +7,12 @@ Wave 2 ships:
   constraints, priors, and guide metadata — re-exported from this
   module.
 * Abstract protocols (:class:`Kernel`, :class:`Guide`,
-  :class:`Integrator`, :class:`Likelihood`) — concrete implementations of
-  the non-kernel protocols land in later waves.
+  :class:`Integrator`, :class:`Likelihood`) plus three concrete sparse
+  variational guides: :class:`FullRankGuide`, :class:`MeanFieldGuide`,
+  :class:`WhitenedGuide`.
 * Model-facing entry points — :class:`GPPrior`, :class:`ConditionedGP`,
-  :func:`gp_factor`, :func:`gp_sample` — the NumPyro-aware shell on top
-  of gaussx linear algebra.
+  :class:`SparseGPPrior`, :func:`gp_factor`, :func:`gp_sample` — the
+  NumPyro-aware shell on top of gaussx linear algebra.
 
 *Scalable matrix construction* and *solver strategies* — numerically
 stable matrix assembly, implicit operators, batched matvec, Cholesky /
@@ -22,6 +21,11 @@ accept any ``gaussx.AbstractSolverStrategy``; the default is
 ``gaussx.DenseSolver()``.
 """
 
+from pyrox.gp._guides import (
+    FullRankGuide,
+    MeanFieldGuide,
+    WhitenedGuide,
+)
 from pyrox.gp._kernels import (
     RBF,
     Constant,
@@ -45,6 +49,7 @@ from pyrox.gp._protocols import (
     Kernel,
     Likelihood,
 )
+from pyrox.gp._sparse import SparseGPPrior
 
 
 __all__ = [
@@ -52,6 +57,7 @@ __all__ = [
     "ConditionedGP",
     "Constant",
     "Cosine",
+    "FullRankGuide",
     "GPPrior",
     "Guide",
     "Integrator",
@@ -59,10 +65,13 @@ __all__ = [
     "Likelihood",
     "Linear",
     "Matern",
+    "MeanFieldGuide",
     "Periodic",
     "Polynomial",
     "RationalQuadratic",
+    "SparseGPPrior",
     "White",
+    "WhitenedGuide",
     "gp_factor",
     "gp_sample",
 ]

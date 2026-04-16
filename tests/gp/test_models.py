@@ -317,6 +317,92 @@ def test_gp_sample_delegates_to_guide_when_provided():
     assert jnp.allclose(f, 42.0)
 
 
+def test_gp_sample_whitened_registers_unit_normal_site_and_deterministic():
+    """Whitened mode registers ``f"{name}_u"`` as the latent sample site
+    and ``name`` as a deterministic, returning the unwhitened function value."""
+    X, _ = _toy_dataset()
+
+    def model():
+        prior = GPPrior(kernel=RBF(), X=X, jitter=1e-6)
+        return gp_sample("f", prior, whitened=True)
+
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        f = model()
+    assert f.shape == (X.shape[0],)
+    assert tr["f_u"]["type"] == "sample"
+    assert tr["f_u"]["value"].shape == (X.shape[0],)
+    assert tr["f"]["type"] == "deterministic"
+
+
+def test_gp_sample_whitened_matches_mu_plus_chol_u():
+    """``f = mu(X) + L u`` exactly, where ``L = chol(K + jitter I)``."""
+    from gaussx import cholesky as gaussx_cholesky
+
+    X, _ = _toy_dataset()
+    kernel = RBF(init_variance=0.7, init_lengthscale=0.6)
+    mean_fn = lambda x: 0.3 * x.squeeze(-1)
+    jitter = 1e-6
+
+    def model():
+        prior = GPPrior(kernel=kernel, X=X, mean_fn=mean_fn, jitter=jitter)
+        return gp_sample("f", prior, whitened=True)
+
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        f = model()
+
+    with handlers.seed(rng_seed=0):
+        K = kernel(X, X) + jitter * jnp.eye(X.shape[0])
+    import lineax as lx
+
+    L = gaussx_cholesky(lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag))
+    u = tr["f_u"]["value"]
+    expected = mean_fn(X) + L.as_matrix() @ u
+    assert jnp.allclose(f, expected, atol=1e-10)
+
+
+def test_gp_sample_whitened_with_guide_raises():
+    """Combining ``whitened=True`` with a ``guide`` is rejected — the two
+    modes are mutually exclusive (guides own their own parameterization)."""
+    X, _ = _toy_dataset()
+
+    class _SentinelGuide:
+        def register(self, name, prior):  # pragma: no cover — should not run
+            return jnp.zeros(prior.X.shape[0])
+
+    prior = GPPrior(kernel=RBF(), X=X)
+    with (
+        pytest.raises(ValueError, match="cannot combine"),
+        handlers.seed(rng_seed=0),
+    ):
+        gp_sample("f", prior, whitened=True, guide=_SentinelGuide())
+
+
+def test_gp_sample_whitened_marginal_matches_prior_mvn():
+    """Under the prior, ``f = mu + L u`` with ``u ~ N(0, I)`` has marginal
+    ``MVN(mu, K + jitter I)`` — verify by Monte-Carlo moment matching."""
+    X, _ = _toy_dataset(n=4)
+    kernel = RBF(init_variance=1.5, init_lengthscale=0.4)
+    jitter = 1e-6
+
+    def model():
+        prior = GPPrior(kernel=kernel, X=X, jitter=jitter)
+        return gp_sample("f", prior, whitened=True)
+
+    keys = jr.split(jr.PRNGKey(0), 5000)
+
+    def draw(key):
+        with handlers.seed(rng_seed=key):
+            return model()
+
+    fs = jax.vmap(draw)(keys)  # (S, N)
+    sample_mean = fs.mean(axis=0)
+    sample_cov = jnp.cov(fs.T)
+
+    K = kernel(X, X) + jitter * jnp.eye(X.shape[0])
+    assert jnp.allclose(sample_mean, jnp.zeros(X.shape[0]), atol=0.1)
+    assert jnp.allclose(sample_cov, K, atol=0.1)
+
+
 # --- jit composability -----------------------------------------------------
 
 
