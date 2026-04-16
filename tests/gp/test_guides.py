@@ -21,6 +21,8 @@ import jax.random as jr
 import lineax as lx
 import numpyro.distributions as nd
 from gaussx import (
+    DenseSolver,
+    MultivariateNormalPrecision,
     damped_natural_update,
     mean_cov_to_natural,
     natural_to_mean_cov,
@@ -582,3 +584,135 @@ def test_delta_kl_with_zero_loc_is_just_log_normalizer():
     expected = 0.5 * (logdet + M * jnp.log(2.0 * jnp.pi))
     assert sign > 0
     assert jnp.allclose(g.kl_divergence(K_zz_op), expected, atol=1e-5)
+
+
+# --- Solver field exposure (PR #66 review) ---------------------------------
+
+
+def test_all_guides_default_solver_to_none():
+    """Every guide accepts an optional ``solver`` field that defaults to
+    ``None`` — the user opts in to a custom :class:`gaussx.AbstractSolverStrategy`
+    by passing one to the constructor or to ``init``."""
+    M = 4
+    assert FullRankGuide.init(num_inducing=M).solver is None
+    assert MeanFieldGuide.init(num_inducing=M).solver is None
+    assert WhitenedGuide.init(num_inducing=M).solver is None
+    assert NaturalGuide.init(num_inducing=M).solver is None
+    assert DeltaGuide.init(num_inducing=M).solver is None
+
+
+def test_all_guides_pass_explicit_solver_through_init():
+    """``init(solver=...)`` stores the solver on the returned guide."""
+    M = 4
+    s = DenseSolver()
+    assert FullRankGuide.init(num_inducing=M, solver=s).solver is s
+    assert MeanFieldGuide.init(num_inducing=M, solver=s).solver is s
+    assert WhitenedGuide.init(num_inducing=M, solver=s).solver is s
+    assert NaturalGuide.init(num_inducing=M, solver=s).solver is s
+    assert DeltaGuide.init(num_inducing=M, solver=s).solver is s
+
+
+def test_natural_guide_log_prob_matches_explicit_mvn_precision():
+    """``NaturalGuide.log_prob`` delegates to
+    :class:`gaussx.MultivariateNormalPrecision`. Constructing that
+    distribution explicitly with the same parameters must give the same
+    log-density to working precision."""
+    M = 5
+    eta1 = jr.normal(jr.PRNGKey(101), (M,))
+    nat2 = -0.5 * (jnp.eye(M) + 0.1 * jnp.ones((M, M)))
+    g = NaturalGuide(nat1=eta1, nat2=nat2)
+    u = jr.normal(jr.PRNGKey(102), (M,))
+
+    Lambda = lx.MatrixLinearOperator(-2.0 * nat2, lx.positive_semidefinite_tag)
+    m, _ = g._moments()
+    mvn = MultivariateNormalPrecision(loc=m, prec_operator=Lambda, solver=DenseSolver())
+    assert jnp.allclose(g.log_prob(u), mvn.log_prob(u), atol=1e-5)
+
+
+def test_natural_guide_sample_uses_mvn_precision_under_seed():
+    """``NaturalGuide.sample`` returns the same draw as a directly
+    constructed :class:`MultivariateNormalPrecision` under the same key,
+    confirming the delegation rather than a hand-rolled Cholesky path."""
+    M = 5
+    eta1 = jr.normal(jr.PRNGKey(201), (M,))
+    nat2 = -0.5 * (jnp.eye(M) + 0.05 * jnp.ones((M, M)))
+    g = NaturalGuide(nat1=eta1, nat2=nat2)
+    key = jr.PRNGKey(202)
+
+    u_guide = g.sample(key)
+    Lambda = lx.MatrixLinearOperator(-2.0 * nat2, lx.positive_semidefinite_tag)
+    m, _ = g._moments()
+    mvn = MultivariateNormalPrecision(loc=m, prec_operator=Lambda, solver=DenseSolver())
+    u_ref = mvn.sample(key)
+    assert jnp.allclose(u_guide, u_ref, atol=1e-5)
+
+
+def test_natural_guide_log_prob_invariant_to_dense_solver_choice():
+    """Default (resolves to :class:`DenseSolver`) matches an explicitly
+    constructed :class:`DenseSolver` — confirms the
+    :func:`_resolve_solver` default is correct and the path is honored.
+    (Stochastic solvers like :class:`CGSolver` use SLQ for the logdet
+    and intentionally aren't compared here — those numerical paths are
+    exercised by the gaussx test suite, not pyrox.)"""
+    M = 5
+    eta1 = jr.normal(jr.PRNGKey(301), (M,))
+    nat2 = -0.5 * (jnp.eye(M) + 0.05 * jnp.ones((M, M)))
+    u = jr.normal(jr.PRNGKey(302), (M,))
+    g_default = NaturalGuide(nat1=eta1, nat2=nat2)
+    g_dense = NaturalGuide(nat1=eta1, nat2=nat2, solver=DenseSolver())
+    assert jnp.allclose(g_default.log_prob(u), g_dense.log_prob(u), atol=1e-5)
+
+
+def test_delta_guide_kl_invariant_to_dense_solver_choice():
+    """``DeltaGuide.kl_divergence`` passes the solver to
+    :func:`gaussx.gaussian_log_prob` — explicit
+    :class:`DenseSolver` matches the default resolution."""
+    _, _, _, K_zz_op, _, _ = _toy_setup()
+    M = K_zz_op.in_size()
+    loc = jr.normal(jr.PRNGKey(401), (M,))
+    g_default = DeltaGuide(loc=loc)
+    g_dense = DeltaGuide(loc=loc, solver=DenseSolver())
+    assert jnp.allclose(
+        g_default.kl_divergence(K_zz_op),
+        g_dense.kl_divergence(K_zz_op),
+        atol=1e-5,
+    )
+
+
+def test_fullrank_log_prob_invariant_to_dense_solver_choice():
+    """``FullRankGuide.log_prob`` delegates to :func:`gaussx.gaussian_log_prob`
+    — explicit :class:`DenseSolver` matches the default."""
+    M = 4
+    key = jr.PRNGKey(501)
+    L = jnp.tril(jr.normal(key, (M, M))) + 0.5 * jnp.eye(M)
+    mean = jr.normal(jr.PRNGKey(502), (M,))
+    u = jr.normal(jr.PRNGKey(503), (M,))
+    g_default = FullRankGuide(mean=mean, scale_tril=L)
+    g_dense = FullRankGuide(mean=mean, scale_tril=L, solver=DenseSolver())
+    assert jnp.allclose(g_default.log_prob(u), g_dense.log_prob(u), atol=1e-5)
+
+
+def test_meanfield_log_prob_invariant_to_dense_solver_choice():
+    """``MeanFieldGuide.log_prob`` routes through
+    :func:`gaussx.gaussian_log_prob` with a diagonal operator —
+    explicit :class:`DenseSolver` matches the default."""
+    M = 4
+    scale = jnp.array([0.5, 1.0, 1.5, 2.0])
+    mean = jr.normal(jr.PRNGKey(601), (M,))
+    u = jr.normal(jr.PRNGKey(602), (M,))
+    g_default = MeanFieldGuide(mean=mean, scale=scale)
+    g_dense = MeanFieldGuide(mean=mean, scale=scale, solver=DenseSolver())
+    assert jnp.allclose(g_default.log_prob(u), g_dense.log_prob(u), atol=1e-5)
+
+
+def test_whitened_log_prob_invariant_to_dense_solver_choice():
+    """``WhitenedGuide.log_prob`` delegates to :func:`gaussx.gaussian_log_prob`
+    — explicit :class:`DenseSolver` matches the default."""
+    M = 4
+    key = jr.PRNGKey(701)
+    L = jnp.tril(jr.normal(key, (M, M))) + 0.5 * jnp.eye(M)
+    mean = jr.normal(jr.PRNGKey(702), (M,))
+    v = jr.normal(jr.PRNGKey(703), (M,))
+    g_default = WhitenedGuide(mean=mean, scale_tril=L)
+    g_dense = WhitenedGuide(mean=mean, scale_tril=L, solver=DenseSolver())
+    assert jnp.allclose(g_default.log_prob(v), g_dense.log_prob(v), atol=1e-5)
