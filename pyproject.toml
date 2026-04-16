@@ -25,6 +25,7 @@ dependencies = [
     "numpyro>=0.15",
     "gaussx @ git+https://github.com/jejjohnson/gaussx.git@main",
     "lineax>=0.0.5",
+    "einops>=0.7",
 ]
 
 [project.optional-dependencies]
@@ -54,9 +55,12 @@ docs = [
     "mkdocs-jupyter>=0.26.2",
     "jupytext>=1.16",
     "ipykernel>=7.2.0",
+    # pygments 2.20.0 dropped the None -> '' coercion for HtmlFormatter(filename=...),
+    # but pymdownx.highlight 10.21.x still passes the untitled-code-block title
+    # through as None. Pin until a fixed pymdown-extensions release ships.
+    "pygments>=2.19,<2.20",
 ]
 examples = [
-    "einops>=0.7",
     "matplotlib>=3.8",
     "numpy>=1.26",
     "scikit-learn>=1.4",
@@ -85,6 +89,12 @@ extend-exclude = ["design_docs"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 ignore = ["E402", "E721", "E731", "E741"]
+
+[tool.ruff.lint.per-file-ignores]
+# F722 clashes with jaxtyping's string-based shape annotations (Array, "N D").
+# Scope the suppression to the jaxtyping-using GP layer + its tests only.
+"src/pyrox/gp/**" = ["F722"]
+"tests/gp/**" = ["F722"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
