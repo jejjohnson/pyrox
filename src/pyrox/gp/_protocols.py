@@ -68,6 +68,20 @@ class Guide(eqx.Module):
     ``FullRankGuide``, etc.) land in the dedicated guide waves (#28, #29).
     The whitening principle keeps optimization geometry well-conditioned —
     sample from a unit-scale latent and unwhiten with the prior Cholesky.
+
+    Two distinct entry points:
+
+    * :meth:`sample` / :meth:`log_prob` — pure variational draws and
+      densities. ``sample(self, key)`` returns a draw from ``q(f)``;
+      ``log_prob(self, f)`` evaluates ``log q(f)``. Neither touches the
+      NumPyro trace.
+    * ``register(name, prior)`` (optional) — the NumPyro-integration hook
+      invoked by :func:`pyrox.gp.gp_sample` when a guide is supplied. Use
+      it to register a sample / param site (or compose one out of guide
+      state) under ``name`` and return the latent function value. Concrete
+      guides that participate in :func:`gp_sample` should implement this;
+      the protocol leaves it unspecified so guides usable purely outside
+      NumPyro stay valid.
     """
 
     @abstractmethod

@@ -14,7 +14,8 @@ in later waves.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import contextlib
+from collections.abc import Callable, Iterator
 
 import equinox as eqx
 import jax
@@ -44,6 +45,30 @@ def _psd_operator(K: Float[Array, "N N"]) -> lx.AbstractLinearOperator:
     Cholesky-based solvers / logdets when using ``AutoSolver``.
     """
     return lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)  # ty: ignore[invalid-return-type]
+
+
+@contextlib.contextmanager
+def _kernel_context(kernel: Kernel) -> Iterator[None]:
+    """Scope multiple kernel calls under a single per-call pyrox context.
+
+    For ``PyroxModule``-derived kernels (Pattern B / C with priors), the
+    per-call ``_Context`` deduplicates ``pyrox_sample``/``pyrox_param``
+    sites within one trace. Without this scoping, evaluating ``kernel(...)``
+    and ``kernel.diag(...)`` back-to-back during prediction would either
+    raise NumPyro duplicate-site errors (under tracing) or silently
+    resample independent hyperparameter draws for each call (under seed),
+    decoupling ``K_cross`` from ``K_diag`` and from the cached training
+    solve. The ``_Context`` is reentrant, so nesting inside an outer
+    ``pyrox_method``-decorated call is safe.
+
+    For pure ``eqx.Module`` kernels (no ``_get_context``), this is a no-op.
+    """
+    ctx = getattr(kernel, "_get_context", None)
+    if ctx is None:
+        yield
+        return
+    with ctx():
+        yield
 
 
 class GPPrior(eqx.Module):
@@ -111,8 +136,13 @@ class GPPrior(eqx.Module):
     ) -> ConditionedGP:
         """Condition on Gaussian-likelihood observations ``y``.
 
-        Precomputes ``alpha = (K + noise_var * I)^{-1} (y - mu(X))`` and
-        caches it in the returned :class:`ConditionedGP`.
+        Precomputes
+        ``alpha = (K + (jitter + noise_var) * I)^{-1} (y - mu(X))`` and
+        caches it in the returned :class:`ConditionedGP`. The same
+        ``jitter`` regularization configured on this prior is included
+        alongside ``noise_var`` in the conditioned operator and solve, so
+        every downstream predict / sample call sees the regularized
+        covariance.
         """
         operator = self._noisy_operator(noise_var)
         residual = y - self.mean(self.X)
@@ -144,7 +174,8 @@ class ConditionedGP(eqx.Module):
 
     def predict_mean(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
         r""":math:`\mu_* = \mu(X_*) + K_{*f}\,\alpha`."""
-        K_cross = self.prior.kernel(X_star, self.prior.X)
+        with _kernel_context(self.prior.kernel):
+            K_cross = self.prior.kernel(X_star, self.prior.X)
         return self.prior.mean(X_star) + predict_mean(self.cache, K_cross)
 
     def predict_var(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
@@ -153,9 +184,15 @@ class ConditionedGP(eqx.Module):
         .. math::
             \sigma^2_{*,i} = k(x_{*,i}, x_{*,i})
                 - K_{*f}[i,:] \cdot (K + \sigma^2 I)^{-1} K_{f*}[:,i]
+
+        ``K_cross`` and ``K_diag`` are computed under one shared kernel
+        context so Pattern B / C kernels with prior'd hyperparameters
+        register their NumPyro sites once and reuse them across both
+        kernel calls (and the cached training solve).
         """
-        K_cross = self.prior.kernel(X_star, self.prior.X)
-        K_diag = self.prior.kernel.diag(X_star)
+        with _kernel_context(self.prior.kernel):
+            K_cross = self.prior.kernel(X_star, self.prior.X)
+            K_diag = self.prior.kernel.diag(X_star)
         return predict_variance(
             K_cross,
             K_diag,
@@ -166,8 +203,13 @@ class ConditionedGP(eqx.Module):
     def predict(
         self, X_star: Float[Array, "M D"]
     ) -> tuple[Float[Array, " M"], Float[Array, " M"]]:
-        """Return ``(mean, variance)`` at ``X_*`` as a tuple."""
-        return self.predict_mean(X_star), self.predict_var(X_star)
+        """Return ``(mean, variance)`` at ``X_*`` as a tuple.
+
+        Both kernel evaluations share a single kernel context; see
+        :meth:`predict_var`.
+        """
+        with _kernel_context(self.prior.kernel):
+            return self.predict_mean(X_star), self.predict_var(X_star)
 
     def sample(
         self,
@@ -183,8 +225,9 @@ class ConditionedGP(eqx.Module):
         predictive covariance explicitly and draw from
         :class:`gaussx.MultivariateNormal`.
         """
-        mean = self.predict_mean(X_star)
-        var = self.predict_var(X_star)
+        with _kernel_context(self.prior.kernel):
+            mean = self.predict_mean(X_star)
+            var = self.predict_var(X_star)
         std = jnp.sqrt(jnp.clip(var, min=0.0))
         eps = jax.random.normal(key, (n_samples, X_star.shape[0]), dtype=mean.dtype)
         return einsum(std, eps, "m, s m -> s m") + mean
@@ -198,10 +241,13 @@ def gp_factor(
 ) -> None:
     """Register the collapsed GP log marginal likelihood with NumPyro.
 
-    Adds ``log p(y | X, theta) = log N(y | mu, K + sigma^2 I)`` to the
-    NumPyro trace as ``numpyro.factor(name, ...)``. Use this inside a
-    NumPyro model when the likelihood is Gaussian and you want the
-    latent function marginalized analytically.
+    Adds
+    ``log p(y | X, theta) = log N(y | mu, K + (jitter + sigma^2) I)``
+    to the NumPyro trace as ``numpyro.factor(name, ...)``. The prior's
+    ``jitter`` is included in addition to the observation noise variance
+    so the covariance matches what :meth:`GPPrior.condition` builds. Use
+    this inside a NumPyro model when the likelihood is Gaussian and you
+    want the latent function marginalized analytically.
     """
     logp = log_marginal_likelihood(
         prior.mean(prior.X),
@@ -224,14 +270,17 @@ def gp_sample(
     from the prior ``MVN(mu(X), K(X, X) + jitter I)`` via
     :class:`gaussx.MultivariateNormal`. A non-``None`` ``guide`` is the
     extension point for Wave 3 variational families — its
-    ``sample(name, prior)`` method is invoked to register the posterior
-    site instead.
+    ``register(name, prior)`` method is invoked to register the posterior
+    site (or whatever NumPyro plumbing the guide owns) in place of the
+    prior sample. This is intentionally distinct from the
+    :class:`pyrox.gp.Guide` protocol's ``sample(self, key)`` method,
+    which draws raw variational samples without touching the trace.
 
     Use this inside a NumPyro model for non-conjugate likelihoods, where
     the latent function cannot be marginalized analytically.
     """
     if guide is not None:
-        return guide.sample(name, prior)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+        return guide.register(name, prior)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
     return numpyro.sample(  # ty: ignore[invalid-return-type]
         name,
         MultivariateNormal(

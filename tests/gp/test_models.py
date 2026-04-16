@@ -239,10 +239,15 @@ def test_gp_sample_registers_mvn_site():
 
 
 def test_gp_sample_delegates_to_guide_when_provided():
+    """``gp_sample(..., guide=g)`` must call ``g.register(name, prior)``.
+
+    The hook is intentionally distinct from the :class:`Guide` protocol's
+    ``sample(self, key)`` (raw variational draw) — see Guide ABC docstring.
+    """
     X, _ = _toy_dataset()
 
     class _SentinelGuide:
-        def sample(self, name, prior):
+        def register(self, name, prior):
             return jnp.full(prior.X.shape[0], 42.0)
 
     def model():
@@ -297,6 +302,77 @@ def test_conditioned_gp_is_eqx_module():
     leaves, treedef = jax.tree_util.tree_flatten(cond)
     rebuilt = jax.tree_util.tree_unflatten(treedef, leaves)
     assert isinstance(rebuilt, ConditionedGP)
+
+
+# --- Pattern B/C regression: kernel context scoping ------------------------
+
+
+def test_predict_var_does_not_double_register_pattern_b_kernel_sites():
+    """Regression for PR #62 P1: ``predict_var`` makes two kernel calls
+    (``kernel(X_star, X)`` and ``kernel.diag(X_star)``). For a kernel
+    whose hyperparameters carry priors (Pattern B / C), both calls would
+    re-register the same NumPyro sample site without a shared kernel
+    context, raising a duplicate-site error under tracing.
+
+    To isolate the within-method duplication the reviewer flagged, we
+    build the ``ConditionedGP`` outside the trace (so the training
+    operator is constructed against the kernel's default values) and
+    only enter the trace for ``predict_var``. That puts both predict-
+    time kernel calls under the same outer context — without the fix,
+    the second call would raise.
+    """
+    X, y = _toy_dataset()
+    X_star = jnp.linspace(-1.5, 1.5, 4).reshape(-1, 1)
+
+    kernel = RBF()
+    kernel.set_prior("variance", dist.LogNormal(0.0, 1.0))
+    kernel.set_prior("lengthscale", dist.LogNormal(0.0, 1.0))
+    prior = GPPrior(kernel=kernel, X=X)
+
+    # Build the conditioned GP under its own seed scope so the training
+    # operator gets concrete kernel hyperparameters, then enter a fresh
+    # trace for the predict_var call. Without the per-method
+    # ``_kernel_context`` scoping, the second kernel call inside
+    # ``predict_var`` would raise a duplicate-site error here.
+    with handlers.seed(rng_seed=1):
+        cond = prior.condition(y, jnp.array(0.05))
+
+    def model():
+        return cond.predict_var(X_star)
+
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        var = model()
+    assert var.shape == (X_star.shape[0],)
+    assert jnp.all(jnp.isfinite(var))
+    # Each prior'd hyperparameter registers exactly once across the
+    # whole predict_var call — duplicate registration would have raised
+    # before this point.
+    assert "RBF.variance" in tr
+    assert "RBF.lengthscale" in tr
+
+
+def test_predict_does_not_double_register_pattern_b_kernel_sites():
+    """Same regression as above for ``predict`` (returns mean + var) —
+    its three kernel evaluations must share one outer context."""
+    X, y = _toy_dataset()
+    X_star = jnp.linspace(-1.5, 1.5, 4).reshape(-1, 1)
+
+    kernel = RBF()
+    kernel.set_prior("variance", dist.LogNormal(0.0, 1.0))
+    kernel.set_prior("lengthscale", dist.LogNormal(0.0, 1.0))
+    prior = GPPrior(kernel=kernel, X=X)
+    with handlers.seed(rng_seed=1):
+        cond = prior.condition(y, jnp.array(0.05))
+
+    def model():
+        return cond.predict(X_star)
+
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        mean, var = model()
+    assert mean.shape == (X_star.shape[0],)
+    assert var.shape == (X_star.shape[0],)
+    assert "RBF.variance" in tr
+    assert "RBF.lengthscale" in tr
 
 
 # --- error surfaces --------------------------------------------------------
