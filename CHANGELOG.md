@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.5](https://github.com/jejjohnson/pyrox/compare/v0.0.4...v0.0.5) (2026-04-16)
+
+
+### Features
+
+* **nn:** bayesian dense layers, SSGP random features, MC dropout, NCP ([#31](https://github.com/jejjohnson/pyrox/issues/31), [#32](https://github.com/jejjohnson/pyrox/issues/32)) ([#68](https://github.com/jejjohnson/pyrox/issues/68)) ([5e75815](https://github.com/jejjohnson/pyrox/commit/5e75815a03f71bf24393b104e33b1c49bed247ce))
+
 ## [0.0.4](https://github.com/jejjohnson/pyrox/compare/v0.0.3...v0.0.4) (2026-04-16)
 
 
