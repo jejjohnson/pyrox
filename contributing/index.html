@@ -1,0 +1,1503 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Probabilistic modeling with Equinox and NumPyro — Bayesian neural networks, Gaussian processes, and composable GP building blocks.">
+      
+      
+        <meta name="author" content="J. Emmanuel Johnson">
+      
+      
+      
+        <link rel="prev" href="../notebooks/latent_gp_classification/">
+      
+      
+        <link rel="next" href="../CHANGELOG/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Contributing - pyrox</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#contributing" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="pyrox" class="md-header__button md-logo" aria-label="pyrox" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            pyrox
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Contributing
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/jejjohnson/pyrox" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jejjohnson/pyrox
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../api/reference/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../notebooks/exact_gp_regression/" class="md-tabs__link">
+          
+  
+  
+  Examples
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../CHANGELOG/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="pyrox" class="md-nav__button md-logo" aria-label="pyrox" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    pyrox
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/jejjohnson/pyrox" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    jejjohnson/pyrox
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/core/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/gp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/nn/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NN
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/exact_gp_regression/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Exact GP Regression
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/latent_gp_classification/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Latent GP Classification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#label-taxonomy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Label Taxonomy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#two-layer-epic-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two-Layer Epic Model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#issue-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Issue Format
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#creating-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Creating issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Creating issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#from-the-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-the-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-claude-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From Claude Code
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#drafting-a-wave-backlog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Drafting a wave backlog
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#relationships" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relationships
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Relationships">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#applying-native-github-relationships" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Applying native GitHub relationships
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Applying native GitHub relationships">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#from-the-ui_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-the-cli-makefile-targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the CLI (Makefile targets)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-claude-code_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From Claude Code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#raw-graphql-for-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw GraphQL (for reference)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pre-commit-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pre-commit checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#label-taxonomy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Label Taxonomy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#two-layer-epic-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Two-Layer Epic Model
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#issue-format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Issue Format
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#creating-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Creating issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Creating issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#from-the-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-the-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-claude-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From Claude Code
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#drafting-a-wave-backlog" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Drafting a wave backlog
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#relationships" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relationships
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Relationships">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#applying-native-github-relationships" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Applying native GitHub relationships
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Applying native GitHub relationships">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#from-the-ui_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-the-cli-makefile-targets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From the CLI (Makefile targets)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#from-claude-code_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        From Claude Code
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#raw-graphql-for-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw GraphQL (for reference)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pre-commit-checklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pre-commit checklist
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="contributing">Contributing<a class="headerlink" href="#contributing" title="Permanent link">&para;</a></h1>
+<p>This page documents the label taxonomy, epic model, and issue conventions used in this project.</p>
+<hr />
+<h2 id="label-taxonomy">Label Taxonomy<a class="headerlink" href="#label-taxonomy" title="Permanent link">&para;</a></h2>
+<p>Every issue carries exactly one <code>type:*</code>, one or more <code>area:*</code>, at most one <code>layer:*</code>, one <code>wave:*</code>, and one <code>priority:*</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Labels</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Type</strong></td>
+<td><code>type:epic-wave</code>, <code>type:epic-theme</code>, <code>type:feature</code>, <code>type:design</code>, <code>type:chore</code>, <code>type:docs</code>, <code>type:bug</code>, <code>type:research</code></td>
+</tr>
+<tr>
+<td><strong>Area</strong></td>
+<td><code>area:engineering</code>, <code>area:testing</code>, <code>area:docs</code>, <code>area:code</code> — extend per project (e.g. <code>area:algorithmic</code>, <code>area:integration</code>)</td>
+</tr>
+<tr>
+<td><strong>Layer</strong></td>
+<td><code>layer:0-primitives</code>, <code>layer:1-components</code>, <code>layer:2-models</code> — only if the project has a formal layer stack</td>
+</tr>
+<tr>
+<td><strong>Wave</strong></td>
+<td><code>wave:0</code>, <code>wave:1</code>, <code>wave:2</code>, … — release-scoped phases (add <code>wave:N-&lt;slug&gt;</code> variants for descriptive labels)</td>
+</tr>
+<tr>
+<td><strong>Priority</strong></td>
+<td><code>priority:p0</code> (blocker), <code>priority:p1</code> (high), <code>priority:p2</code> (normal)</td>
+</tr>
+</tbody>
+</table>
+<p>Bootstrap the standard set on a fresh repo:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>make<span class="w"> </span>gh-labels
+</code></pre></div>
+<p>The script lives at <code>.github/scripts/create-labels.sh</code>. Edit the hard-coded <code>create …</code> entries in the script to customise <code>area:*</code>, <code>layer:*</code>, and <code>wave:*</code> for the project, then re-run — the script is idempotent.</p>
+<hr />
+<h2 id="two-layer-epic-model">Two-Layer Epic Model<a class="headerlink" href="#two-layer-epic-model" title="Permanent link">&para;</a></h2>
+<p>Work is organised as <strong>Wave → Theme → Issue</strong>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>[EPIC] Wave N   (L1)   —   release-scoped mega-epic, owns a milestone
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  ├── [EPIC] &lt;theme&gt;   (L2)   —   parallel-safe group of issues
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>  │     ├── feature / design / chore / bug issue
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>  │     └── …
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>  └── [EPIC] &lt;theme&gt;   (L2)
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>        └── …
+</code></pre></div>
+<ul>
+<li><strong>Wave epic</strong> (<code>type:epic-wave</code>) maps one-to-one with a milestone (<code>vX.Y-&lt;slug&gt;</code>). Groups several Theme epics that can run in parallel.</li>
+<li><strong>Theme epic</strong> (<code>type:epic-theme</code>) groups concrete issues that ship together as a coherent slice. Themes inside a wave are parallel-safe unless the body says otherwise.</li>
+<li><strong>Issue</strong> (feature / design / chore / bug) is the leaf — a single substantial deliverable that rolls up to a Theme epic.</li>
+</ul>
+<p>Stragglers are discouraged: any <code>type:feature</code> issue should attach to a Theme epic. If no suitable theme exists, create one first.</p>
+<hr />
+<h2 id="issue-format">Issue Format<a class="headerlink" href="#issue-format" title="Permanent link">&para;</a></h2>
+<p>Issue templates live in <code>.github/ISSUE_TEMPLATE/</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Template</th>
+<th>When to use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Epic — Wave (L1)</code></td>
+<td>Opening a new release-scoped wave</td>
+</tr>
+<tr>
+<td><code>Epic — Theme (L2)</code></td>
+<td>Grouping related issues inside a wave</td>
+</tr>
+<tr>
+<td><code>Feature / Enhancement</code></td>
+<td>One substantial deliverable</td>
+</tr>
+<tr>
+<td><code>Design / ADR</code></td>
+<td>Resolve an open design question for a new API</td>
+</tr>
+<tr>
+<td><code>Bug report</code></td>
+<td>Something isn't working</td>
+</tr>
+<tr>
+<td><code>Research / Comparative Analysis</code></td>
+<td>Study prior art (external repo, paper) and produce a prioritized roadmap of follow-up issues</td>
+</tr>
+</tbody>
+</table>
+<p>Feature + Design templates include two <strong>optional</strong> sections for context-heavy issues:</p>
+<ul>
+<li><strong>Design Snapshot</strong> — paste API sketches, code examples, or excerpts from private / external design docs so the issue is self-contained.</li>
+<li><strong>Mathematical Notes</strong> — equations, sign conventions, numerical considerations.</li>
+</ul>
+<p>Delete either section if not relevant. Both exist so that an implementer (human or AI agent) can work on the issue without opening other repos or channels.</p>
+<hr />
+<h2 id="creating-issues">Creating issues<a class="headerlink" href="#creating-issues" title="Permanent link">&para;</a></h2>
+<p>New issues should use one of the templates in <code>.github/ISSUE_TEMPLATE/</code> so that labels, required sections, and title conventions are consistent.</p>
+<h3 id="from-the-ui">From the UI<a class="headerlink" href="#from-the-ui" title="Permanent link">&para;</a></h3>
+<p>Click <strong>New issue</strong> on the repo's Issues tab and pick a template. The body is pre-filled with the section scaffolding — fill in, apply labels and milestone, submit.</p>
+<h3 id="from-the-cli">From the CLI<a class="headerlink" href="#from-the-cli" title="Permanent link">&para;</a></h3>
+<p>For drafted content, write the body to a file (minus the template's YAML frontmatter), then:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>gh<span class="w"> </span>issue<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--title<span class="w"> </span><span class="s2">&quot;feat(primitives): diagonal BLR update step&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>--body-file<span class="w"> </span>/tmp/issue-body.md<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>--label<span class="w"> </span><span class="s2">&quot;type:feature,area:algorithmic,layer:0-primitives,wave:1,priority:p1&quot;</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span>--milestone<span class="w"> </span><span class="s2">&quot;v0.1-diagonal&quot;</span>
+</code></pre></div>
+<p>To open the UI in a browser with a template pre-selected:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>gh<span class="w"> </span>issue<span class="w"> </span>create<span class="w"> </span>--web
+</code></pre></div>
+<p>The web flow opens <code>/issues/new/choose</code> so you can pick the template in the UI. <code>gh issue create</code> does not support pre-selecting a template for the web path; the <code>--template</code> flag is only used as starting body text in the non-web flow.</p>
+<p>After the issue is created, apply native parent / blocked-by links via the Makefile targets documented below in the Relationships section (or <code>make gh-sub</code> / <code>make gh-block</code>).</p>
+<h3 id="from-claude-code">From Claude Code<a class="headerlink" href="#from-claude-code" title="Permanent link">&para;</a></h3>
+<p>The <code>create-gh-issue</code> skill (at <code>.claude/commands/create-gh-issue.md</code>) guides Claude through:</p>
+<ul>
+<li><strong>Picking the right template</strong> (decision tree covering feature / design / bug / research / epic-wave / epic-theme)</li>
+<li><strong>Drafting the body</strong> with required sections + rename guidance for optional sections (<code>Design Snapshot</code> → <code>Demo To Implement</code>, etc.)</li>
+<li><strong>Applying the correct label set</strong> (which <code>type:*</code> + <code>area:*</code> + <code>layer:*</code> + <code>wave:*</code> + <code>priority:*</code> combos are valid for each work type)</li>
+<li><strong>Setting the milestone</strong> (which <code>vX.Y-&lt;slug&gt;</code> corresponds to the wave)</li>
+<li><strong>Applying relationships</strong> (chains to <code>link-gh-issues</code> skill for native sub-issue + blocked-by links)</li>
+<li><strong>Style conventions</strong> — unicode math, <code>text</code> code fences, code-first-prose-last</li>
+<li><strong>Bulk workflow</strong> — publishing a <code>.plans/&lt;wave&gt;-backlog.md</code> file into real GitHub issues (multi-pass: wave epic → theme epics → leaf issues → relationships), with draft-ID → GH-number mapping</li>
+</ul>
+<p>Example prompts:</p>
+<ul>
+<li>"Open a feature issue for the diagonal BLR update step, child of theme epic #27"</li>
+<li>"File a design issue for the per-parameter prior question"</li>
+<li>"Publish the drafts in <code>.plans/wave-1-backlog.md</code> as real issues and wire up the sub-issue links"</li>
+<li>"Open a research issue comparing pof vs this project, based on my notes in <code>&lt;path&gt;</code>"</li>
+</ul>
+<hr />
+<h2 id="drafting-a-wave-backlog">Drafting a wave backlog<a class="headerlink" href="#drafting-a-wave-backlog" title="Permanent link">&para;</a></h2>
+<p>For large planning exercises (new wave, new release, large refactor), draft the whole backlog as one markdown file <strong>before</strong> opening GitHub issues. A template lives at <a href="../templates/wave-backlog/"><code>docs/templates/wave-backlog.md</code></a>.</p>
+<p>Why:</p>
+<ul>
+<li><strong>Review the whole wave in one scroll</strong> instead of clicking through 15 half-drafted issues</li>
+<li><strong>Share context once</strong> at the top (Shared Context · Design Snapshot · Intended Package Layout · Runtime Boundary) rather than duplicating across every child issue</li>
+<li><strong>Stable draft IDs</strong> (<code>&lt;PREFIX&gt;-01</code>, <code>&lt;PREFIX&gt;-02</code>, …) let child issues reference each other before GitHub issue numbers exist</li>
+</ul>
+<p>Workflow:</p>
+<ol>
+<li>Copy <code>docs/templates/wave-backlog.md</code> into your project's <code>.plans/</code> directory (gitignored). Rename to describe the wave — e.g. <code>.plans/wave-1-backlog.md</code>.</li>
+<li>Pick a short project prefix (e.g. <code>PYX</code> for pyrox, <code>OBX</code> for optax_bayes). Number drafts sequentially.</li>
+<li>Fill in shared context at the top, then draft each issue body.</li>
+<li>When the file is ready, open each draft as a real GitHub issue using the matching <code>.github/ISSUE_TEMPLATE/</code>. Copy the body verbatim.</li>
+<li>Record GitHub issue numbers next to draft IDs in the backlog file, or replace draft IDs throughout. Update cross-references.</li>
+<li>Either delete the backlog file or archive it in <code>.plans/archive/</code>.</li>
+</ol>
+<hr />
+<h2 id="relationships">Relationships<a class="headerlink" href="#relationships" title="Permanent link">&para;</a></h2>
+<p>Use an explicit <code>## Relationships</code> block at the bottom of each issue / epic body:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="gu">## Relationships</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">-</span><span class="w"> </span>Parent: #&lt;theme-epic&gt;
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="k">-</span><span class="w"> </span>Blocked by: #
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="k">-</span><span class="w"> </span>Blocks: #
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="k">-</span><span class="w"> </span>Related: #
+</code></pre></div>
+<p>GitHub's task-list feature links bidirectionally from the parent, so checklist items in a Theme epic body auto-show in the referenced issues.</p>
+<h3 id="applying-native-github-relationships">Applying native GitHub relationships<a class="headerlink" href="#applying-native-github-relationships" title="Permanent link">&para;</a></h3>
+<p>The prose <code>## Relationships</code> block above is a human-readable record. GitHub also exposes two <strong>native</strong> relationship features that power the UI sub-issue panel and the dependency graph — <strong>apply both</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Prose line</th>
+<th>Native feature</th>
+<th>Mutation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Parent:</code> / <code>Theme Epics</code> / <code>Issues</code> checklist</td>
+<td>Sub-issues (parent ↔ child hierarchy)</td>
+<td><code>addSubIssue</code> / <code>removeSubIssue</code></td>
+</tr>
+<tr>
+<td><code>Blocked by:</code></td>
+<td>Typed dependency</td>
+<td><code>addBlockedBy</code></td>
+</tr>
+<tr>
+<td><code>Blocks:</code></td>
+<td>Inverse — applied on the OTHER issue</td>
+<td><code>addBlockedBy</code> (on the blocked side)</td>
+</tr>
+<tr>
+<td><code>Related:</code></td>
+<td>No native feature</td>
+<td>prose only</td>
+</tr>
+</tbody>
+</table>
+<h4 id="from-the-ui_1">From the UI<a class="headerlink" href="#from-the-ui_1" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>Sub-issues</strong> — open the parent issue, side-panel → <em>Sub-issues</em> → <em>Create sub-issue</em> or <em>Add existing sub-issue</em>.</li>
+<li><strong>Blocked by</strong> — open the blocked issue, side-panel → <em>Development</em> → <em>Mark as blocked by</em>.</li>
+</ul>
+<h4 id="from-the-cli-makefile-targets">From the CLI (Makefile targets)<a class="headerlink" href="#from-the-cli-makefile-targets" title="Permanent link">&para;</a></h4>
+<p>For scripted work, the repo ships a helper script wrapped by three <code>make</code> targets:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Link children as sub-issues under a parent</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>make<span class="w"> </span>gh-sub<span class="w"> </span><span class="nv">PARENT</span><span class="o">=</span><span class="m">7</span><span class="w"> </span><span class="nv">CHILDREN</span><span class="o">=</span><span class="s2">&quot;42 43 44&quot;</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># Mark issue 44 as blocked by 43</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>make<span class="w"> </span>gh-block<span class="w"> </span><span class="nv">ISSUE</span><span class="o">=</span><span class="m">44</span><span class="w"> </span><span class="nv">BLOCKED_BY</span><span class="o">=</span><span class="m">43</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1"># Inspect parent / sub-issues / blocking / blocked-by for an issue</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>make<span class="w"> </span>gh-show<span class="w"> </span><span class="nv">ISSUE</span><span class="o">=</span><span class="m">44</span>
+</code></pre></div>
+<p>Direct script usage (same functionality plus unlink commands):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>bash<span class="w"> </span>.github/scripts/link-issues.sh<span class="w"> </span>sub<span class="w">     </span>&lt;parent&gt;<span class="w"> </span>&lt;child&gt;<span class="w"> </span><span class="o">[</span>&lt;child&gt;<span class="w"> </span>...<span class="o">]</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>bash<span class="w"> </span>.github/scripts/link-issues.sh<span class="w"> </span>block<span class="w">   </span>&lt;issue&gt;<span class="w"> </span>&lt;blocker&gt;
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>bash<span class="w"> </span>.github/scripts/link-issues.sh<span class="w"> </span>unsub<span class="w">   </span>&lt;parent&gt;<span class="w"> </span>&lt;child&gt;
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>bash<span class="w"> </span>.github/scripts/link-issues.sh<span class="w"> </span>unblock<span class="w"> </span>&lt;issue&gt;<span class="w"> </span>&lt;blocker&gt;
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>bash<span class="w"> </span>.github/scripts/link-issues.sh<span class="w"> </span>show<span class="w">    </span>&lt;issue&gt;
+</code></pre></div>
+<p>The script resolves issue numbers to GraphQL node IDs automatically, and treats "already linked" as a no-op so re-runs are safe.</p>
+<h4 id="from-claude-code_1">From Claude Code<a class="headerlink" href="#from-claude-code_1" title="Permanent link">&para;</a></h4>
+<p>The <code>link-gh-issues</code> skill (at <code>.claude/commands/link-gh-issues.md</code>) guides Claude through the same operations — useful for bulk-applying relationships from a drafted wave backlog, parsing the <code>Issues</code> checklist out of a theme epic body, or verifying that the native links match the prose.</p>
+<p>Example prompts:</p>
+<ul>
+<li>"Apply the relationships from epic #29"</li>
+<li>"Link #42, #43, #44 as sub-issues of #7"</li>
+<li>"Mark #44 as blocked by #43"</li>
+<li>"What's blocking #44?" (Claude runs <code>make gh-show ISSUE=44</code> or the underlying GraphQL query)</li>
+</ul>
+<h4 id="raw-graphql-for-reference">Raw GraphQL (for reference)<a class="headerlink" href="#raw-graphql-for-reference" title="Permanent link">&para;</a></h4>
+<p>Under the hood the helper runs:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="k">mutation</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">addSubIssue</span><span class="p">(</span><span class="n">input</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">issueId</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;parent-node-id&gt;&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">subIssueId</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;child-node-id&gt;&quot;</span><span class="w"> </span><span class="p">})</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">subIssue</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">number</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="k">mutation</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">addBlockedBy</span><span class="p">(</span><span class="n">input</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">issueId</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;this-node-id&gt;&quot;</span><span class="p">,</span><span class="w"> </span><span class="n">blockingIssueId</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;&lt;blocker-node-id&gt;&quot;</span><span class="w"> </span><span class="p">})</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">issue</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">number</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<p>Issue node IDs are resolved via <code>gh api repos/:owner/:repo/issues/&lt;N&gt; --jq .node_id</code>.</p>
+<hr />
+<h2 id="pre-commit-checklist">Pre-commit checklist<a class="headerlink" href="#pre-commit-checklist" title="Permanent link">&para;</a></h2>
+<p>Run these locally before opening a PR:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>make<span class="w"> </span>format<span class="w">       </span><span class="c1"># ruff format . + ruff check --fix .   (applies changes)</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>make<span class="w"> </span>lint<span class="w">         </span><span class="c1"># ruff check .                         (CI-style check)</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>make<span class="w"> </span>typecheck<span class="w">    </span><span class="c1"># ty check</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>make<span class="w"> </span><span class="nb">test</span><span class="w">         </span><span class="c1"># pytest</span>
+</code></pre></div>
+<p>Note that <code>make format</code> <strong>mutates files</strong> — it formats and applies autofixes. <code>make lint</code> is the CI-parity read-only check. Run <code>make format</code> first, commit the result, then run <code>make lint</code> / <code>make test</code> to verify.</p>
+<p>Pre-commit hooks run ruff on every commit. Run <code>make precommit</code> to apply them to all files manually.</p>
+<p>Commit messages follow the <a href="https://www.conventionalcommits.org/">Conventional Commits</a> specification — enforced on PR titles by <code>.github/workflows/conventional-commits.yml</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "content.code.copy", "content.code.annotate"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3.2.2/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
