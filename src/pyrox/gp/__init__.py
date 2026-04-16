@@ -7,9 +7,15 @@
   constraints, priors, and guide metadata — re-exported from this
   module.
 * Abstract protocols (:class:`Kernel`, :class:`Guide`,
-  :class:`Integrator`, :class:`Likelihood`) plus three concrete sparse
-  variational guides: :class:`FullRankGuide`, :class:`MeanFieldGuide`,
-  :class:`WhitenedGuide`.
+  :class:`Integrator`, :class:`Likelihood`) plus five concrete sparse
+  variational guides — :class:`FullRankGuide`, :class:`MeanFieldGuide`,
+  :class:`WhitenedGuide`, :class:`NaturalGuide`, :class:`DeltaGuide`.
+  Natural-parameter conversion and damped-update primitives live in
+  ``gaussx`` (:func:`gaussx.mean_cov_to_natural`,
+  :func:`gaussx.natural_to_mean_cov`,
+  :func:`gaussx.damped_natural_update`) — :class:`NaturalGuide`
+  delegates its math there, and so will the future natural-gradient /
+  CVI inference paths.
 * Model-facing entry points — :class:`GPPrior`, :class:`ConditionedGP`,
   :class:`SparseGPPrior`, :func:`gp_factor`, :func:`gp_sample` — the
   NumPyro-aware shell on top of gaussx linear algebra.
@@ -22,8 +28,10 @@ accept any ``gaussx.AbstractSolverStrategy``; the default is
 """
 
 from pyrox.gp._guides import (
+    DeltaGuide,
     FullRankGuide,
     MeanFieldGuide,
+    NaturalGuide,
     WhitenedGuide,
 )
 from pyrox.gp._kernels import (
@@ -57,6 +65,7 @@ __all__ = [
     "ConditionedGP",
     "Constant",
     "Cosine",
+    "DeltaGuide",
     "FullRankGuide",
     "GPPrior",
     "Guide",
@@ -66,6 +75,7 @@ __all__ = [
     "Linear",
     "Matern",
     "MeanFieldGuide",
+    "NaturalGuide",
     "Periodic",
     "Polynomial",
     "RationalQuadratic",
