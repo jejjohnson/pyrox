@@ -5,7 +5,7 @@ deterministic parameters and random sample sites with NumPyro, plus a
 per-call ``_Context`` cache that prevents duplicate site registration
 within a single probabilistic call.
 
-Pattern A usage::
+Pattern B usage::
 
     class BayesianLinear(PyroxModule):
         in_features: int
