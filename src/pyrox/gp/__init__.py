@@ -8,15 +8,18 @@ Wave 2 ships:
 * :class:`Parameterized` kernel classes that wrap those functions with
   constraints, priors, and guide metadata — re-exported from this
   module.
-* Abstract protocols (:class:`Kernel`, :class:`Solver`, :class:`Guide`,
+* Abstract protocols (:class:`Kernel`, :class:`Guide`,
   :class:`Integrator`, :class:`Likelihood`) — concrete implementations of
   the non-kernel protocols land in later waves.
+* Model-facing entry points — :class:`GPPrior`, :class:`ConditionedGP`,
+  :func:`gp_factor`, :func:`gp_sample` — the NumPyro-aware shell on top
+  of gaussx linear algebra.
 
-*Scalable matrix construction* — numerically stable matrix assembly,
-implicit operators, batched matvec, Cholesky-with-jitter, solver
-strategies — lives in ``gaussx``. Concrete model-facing entry points
-(``GPPrior``, ``ConditionedGP``, ``gp_factor``, ``gp_sample``) land in
-Wave 2 Epic 2.B (#22).
+*Scalable matrix construction* and *solver strategies* — numerically
+stable matrix assembly, implicit operators, batched matvec, Cholesky /
+CG / BBMM / LSMR, etc. — live in ``gaussx``. pyrox model entry points
+accept any ``gaussx.AbstractSolverStrategy``; the default is
+``gaussx.DenseSolver()``.
 """
 
 from pyrox.gp._kernels import (
@@ -30,19 +33,26 @@ from pyrox.gp._kernels import (
     RationalQuadratic,
     White,
 )
+from pyrox.gp._models import (
+    ConditionedGP,
+    GPPrior,
+    gp_factor,
+    gp_sample,
+)
 from pyrox.gp._protocols import (
     Guide,
     Integrator,
     Kernel,
     Likelihood,
-    Solver,
 )
 
 
 __all__ = [
     "RBF",
+    "ConditionedGP",
     "Constant",
     "Cosine",
+    "GPPrior",
     "Guide",
     "Integrator",
     "Kernel",
@@ -52,6 +62,7 @@ __all__ = [
     "Periodic",
     "Polynomial",
     "RationalQuadratic",
-    "Solver",
     "White",
+    "gp_factor",
+    "gp_sample",
 ]
