@@ -1764,6 +1764,7 @@ name = "pyrox"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [
+    { name = "einops" },
     { name = "equinox" },
     { name = "gaussx" },
     { name = "jax" },
@@ -1791,7 +1792,6 @@ docs = [
     { name = "mkdocstrings", extra = ["python"] },
 ]
 examples = [
-    { name = "einops" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "scikit-learn" },
@@ -1805,6 +1805,7 @@ typecheck = [
 
 [package.metadata]
 requires-dist = [
+    { name = "einops", specifier = ">=0.7" },
     { name = "equinox", specifier = ">=0.11" },
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?branch=main" },
     { name = "jax", specifier = ">=0.4" },
@@ -1829,7 +1830,6 @@ docs = [
     { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0.3" },
 ]
 examples = [
-    { name = "einops", specifier = ">=0.7" },
     { name = "matplotlib", specifier = ">=3.8" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "scikit-learn", specifier = ">=1.4" },
