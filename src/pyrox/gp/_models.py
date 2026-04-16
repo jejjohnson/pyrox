@@ -108,6 +108,19 @@ class GPPrior(eqx.Module):
             solver=self._resolved_solver(),
         )
 
+    def sample(self, key: Array) -> Float[Array, " N"]:
+        r"""Draw ``f \sim p(f) = \mathcal{N}(\mu(X), K + \text{jitter}\,I)``.
+
+        Wraps the prior in a :class:`gaussx.MultivariateNormal` with
+        the configured :attr:`solver`. This is the non-NumPyro analogue
+        of :func:`gp_sample` — useful for tests, diagnostics, and
+        prior-sample initialization without registering a sample site.
+        """
+        op = self._prior_operator()
+        loc = self.mean(self.X)
+        mvn = MultivariateNormal(loc, op, solver=self._resolved_solver())
+        return mvn.sample(key)
+
     def condition(
         self,
         y: Float[Array, " N"],

@@ -8,6 +8,7 @@ and that the helpers compose correctly with the kernel.
 from __future__ import annotations
 
 import jax.numpy as jnp
+import jax.random as jr
 import numpyro.distributions as dist
 from gaussx import CGSolver, DenseSolver
 from numpyro import handlers
@@ -176,3 +177,44 @@ def test_predictive_blocks_uses_consistent_kernel_hyperparameter_draws():
     assert jnp.allclose(K_xx_diag, variance_zz, atol=1e-6)
     # And K_xz is bounded by the same variance (k(x, z) <= variance).
     assert jnp.all(K_xz <= variance_zz + 1e-6)
+
+
+# --- Prior-side sample / log_prob (PR #66 review) --------------------------
+
+
+def test_inducing_log_prob_matches_numpyro_mvn():
+    """``SparseGPPrior.log_prob(u)`` must match a reference numpyro MVN
+    over the inducing prior :math:`p(u) = N(0, K_zz + jitter*I)`."""
+    Z = _toy_inducing(5)
+    prior = SparseGPPrior(kernel=RBF(init_variance=1.5, init_lengthscale=0.4), Z=Z)
+    K = prior.inducing_operator().as_matrix()
+    u = jr.normal(jr.PRNGKey(11), (Z.shape[0],))
+    ref = dist.MultivariateNormal(jnp.zeros_like(u), covariance_matrix=K).log_prob(u)
+    assert jnp.allclose(prior.log_prob(u), ref, atol=1e-5)
+
+
+def test_inducing_log_prob_invariant_to_dense_solver_choice():
+    """Default solver resolution (``None`` → :class:`DenseSolver`) matches
+    an explicitly constructed :class:`DenseSolver` — confirms the field
+    is wired through to :func:`gaussx.gaussian_log_prob`."""
+    Z = _toy_inducing(5)
+    p_default = SparseGPPrior(kernel=RBF(), Z=Z)
+    p_dense = SparseGPPrior(kernel=RBF(), Z=Z, solver=DenseSolver())
+    u = jr.normal(jr.PRNGKey(12), (Z.shape[0],))
+    assert jnp.allclose(p_default.log_prob(u), p_dense.log_prob(u), atol=1e-5)
+
+
+def test_inducing_sample_returns_correct_shape():
+    Z = _toy_inducing(7)
+    prior = SparseGPPrior(kernel=RBF(), Z=Z)
+    u = prior.sample(jr.PRNGKey(13))
+    assert u.shape == (7,)
+
+
+def test_inducing_sample_is_deterministic_under_same_key():
+    """Same key, same prior → same draw — ``MultivariateNormal.sample``
+    is reparameterized so this is an explicit reproducibility check."""
+    Z = _toy_inducing(5)
+    prior = SparseGPPrior(kernel=RBF(), Z=Z)
+    key = jr.PRNGKey(14)
+    assert jnp.allclose(prior.sample(key), prior.sample(key), atol=0.0)

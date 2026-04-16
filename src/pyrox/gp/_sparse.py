@@ -23,7 +23,12 @@ from collections.abc import Callable
 import equinox as eqx
 import jax.numpy as jnp
 import lineax as lx
-from gaussx import AbstractSolverStrategy, DenseSolver
+from gaussx import (
+    AbstractSolverStrategy,
+    DenseSolver,
+    MultivariateNormal,
+    gaussian_log_prob,
+)
 from jaxtyping import Array, Float
 
 from pyrox.gp._context import _kernel_context
@@ -159,3 +164,38 @@ class SparseGPPrior(eqx.Module):
 
     def _resolved_solver(self) -> AbstractSolverStrategy:
         return DenseSolver() if self.solver is None else self.solver  # ty: ignore[invalid-return-type]
+
+    def log_prob(self, u: Float[Array, " M"]) -> Float[Array, ""]:
+        r"""Log-density under :math:`p(u) = \mathcal{N}(0, K_{ZZ} + \text{jitter}\,I)`.
+
+        Delegates to :func:`gaussx.gaussian_log_prob` with the
+        configured :attr:`solver` so the user-supplied solver controls
+        the ``solve`` / ``logdet`` work on ``K_zz_op``. Useful for
+        scoring inducing values against the SVGP prior in non-NumPyro
+        contexts (e.g.\\ tests, diagnostics).
+        """
+        m = jnp.zeros(self.num_inducing, dtype=u.dtype)
+        return gaussian_log_prob(
+            m, self.inducing_operator(), u, solver=self._resolved_solver()
+        )
+
+    def sample(self, key: Array) -> Float[Array, " M"]:
+        r"""Draw ``u \sim p(u)`` from the inducing prior.
+
+        Wraps the inducing operator in a
+        :class:`gaussx.MultivariateNormal` with the configured
+        :attr:`solver`. ``MultivariateNormal.sample`` factors the
+        covariance via :func:`gaussx.cholesky` and reparameterizes;
+        the returned draw has shape ``(M,)``.
+
+        Note: the SVGP variational workflow samples ``u`` from the
+        *guide* :math:`q(u)`, not the prior. This method exists so the
+        prior surface is symmetric with the guide surface and so users
+        can score / draw inducing values against the prior directly
+        (e.g.\\ for tests or for prior-sample initialization).
+        """
+        n = self.num_inducing
+        op = self.inducing_operator()
+        loc = jnp.zeros(n, dtype=op.out_structure().dtype)
+        mvn = MultivariateNormal(loc, op, solver=self._resolved_solver())
+        return mvn.sample(key)

@@ -530,3 +530,39 @@ def test_condition_shape_mismatch_is_caught_at_call_time():
         handlers.seed(rng_seed=0),
     ):
         prior.condition(y_wrong, jnp.array(0.05))
+
+
+# --- Prior-side sample (PR #66 review) -------------------------------------
+
+
+def test_gpprior_sample_returns_correct_shape_and_dtype():
+    """``GPPrior.sample`` returns a vector of length ``N`` matching the
+    training-input dtype — the non-NumPyro draw analogue of
+    :func:`gp_sample`."""
+    X, _ = _toy_dataset(n=6)
+    prior = GPPrior(kernel=RBF(), X=X)
+    f = prior.sample(jr.PRNGKey(7))
+    assert f.shape == (6,)
+    assert f.dtype == X.dtype
+
+
+def test_gpprior_sample_marginal_matches_prior_log_prob():
+    """``GPPrior.log_prob(f)`` evaluated at a sample drawn from
+    :meth:`sample` is finite — round-trip sanity that the same
+    operator backs both paths."""
+    X, _ = _toy_dataset(n=6)
+    prior = GPPrior(kernel=RBF(), X=X)
+    f = prior.sample(jr.PRNGKey(8))
+    lp = prior.log_prob(f)
+    assert jnp.isfinite(lp)
+
+
+def test_gpprior_sample_invariant_to_dense_solver_choice():
+    """Default solver resolution matches an explicit
+    :class:`DenseSolver` — the configured ``solver`` propagates into
+    :class:`gaussx.MultivariateNormal`."""
+    X, _ = _toy_dataset(n=6)
+    p_default = GPPrior(kernel=RBF(), X=X)
+    p_dense = GPPrior(kernel=RBF(), X=X, solver=DenseSolver())
+    key = jr.PRNGKey(9)
+    assert jnp.allclose(p_default.sample(key), p_dense.sample(key), atol=1e-5)
