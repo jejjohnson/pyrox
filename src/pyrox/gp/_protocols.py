@@ -1,12 +1,19 @@
 """Layer 1 — abstract protocol classes for GP components.
 
-Five orthogonal protocols that compose into a GP model. Wave 2 ships the
-abstract definitions only; concrete implementations land across later waves
-(``CholeskySolver`` in #21, guides in #28, etc.). The interfaces here
-intentionally stay narrow so later waves can extend without renaming.
+Four orthogonal pyrox-local protocols that compose into a GP model.
+Wave 2 ships the abstract definitions only for :class:`Guide`,
+:class:`Integrator`, and :class:`Likelihood`; concrete implementations
+land in later waves. :class:`Kernel` already has concrete implementations
+in this wave (:class:`pyrox.gp.RBF`, etc.).
+
+Solver strategies intentionally live in :mod:`gaussx`, not here. Use
+``gaussx.AbstractSolverStrategy`` (combined solve + logdet),
+``AbstractSolveStrategy``, or ``AbstractLogdetStrategy`` — with concretes
+like ``gaussx.DenseSolver``, ``gaussx.CGSolver``, ``gaussx.BBMMSolver``,
+and ``gaussx.ComposedSolver``. The pyrox model entry points
+(``GPPrior``, ``gp_factor``, ``gp_sample``) accept any solver strategy.
 
 * :class:`Kernel` — covariance structure, ``(X1, X2) -> Gram``.
-* :class:`Solver` — linear algebra on covariance matrices.
 * :class:`Guide` — variational posterior structure.
 * :class:`Integrator` — expectations under a Gaussian.
 * :class:`Likelihood` — observation model.
@@ -52,30 +59,6 @@ class Kernel(eqx.Module):
         broadcast for the ``O(N)`` shortcut.
         """
         return jnp.diag(self(X, X))
-
-
-class Solver(eqx.Module):
-    """Abstract base for GP linear-algebra strategies.
-
-    A :class:`Solver` decouples *how* a kernel matrix is inverted /
-    log-determinanted from *what* the kernel is. Concrete implementations
-    (Cholesky, conjugate gradients, BBMM, Woodbury, Kalman) land in later
-    waves; the dense :class:`CholeskySolver` is the Wave 2 baseline (#21).
-    """
-
-    @abstractmethod
-    def solve(
-        self,
-        K: Float[Array, "N N"],
-        y: Float[Array, "N ..."],
-    ) -> Float[Array, "N ..."]:
-        """Return ``K^{-1} y``."""
-        raise NotImplementedError
-
-    @abstractmethod
-    def logdet(self, K: Float[Array, "N N"]) -> Float[Array, ""]:
-        """Return ``log |K|``."""
-        raise NotImplementedError
 
 
 class Guide(eqx.Module):
