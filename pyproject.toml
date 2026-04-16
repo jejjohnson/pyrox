@@ -32,6 +32,13 @@ dependencies = [
 optax = [
     "optax>=0.2",
 ]
+# `pip install pyrox[colab]` bundles what the example notebooks need to run
+# top-to-bottom in Google Colab — matplotlib for plots, watermark for an
+# explicit version readout at the top of each notebook.
+colab = [
+    "matplotlib>=3.8",
+    "watermark>=2.4",
+]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/pyrox"
@@ -55,6 +62,12 @@ docs = [
     "mkdocs-jupyter>=0.26.2",
     "jupytext>=1.16",
     "ipykernel>=7.2.0",
+    # matplotlib + watermark used by the example notebooks during local
+    # re-execution. The guarded watermark cell in each notebook no-ops
+    # if the package is missing, but installing it here lets the version
+    # readout actually print under `nbconvert --execute`.
+    "matplotlib>=3.8",
+    "watermark>=2.4",
     # pygments 2.20.0 dropped the None -> '' coercion for HtmlFormatter(filename=...),
     # but pymdownx.highlight 10.21.x still passes the untitled-code-block title
     # through as None. Pin until a fixed pymdown-extensions release ships.
@@ -92,9 +105,11 @@ ignore = ["E402", "E721", "E731", "E741"]
 
 [tool.ruff.lint.per-file-ignores]
 # F722 clashes with jaxtyping's string-based shape annotations (Array, "N D").
-# Scope the suppression to the jaxtyping-using GP layer + its tests only.
+# Scope the suppression to the jaxtyping-using GP layer, its tests, and the
+# example notebooks that demonstrate the same patterns.
 "src/pyrox/gp/**" = ["F722"]
 "tests/gp/**" = ["F722"]
+"docs/notebooks/**" = ["F722", "B905"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
