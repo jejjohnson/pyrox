@@ -108,7 +108,9 @@ ignore = ["E402", "E721", "E731", "E741"]
 # Scope the suppression to the jaxtyping-using GP layer, its tests, and the
 # example notebooks that demonstrate the same patterns.
 "src/pyrox/gp/**" = ["F722"]
+"src/pyrox/nn/**" = ["F722"]
 "tests/gp/**" = ["F722"]
+"tests/nn/**" = ["F722"]
 "docs/notebooks/**" = ["F722", "B905"]
 
 [tool.ruff.lint.isort]
