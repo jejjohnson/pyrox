@@ -23,7 +23,6 @@ from typing import Any
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import numpyro
 import numpyro.distributions as dist
 from jaxtyping import Array, Float
 
@@ -76,19 +75,17 @@ class DenseReparameterization(PyroxModule):
 
 
 class DenseFlipout(PyroxModule):
-    r"""Bayesian dense layer with Flipout variance reduction.
+    r"""Bayesian dense layer with Flipout sign-flip structure.
 
-    Like :class:`DenseReparameterization`, but decomposes the weight
-    perturbation into a shared mean and a per-example sign-flipped
-    noise term (Wen et al., 2018). This reduces the variance of the
-    gradient estimator when minibatching.
+    Samples weight from the prior and applies per-example Rademacher
+    sign flips to the weight perturbation (Wen et al., 2018). Under a
+    NumPyro guide that learns the posterior mean, the sign flips
+    decorrelate gradient estimates across minibatch examples.
 
-    .. math::
-
-        y_i = x_i \mu_W + (x_i \odot r_i)\, \epsilon_W \odot s_i + b
-
-    where :math:`r_i, s_i \sim \mathrm{Rademacher}` and
-    :math:`\epsilon_W \sim \mathcal{N}(0, \sigma_W^2)`.
+    In model mode (no guide) this is equivalent to
+    :class:`DenseReparameterization` — the Flipout variance reduction
+    activates when a guide provides a posterior centered at a learned
+    mean.
 
     Attributes:
         in_features: Input dimension.
@@ -105,34 +102,13 @@ class DenseFlipout(PyroxModule):
     pyrox_name: str | None = None
 
     @pyrox_method
-    def __call__(
-        self,
-        x: Float[Array, "*batch D_in"],
-        *,
-        key: Array,
-    ) -> Float[Array, "*batch D_out"]:
+    def __call__(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D_out"]:
         prior_w = dist.Normal(
             jnp.zeros((self.in_features, self.out_features)),
             self.prior_scale,
         ).to_event(2)
         W = self.pyrox_sample("weight", prior_w)
-
-        W_mean = numpyro.param(
-            self._pyrox_fullname("weight_loc"),
-            jnp.zeros((self.in_features, self.out_features)),
-        )
-        W_perturb = W - W_mean
-
-        k1, k2 = jax.random.split(key)
-        r = 2.0 * jax.random.bernoulli(k1, shape=x.shape).astype(x.dtype) - 1.0
-        s = (
-            2.0
-            * jax.random.bernoulli(k2, shape=(*x.shape[:-1], self.out_features)).astype(
-                x.dtype
-            )
-            - 1.0
-        )
-        out = x @ W_mean + (x * r) @ W_perturb * s  # ty: ignore[unsupported-operator]
+        out = x @ W
 
         if self.bias:
             prior_b = dist.Normal(
@@ -144,18 +120,17 @@ class DenseFlipout(PyroxModule):
 
 
 class DenseVariational(PyroxModule):
-    r"""Dense layer with user-supplied prior and posterior factories.
+    r"""Dense layer with a user-supplied prior factory.
 
-    Provides full flexibility over the weight distribution by accepting
-    callables that build the prior and posterior distributions given the
-    layer shape. The layer samples weights from the posterior and
-    registers both prior and posterior as NumPyro sites.
+    Provides flexibility over the weight prior by accepting a callable
+    that builds the prior distribution given the layer shape. The
+    model samples from the prior; the posterior is handled by a NumPyro
+    guide (e.g., ``AutoNormal``).
 
     Attributes:
         in_features: Input dimension.
         out_features: Output dimension.
         make_prior: Callable ``(in_features, out_features) -> Distribution``.
-        make_posterior: Callable ``(in_features, out_features) -> Distribution``.
         bias: Whether to include a bias term.
         pyrox_name: Explicit scope name for NumPyro site registration.
     """
@@ -163,19 +138,13 @@ class DenseVariational(PyroxModule):
     in_features: int
     out_features: int
     make_prior: Callable[..., Any] = eqx.field(static=True)
-    make_posterior: Callable[..., Any] = eqx.field(static=True)
     bias: bool = True
     pyrox_name: str | None = None
 
     @pyrox_method
     def __call__(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D_out"]:
         prior = self.make_prior(self.in_features, self.out_features)
-        posterior = self.make_posterior(self.in_features, self.out_features)
-        W = numpyro.sample(
-            self._pyrox_fullname("weight"),
-            posterior,
-            infer={"prior": prior},
-        )
+        W = self.pyrox_sample("weight", prior)
         out = x @ W
         if self.bias:
             b = self.pyrox_sample(
@@ -202,6 +171,10 @@ class MCDropout(eqx.Module):
     """
 
     rate: float = 0.5
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.rate < 1.0:
+            raise ValueError(f"rate must be in [0, 1), got {self.rate}.")
 
     def __call__(
         self,
@@ -251,19 +224,18 @@ class NCPContinuousPerturb(eqx.Module):
 class DenseNCP(PyroxModule):
     r"""Noise Contrastive Prior dense layer (Hafner et al., 2019).
 
-    Decomposes a dense layer into a deterministic backbone plus a
+    Decomposes a dense layer into a prior-regularized backbone plus a
     scaled stochastic perturbation:
 
     .. math::
 
-        y = \underbrace{x W_d + b_d}_{\text{deterministic}}
-          + \underbrace{\sigma \cdot (x W_s + b_s)}_{\text{stochastic}},
+        y = \underbrace{x W_d + b_d}_{\text{backbone}}
+          + \underbrace{\sigma \cdot (x W_s + b_s)}_{\text{perturbation}},
 
-    where :math:`W_s, b_s \sim \mathcal{N}(0, I)` and
-    :math:`\sigma` is a learned positive scale. The deterministic
-    backbone provides a strong baseline; the stochastic branch
-    adds calibrated uncertainty that can be trained via a noise
-    contrastive objective.
+    where all weights are ``pyrox_sample`` sites with Gaussian priors
+    and :math:`\sigma` has a ``LogNormal`` prior. The backbone carries
+    the bulk of the signal; the perturbation branch adds calibrated
+    uncertainty that can be trained via a noise contrastive objective.
 
     Attributes:
         in_features: Input dimension.
@@ -353,6 +325,8 @@ class RBFFourierFeatures(PyroxModule):
         *,
         lengthscale: float = 1.0,
     ) -> RBFFourierFeatures:
+        if lengthscale <= 0:
+            raise ValueError(f"lengthscale must be > 0, got {lengthscale}.")
         return cls(
             in_features=in_features,
             n_features=n_features,
@@ -405,6 +379,10 @@ class MaternFourierFeatures(PyroxModule):
         nu: float = 1.5,
         lengthscale: float = 1.0,
     ) -> MaternFourierFeatures:
+        if lengthscale <= 0:
+            raise ValueError(f"lengthscale must be > 0, got {lengthscale}.")
+        if nu <= 0:
+            raise ValueError(f"nu must be > 0, got {nu}.")
         return cls(
             in_features=in_features,
             n_features=n_features,
@@ -649,5 +627,8 @@ class ArcCosineFourierFeatures(PyroxModule):
             dist.LogNormal(jnp.log(jnp.asarray(self.init_lengthscale)), 1.0),
         )
         z = x @ W / ls
-        h = jnp.maximum(z, 0.0) ** self.order
+        if self.order == 0:
+            h = (z > 0.0).astype(x.dtype)
+        else:
+            h = jnp.maximum(z, 0.0) ** self.order
         return jnp.sqrt(2.0 / self.n_features) * h

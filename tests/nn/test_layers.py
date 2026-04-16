@@ -73,9 +73,8 @@ def test_reparam_stochastic_across_seeds():
 def test_flipout_output_shape():
     layer = DenseFlipout(in_features=3, out_features=5)
     x = jnp.ones((4, 3))
-    key = jr.PRNGKey(42)
     with handlers.seed(rng_seed=0):
-        y = layer(x, key=key)
+        y = layer(x)
     assert y.shape == (4, 5)
 
 
@@ -83,16 +82,17 @@ def test_flipout_registers_weight_site():
     layer = DenseFlipout(in_features=3, out_features=2, pyrox_name="flipout")
     x = jnp.ones((1, 3))
     with handlers.trace() as tr, handlers.seed(rng_seed=0):
-        layer(x, key=jr.PRNGKey(0))
+        layer(x)
     assert "flipout.weight" in tr
 
 
-def test_flipout_stochastic_across_keys():
+def test_flipout_stochastic_across_seeds():
     layer = DenseFlipout(in_features=3, out_features=2)
     x = jnp.ones((2, 3))
     with handlers.seed(rng_seed=0):
-        y1 = layer(x, key=jr.PRNGKey(0))
-        y2 = layer(x, key=jr.PRNGKey(1))
+        y1 = layer(x)
+    with handlers.seed(rng_seed=1):
+        y2 = layer(x)
     assert not jnp.allclose(y1, y2)
 
 
@@ -103,16 +103,11 @@ def _std_prior(d_in, d_out):
     return dist.Normal(jnp.zeros((d_in, d_out)), 1.0).to_event(2)
 
 
-def _std_posterior(d_in, d_out):
-    return dist.Normal(jnp.zeros((d_in, d_out)), 0.1).to_event(2)
-
-
 def test_variational_output_shape():
     layer = DenseVariational(
         in_features=3,
         out_features=5,
         make_prior=_std_prior,
-        make_posterior=_std_posterior,
     )
     x = jnp.ones((4, 3))
     with handlers.seed(rng_seed=0):
@@ -125,7 +120,6 @@ def test_variational_registers_weight_site():
         in_features=3,
         out_features=2,
         make_prior=_std_prior,
-        make_posterior=_std_posterior,
         pyrox_name="var",
     )
     x = jnp.ones((1, 3))
@@ -447,6 +441,17 @@ def test_arccosine_order1_nonnegative():
     with handlers.seed(rng_seed=0):
         phi = rff(jnp.ones((10, 3)))
     assert jnp.all(phi >= 0.0)
+
+
+def test_arccosine_order0_is_heaviside():
+    """Order-0 features are binary (0 or scaled 1) — the Heaviside step,
+    not 0**0 = 1 everywhere."""
+    rff = ArcCosineFourierFeatures.init(in_features=3, n_features=50, order=0)
+    with handlers.seed(rng_seed=0):
+        phi = rff(jnp.ones((10, 3)))
+    scale = jnp.sqrt(2.0 / 50)
+    unique_vals = jnp.unique(phi)
+    assert jnp.allclose(unique_vals, jnp.array([0.0, scale]), atol=1e-6)
 
 
 def test_arccosine_stochastic_across_seeds():
