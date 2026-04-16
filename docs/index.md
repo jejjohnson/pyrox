@@ -31,6 +31,7 @@ uv add pyrox
 ```python
 import equinox as eqx
 import numpyro
+import numpyro.distributions as dist
 
 
 def model(x, y=None):

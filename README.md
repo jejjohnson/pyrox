@@ -60,7 +60,7 @@ uv add pyrox
 
 ### Runtime dependencies
 
-- Required: `jax`, `equinox`, `numpyro`
+- Required: `jax`, `equinox`, `numpyro`, `gaussx`, `lineax`
 - Optional: `optax` (install via `pip install 'pyrox[optax]'`)
 
 ### From source
@@ -84,6 +84,7 @@ When you already have an Equinox module and just want to treat one of its fields
 ```python
 import equinox as eqx
 import numpyro
+import numpyro.distributions as dist
 
 
 def model(x, y=None):

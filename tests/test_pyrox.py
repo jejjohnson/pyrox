@@ -8,6 +8,8 @@ advertised public surface is importable and shaped as documented.
 
 from __future__ import annotations
 
+import dataclasses
+
 import pyrox
 import pyrox._core
 import pyrox.gp
@@ -40,6 +42,9 @@ def test_core_public_surface_matches_contract():
     assert isinstance(Parameterized, type)
     assert issubclass(Parameterized, PyroxModule)
     assert callable(pyrox_method)
-    # Descriptors are value-object containers, not trainable modules.
-    assert PyroxParam.__mro__[1].__name__ == "tuple"  # NamedTuple
-    assert PyroxSample.__dataclass_fields__ is not None
+    # Descriptors are value-object containers, not trainable modules:
+    # PyroxParam is a NamedTuple (tuple subclass with _fields), PyroxSample
+    # is a plain dataclass.
+    assert issubclass(PyroxParam, tuple)
+    assert hasattr(PyroxParam, "_fields")
+    assert dataclasses.is_dataclass(PyroxSample)
