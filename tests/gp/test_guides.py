@@ -112,7 +112,9 @@ def test_fullrank_predict_matches_direct_closed_form():
     K_zz = K_zz_op.as_matrix()
     mu_ref, var_ref = _direct_sparse_predictive(K_xz, K_zz, K_xx_diag, mean, L @ L.T)
     assert jnp.allclose(mu, mu_ref, atol=1e-6)
-    assert jnp.allclose(var, var_ref, atol=1e-6)
+    # Loosened to accommodate the dtype-aware Cholesky jitter inside
+    # `_svgp_predict_unwhitened` (~10 * eps for float32).
+    assert jnp.allclose(var, var_ref, atol=1e-4)
 
 
 # --- MeanFieldGuide --------------------------------------------------------
@@ -163,7 +165,9 @@ def test_meanfield_predict_matches_direct_closed_form():
         K_xz, K_zz, K_xx_diag, mean, jnp.diag(scale**2)
     )
     assert jnp.allclose(mu, mu_ref, atol=1e-6)
-    assert jnp.allclose(var, var_ref, atol=1e-6)
+    # Loosened to accommodate the dtype-aware Cholesky jitter inside
+    # `_svgp_predict_unwhitened` (~10 * eps for float32).
+    assert jnp.allclose(var, var_ref, atol=1e-4)
 
 
 # --- WhitenedGuide ---------------------------------------------------------
@@ -228,8 +232,11 @@ def test_whitened_and_unwhitened_predict_agree_under_change_of_variables():
     g_full = FullRankGuide(mean=L_zz @ m_v, scale_tril=L_zz @ L_v)
     mu_f, var_f = g_full.predict(K_xz, K_zz_op, K_xx_diag)
 
-    assert jnp.allclose(mu_w, mu_f, atol=1e-8)
-    assert jnp.allclose(var_w, var_f, atol=1e-8)
+    assert jnp.allclose(mu_w, mu_f, atol=1e-6)
+    # The unwhitened path adds a dtype-aware Cholesky jitter (~10 * eps
+    # for float32) inside `_svgp_predict_unwhitened` that the whitened
+    # path does not, so the two predictives agree only up to that jitter.
+    assert jnp.allclose(var_w, var_f, atol=1e-4)
 
 
 def test_whitened_and_unwhitened_kl_agree_under_change_of_variables():

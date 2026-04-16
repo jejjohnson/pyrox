@@ -14,8 +14,7 @@ in later waves.
 
 from __future__ import annotations
 
-import contextlib
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 
 import equinox as eqx
 import jax
@@ -38,6 +37,7 @@ from gaussx import (
 from jaxtyping import Array, Float
 from numpyro import distributions as dist
 
+from pyrox.gp._context import _kernel_context
 from pyrox.gp._protocols import Kernel
 
 
@@ -48,30 +48,6 @@ def _psd_operator(K: Float[Array, "N N"]) -> lx.AbstractLinearOperator:
     Cholesky-based solvers / logdets when using ``AutoSolver``.
     """
     return lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)  # ty: ignore[invalid-return-type]
-
-
-@contextlib.contextmanager
-def _kernel_context(kernel: Kernel) -> Iterator[None]:
-    """Scope multiple kernel calls under a single per-call pyrox context.
-
-    For ``PyroxModule``-derived kernels (Pattern B / C with priors), the
-    per-call ``_Context`` deduplicates ``pyrox_sample``/``pyrox_param``
-    sites within one trace. Without this scoping, evaluating ``kernel(...)``
-    and ``kernel.diag(...)`` back-to-back during prediction would either
-    raise NumPyro duplicate-site errors (under tracing) or silently
-    resample independent hyperparameter draws for each call (under seed),
-    decoupling ``K_cross`` from ``K_diag`` and from the cached training
-    solve. The ``_Context`` is reentrant, so nesting inside an outer
-    ``pyrox_method``-decorated call is safe.
-
-    For pure ``eqx.Module`` kernels (no ``_get_context``), this is a no-op.
-    """
-    ctx = getattr(kernel, "_get_context", None)
-    if ctx is None:
-        yield
-        return
-    with ctx():
-        yield
 
 
 class GPPrior(eqx.Module):
@@ -304,9 +280,12 @@ def gp_sample(
     if whitened:
         L = cholesky(prior._prior_operator())
         n = prior.X.shape[0]
+        dtype = prior.X.dtype
         u = numpyro.sample(
             f"{name}_u",
-            dist.Normal(jnp.zeros(n, dtype=prior.X.dtype), 1.0).to_event(1),
+            dist.Normal(jnp.zeros(n, dtype=dtype), jnp.ones((), dtype=dtype)).to_event(
+                1
+            ),
         )
         f = prior.mean(prior.X) + unwhiten(jnp.asarray(u), L)
         return numpyro.deterministic(name, f)  # ty: ignore[invalid-return-type]

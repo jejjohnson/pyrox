@@ -97,9 +97,14 @@ def _svgp_predict_unwhitened(
     Sv = jax.vmap(lambda col: lx.linear_solve(L_zz, col).value, in_axes=1, out_axes=1)(
         Sv_left.T
     ).T  # L_zz^{-1} S L_zz^{-T}, shape (M, M)
-    # Symmetrize for numerical safety before Cholesky.
+    # Symmetrize for numerical safety before Cholesky, then add a
+    # dtype-aware diagonal jitter that's actually meaningful in the
+    # working precision (a fixed 1e-12 vanishes when added to ~unit
+    # values in float32). The ``max`` keeps the float64 behavior at the
+    # historical 1e-12; only the float32 path is bumped up to ~10 * eps.
     Sv = 0.5 * (Sv + Sv.T)
-    Lv = jnp.linalg.cholesky(Sv + 1e-12 * jnp.eye(Sv.shape[0], dtype=Sv.dtype))
+    jitter = max(1e-12, float(jnp.finfo(Sv.dtype).eps) * 10.0)
+    Lv = jnp.linalg.cholesky(Sv + jitter * jnp.eye(Sv.shape[0], dtype=Sv.dtype))
     return whitened_svgp_predict(K_zz_op, K_xz, m_v, Lv, K_xx_diag)
 
 

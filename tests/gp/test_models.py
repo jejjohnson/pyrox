@@ -391,8 +391,7 @@ def test_gp_sample_whitened_marginal_matches_prior_mvn():
     keys = jr.split(jr.PRNGKey(0), 5000)
 
     def draw(key):
-        with handlers.seed(rng_seed=key):
-            return model()
+        return handlers.seed(model, rng_seed=key)()
 
     fs = jax.vmap(draw)(keys)  # (S, N)
     sample_mean = fs.mean(axis=0)

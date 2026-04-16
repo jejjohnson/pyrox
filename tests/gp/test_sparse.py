@@ -8,7 +8,9 @@ and that the helpers compose correctly with the kernel.
 from __future__ import annotations
 
 import jax.numpy as jnp
+import numpyro.distributions as dist
 from gaussx import CGSolver, DenseSolver
+from numpyro import handlers
 
 from pyrox.gp import RBF, Matern, SparseGPPrior
 
@@ -89,3 +91,88 @@ def test_inducing_operator_is_psd_tagged():
     Z = _toy_inducing(3)
     op = SparseGPPrior(kernel=RBF(), Z=Z).inducing_operator()
     assert lx.is_positive_semidefinite(op)
+
+
+# --- Pattern B/C regression: kernel context scoping ------------------------
+
+
+def test_predictive_blocks_returns_consistent_shapes_and_jitter():
+    """``predictive_blocks(X)`` returns the same three matrices that
+    :meth:`inducing_operator`, :meth:`cross_covariance`, and
+    :meth:`kernel_diag` produce for pure ``eqx.Module`` kernels — but in
+    one shared kernel context (verified separately for Pattern B / C
+    kernels)."""
+    Z = _toy_inducing(4)
+    X = jnp.linspace(-3.0, 3.0, 6).reshape(-1, 1)
+    kern = RBF(init_variance=1.5, init_lengthscale=0.4)
+    prior = SparseGPPrior(kernel=kern, Z=Z, jitter=2e-4)
+
+    K_zz_op, K_xz, K_xx_diag = prior.predictive_blocks(X)
+    assert K_zz_op.in_size() == Z.shape[0]
+    assert K_xz.shape == (X.shape[0], Z.shape[0])
+    assert K_xx_diag.shape == (X.shape[0],)
+
+    K_zz_solo = prior.inducing_operator().as_matrix()
+    assert jnp.allclose(K_zz_op.as_matrix(), K_zz_solo, atol=1e-10)
+    assert jnp.allclose(K_xz, prior.cross_covariance(X), atol=1e-10)
+    assert jnp.allclose(K_xx_diag, prior.kernel_diag(X), atol=1e-10)
+
+
+def test_predictive_blocks_does_not_double_register_pattern_b_kernel_sites():
+    """Regression for PR #64 P1: building ``K_zz``, ``K_xz``, and
+    ``K_xx_diag`` for an SVGP predictive requires three kernel calls.
+    For a kernel whose hyperparameters carry priors (Pattern B / C),
+    those calls would re-register the same NumPyro sample sites without
+    a shared kernel context — raising a duplicate-site error under
+    tracing. ``predictive_blocks`` scopes one outer
+    :class:`pyrox.PyroxModule` context so each prior'd hyperparameter
+    site registers exactly once."""
+    Z = _toy_inducing(4)
+    X = jnp.linspace(-3.0, 3.0, 5).reshape(-1, 1)
+
+    kernel = RBF()
+    kernel.set_prior("variance", dist.LogNormal(0.0, 1.0))
+    kernel.set_prior("lengthscale", dist.LogNormal(0.0, 1.0))
+    prior = SparseGPPrior(kernel=kernel, Z=Z, jitter=1e-4)
+
+    def model():
+        return prior.predictive_blocks(X)
+
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        K_zz_op, K_xz, K_xx_diag = model()
+
+    assert K_zz_op.in_size() == Z.shape[0]
+    assert K_xz.shape == (X.shape[0], Z.shape[0])
+    assert K_xx_diag.shape == (X.shape[0],)
+    # Each prior'd hyperparameter site registers exactly once across
+    # the three kernel evaluations — duplicate registration would have
+    # raised before this point.
+    assert "RBF.variance" in tr
+    assert "RBF.lengthscale" in tr
+
+
+def test_predictive_blocks_uses_consistent_kernel_hyperparameter_draws():
+    """Under one shared seed scope, ``predictive_blocks`` draws the
+    kernel hyperparameter samples once and reuses them across the three
+    kernel evaluations — so ``K_zz``, ``K_xz``, and ``K_xx_diag`` all
+    reflect the same hyperparameter draw. Calling the three accessors
+    separately under independent seed scopes would draw three
+    independent samples and yield mutually inconsistent matrices."""
+    Z = _toy_inducing(4)
+    X = jnp.linspace(-2.0, 2.0, 5).reshape(-1, 1)
+
+    kernel = RBF()
+    kernel.set_prior("variance", dist.LogNormal(0.0, 1.0))
+    kernel.set_prior("lengthscale", dist.LogNormal(0.0, 1.0))
+    prior = SparseGPPrior(kernel=kernel, Z=Z, jitter=1e-4)
+
+    with handlers.seed(rng_seed=0):
+        K_zz_op, K_xz, K_xx_diag = prior.predictive_blocks(X)
+    K_zz = K_zz_op.as_matrix()
+
+    # Recover the variance from the diagonal of K_zz (RBF: K(z, z) = variance).
+    variance_zz = K_zz[0, 0] - prior.jitter
+    # Same variance must appear on the diagonal of K_xx (stationary RBF).
+    assert jnp.allclose(K_xx_diag, variance_zz, atol=1e-6)
+    # And K_xz is bounded by the same variance (k(x, z) <= variance).
+    assert jnp.all(K_xz <= variance_zz + 1e-6)
