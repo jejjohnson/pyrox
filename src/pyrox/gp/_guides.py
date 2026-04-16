@@ -573,9 +573,21 @@ class DeltaGuide(Guide):
         With ``u = loc`` deterministically, the predictive is the prior
         conditional ``p(f_* | u = loc)``: the mean is
         ``K_{xZ} K_{ZZ}^{-1} loc`` and the variance is the prior
-        reduction ``k(x, x) - K_{xZ} K_{ZZ}^{-1} K_{Zx}`` with no
-        posterior-uncertainty contribution.
+        reduction ``k(x, x) - K_{xZ} K_{ZZ}^{-1} K_{Zx}`` *exactly* —
+        no posterior-uncertainty contribution and no Cholesky jitter.
+
+        Implemented by calling :func:`gaussx.whitened_svgp_predict`
+        directly with the whitened mean ``L_{ZZ}^{-1} loc`` and a zero
+        whitened Cholesky factor. The shared
+        :func:`_svgp_predict_unwhitened` helper would route the zero
+        variational covariance through :func:`gaussx.safe_cholesky`,
+        which injects jitter to make the input PD and would add a tiny
+        spurious variance term. Bypassing that path keeps the
+        :class:`DeltaGuide` predictive numerically equal to the prior
+        conditional.
         """
         m_size = self.loc.shape[0]
-        zero_cov = jnp.zeros((m_size, m_size), dtype=self.loc.dtype)
-        return _svgp_predict_unwhitened(K_xz, K_zz_op, K_xx_diag, self.loc, zero_cov)
+        L_zz = cholesky(K_zz_op)
+        u_mean_white = lx.linear_solve(L_zz, self.loc).value
+        zero_chol = jnp.zeros((m_size, m_size), dtype=self.loc.dtype)
+        return whitened_svgp_predict(K_zz_op, K_xz, u_mean_white, zero_chol, K_xx_diag)

@@ -535,9 +535,30 @@ def test_delta_predict_matches_prior_conditioning_on_u_equals_loc():
         K_xz, K_zz, K_xx_diag, loc, jnp.zeros((M, M))
     )
     assert jnp.allclose(mu, mu_ref, atol=1e-5)
-    # Loosened to accommodate the dtype-aware Cholesky jitter inside
-    # `_svgp_predict_unwhitened` (~10 * eps for float32).
-    assert jnp.allclose(var, var_ref, atol=1e-4)
+    assert jnp.allclose(var, var_ref, atol=1e-5)
+
+
+def test_delta_predict_variance_is_exact_prior_conditional_no_jitter():
+    """Regression for PR #66 review: ``DeltaGuide.predict`` must compute
+    the *exact* prior conditional with no extra variance from a Cholesky
+    jitter term.
+
+    Routing the zero variational covariance through
+    :func:`gaussx.safe_cholesky` would inject a tiny PSD perturbation
+    that survives into the predictive variance. ``DeltaGuide.predict``
+    bypasses that path by calling :func:`gaussx.whitened_svgp_predict`
+    directly with a zero whitened Cholesky factor, so the predictive
+    variance equals the prior conditional ``k(x, x) - K_xz K_zz^{-1}
+    K_zx`` to working precision."""
+    _, _, _, K_zz_op, K_xz, K_xx_diag = _toy_setup()
+    M = K_zz_op.in_size()
+    loc = jr.normal(jr.PRNGKey(31), (M,))
+    g = DeltaGuide(loc=loc)
+    _, var = g.predict(K_xz, K_zz_op, K_xx_diag)
+    K_zz = K_zz_op.as_matrix()
+    K_zx = K_xz.T
+    var_prior = K_xx_diag - jnp.einsum("nm,mn->n", K_xz, jnp.linalg.solve(K_zz, K_zx))
+    assert jnp.allclose(var, var_prior, atol=1e-6)
 
 
 def test_delta_predict_variance_is_at_most_prior_diag():
