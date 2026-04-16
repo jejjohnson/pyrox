@@ -151,14 +151,29 @@ jax.config.update("jax_enable_x64", True)
 
 ## Reproducibility — `watermark`
 
-After imports, print a version readout:
+After imports, print a version readout. The cell uses `get_ipython()` and an `importlib.util.find_spec` check so a plain `python foo.py` smoke run during dev — and a local `nbconvert --execute` on a machine without `watermark` installed — both no-op cleanly instead of raising `UsageError: Line magic function %load_ext not found`:
 
 ```python
-# %load_ext watermark
-# %watermark -v -m -p jax,equinox,numpyro,gaussx,pyrox,matplotlib
+import importlib.util
+
+try:
+    from IPython import get_ipython
+
+    ipython = get_ipython()
+except ImportError:
+    ipython = None
+
+if ipython is not None and importlib.util.find_spec("watermark") is not None:
+    ipython.run_line_magic("load_ext", "watermark")
+    ipython.run_line_magic(
+        "watermark",
+        "-v -m -p jax,equinox,numpyro,gaussx,pyrox,matplotlib",
+    )
+else:
+    print("watermark extension not installed; skipping reproducibility readout.")
 ```
 
-Users reproducing the notebook later see exactly which package versions generated the committed outputs.
+The `[docs]` and `[colab]` dependency groups both pull in `watermark`, so under the documented authoring workflow (`uv run --group docs jupyter nbconvert --execute ...`) and on Colab the readout actually prints. Users reproducing the notebook later see exactly which package versions generated the committed outputs.
 
 ## Notebook Structure
 

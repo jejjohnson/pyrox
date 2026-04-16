@@ -165,20 +165,29 @@ def test_gpprior_accepts_composed_solver():
 # --- Closed-form log marginal likelihood golden check ----------------------
 
 
-def test_log_marginal_likelihood_matches_direct_computation():
-    """Pin GPPrior.log_prob against the closed-form GP log marginal.
+def test_collapsed_log_marginal_likelihood_matches_direct_computation():
+    """Pin the collapsed GP log marginal — what ``gp_factor`` registers —
+    against a direct Cholesky reference.
 
-    log p(y | X, theta) = -1/2 y^T (K + sigma^2 I)^{-1} y
-                          -1/2 log|K + sigma^2 I|
-                          -N/2 log(2*pi)
+    .. math::
+        \\log p(y \\mid X, \\theta) =
+            -\\tfrac{1}{2}\\, y^\\top (K + (\\text{jitter} + \\sigma^2) I)^{-1} y
+            -\\tfrac{1}{2}\\, \\log\\bigl|K + (\\text{jitter} + \\sigma^2) I\\bigr|
+            -\\tfrac{N}{2}\\, \\log(2\\pi).
 
     We compute it two ways:
-      (1) pyrox: build the noisy operator via condition() and evaluate
-          log_prob of y under MVN(0, K + sigma^2 I).
-      (2) numpy: direct Cholesky solve + logdet on the same kernel matrix.
+
+    1. ``gp_factor`` path — call ``gaussx.log_marginal_likelihood`` on
+       ``prior._noisy_operator(noise_var)``. This is exactly what
+       :func:`pyrox.gp.gp_factor` does under the hood, just without the
+       NumPyro side effect.
+    2. Direct Cholesky — solve + logdet on the same kernel matrix, with
+       the matching ``(jitter + noise_var)`` regularization.
 
     The two numbers should agree to float32 roundoff.
     """
+    from gaussx import log_marginal_likelihood
+
     X, y = _toy_dataset(n=8, seed=1)
     variance = jnp.array(1.1)
     lengthscale = jnp.array(0.45)
@@ -186,18 +195,21 @@ def test_log_marginal_likelihood_matches_direct_computation():
     jitter = 1e-8
     n = X.shape[0]
 
-    # (1) pyrox path: GPPrior log_prob on the noisy operator via an
-    # internal helper — we mirror what gp_factor does under the hood.
+    # (1) pyrox path: log_marginal_likelihood on the noisy operator —
+    # the same call gp_factor makes inside its NumPyro factor.
     with handlers.seed(rng_seed=0):
         kernel = RBF(init_variance=float(variance), init_lengthscale=float(lengthscale))
         prior = GPPrior(kernel=kernel, X=X, jitter=jitter)
         K = kernel(X, X)
-    K_y = K + (jitter + noise_var) * jnp.eye(n)
-    pyrox_logp = dist.MultivariateNormal(jnp.zeros(n), covariance_matrix=K_y).log_prob(
-        y
-    )
+        pyrox_logp = log_marginal_likelihood(
+            prior.mean(prior.X),
+            prior._noisy_operator(noise_var),
+            y,
+            solver=prior._resolved_solver(),
+        )
 
     # (2) Closed-form direct computation via Cholesky.
+    K_y = K + (jitter + noise_var) * jnp.eye(n)
     L = jnp.linalg.cholesky(K_y)
     alpha = jax.scipy.linalg.cho_solve((L, True), y)
     data_fit = -0.5 * jnp.dot(y, alpha)
@@ -206,16 +218,6 @@ def test_log_marginal_likelihood_matches_direct_computation():
     direct_logp = data_fit + logdet + normalizer
 
     assert jnp.allclose(pyrox_logp, direct_logp, atol=1e-4)
-
-    # The prior in guide/model form via gaussx.log_marginal_likelihood
-    # should also agree (same underlying math, different code path).
-    from gaussx import log_marginal_likelihood
-
-    op = prior._noisy_operator(noise_var)
-    gaussx_logp = log_marginal_likelihood(
-        prior.mean(prior.X), op, y, solver=prior._resolved_solver()
-    )
-    assert jnp.allclose(gaussx_logp, direct_logp, atol=1e-4)
 
 
 # --- gp_factor inside a NumPyro model --------------------------------------
