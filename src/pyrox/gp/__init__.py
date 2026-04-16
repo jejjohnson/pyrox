@@ -34,6 +34,11 @@ from pyrox.gp._guides import (
     NaturalGuide,
     WhitenedGuide,
 )
+from pyrox.gp._inference import (
+    ConjugateVI,
+    svgp_elbo,
+    svgp_factor,
+)
 from pyrox.gp._kernels import (
     RBF,
     Constant,
@@ -44,6 +49,10 @@ from pyrox.gp._kernels import (
     Polynomial,
     RationalQuadratic,
     White,
+)
+from pyrox.gp._likelihoods import (
+    DistLikelihood,
+    GaussianLikelihood,
 )
 from pyrox.gp._models import (
     ConditionedGP,
@@ -63,11 +72,14 @@ from pyrox.gp._sparse import SparseGPPrior
 __all__ = [
     "RBF",
     "ConditionedGP",
+    "ConjugateVI",
     "Constant",
     "Cosine",
     "DeltaGuide",
+    "DistLikelihood",
     "FullRankGuide",
     "GPPrior",
+    "GaussianLikelihood",
     "Guide",
     "Integrator",
     "Kernel",
@@ -84,4 +96,6 @@ __all__ = [
     "WhitenedGuide",
     "gp_factor",
     "gp_sample",
+    "svgp_elbo",
+    "svgp_factor",
 ]
