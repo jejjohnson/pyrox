@@ -26,7 +26,6 @@ from gaussx import (
     AbstractIntegrator as GaussxIntegrator,
     GaussianState,
     cholesky,
-    inv,
     log_likelihood_expectation,
     variational_elbo_gaussian,
 )
@@ -138,8 +137,8 @@ def svgp_elbo(
             y,
             f_loc,
             f_var,
-            likelihood.noise_var,
-            kl,  # ty: ignore[invalid-argument-type]
+            likelihood.noise_var,  # ty: ignore[invalid-argument-type]
+            kl,
         )
 
     if integrator is None:
@@ -219,6 +218,8 @@ class ConjugateVI:
         damping: float = 1.0,
         integrator: GaussxIntegrator | None = None,
     ) -> None:
+        if not 0.0 <= damping <= 1.0:
+            raise ValueError(f"damping must be in [0, 1], got {damping}.")
         self.damping = damping
         self.integrator = integrator
 
@@ -281,16 +282,30 @@ class ConjugateVI:
 
         # Prior natural parameters: p(u) = N(0, K_zz)
         # => eta1_prior = 0, eta2_prior = -0.5 K_zz^{-1}
+        # Build K_zz^{-1} via Cholesky solves (more stable than inv).
         M = K_zz_op.in_size()
-        nat1_prior = jnp.zeros(M)
-        K_zz_inv = inv(K_zz_op)
-        nat2_prior = -0.5 * K_zz_inv.as_matrix()
+        nat1_prior = jnp.zeros_like(guide.nat1)
+        eye = jnp.eye(M, dtype=guide.nat2.dtype)
+        K_zz_inv = jax.vmap(
+            lambda col: lx.linear_solve(L_zz.T, col).value,
+            in_axes=1,
+            out_axes=1,
+        )(
+            jax.vmap(
+                lambda col: lx.linear_solve(L_zz, col).value,
+                in_axes=1,
+                out_axes=1,
+            )(eye)
+        )
+        K_zz_inv = 0.5 * (K_zz_inv + K_zz_inv.T)
+        nat2_prior = -0.5 * K_zz_inv
 
-        # Project per-point sites into inducing space.
-        # grad1 is ∂ELL/∂μ_n; the nat2 site contribution uses
-        # ∂ELL/∂σ²_n = 0.5 * ∂²ELL/∂μ²_n (the variance gradient,
-        # not the mean Hessian).
-        nat1_hat = nat1_prior + B @ grad1
+        # Project per-point site natural parameters into inducing
+        # space. The site λ₁ = grad1 - f_loc * grad2 (not just grad1);
+        # omitting the f_loc correction makes the update depend on the
+        # current guide mean instead of being a fixed-point update.
+        site_lambda1 = grad1 - f_loc * grad2
+        nat1_hat = nat1_prior + B @ site_lambda1
         nat2_hat = nat2_prior + B @ (0.5 * grad2[:, None] * B.T)
 
         return guide.natural_update(nat1_hat, nat2_hat, rho=self.damping)

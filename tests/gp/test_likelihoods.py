@@ -37,7 +37,7 @@ def test_gaussian_log_prob_dtype_preserved():
     f = jnp.array([1.0, 2.0], dtype=jnp.float32)
     y = jnp.array([1.1, 2.1], dtype=jnp.float32)
     lik = GaussianLikelihood(noise_var=0.1)
-    assert lik.log_prob(f, y).dtype == jnp.float32
+    assert lik.log_prob(f, y).dtype == f.dtype
 
 
 # --- DistLikelihood -------------------------------------------------------
@@ -53,7 +53,7 @@ def test_dist_bernoulli_log_prob_matches_numpyro():
 
 def test_dist_poisson_log_prob_matches_numpyro():
     f = jnp.array([0.5, 1.0, -0.5])
-    y = jnp.array([1.0, 3.0, 0.0])
+    y = jnp.array([1, 3, 0], dtype=jnp.int32)
     lik = DistLikelihood(dist_fn=lambda f: nd.Poisson(rate=jnp.exp(f)))
     ref = nd.Poisson(rate=jnp.exp(f)).log_prob(y).sum()
     assert jnp.allclose(lik.log_prob(f, y), ref, atol=1e-5)
