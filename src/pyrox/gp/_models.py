@@ -14,8 +14,7 @@ in later waves.
 
 from __future__ import annotations
 
-import contextlib
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 
 import equinox as eqx
 import jax
@@ -29,12 +28,16 @@ from gaussx import (
     MultivariateNormal,
     PredictionCache,
     build_prediction_cache,
+    cholesky,
     log_marginal_likelihood,
     predict_mean,
     predict_variance,
+    unwhiten,
 )
 from jaxtyping import Array, Float
+from numpyro import distributions as dist
 
+from pyrox.gp._context import _kernel_context
 from pyrox.gp._protocols import Kernel
 
 
@@ -45,30 +48,6 @@ def _psd_operator(K: Float[Array, "N N"]) -> lx.AbstractLinearOperator:
     Cholesky-based solvers / logdets when using ``AutoSolver``.
     """
     return lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)  # ty: ignore[invalid-return-type]
-
-
-@contextlib.contextmanager
-def _kernel_context(kernel: Kernel) -> Iterator[None]:
-    """Scope multiple kernel calls under a single per-call pyrox context.
-
-    For ``PyroxModule``-derived kernels (Pattern B / C with priors), the
-    per-call ``_Context`` deduplicates ``pyrox_sample``/``pyrox_param``
-    sites within one trace. Without this scoping, evaluating ``kernel(...)``
-    and ``kernel.diag(...)`` back-to-back during prediction would either
-    raise NumPyro duplicate-site errors (under tracing) or silently
-    resample independent hyperparameter draws for each call (under seed),
-    decoupling ``K_cross`` from ``K_diag`` and from the cached training
-    solve. The ``_Context`` is reentrant, so nesting inside an outer
-    ``pyrox_method``-decorated call is safe.
-
-    For pure ``eqx.Module`` kernels (no ``_get_context``), this is a no-op.
-    """
-    ctx = getattr(kernel, "_get_context", None)
-    if ctx is None:
-        yield
-        return
-    with ctx():
-        yield
 
 
 class GPPrior(eqx.Module):
@@ -262,25 +241,55 @@ def gp_sample(
     name: str,
     prior: GPPrior,
     *,
+    whitened: bool = False,
     guide: object | None = None,
 ) -> Float[Array, " N"]:
-    """Sample a latent function ``f`` at the prior's training inputs.
+    r"""Sample a latent function ``f`` at the prior's training inputs.
 
-    When ``guide`` is ``None`` (Wave 2 default) the sample site draws
-    from the prior ``MVN(mu(X), K(X, X) + jitter I)`` via
-    :class:`gaussx.MultivariateNormal`. A non-``None`` ``guide`` is the
-    extension point for Wave 3 variational families — its
-    ``register(name, prior)`` method is invoked to register the posterior
-    site (or whatever NumPyro plumbing the guide owns) in place of the
-    prior sample. This is intentionally distinct from the
-    :class:`pyrox.gp.Guide` protocol's ``sample(self, key)`` method,
-    which draws raw variational samples without touching the trace.
+    Three mutually exclusive modes:
+
+    * ``whitened=False``, ``guide=None`` (default) — register a single
+      ``numpyro.sample(name, MVN(mu, K + jitter I))`` site. The latent
+      function is sampled directly from the prior.
+    * ``whitened=True``, ``guide=None`` — register a unit-normal latent
+      site ``f"{name}_u"`` with shape ``(N,)`` and return the
+      deterministic value ``f = mu(X) + L u`` where ``L`` is the
+      Cholesky factor of ``K + jitter I``. This reparameterization is the
+      standard fix for mean-field SVI on GP-correlated latents
+      (Murray & Adams, 2010): a NumPyro auto-guide such as
+      :class:`numpyro.infer.autoguide.AutoNormal` then approximates the
+      well-conditioned isotropic posterior over ``u`` instead of the
+      ill-conditioned correlated posterior over ``f``.
+    * ``guide`` provided — delegate to ``guide.register(name, prior)``.
+      Concrete variational guides (Wave 3) own their own
+      parameterization, so combining ``whitened=True`` with ``guide`` is
+      rejected.
 
     Use this inside a NumPyro model for non-conjugate likelihoods, where
     the latent function cannot be marginalized analytically.
     """
     if guide is not None:
+        if whitened:
+            raise ValueError(
+                "gp_sample: cannot combine `whitened=True` with `guide=...`. "
+                "Provide one or the other; concrete guides own their own "
+                "parameterization."
+            )
         return guide.register(name, prior)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
+
+    if whitened:
+        L = cholesky(prior._prior_operator())
+        n = prior.X.shape[0]
+        dtype = prior.X.dtype
+        u = numpyro.sample(
+            f"{name}_u",
+            dist.Normal(jnp.zeros(n, dtype=dtype), jnp.ones((), dtype=dtype)).to_event(
+                1
+            ),
+        )
+        f = prior.mean(prior.X) + unwhiten(jnp.asarray(u), L)
+        return numpyro.deterministic(name, f)  # ty: ignore[invalid-return-type]
+
     return numpyro.sample(  # ty: ignore[invalid-return-type]
         name,
         MultivariateNormal(
