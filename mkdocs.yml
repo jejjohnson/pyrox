@@ -51,6 +51,7 @@ nav:
       - Exact GP Regression: notebooks/exact_gp_regression.ipynb
       - Latent GP Classification: notebooks/latent_gp_classification.ipynb
       - "Regression Masterclass — Pattern 1 (eqx.tree_at)": notebooks/regression_masterclass_treeat.ipynb
+      - "Regression Masterclass — Pattern 2 (PyroxModule)": notebooks/regression_masterclass_pyrox_sample.ipynb
   - Contributing: contributing.md
   - Changelog: CHANGELOG.md
 
