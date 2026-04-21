@@ -26,7 +26,10 @@ import jax.numpy as jnp
 import numpyro.distributions as dist
 from jaxtyping import Array, Float
 
+from pyrox._basis import fourier_basis, spectral_density
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
+from pyrox.gp._context import _kernel_context
+from pyrox.gp._protocols import Kernel
 
 
 class DenseReparameterization(PyroxModule):
@@ -632,3 +635,239 @@ class ArcCosineFourierFeatures(PyroxModule):
         else:
             h = jnp.maximum(z, 0.0) ** self.order
         return jnp.sqrt(2.0 / self.n_features) * h
+
+
+class VariationalFourierFeatures(PyroxModule):
+    r"""VSSGP — RFF with a learnable variational posterior over frequencies.
+
+    Standard RFF (e.g. :class:`RBFFourierFeatures`) treats the spectral
+    frequencies :math:`W` as a frozen prior draw; VSSGP (Gal & Turner,
+    2015) treats :math:`W` as a latent with a learnable mean-field
+    posterior, recovering spectral *uncertainty* on top of the
+    feature-space uncertainty.
+
+    Prior: :math:`p(W) = \mathcal{N}(0, I)` (RBF spectral density in
+    lengthscale-1 units). The lengthscale is itself a sampled site
+    (``LogNormal(log init_lengthscale, 1)``) so that frequencies are
+    rescaled to the physical kernel.
+
+    Under SVI, attach an :class:`~numpyro.infer.autoguide.AutoNormal` to
+    learn the posterior on ``W``; under prior-only seeds, behaves
+    identically to :class:`RBFFourierFeatures`.
+
+    Attributes:
+        in_features: Input dimension :math:`D`.
+        n_features: Number of frequency pairs (output dim ``2 * n_features``).
+        init_lengthscale: Prior location for the kernel lengthscale.
+        pyrox_name: Explicit scope name for NumPyro site registration.
+    """
+
+    in_features: int = eqx.field(static=True)
+    n_features: int = eqx.field(static=True)
+    init_lengthscale: float = 1.0
+    pyrox_name: str | None = None
+
+    @classmethod
+    def init(
+        cls,
+        in_features: int,
+        n_features: int,
+        *,
+        lengthscale: float = 1.0,
+    ) -> VariationalFourierFeatures:
+        if lengthscale <= 0:
+            raise ValueError(f"lengthscale must be > 0, got {lengthscale}.")
+        return cls(
+            in_features=in_features,
+            n_features=n_features,
+            init_lengthscale=lengthscale,
+        )
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D_rff"]:
+        # Same prior as RBFFourierFeatures — the *posterior* is what differs
+        # under SVI: an attached AutoGuide learns q(W) instead of forcing W
+        # to its prior draw.
+        W = self.pyrox_sample(
+            "W",
+            dist.Normal(0.0, 1.0)
+            .expand([self.in_features, self.n_features])
+            .to_event(2),
+        )
+        ls = self.pyrox_sample(
+            "lengthscale",
+            dist.LogNormal(jnp.log(jnp.asarray(self.init_lengthscale)), 1.0),
+        )
+        return _rff_forward(W, ls, self.n_features, x)
+
+
+def _orthogonal_blocks(
+    in_features: int,
+    n_blocks: int,
+    *,
+    key: jax.Array,
+) -> Float[Array, "D_in D_orf"]:
+    """Build the ORF frequency matrix as ``[Q_1 S_1, ..., Q_K S_K]``.
+
+    Each block is an orthogonal (Haar) ``D x D`` matrix scaled by an
+    independent chi-distributed magnitude on each row, matching the
+    isotropic Gaussian frequency density in expectation.
+    """
+    D = in_features
+    blocks: list[Float[Array, "D_in D_in"]] = []
+    for _ in range(n_blocks):
+        key, k_qr, k_chi = jax.random.split(key, 3)
+        G = jax.random.normal(k_qr, (D, D))
+        Q, _ = jnp.linalg.qr(G)
+        # Chi-distributed scale per row (sqrt of chi-squared with df=D).
+        chi = jnp.sqrt(jnp.sum(jax.random.normal(k_chi, (D, D)) ** 2, axis=-1))  # (D,)
+        blocks.append(Q * chi[:, None])
+    return jnp.concatenate(blocks, axis=-1)  # (D, n_blocks * D)
+
+
+class OrthogonalRandomFeatures(eqx.Module):
+    r"""Orthogonal Random Features (Yu et al., 2016) — variance-reduced RFF.
+
+    Frequencies are drawn from blocks of Haar-orthogonal matrices scaled by
+    independent chi-distributed magnitudes, giving the same RBF kernel
+    approximation as plain :class:`RBFFourierFeatures` *in expectation* but
+    with provably lower variance for finite ``n_features``.
+
+    Frozen at construction time — no priors, no SVI on ``W``. The frequency
+    matrix is built once from a ``key`` and stored as a static array.
+
+    Attributes:
+        in_features: Input dimension :math:`D`.
+        n_features: Number of feature pairs. Must satisfy
+            ``n_features % in_features == 0`` so that ORF blocks tile cleanly.
+        lengthscale: Fixed kernel lengthscale (no prior; pass a value).
+        W: Pre-built frequency matrix of shape ``(in_features, 2 * n_features // 2)``.
+
+    Note:
+        For learnable lengthscale or full Bayesian treatment of the
+        frequencies, prefer :class:`VariationalFourierFeatures`.
+    """
+
+    in_features: int = eqx.field(static=True)
+    n_features: int = eqx.field(static=True)
+    lengthscale: Float[Array, ""]
+    W: Float[Array, "D_in D_orf"]
+
+    @classmethod
+    def init(
+        cls,
+        in_features: int,
+        n_features: int,
+        *,
+        key: jax.Array,
+        lengthscale: float = 1.0,
+    ) -> OrthogonalRandomFeatures:
+        if lengthscale <= 0:
+            raise ValueError(f"lengthscale must be > 0, got {lengthscale}.")
+        if n_features % in_features != 0:
+            raise ValueError(
+                f"n_features ({n_features}) must be divisible by in_features "
+                f"({in_features}) so ORF blocks tile cleanly."
+            )
+        n_blocks = n_features // in_features
+        W = _orthogonal_blocks(in_features, n_blocks, key=key)
+        return cls(
+            in_features=in_features,
+            n_features=n_features,
+            lengthscale=jnp.asarray(lengthscale),
+            W=W,
+        )
+
+    def __call__(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D_rff"]:
+        return _rff_forward(self.W, self.lengthscale, self.n_features, x)
+
+
+class HSGPFeatures(PyroxModule):
+    r"""Hilbert-Space Gaussian Process feature layer (Riutort-Mayol et al., 2023).
+
+    A *deterministic* Laplacian-eigenfunction basis on the bounded box
+    :math:`[-L, L]^D` plus learnable per-basis amplitudes with a
+    kernel-spectral-density prior:
+
+    .. math::
+
+        \hat{f}(x) = \sum_{j=1}^{M} \alpha_j\,\sqrt{S(\sqrt{\lambda_j})}\,\phi_j(x),
+        \quad \alpha_j \sim \mathcal{N}(0, 1).
+
+    This is the NN-side dual of :class:`pyrox.gp.FourierInducingFeatures`
+    — same basis, different prior wiring. As ``M`` and ``L`` grow, the
+    induced GP converges to the kernel passed in.
+
+    Attributes:
+        in_features: Input dimension :math:`D`.
+        num_basis_per_dim: Per-axis number of 1D eigenfunctions; total
+            basis count is ``prod(num_basis_per_dim)``.
+        L: Per-axis box half-width.
+        kernel: A stationary kernel from :mod:`pyrox.gp` whose spectral
+            density supplies the per-basis prior variance. Currently
+            :class:`pyrox.gp.RBF` and :class:`pyrox.gp.Matern` are
+            supported by :func:`pyrox._basis.spectral_density`.
+        pyrox_name: Explicit scope name for NumPyro site registration.
+    """
+
+    in_features: int = eqx.field(static=True)
+    num_basis_per_dim: tuple[int, ...] = eqx.field(static=True)
+    L: tuple[float, ...] = eqx.field(static=True)
+    kernel: Kernel
+    pyrox_name: str | None = None
+
+    @classmethod
+    def init(
+        cls,
+        in_features: int,
+        num_basis_per_dim: int | tuple[int, ...],
+        L: float | tuple[float, ...],
+        *,
+        kernel: Kernel,
+    ) -> HSGPFeatures:
+        if isinstance(num_basis_per_dim, int):
+            num_basis_per_dim = (num_basis_per_dim,) * in_features
+        if isinstance(L, int | float):
+            L = (float(L),) * in_features
+        if len(num_basis_per_dim) != in_features:
+            raise ValueError(
+                f"num_basis_per_dim length ({len(num_basis_per_dim)}) "
+                f"must match in_features ({in_features})."
+            )
+        if len(L) != in_features:
+            raise ValueError(
+                f"L length ({len(L)}) must match in_features ({in_features})."
+            )
+        if any(L_d <= 0 for L_d in L):
+            raise ValueError(f"L must be all positive; got {L}.")
+        if any(M_d < 1 for M_d in num_basis_per_dim):
+            raise ValueError(
+                f"num_basis_per_dim must be all >= 1; got {num_basis_per_dim}."
+            )
+        return cls(
+            in_features=in_features,
+            num_basis_per_dim=tuple(num_basis_per_dim),
+            L=tuple(float(L_d) for L_d in L),
+            kernel=kernel,
+        )
+
+    @property
+    def num_basis(self) -> int:
+        n = 1
+        for m in self.num_basis_per_dim:
+            n *= m
+        return n
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, "N D_in"]) -> Float[Array, " N"]:
+        Phi, lam = fourier_basis(x, self.num_basis_per_dim, self.L)  # (N, M), (M,)
+        # Spectral density evaluated under the kernel's own context so any
+        # priors on (variance, lengthscale) register exactly once.
+        with _kernel_context(self.kernel):
+            S = spectral_density(self.kernel, lam, D=self.in_features)
+        sqrt_S = jnp.sqrt(S)
+        alpha = self.pyrox_sample(
+            "alpha",
+            dist.Normal(0.0, 1.0).expand([self.num_basis]).to_event(1),
+        )
+        return jnp.einsum("nm,m->n", Phi, sqrt_S * alpha)
