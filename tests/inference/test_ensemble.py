@@ -212,11 +212,21 @@ def test_ensemble_loss_returns_value_and_grad(linear_problem):
 
 
 def test_manual_loop_matches_ensemble_map(linear_problem):
-    """Hand-rolled init+step loop should give same answer as ensemble_map."""
+    """Hand-rolled init+step loop converges to the same params as ensemble_map.
+
+    Uses identical optimizer / ensemble_size / num_epochs / seed; both
+    paths use a single seed for init (no internal mini-batch perm key in
+    full-batch mode), so the converged parameters should match bit-for-bit.
+    """
     p = linear_problem
-    opt = optax.adam(5e-2)
-    # Manual loop using primitives
-    state = ensemble_init(p["init_fn"], opt, ensemble_size=8, seed=jr.PRNGKey(0))
+    seed = jr.PRNGKey(0)
+    ensemble_size = 8
+    num_epochs = 500
+    learning_rate = 5e-2
+
+    # (a) Manual loop using the Layer-1 primitives.
+    opt = optax.adam(learning_rate)
+    state = ensemble_init(p["init_fn"], opt, ensemble_size=ensemble_size, seed=seed)
     step_jit = eqx.filter_jit(
         lambda s, x, y: ensemble_step(
             s,
@@ -227,11 +237,26 @@ def test_manual_loop_matches_ensemble_map(linear_problem):
             prior_weight=1.0,
         )
     )
-    for _ in range(500):
+    for _ in range(num_epochs):
         state, _ = step_jit(state, p["X"], p["y"])
     params_manual = state.params
 
-    # Ridge convergence — both should be close to ridge
+    # (b) Same problem via the Layer-3 sugar.
+    params_sugar, _ = ensemble_map(
+        p["log_joint"],
+        p["init_fn"],
+        ensemble_size=ensemble_size,
+        num_epochs=num_epochs,
+        data=(p["X"], p["y"]),
+        seed=seed,
+        learning_rate=learning_rate,
+        prior_weight=1.0,
+    )
+
+    # Both paths must converge to the same params (full-batch is deterministic
+    # given the same init seed and number of steps).
+    assert jnp.allclose(params_manual, params_sugar, rtol=1e-4, atol=1e-4)
+    # Sanity: also close to the analytic ridge solution.
     assert jnp.linalg.norm(params_manual.mean(0) - p["theta_ridge"]) < 0.1
 
 
@@ -263,6 +288,31 @@ def test_ensemble_map_class_init_update_run_consistent(linear_problem):
     # Both should converge near ridge.
     assert jnp.linalg.norm(params_iu.mean(0) - p["theta_ridge"]) < 0.1
     assert jnp.linalg.norm(result.params.mean(0) - p["theta_ridge"]) < 0.1
+
+
+def test_ensemble_map_run_clamps_oversize_batch(linear_problem):
+    """When batch_size > N, EnsembleMAP.run must fall back to full-batch.
+
+    Without the clamp, scale = N / batch_size < 1 silently downweights the
+    likelihood and biases the fit toward the prior. The bug: passing a
+    big batch_size like 10*N should converge to the same MAP as
+    batch_size=None (full-batch), not to a different solution.
+    """
+    p = linear_problem
+    n = p["y"].shape[0]
+    runner = EnsembleMAP(
+        log_joint=p["log_joint"],
+        init_fn=p["init_fn"],
+        optimizer=optax.adam(5e-2),
+        ensemble_size=4,
+        prior_weight=1.0,
+    )
+    result_full = runner.run(jr.PRNGKey(0), 500, p["X"], p["y"], batch_size=None)
+    result_oversized = runner.run(jr.PRNGKey(0), 500, p["X"], p["y"], batch_size=10 * n)
+    # Both should converge to the same params (clamp ⇒ identical runs).
+    assert jnp.allclose(
+        result_full.params, result_oversized.params, rtol=1e-5, atol=1e-5
+    )
 
 
 def test_ensemble_map_class_with_eqx_module():
@@ -377,3 +427,54 @@ def test_ensemble_vi_class_run(linear_problem):
     result = runner.run(jr.PRNGKey(0), 200, p["X"], p["y"])
     assert isinstance(result, EnsembleResult)
     assert result.losses.shape == (4, 200)
+
+
+def _vi_plate_model(x, y=None):
+    """Same linear model but with the obs likelihood inside a plate.
+
+    With a ``plate``, the observation site carries a non-trivial
+    ``site["scale"]`` that the tempered ELBO must honor.
+    """
+    w = numpyro.sample("w", dist.Normal(jnp.zeros(5), 1.0).to_event(1))
+    b = numpyro.sample("b", dist.Normal(0.0, 1.0))
+    f = x @ w + b
+    with numpyro.plate("data", x.shape[0]):
+        numpyro.sample("y", dist.Normal(f, 0.5), obs=y)
+
+
+def test_ensemble_vi_tempered_elbo_runs_on_plate(linear_problem):
+    """Tempered ELBO (kl_weight != 1) must run cleanly on a plate model.
+
+    Regression test for the site-scale handling in `_TemperedTraceELBO`:
+    omitting site["scale"] would make the ELBO numerically wrong on
+    plate-scoped observation sites, but it would still *run*. The check
+    below pins the loss-decrease behavior on a plated model.
+    """
+    p = linear_problem
+    guide = AutoNormal(_vi_plate_model)
+    runner = EnsembleVI(
+        model_fn=_vi_plate_model,
+        guide_fn=guide,
+        optimizer=numpyro.optim.Adam(1e-2),
+        ensemble_size=4,
+        kl_weight=0.5,
+    )
+    result = runner.run(jr.PRNGKey(0), 400, p["X"], p["y"])
+    assert result.losses.shape == (4, 400)
+    head = result.losses[:, :40].mean()
+    tail = result.losses[:, -40:].mean()
+    assert tail < head
+
+
+def test_ensemble_vi_accepts_optax_optimizer(linear_problem):
+    """EnsembleVI should auto-wrap optax via duck-typing, not isinstance."""
+    p = linear_problem
+    guide = AutoNormal(_vi_model)
+    runner = EnsembleVI(
+        model_fn=_vi_model,
+        guide_fn=guide,
+        optimizer=optax.adam(1e-2),  # optax, not numpyro.optim.*
+        ensemble_size=2,
+    )
+    result = runner.run(jr.PRNGKey(0), 100, p["X"], p["y"])
+    assert result.losses.shape == (2, 100)

@@ -29,8 +29,9 @@ schedules, custom batching, callbacks, early stopping, etc.
 * :func:`ensemble_predict` — ``vmap`` a scalar-in predictive over the
   leading ensemble axis.
 
-``optax`` is required for the MAP path and is the default optimizer for
-the VI path (``pip install pyrox[optax]``).
+``optax`` is required for the MAP path (``pip install pyrox[optax]``).
+The VI path defaults to ``numpyro.optim.Adam`` and also accepts
+``optax.GradientTransformation`` instances when ``optax`` is installed.
 """
 
 from __future__ import annotations
@@ -326,9 +327,12 @@ class EnsembleMAP(eqx.Module):
             history of shape ``(E, num_epochs)``.
         """
         n = y.shape[0]
-        bsz = n if batch_size is None else batch_size
+        # Clamp batch_size to n so that batch_size > n falls back cleanly
+        # to full-batch with scale=1, instead of silently downweighting
+        # the likelihood by n/batch_size < 1 and biasing toward the prior.
+        bsz = n if batch_size is None else min(batch_size, n)
         scale = float(n) / float(bsz)
-        use_minibatch = batch_size is not None and batch_size < n
+        use_minibatch = batch_size is not None and bsz < n
 
         init_key, perm_key = jr.split(seed)
         state = self.init(init_key)
@@ -400,7 +404,16 @@ class EnsembleVI(eqx.Module):
         from numpyro.infer import SVI, Trace_ELBO
 
         opt = self.optimizer
-        if not isinstance(opt, numpyro.optim._NumPyroOptim):
+        # Duck-type rather than isinstance against numpyro.optim._NumPyroOptim:
+        # the latter is a private symbol that may move under refactors. The
+        # public contract of a numpyro optimizer is `init_fn` + `update_fn` +
+        # `get_params`; if any are missing, assume it's an optax transform.
+        is_numpyro_optim = (
+            callable(getattr(opt, "init_fn", None))
+            and callable(getattr(opt, "update_fn", None))
+            and callable(getattr(opt, "get_params", None))
+        )
+        if not is_numpyro_optim:
             opt = numpyro.optim.optax_to_numpyro(opt)
         if self.kl_weight == 1.0:
             elbo: Any = Trace_ELBO(num_particles=self.num_particles)
@@ -452,11 +465,34 @@ class _TemperedTraceELBO:
     and ``KL = log q(z) - log p(z)``, then recombines as
     ``-(log_lik - kl_weight * KL)``. ``kl_weight=1`` recovers the
     standard ELBO; ``kl_weight<1`` is a cold posterior temper.
+
+    Each per-site log-probability is multiplied by the site's ``scale``
+    metadata (set by ``numpyro.handlers.scale`` and subsampled
+    ``numpyro.plate``) so subsampled / scaled models get the same
+    bias-corrected ELBO as ``numpyro.infer.Trace_ELBO``.
     """
 
     def __init__(self, kl_weight: float, num_particles: int = 1) -> None:
         self.kl_weight = kl_weight
         self.num_particles = num_particles
+
+    @staticmethod
+    def _site_log_prob(site: dict) -> Array:
+        """Per-site log-prob honoring numpyro ``scale`` metadata.
+
+        Mirrors ``numpyro.infer.elbo._get_log_prob_sum`` semantics: prefer
+        the precomputed ``log_prob`` field if numpyro has cached it,
+        otherwise compute ``fn.log_prob(value)`` ourselves; either way,
+        sum and multiply by ``site["scale"]`` (defaulting to 1.0).
+        """
+        lp = site.get("log_prob")
+        if lp is None:
+            lp = site["fn"].log_prob(site["value"])
+        lp = lp.sum()
+        site_scale = site.get("scale")
+        if site_scale is not None and site_scale != 1.0:
+            lp = lp * site_scale
+        return lp
 
     def loss(
         self,
@@ -480,7 +516,7 @@ class _TemperedTraceELBO:
             for site in model_tr.values():
                 if site["type"] != "sample":
                     continue
-                lp = site["fn"].log_prob(site["value"]).sum()
+                lp = self._site_log_prob(site)
                 if site.get("is_observed", False):
                     log_lik = log_lik + lp
                 else:
@@ -489,7 +525,7 @@ class _TemperedTraceELBO:
             for site in guide_tr.values():
                 if site["type"] != "sample":
                     continue
-                log_q_z = log_q_z + site["fn"].log_prob(site["value"]).sum()
+                log_q_z = log_q_z + self._site_log_prob(site)
             kl = log_q_z - log_p_z
             return -(log_lik - self.kl_weight * kl)
 
