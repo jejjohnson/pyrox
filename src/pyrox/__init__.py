@@ -1,7 +1,7 @@
 """pyrox: probabilistic modeling with Equinox and NumPyro."""
 
-from pyrox import _core, gp, nn
+from pyrox import _core, gp, inference, nn
 
 
 __version__ = "0.0.5"
-__all__ = ["__version__", "_core", "gp", "nn"]
+__all__ = ["__version__", "_core", "gp", "inference", "nn"]
