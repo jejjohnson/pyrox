@@ -114,6 +114,7 @@ ignore = ["E402", "E721", "E731", "E741"]
 # F722 clashes with jaxtyping's string-based shape annotations (Array, "N D").
 # Scope the suppression to the jaxtyping-using GP layer, its tests, and the
 # example notebooks that demonstrate the same patterns.
+"src/pyrox/_basis/**" = ["F722"]
 "src/pyrox/gp/**" = ["F722"]
 "src/pyrox/nn/**" = ["F722"]
 # RUF001/002/003 flag Greek letters and the multiplication sign in
@@ -122,6 +123,7 @@ ignore = ["E402", "E721", "E731", "E741"]
 "src/pyrox/inference/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "src/pyrox/api/**" = ["F722"]
 "src/pyrox/preprocessing/**" = ["F722"]
+"tests/basis/**" = ["F722"]
 "tests/gp/**" = ["F722"]
 "tests/nn/**" = ["F722"]
 "tests/inference/**" = ["F722"]
