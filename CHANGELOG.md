@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.6](https://github.com/jejjohnson/pyrox/compare/v0.0.5...v0.0.6) (2026-04-21)
+
+
+### Features
+
+* **inference:** add layered ensemble-of-MAP / ensemble-of-VI runner ([#81](https://github.com/jejjohnson/pyrox/issues/81)) ([8c44f8f](https://github.com/jejjohnson/pyrox/commit/8c44f8fb84d95fbbf7a67d95b212a4a21e45504d))
+* **nn:** add Bayesian Neural Field layer family, preprocessing, and BNFEstimator ([#83](https://github.com/jejjohnson/pyrox/issues/83)) ([acbda2c](https://github.com/jejjohnson/pyrox/commit/acbda2c890f935d90f5c80a5e7a2738a508d47ad))
+
 ## [0.0.5](https://github.com/jejjohnson/pyrox/compare/v0.0.4...v0.0.5) (2026-04-16)
 
 
