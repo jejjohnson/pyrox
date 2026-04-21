@@ -1,12 +1,21 @@
 """Sparse GP prior — inducing-input variational foundation.
 
-The :class:`SparseGPPrior` wraps a kernel together with a fixed set of
-*inducing inputs* ``Z`` of shape ``(M, D)``. It exposes the inducing
-covariance ``K_zz``, cross covariances ``K_xz``, and the prior diagonal
-``K_xx`` as building blocks. A sparse variational guide
+The :class:`SparseGPPrior` wraps a kernel together with either a fixed
+set of *inducing inputs* ``Z`` of shape ``(M, D)`` or an *inducing-feature*
+object (e.g. :class:`pyrox.gp.FourierInducingFeatures`) that derives
+``K_zz`` and ``K_xz`` from a Laplacian eigenbasis. It exposes the
+inducing covariance ``K_zz``, cross covariances ``K_xz``, and the prior
+diagonal ``K_xx`` as building blocks. A sparse variational guide
 (:class:`pyrox.gp.FullRankGuide`, :class:`MeanFieldGuide`, or
 :class:`WhitenedGuide`) consumes these matrices to produce a predictive
 distribution at any test set.
+
+When the prior is built from inducing features, ``K_zz`` is returned as a
+:class:`lineax.DiagonalLinearOperator` and jitter is folded *into the
+diagonal vector* — never added as ``jnp.eye``. This preserves the
+diagonal-dispatch short-circuit in :func:`gaussx.solve` /
+:func:`gaussx.cholesky` end-to-end, which is the entire point of the
+inducing-feature reduction.
 
 This wave intentionally stops at building blocks: the sparse ELBO entry
 point — analogous to :func:`gp_factor` for the collapsed Gaussian path
@@ -32,6 +41,7 @@ from gaussx import (
 from jaxtyping import Array, Float
 
 from pyrox.gp._context import _kernel_context
+from pyrox.gp._inducing import InducingFeatures
 from pyrox.gp._protocols import Kernel
 
 
@@ -83,14 +93,25 @@ class SparseGPPrior(eqx.Module):
     """
 
     kernel: Kernel
-    Z: Float[Array, "M D"]
+    Z: Float[Array, "M D"] | None = None
+    inducing: InducingFeatures | None = None
     mean_fn: Callable[[Float[Array, "N D"]], Float[Array, " N"]] | None = None
     solver: AbstractSolverStrategy | None = None
     jitter: float = 1e-6
 
+    def __check_init__(self) -> None:
+        if (self.Z is None) == (self.inducing is None):
+            raise ValueError(
+                "SparseGPPrior must be constructed with exactly one of `Z` "
+                "(point inducing) or `inducing` (inducing features)."
+            )
+
     @property
     def num_inducing(self) -> int:
-        """Number of inducing inputs ``M``."""
+        """Number of inducing inputs / features ``M``."""
+        if self.inducing is not None:
+            return self.inducing.num_features
+        assert self.Z is not None
         return self.Z.shape[0]
 
     def mean(self, X: Float[Array, "N D"]) -> Float[Array, " N"]:
@@ -100,7 +121,14 @@ class SparseGPPrior(eqx.Module):
         return self.mean_fn(X)
 
     def inducing_operator(self) -> lx.AbstractLinearOperator:
-        r"""Return ``K_{ZZ} + \text{jitter}\,I`` as a PSD lineax operator.
+        r"""Return ``K_{ZZ} + \text{jitter}\,I`` as a ``lineax`` operator.
+
+        For point-inducing priors, returns a dense
+        :class:`lineax.MatrixLinearOperator` with ``positive_semidefinite_tag``.
+        For inducing-feature priors, delegates to
+        :meth:`InducingFeatures.K_uu` — typically a
+        :class:`lineax.DiagonalLinearOperator` so the downstream
+        :func:`gaussx.solve` dispatches in O(M) instead of O(M^3).
 
         Single kernel call; safe standalone for kernels with priors. For
         building several SVGP blocks together, prefer
@@ -109,17 +137,25 @@ class SparseGPPrior(eqx.Module):
         Pattern B / C kernels register their NumPyro hyperparameter
         sites once instead of resampling per call.
         """
+        if self.inducing is not None:
+            with _kernel_context(self.kernel):
+                return self.inducing.K_uu(self.kernel, jitter=self.jitter)
+        assert self.Z is not None
         with _kernel_context(self.kernel):
             K = self.kernel(self.Z, self.Z)
         K = K + self.jitter * jnp.eye(K.shape[0], dtype=K.dtype)
         return _psd_operator(K)
 
     def cross_covariance(self, X: Float[Array, "N D"]) -> Float[Array, "N M"]:
-        r""":math:`K_{XZ}` — kernel between ``X`` and the inducing inputs.
+        r""":math:`K_{XZ}` — covariance between ``X`` and the inducing inputs/features.
 
         See :meth:`predictive_blocks` for the shared-context batch
         helper to use when assembling several SVGP blocks together.
         """
+        if self.inducing is not None:
+            with _kernel_context(self.kernel):
+                return self.inducing.k_ux(X, self.kernel)
+        assert self.Z is not None
         with _kernel_context(self.kernel):
             return self.kernel(X, self.Z)
 
@@ -154,13 +190,26 @@ class SparseGPPrior(eqx.Module):
         For pure :class:`equinox.Module` kernels (no ``_get_context``),
         this is equivalent to calling :meth:`inducing_operator`,
         :meth:`cross_covariance`, and :meth:`kernel_diag` independently.
+
+        For inducing-feature priors, ``K_zz_op`` is a
+        :class:`lineax.DiagonalLinearOperator` (jitter folded into the
+        diagonal vector — never ``+ jnp.eye``) so the downstream solve
+        stays O(M).
         """
         with _kernel_context(self.kernel):
-            K_zz_raw = self.kernel(self.Z, self.Z)
-            K_xz = self.kernel(X, self.Z)
+            if self.inducing is not None:
+                K_zz_op = self.inducing.K_uu(self.kernel, jitter=self.jitter)
+                K_xz = self.inducing.k_ux(X, self.kernel)
+            else:
+                assert self.Z is not None
+                K_zz_raw = self.kernel(self.Z, self.Z)
+                K_xz = self.kernel(X, self.Z)
+                K_zz = K_zz_raw + self.jitter * jnp.eye(
+                    K_zz_raw.shape[0], dtype=K_zz_raw.dtype
+                )
+                K_zz_op = _psd_operator(K_zz)
             K_xx_diag = self.kernel.diag(X)
-        K_zz = K_zz_raw + self.jitter * jnp.eye(K_zz_raw.shape[0], dtype=K_zz_raw.dtype)
-        return _psd_operator(K_zz), K_xz, K_xx_diag
+        return K_zz_op, K_xz, K_xx_diag
 
     def _resolved_solver(self) -> AbstractSolverStrategy:
         return DenseSolver() if self.solver is None else self.solver  # ty: ignore[invalid-return-type]
