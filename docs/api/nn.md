@@ -32,6 +32,14 @@ The `pyrox.nn` subpackage ships uncertainty-aware neural network layers in three
 
 ::: pyrox.nn.RandomKitchenSinks
 
+## Wave-4 spectral layers (#41)
+
+::: pyrox.nn.VariationalFourierFeatures
+
+::: pyrox.nn.OrthogonalRandomFeatures
+
+::: pyrox.nn.HSGPFeatures
+
 ## Bayesian Neural Field stack
 
 ::: pyrox.nn.Standardization
