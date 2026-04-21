@@ -72,6 +72,32 @@ with `autoguide`, and flip `set_mode("model" | "guide")`.
 ::: pyrox.gp.White
 ::: pyrox.gp.Constant
 
+## Sparse-GP inducing features (#49)
+
+Inter-domain inducing-feature families used to build scalable sparse GPs
+where the inducing-prior covariance ``K_uu`` becomes diagonal. Pass any
+of these to :class:`SparseGPPrior` via the ``inducing=`` keyword in
+place of a raw point matrix ``Z``.
+
+```python
+from pyrox.gp import RBF, FourierInducingFeatures, SparseGPPrior
+
+kernel   = RBF(init_lengthscale=0.3, init_variance=1.0)
+features = FourierInducingFeatures.init(in_features=1, num_basis_per_dim=64, L=5.0)
+prior    = SparseGPPrior(kernel=kernel, inducing=features)   # K_uu is diagonal!
+```
+
+::: pyrox.gp.InducingFeatures
+::: pyrox.gp.FourierInducingFeatures
+::: pyrox.gp.SphericalHarmonicInducingFeatures
+::: pyrox.gp.LaplacianInducingFeatures
+::: pyrox.gp.DecoupledInducingFeatures
+::: pyrox.gp.funk_hecke_coefficients
+
+## Sparse GP prior
+
+::: pyrox.gp.SparseGPPrior
+
 ## Component protocols
 
 Abstract pyrox-local bases for the orthogonal component stack. Wave 2
