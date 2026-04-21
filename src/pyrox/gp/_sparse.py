@@ -146,8 +146,15 @@ class SparseGPPrior(eqx.Module):
         K = K + self.jitter * jnp.eye(K.shape[0], dtype=K.dtype)
         return _psd_operator(K)
 
-    def cross_covariance(self, X: Float[Array, "N D"]) -> Float[Array, "N M"]:
+    def cross_covariance(self, X: Array) -> Float[Array, "N M"]:
         r""":math:`K_{XZ}` — covariance between ``X`` and the inducing inputs/features.
+
+        The expected shape of ``X`` is inducing-family-dependent:
+
+        - Point-inducing (``Z``) or :class:`FourierInducingFeatures`:
+          coordinates ``(N, D)``.
+        - :class:`SphericalHarmonicInducingFeatures`: unit vectors ``(N, 3)``.
+        - :class:`LaplacianInducingFeatures`: integer node indices ``(N,)``.
 
         See :meth:`predictive_blocks` for the shared-context batch
         helper to use when assembling several SVGP blocks together.
@@ -169,7 +176,7 @@ class SparseGPPrior(eqx.Module):
             return self.kernel.diag(X)
 
     def predictive_blocks(
-        self, X: Float[Array, "N D"]
+        self, X: Array
     ) -> tuple[
         lx.AbstractLinearOperator,
         Float[Array, "N M"],

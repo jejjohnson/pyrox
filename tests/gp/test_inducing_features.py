@@ -299,3 +299,55 @@ def test_sparse_prior_sample_returns_correct_shape():
     u = prior.sample(jr.PRNGKey(0))
     assert u.shape == (12,)
     assert jnp.all(jnp.isfinite(u))
+
+
+# ---------------------------------------------------------------------------
+# SparseGPPrior integration tests — each family round-trips end-to-end
+# ---------------------------------------------------------------------------
+
+
+def test_sparse_prior_vish_end_to_end():
+    """VISH inducing features produce a usable diagonal K_uu via SparseGPPrior."""
+    kernel = RBF(init_lengthscale=0.5, init_variance=1.0)
+    features = SphericalHarmonicInducingFeatures.init(l_max=3, num_quadrature=64)
+    prior = SparseGPPrior(kernel=kernel, inducing=features, jitter=1e-5)
+
+    K_uu_op = prior.inducing_operator()
+    assert isinstance(K_uu_op, lx.DiagonalLinearOperator)
+    assert prior.num_inducing == (3 + 1) ** 2
+
+    rng = np.random.default_rng(4)
+    xyz = rng.standard_normal((5, 3))
+    xyz /= np.linalg.norm(xyz, axis=1, keepdims=True)
+    K_xz = prior.cross_covariance(jnp.asarray(xyz))
+    assert K_xz.shape == (5, prior.num_inducing)
+    assert jnp.all(jnp.isfinite(K_xz))
+
+    # Prior log-prob should be finite on a zero inducing vector.
+    u = jnp.zeros(prior.num_inducing)
+    assert jnp.isfinite(prior.log_prob(u))
+
+
+def test_sparse_prior_laplacian_end_to_end():
+    """Laplacian inducing features plug into SparseGPPrior with node indices as X."""
+    rng = np.random.default_rng(5)
+    n_nodes = 10
+    A = rng.uniform(0, 1, size=(n_nodes, n_nodes))
+    A = 0.5 * (A + A.T)
+    np.fill_diagonal(A, 0.0)
+
+    kernel = RBF(init_lengthscale=0.5, init_variance=1.0)
+    features = LaplacianInducingFeatures.fit(jnp.asarray(A), num_basis=4)
+    prior = SparseGPPrior(kernel=kernel, inducing=features, jitter=1e-5)
+
+    K_uu_op = prior.inducing_operator()
+    assert isinstance(K_uu_op, lx.DiagonalLinearOperator)
+    assert prior.num_inducing == 4
+
+    node_indices = jnp.array([0, 2, 5, 7])
+    K_xz = prior.cross_covariance(node_indices)
+    assert K_xz.shape == (4, 4)
+    assert jnp.all(jnp.isfinite(K_xz))
+
+    u = jnp.zeros(prior.num_inducing)
+    assert jnp.isfinite(prior.log_prob(u))

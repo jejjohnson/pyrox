@@ -17,8 +17,6 @@ are the engine of both VFF (#49, GP-side) and HSGP (#41, NN-side).
 
 from __future__ import annotations
 
-import itertools
-
 import einops
 import jax.numpy as jnp
 from jaxtyping import Array, Float
@@ -137,16 +135,33 @@ def fourier_basis(
         Phi = einops.einsum(Phi, b, "n a, n b -> n a b")
         Phi = einops.rearrange(Phi, "n a b -> n (a b)")
 
-    # Sum-of-eigenvalues across axes, flattened to match.
-    multi_idx = list(itertools.product(*[range(M_per[d]) for d in range(D)]))
-    if multi_idx:
-        idx = jnp.asarray(multi_idx, dtype=jnp.int32)  # (M, D)
-        lam = jnp.sum(
-            jnp.stack([lams[d][idx[:, d]] for d in range(D)], axis=-1), axis=-1
-        )
-    else:
-        lam = jnp.zeros(0, dtype=x.dtype)
+    # Sum-of-eigenvalues across axes via pure JAX broadcasting — row-major
+    # flatten matches the basis layout above.
+    lam = _tensor_product_sum(lams, dtype=x.dtype)
     return Phi, lam
+
+
+def _tensor_product_sum(
+    lams: list[Float[Array, " M_d"]],
+    *,
+    dtype: jnp.dtype,
+) -> Float[Array, " M"]:
+    """Row-major flatten of the sum-of-eigenvalues tensor over D per-axis vectors.
+
+    ``lams[d]`` has shape ``(M_d,)``; the result has shape ``(prod_d M_d,)``
+    with entry ``(j_0, ..., j_{D-1})`` equal to ``sum_d lams[d][j_d]``. Uses
+    pure JAX broadcasting — no Python-side enumeration of multi-indices.
+    """
+    if not lams:
+        return jnp.zeros(0, dtype=dtype)
+    D = len(lams)
+    grid = jnp.zeros(tuple(lam.shape[0] for lam in lams), dtype=dtype)
+    for d, lam_d in enumerate(lams):
+        # Reshape lam_d to broadcast along axis d of the D-dim grid.
+        shape = [1] * D
+        shape[d] = lam_d.shape[0]
+        grid = grid + jnp.reshape(lam_d, shape)
+    return jnp.reshape(grid, (-1,))
 
 
 def fourier_eigenvalues(
@@ -166,8 +181,4 @@ def fourier_eigenvalues(
     lams = [
         fourier_eigenvalues_1d(M_per[d], float(L_per[d]), dtype=dtype) for d in range(D)
     ]
-    multi_idx = list(itertools.product(*[range(M_per[d]) for d in range(D)]))
-    if not multi_idx:
-        return jnp.zeros(0, dtype=dtype)
-    idx = jnp.asarray(multi_idx, dtype=jnp.int32)
-    return jnp.sum(jnp.stack([lams[d][idx[:, d]] for d in range(D)], axis=-1), axis=-1)
+    return _tensor_product_sum(lams, dtype=dtype)

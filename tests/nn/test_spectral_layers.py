@@ -82,19 +82,20 @@ def test_orf_output_shape():
 
 
 def test_orf_block_orthogonality():
-    """Each ``D x D`` block of ``W / chi_per_row`` is exactly orthogonal."""
+    """Each ``D x D`` block's columns are orthogonal chi-scaled unit vectors."""
     D = 4
     n_features = 12  # 3 blocks
     orf = OrthogonalRandomFeatures.init(
         in_features=D, n_features=n_features, key=jr.PRNGKey(7)
     )
-    W = np.asarray(orf.W)  # (D, n_features)
+    W = np.asarray(orf.W)  # (D, n_features); columns are frequencies
     n_blocks = n_features // D
     for k in range(n_blocks):
         block = W[:, k * D : (k + 1) * D]
-        # Recover Q by dividing each row by its chi-magnitude.
-        chi = np.linalg.norm(block, axis=1)  # (D,)
-        Q = block / chi[:, None]
+        # Recover Q by dividing each *column* by its chi-magnitude.
+        chi = np.linalg.norm(block, axis=0)  # (D,) per-column norm
+        Q = block / chi[None, :]
+        # Columns of Q are orthonormal: Q^T Q = I.
         np.testing.assert_allclose(Q.T @ Q, np.eye(D), atol=1e-5)
 
 

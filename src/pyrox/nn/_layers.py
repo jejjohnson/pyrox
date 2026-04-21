@@ -709,9 +709,12 @@ def _orthogonal_blocks(
 ) -> Float[Array, "D_in D_orf"]:
     """Build the ORF frequency matrix as ``[Q_1 S_1, ..., Q_K S_K]``.
 
-    Each block is an orthogonal (Haar) ``D x D`` matrix scaled by an
-    independent chi-distributed magnitude on each row, matching the
-    isotropic Gaussian frequency density in expectation.
+    Each block is a Haar-orthogonal ``D x D`` matrix with its *columns*
+    scaled by independent chi-distributed magnitudes. The RFF forward uses
+    ``z = x @ W`` so columns of ``W`` carry the per-feature frequencies:
+    scaling columns (not rows) preserves the ORF construction where each
+    frequency vector is an orthogonal unit direction times its own chi
+    magnitude.
     """
     D = in_features
     blocks: list[Float[Array, "D_in D_in"]] = []
@@ -719,9 +722,9 @@ def _orthogonal_blocks(
         key, k_qr, k_chi = jax.random.split(key, 3)
         G = jax.random.normal(k_qr, (D, D))
         Q, _ = jnp.linalg.qr(G)
-        # Chi-distributed scale per row (sqrt of chi-squared with df=D).
+        # Chi-distributed scale per column (sqrt of chi-squared with df=D).
         chi = jnp.sqrt(jnp.sum(jax.random.normal(k_chi, (D, D)) ** 2, axis=-1))  # (D,)
-        blocks.append(Q * chi[:, None])
+        blocks.append(Q * chi[None, :])
     return jnp.concatenate(blocks, axis=-1)  # (D, n_blocks * D)
 
 

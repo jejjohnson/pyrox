@@ -65,6 +65,15 @@ class InducingFeatures(Protocol):
     features. Diagonal-friendly concretions return
     :class:`lineax.DiagonalLinearOperator` so the downstream solve dispatches
     to elementwise division.
+
+    **Input shape is family-dependent.** ``k_ux`` takes a batch of data
+    points ``X`` in whatever representation the family consumes:
+
+    - :class:`FourierInducingFeatures`: coordinates ``(N, D)``.
+    - :class:`SphericalHarmonicInducingFeatures`: unit vectors ``(N, 3)``.
+    - :class:`LaplacianInducingFeatures`: integer node indices ``(N,)``.
+
+    Each implementation validates its own expected shape and dtype.
     """
 
     @property
@@ -74,7 +83,7 @@ class InducingFeatures(Protocol):
         self, kernel: Kernel, *, jitter: float = 1e-6
     ) -> lx.AbstractLinearOperator: ...
 
-    def k_ux(self, x: Float[Array, "N D"], kernel: Kernel) -> Float[Array, "N M"]: ...
+    def k_ux(self, x: Array, kernel: Kernel) -> Float[Array, "N M"]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -233,19 +242,17 @@ def funk_hecke_coefficients(
     :math:`\kappa(t) = k_{\mathrm{euc}}(\hat{n}_0, \hat{n}_t)` for unit
     vectors at angular separation ``arccos(t)``.
     """
-    # Gauss-Legendre quadrature on [-1, 1].
-    t, w = jnp.asarray(_gauss_legendre_nodes(num_quadrature))
+    # Gauss-Legendre quadrature nodes on [-1, 1] (host-side setup constants).
+    t, w = _gauss_legendre_nodes(num_quadrature)
     # Build pairs of unit vectors: x0 = (0, 0, 1), x_t = (sin(arccos t), 0, t).
     sin_t = jnp.sqrt(jnp.maximum(1.0 - t**2, 0.0))
     n0 = jnp.array([0.0, 0.0, 1.0])
     nT = jnp.stack([sin_t, jnp.zeros_like(t), t], axis=-1)  # (Q, 3)
+    # Single batched kernel call — stays on-device and keeps autodiff edges
+    # to any hyperparameters sampled inside ``kernel``. Taking row 0 of the
+    # ``(1, Q)`` Gram is O(Q), not O(Q^2).
     with _kernel_context(kernel):
-        kt = jnp.array(
-            [
-                float(kernel(n0[None, :], nT[i : i + 1, :])[0, 0])
-                for i in range(num_quadrature)
-            ]
-        )
+        kt = kernel(n0[None, :], nT)[0]  # (Q,)
     # Evaluate P_l(t) for l = 0, ..., l_max via three-term recurrence.
     P_lm1 = jnp.ones_like(t)  # P_0
     P_l = t  # P_1
@@ -382,14 +389,17 @@ class LaplacianInducingFeatures(eqx.Module):
     def num_features(self) -> int:
         return int(self.eigvals.shape[0])
 
+    def _check_stationary(self, kernel: Kernel) -> None:
+        if not _is_stationary(kernel):
+            raise ValueError(
+                "LaplacianInducingFeatures requires a stationary kernel with a "
+                f"registered spectral density; got {type(kernel).__name__}."
+            )
+
     def K_uu(
         self, kernel: Kernel, *, jitter: float = 1e-6
     ) -> lx.DiagonalLinearOperator:
-        if not _is_stationary(kernel):
-            raise ValueError(
-                f"LaplacianInducingFeatures requires a stationary kernel with a "
-                f"registered spectral density; got {type(kernel).__name__}."
-            )
+        self._check_stationary(kernel)
         with _kernel_context(kernel):
             S = spectral_density(kernel, self.eigvals, D=1)
         return _diagonal_with_jitter(S, jitter)
@@ -397,6 +407,7 @@ class LaplacianInducingFeatures(eqx.Module):
     def k_ux(
         self, node_indices: Int[Array, " N"], kernel: Kernel
     ) -> Float[Array, "N M"]:
+        self._check_stationary(kernel)
         if node_indices.ndim != 1:
             raise ValueError(
                 "node_indices must be a 1D integer array; got shape "
