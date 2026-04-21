@@ -113,6 +113,49 @@ def test_fit_spatiotemporal_default_degrees_all_zero():
     assert fit.fourier_layer.degrees == (0, 0)
 
 
+def test_fit_spatiotemporal_standardize_subset_is_full_size():
+    """A subset `standardize=` must still yield a layer aligned with feature_cols.
+
+    Regression for a bug where `standardize_layer.mu / std` were sized
+    to the subset, causing `_df_to_design` to broadcast-fail (or silently
+    mis-scale) when applied to the full `(N, D)` design matrix.
+    """
+    df = pd.DataFrame(
+        {
+            "t": [0.0, 1.0, 2.0, 3.0],
+            "lat": [10.0, 20.0, 30.0, 40.0],  # mean=25, std≈11.18
+            "lon": [-1.0, -2.0, -3.0, -4.0],
+            "z": [0.1, 0.2, 0.3, 0.4],
+        }
+    )
+    fit = fit_spatiotemporal(
+        df,
+        feature_cols=["t", "lat", "lon"],
+        target_col="z",
+        standardize=["lat"],  # only lat
+    )
+    # Layer must be sized to (D,) = (3,), with identity on t and lon.
+    assert fit.standardize_layer.mu.shape == (3,)
+    assert fit.standardize_layer.std.shape == (3,)
+    assert float(fit.standardize_layer.mu[0]) == 0.0  # t identity
+    assert float(fit.standardize_layer.std[0]) == 1.0
+    assert float(fit.standardize_layer.mu[2]) == 0.0  # lon identity
+    assert float(fit.standardize_layer.std[2]) == 1.0
+    # lat was standardized.
+    assert float(fit.standardize_layer.mu[1]) == pytest.approx(25.0)
+    assert float(fit.standardize_layer.std[1]) == pytest.approx(
+        float(df["lat"].std(ddof=0))
+    )
+
+
+def test_fit_spatiotemporal_standardize_rejects_unknown_column():
+    df = pd.DataFrame({"a": [1.0, 2.0], "z": [5.0, 6.0]})
+    with pytest.raises(ValueError, match="subset of feature_cols"):
+        fit_spatiotemporal(
+            df, feature_cols=["a"], target_col="z", standardize=["not_a_col"]
+        )
+
+
 def test_fit_spatiotemporal_rejects_mismatched_fourier_length():
     df = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0], "z": [5.0, 6.0]})
     with pytest.raises(ValueError, match="fourier_degrees"):

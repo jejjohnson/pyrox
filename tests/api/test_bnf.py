@@ -89,6 +89,37 @@ def test_bnf_estimator_vi_inference_kind():
     assert est.inference_kind == "vi"
 
 
+def test_bnf_estimator_standardize_subset_end_to_end():
+    """`standardize_columns` as a strict subset must not break fit/predict.
+
+    Regression for the subset broadcasting bug: previously the fitted
+    `Standardization` layer was sized to the subset, then
+    `_df_to_design` applied it to the full `(N, D)` design matrix and
+    either mis-scaled or raised a broadcast error.
+    """
+    rng = np.random.default_rng(0)
+    n = 40
+    t = np.linspace(0, 10, n)
+    lat = 50.0 + 10.0 * rng.normal(size=n)
+    z = np.sin(t) + 0.1 * rng.normal(size=n)
+    df = pd.DataFrame({"t": t, "lat": lat, "z": z})
+    est = BNFEstimator(
+        feature_cols=("t", "lat"),
+        target_col="z",
+        width=4,
+        depth=2,
+        fourier_degrees=(1, 0),
+        sigma_obs=0.1,
+        ensemble_size=2,
+        num_epochs=50,
+        standardize_columns=("lat",),
+    )
+    fitted = est.fit(df, seed=0)
+    mean = fitted.predict(df)
+    assert mean.shape == (n,)
+    assert np.all(np.isfinite(np.asarray(mean)))
+
+
 def test_bnf_estimator_rejects_unsupported_observation_model():
     df_train, _, _, _ = _toy_dataset()
     est = BNFEstimator(

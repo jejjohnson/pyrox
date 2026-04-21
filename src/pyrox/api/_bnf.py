@@ -419,6 +419,11 @@ def _predict_vi_ensemble(
 
     def _model(x: Array, y: Array | None = None) -> None:
         f = bnf_template(x)
+        # Expose the latent so `Predictive` returns noise-free ensemble
+        # samples; otherwise `out["y"]` would already include one
+        # `sigma_obs` draw and `_gaussian_mixture_quantiles` — which adds
+        # `sigma_obs` itself — would double-count observation noise.
+        numpyro.deterministic("f", f)
         numpyro.sample("y", dist.Normal(f, sigma_obs), obs=y)
 
     factory = guide_factory or AutoNormal
@@ -430,9 +435,10 @@ def _predict_vi_ensemble(
             guide=guide,
             params=member_params,
             num_samples=num_posterior_samples,
+            return_sites=("f",),
         )
         out = pred(key, x, None)
-        return out["y"]  # (S, N)
+        return out["f"]  # (S, N) — latent means, no sigma_obs noise
 
     e = jax.tree.leaves(guide_params)[0].shape[0]
     keys = jr.split(jr.PRNGKey(seed), e)

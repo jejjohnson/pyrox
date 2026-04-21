@@ -1,8 +1,8 @@
 """Pandas-side preprocessing helpers.
 
-Isolated here so that :mod:`pyrox.nn` and :mod:`pyrox.api._bnf` stay
-pandas-free. The output of every helper is an immutable bundle of
-fitted layers + scalars, ready to be plugged into the JAX-side stack.
+Isolated here so that :mod:`pyrox.nn` stays pandas-free. The output of
+every helper is an immutable bundle of fitted layers + scalars, ready
+to be plugged into the JAX-side stack.
 
 Public surface:
 

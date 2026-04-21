@@ -1,8 +1,8 @@
 """Pandas-side helpers for fitting BNF feature layers.
 
-Pandas appears here and *only* here. The output is always a JAX-only
-PyTree (an :class:`equinox.Module` tree), so downstream layers and
-estimators stay pandas-free.
+Pandas usage is isolated to preprocessing and estimator-facing facades.
+The output here is always a JAX-only PyTree (an :class:`equinox.Module`
+tree), so downstream :mod:`pyrox.nn` layers stay pandas-free.
 """
 
 from __future__ import annotations
@@ -200,9 +200,37 @@ def fit_spatiotemporal(
     Returns:
         Fitted :class:`SpatiotemporalFit` bundle.
     """
+    feature_cols_list = list(feature_cols)
     if standardize is None:
-        standardize = list(feature_cols)
-    standardize_layer = fit_standardization(df, standardize)
+        standardize_layer = fit_standardization(df, feature_cols_list)
+    else:
+        # Build a full-size Standardization layer aligned with
+        # `feature_cols`, with identity (mu=0, std=1) on columns not
+        # named in `standardize`. That lets downstream code apply the
+        # layer to the entire design matrix without re-indexing.
+        standardize_set = set(standardize)
+        missing = standardize_set - set(feature_cols_list)
+        if missing:
+            raise ValueError(
+                "standardize must be a subset of feature_cols; "
+                f"missing from feature_cols: {sorted(missing)}"
+            )
+        sub_layer = fit_standardization(df, list(standardize))
+        sub_mu = {col: sub_layer.mu[i] for i, col in enumerate(standardize)}
+        sub_std = {col: sub_layer.std[i] for i, col in enumerate(standardize)}
+        mu_full = jnp.stack(
+            [
+                sub_mu[col] if col in standardize_set else jnp.float32(0.0)
+                for col in feature_cols_list
+            ]
+        )
+        std_full = jnp.stack(
+            [
+                sub_std[col] if col in standardize_set else jnp.float32(1.0)
+                for col in feature_cols_list
+            ]
+        )
+        standardize_layer = Standardization(mu=mu_full, std=std_full)
 
     # If fourier_degrees was not provided, default to all-zero (no Fourier).
     if not fourier_degrees:
