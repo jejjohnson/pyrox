@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import jax.numpy as jnp
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -111,6 +112,48 @@ def test_fit_spatiotemporal_default_degrees_all_zero():
     df = pd.DataFrame({"a": [1.0, 2.0], "b": [3.0, 4.0], "z": [5.0, 6.0]})
     fit = fit_spatiotemporal(df, feature_cols=["a", "b"], target_col="z")
     assert fit.fourier_layer.degrees == (0, 0)
+
+
+def test_encode_time_column_int_preserves_unix_second_precision():
+    """Unix-second timestamps must keep unit-level resolution after centering.
+
+    Regression: casting to float32 *before* subtracting `time_min`
+    collapses neighboring Unix-second integers because float32 has only
+    ~7 decimal digits. Subtract in float64, then cast.
+    """
+    # Three consecutive Unix seconds around 2024-01-01.
+    base = 1_704_067_200  # 2024-01-01T00:00:00Z
+    series = pd.Series([base, base + 1, base + 2])
+    t, t_min, scale = encode_time_column(series, timetype="int")
+    assert t_min == float(base)
+    assert scale == 1.0
+    t_np = np.asarray(t)
+    assert t_np.shape == (3,)
+    # Unit-level deltas must survive.
+    assert t_np[1] - t_np[0] == pytest.approx(1.0)
+    assert t_np[2] - t_np[1] == pytest.approx(1.0)
+
+
+def test_fit_spatiotemporal_default_does_not_standardize_time():
+    """The default `standardize=None` must leave the time column untouched.
+
+    Seasonal features interpret `seasonality_periods` in the *original*
+    time units, so z-scoring time would miscalibrate the seasonal
+    frequencies unless the user overrides the default.
+    """
+    df = pd.DataFrame(
+        {
+            "t": [0.0, 1.0, 2.0, 3.0],
+            "lat": [10.0, 20.0, 30.0, 40.0],
+            "z": [0.1, 0.2, 0.3, 0.4],
+        }
+    )
+    fit = fit_spatiotemporal(df, feature_cols=["t", "lat"], target_col="z")
+    # Time axis (index 0) must remain identity.
+    assert float(fit.standardize_layer.mu[0]) == 0.0
+    assert float(fit.standardize_layer.std[0]) == 1.0
+    # Non-time columns are standardized.
+    assert float(fit.standardize_layer.mu[1]) == pytest.approx(25.0)
 
 
 def test_fit_spatiotemporal_standardize_subset_is_full_size():

@@ -115,10 +115,21 @@ def encode_time_column(
         ``1 / nanoseconds-per-unit`` for ``datetime``).
     """
     if timetype == "int":
-        arr = jnp.asarray(series.to_numpy(), dtype=jnp.float32)
+        # Do the offset subtraction in numpy float64 before casting to
+        # JAX float32: common "integer" time columns are Unix
+        # seconds/milliseconds, which exceed float32's ~7 decimal digits.
+        # A direct float32 cast collapses neighboring timestamps to the
+        # same value, silently destroying unit-level time deltas. (We use
+        # numpy here rather than `jnp.float64` because JAX defaults to
+        # float32 and would silently downcast unless `jax_enable_x64` is
+        # set, defeating the purpose.)
+        import numpy as np
+
+        arr64 = np.asarray(series.to_numpy(), dtype=np.float64)
         if time_min is None:
-            time_min = float(arr.min())
-        return arr - time_min, float(time_min), 1.0
+            time_min = float(arr64.min())
+        centered = arr64 - time_min
+        return jnp.asarray(centered, dtype=jnp.float32), float(time_min), 1.0
     if timetype == "datetime":
         # Keep everything in int64 (numpy-side) to avoid float32 precision
         # loss — nanoseconds since epoch overflow float32 badly.
@@ -202,35 +213,43 @@ def fit_spatiotemporal(
     """
     feature_cols_list = list(feature_cols)
     if standardize is None:
-        standardize_layer = fit_standardization(df, feature_cols_list)
-    else:
-        # Build a full-size Standardization layer aligned with
-        # `feature_cols`, with identity (mu=0, std=1) on columns not
-        # named in `standardize`. That lets downstream code apply the
-        # layer to the entire design matrix without re-indexing.
-        standardize_set = set(standardize)
-        missing = standardize_set - set(feature_cols_list)
-        if missing:
-            raise ValueError(
-                "standardize must be a subset of feature_cols; "
-                f"missing from feature_cols: {sorted(missing)}"
-            )
+        # Default: standardize every column except the time column. The
+        # time axis is shifted by `time_min` (and scaled for datetime) in
+        # `encode_time_column`, and downstream blocks — especially the
+        # seasonal features — interpret `seasonality_periods` in the
+        # *original* time units. Z-scoring time would rescale those
+        # periods implicitly and miscalibrate the seasonal basis.
+        standardize = [col for i, col in enumerate(feature_cols_list) if i != time_col]
+    # Build a full-size Standardization layer aligned with `feature_cols`,
+    # with identity (mu=0, std=1) on columns not in `standardize`. That
+    # lets downstream code apply the layer to the entire design matrix
+    # without re-indexing.
+    standardize_set = set(standardize)
+    missing = standardize_set - set(feature_cols_list)
+    if missing:
+        raise ValueError(
+            "standardize must be a subset of feature_cols; "
+            f"missing from feature_cols: {sorted(missing)}"
+        )
+    if standardize_set:
         sub_layer = fit_standardization(df, list(standardize))
         sub_mu = {col: sub_layer.mu[i] for i, col in enumerate(standardize)}
         sub_std = {col: sub_layer.std[i] for i, col in enumerate(standardize)}
-        mu_full = jnp.stack(
-            [
-                sub_mu[col] if col in standardize_set else jnp.float32(0.0)
-                for col in feature_cols_list
-            ]
-        )
-        std_full = jnp.stack(
-            [
-                sub_std[col] if col in standardize_set else jnp.float32(1.0)
-                for col in feature_cols_list
-            ]
-        )
-        standardize_layer = Standardization(mu=mu_full, std=std_full)
+    else:
+        sub_mu, sub_std = {}, {}
+    mu_full = jnp.stack(
+        [
+            sub_mu[col] if col in standardize_set else jnp.float32(0.0)
+            for col in feature_cols_list
+        ]
+    )
+    std_full = jnp.stack(
+        [
+            sub_std[col] if col in standardize_set else jnp.float32(1.0)
+            for col in feature_cols_list
+        ]
+    )
+    standardize_layer = Standardization(mu=mu_full, std=std_full)
 
     # If fourier_degrees was not provided, default to all-zero (no Fourier).
     if not fourier_degrees:
