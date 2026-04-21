@@ -25,7 +25,7 @@ dependencies = [
     "numpyro>=0.15",
     "gaussx @ git+https://github.com/jejjohnson/gaussx.git@main",
     "lineax>=0.0.5",
-    "einops>=0.7",
+    "einops>=0.8.2",
 ]
 
 [project.optional-dependencies]
