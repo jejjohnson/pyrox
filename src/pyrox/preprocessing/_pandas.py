@@ -140,16 +140,27 @@ def encode_time_column(
         # below assumes.
         import numpy as np
 
-        ns_np = (
-            pd.to_datetime(series).astype("datetime64[ns]").astype("int64").to_numpy()
-        )
-        unit_ns = {
+        ts = pd.to_datetime(series)
+        # tz-aware columns can't be cast straight to `datetime64[ns]`
+        # (pandas raises). Normalize to UTC and drop the tz so the int64
+        # epoch representation is well-defined and consistent across
+        # different input timezones.
+        if getattr(ts.dt, "tz", None) is not None:
+            ts = ts.dt.tz_convert("UTC").dt.tz_localize(None)
+        ns_np = ts.astype("datetime64[ns]").astype("int64").to_numpy()
+        unit_ns_table = {
             None: 24 * 3600 * 1_000_000_000,
             "D": 24 * 3600 * 1_000_000_000,
             "H": 3600 * 1_000_000_000,
             "W": 7 * 24 * 3600 * 1_000_000_000,
             "min": 60 * 1_000_000_000,
-        }.get(freq, 24 * 3600 * 1_000_000_000)
+        }
+        if freq not in unit_ns_table:
+            raise ValueError(
+                f"Unsupported freq {freq!r}; expected one of "
+                f"{sorted(k for k in unit_ns_table if k is not None)} or None"
+            )
+        unit_ns = unit_ns_table[freq]
         scale = 1.0 / float(unit_ns)
         if time_min is None:
             time_min = float(ns_np.min()) * scale
@@ -212,6 +223,7 @@ def fit_spatiotemporal(
         Fitted :class:`SpatiotemporalFit` bundle.
     """
     feature_cols_list = list(feature_cols)
+    time_col_name = feature_cols_list[time_col]
     if standardize is None:
         # Default: standardize every column except the time column. The
         # time axis is shifted by `time_min` (and scaled for datetime) in
@@ -230,6 +242,17 @@ def fit_spatiotemporal(
         raise ValueError(
             "standardize must be a subset of feature_cols; "
             f"missing from feature_cols: {sorted(missing)}"
+        )
+    if time_col_name in standardize_set:
+        # The time column gets shifted (and possibly scaled) by
+        # `encode_time_column` before standardization is applied. Fitting
+        # mu/std on the *raw* time values would then mis-shift the
+        # encoded column by an extra constant — invariably catastrophic
+        # for Unix-like timestamps. Force the user to opt out instead.
+        raise ValueError(
+            f"Cannot standardize the time column ({time_col_name!r}); "
+            "the time axis is already centered by `time_min` in "
+            "`encode_time_column`. Drop it from `standardize`."
         )
     if standardize_set:
         sub_layer = fit_standardization(df, list(standardize))
@@ -258,6 +281,16 @@ def fit_spatiotemporal(
         raise ValueError(
             f"fourier_degrees must have length {len(feature_cols)}, "
             f"got {len(fourier_degrees)}"
+        )
+    # Seasonal periods + harmonics must be the same length: the BNF's
+    # seasonal block guards on `any(harmonics)`, so a misaligned
+    # `harmonics=()` would silently drop *all* requested seasonality.
+    # Fail fast here.
+    if len(seasonality_periods) != len(num_seasonal_harmonics):
+        raise ValueError(
+            "seasonality_periods and num_seasonal_harmonics must have the same "
+            f"length; got {len(seasonality_periods)} periods and "
+            f"{len(num_seasonal_harmonics)} harmonics"
         )
     fourier_layer = FourierFeatures(
         degrees=tuple(int(d) for d in fourier_degrees),

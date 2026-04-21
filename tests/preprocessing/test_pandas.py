@@ -156,6 +156,62 @@ def test_fit_spatiotemporal_default_does_not_standardize_time():
     assert float(fit.standardize_layer.mu[1]) == pytest.approx(25.0)
 
 
+def test_encode_time_column_datetime_rejects_unknown_freq():
+    """Typos in `freq` must raise, not silently default to days.
+
+    Regression for a `.get(freq, day_default)` fallback that masked
+    typos like `'h'` (vs `'H'`) and silently mis-scaled time.
+    """
+    series = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"])
+    with pytest.raises(ValueError, match="Unsupported freq"):
+        encode_time_column(pd.Series(series), timetype="datetime", freq="h")
+
+
+def test_encode_time_column_datetime_handles_tz_aware():
+    """Timezone-aware columns must be normalized to UTC, not crash."""
+    series = pd.to_datetime(
+        ["2024-01-01T00:00:00", "2024-01-02T00:00:00", "2024-01-03T00:00:00"],
+        utc=True,
+    )
+    t, _t_min, _scale = encode_time_column(pd.Series(series), timetype="datetime")
+    t_np = np.asarray(t)
+    assert t_np.shape == (3,)
+    # Day-unit deltas: 1.0, 1.0
+    assert t_np[1] - t_np[0] == pytest.approx(1.0)
+    assert t_np[2] - t_np[1] == pytest.approx(1.0)
+
+
+def test_fit_spatiotemporal_rejects_misaligned_seasonal():
+    """`seasonality_periods` and `num_seasonal_harmonics` must match length."""
+    df = pd.DataFrame({"t": [0.0, 1.0, 2.0], "z": [0.1, 0.2, 0.3]})
+    with pytest.raises(ValueError, match="same length"):
+        fit_spatiotemporal(
+            df,
+            feature_cols=["t"],
+            target_col="z",
+            seasonality_periods=(7.0,),
+            num_seasonal_harmonics=(),  # forgot harmonics — silent drop before fix
+        )
+
+
+def test_fit_spatiotemporal_rejects_time_col_in_standardize():
+    """Explicitly standardizing the time column must raise."""
+    df = pd.DataFrame(
+        {
+            "t": [0.0, 1.0, 2.0, 3.0],
+            "lat": [10.0, 20.0, 30.0, 40.0],
+            "z": [0.1, 0.2, 0.3, 0.4],
+        }
+    )
+    with pytest.raises(ValueError, match="time column"):
+        fit_spatiotemporal(
+            df,
+            feature_cols=["t", "lat"],
+            target_col="z",
+            standardize=["t", "lat"],
+        )
+
+
 def test_fit_spatiotemporal_standardize_subset_is_full_size():
     """A subset `standardize=` must still yield a layer aligned with feature_cols.
 
