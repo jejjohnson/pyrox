@@ -32,12 +32,19 @@ dependencies = [
 optax = [
     "optax>=0.2",
 ]
+# `pip install pyrox[bnf]` bundles what the Bayesian Neural Field stack needs:
+# pandas for `pyrox.preprocessing` and optax for the SGD-MAP / SVI inference.
+bnf = [
+    "pandas>=2.0",
+    "optax>=0.2",
+]
 # `pip install pyrox[colab]` bundles what the example notebooks need to run
 # top-to-bottom in Google Colab — matplotlib for plots, watermark for an
 # explicit version readout at the top of each notebook.
 colab = [
     "matplotlib>=3.8",
     "watermark>=2.4",
+    "pandas>=2.0",
 ]
 
 [project.urls]
@@ -113,9 +120,13 @@ ignore = ["E402", "E721", "E731", "E741"]
 # strings/docstrings/comments. These are intentional math notation in
 # the inference module and the example notebooks, so suppress them.
 "src/pyrox/inference/**" = ["F722", "RUF001", "RUF002", "RUF003"]
+"src/pyrox/api/**" = ["F722"]
+"src/pyrox/preprocessing/**" = ["F722"]
 "tests/gp/**" = ["F722"]
 "tests/nn/**" = ["F722"]
 "tests/inference/**" = ["F722"]
+"tests/api/**" = ["F722"]
+"tests/preprocessing/**" = ["F722"]
 "docs/notebooks/**" = ["F722", "B905", "RUF001", "RUF002", "RUF003", "E501"]
 
 [tool.ruff.lint.isort]
@@ -128,6 +139,9 @@ python-version = "3.12"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--cov=src/pyrox --cov-report=term-missing --cov-report=xml:coverage.xml"
+markers = [
+    "slow: long-running tests (convergence / integration); skip with `-m 'not slow'`",
+]
 
 [tool.coverage.run]
 source = ["src/pyrox"]

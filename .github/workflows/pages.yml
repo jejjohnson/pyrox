@@ -23,7 +23,11 @@ jobs:
         run: uv python install 3.12
 
       - name: Install dependencies
-        run: uv sync --group docs
+        # `--extra bnf` is required: `docs/api/api.md` and
+        # `docs/api/preprocessing.md` use mkdocstrings to import
+        # `pyrox.api` and `pyrox.preprocessing`, both of which need
+        # pandas (only present in the [bnf] extra).
+        run: uv sync --group docs --extra bnf
 
       - name: Build and deploy docs
         run: uv run mkdocs gh-deploy --force

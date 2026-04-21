@@ -48,6 +48,8 @@ nav:
       - GP: api/gp.md
       - NN: api/nn.md
       - Inference: api/inference.md
+      - Preprocessing: api/preprocessing.md
+      - Estimator: api/api.md
   - Examples:
       - Exact GP Regression: notebooks/exact_gp_regression.ipynb
       - Latent GP Classification: notebooks/latent_gp_classification.ipynb
