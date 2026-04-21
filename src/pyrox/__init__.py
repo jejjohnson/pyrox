@@ -16,7 +16,7 @@ __all__ = [
 # `[bnf]` optional extra. Only expose them when the extra is installed so
 # a plain `pip install pyrox` + `import pyrox` still works.
 try:
-    from pyrox import api, preprocessing  # noqa: F401
+    from pyrox import api, preprocessing
 
     __all__ += ["api", "preprocessing"]
 except ImportError:
