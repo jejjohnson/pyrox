@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
     "jax>=0.4",
     "equinox>=0.11",
-    "numpyro>=0.15",
+    "numpyro>=0.20.1",
     "gaussx @ git+https://github.com/jejjohnson/gaussx.git@main",
     "lineax>=0.0.5",
     "einops>=0.8.2",
