@@ -42,7 +42,7 @@ bnf = [
 # top-to-bottom in Google Colab — matplotlib for plots, watermark for an
 # explicit version readout at the top of each notebook.
 colab = [
-    "matplotlib>=3.8",
+    "matplotlib>=3.10.8",
     "watermark>=2.4",
     "pandas>=2.0",
 ]
@@ -73,7 +73,7 @@ docs = [
     # re-execution. The guarded watermark cell in each notebook no-ops
     # if the package is missing, but installing it here lets the version
     # readout actually print under `nbconvert --execute`.
-    "matplotlib>=3.8",
+    "matplotlib>=3.10.8",
     "watermark>=2.4",
     # pygments 2.20.0 dropped the None -> '' coercion for HtmlFormatter(filename=...),
     # but pymdownx.highlight 10.21.x still passes the untitled-code-block title
@@ -81,7 +81,7 @@ docs = [
     "pygments>=2.19,<2.20",
 ]
 examples = [
-    "matplotlib>=3.8",
+    "matplotlib>=3.10.8",
     "numpy>=1.26",
     "scikit-learn>=1.4",
 ]
