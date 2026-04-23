@@ -13,12 +13,17 @@ Five layer families:
 * :class:`DenseNCP` — Noise Contrastive Prior layer that decomposes a
   dense layer into a deterministic backbone plus a scaled stochastic
   perturbation (Hafner et al., 2019).
+* :class:`SirenDense` — single sine-activated dense layer with
+  Sitzmann-regime init (Sitzmann et al., NeurIPS 2020).
+* :class:`SIREN` — multi-layer sinusoidal representation network.
+* :class:`BayesianSIREN` — SIREN with regime-scaled Normal priors.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 import equinox as eqx
 import jax
@@ -874,3 +879,428 @@ class HSGPFeatures(PyroxModule):
             dist.Normal(0.0, 1.0).expand([self.num_basis]).to_event(1),
         )
         return jnp.einsum("nm,m->n", Phi, sqrt_S * alpha)
+
+
+# ---------------------------------------------------------------------------
+# SIREN — Sinusoidal Representation Networks (Sitzmann et al., NeurIPS 2020)
+# ---------------------------------------------------------------------------
+
+
+def _siren_W_limit(
+    layer_type: str,
+    in_features: int,
+    omega: float,
+    c: float = 6.0,
+) -> float:
+    """Return the half-width ``a`` of the ``U(-a, a)`` weight init for a SIREN layer.
+
+    Implements Sitzmann et al. (2020) Theorem 1's three-regime prescription:
+
+    - ``"first"``:  ``a = 1 / in_features``
+    - ``"hidden"``: ``a = sqrt(c / in_features) / omega``
+    - ``"last"``:   ``a = sqrt(c / in_features)``
+
+    Args:
+        layer_type: One of ``"first"``, ``"hidden"``, ``"last"``.
+        in_features: Input dimension of the layer.
+        omega: Frequency multiplier (only affects hidden-layer limit).
+        c: Constant from Theorem 1; defaults to 6.0.
+
+    Returns:
+        Half-width ``a`` such that ``W ~ U(-a, a)``.
+
+    Raises:
+        ValueError: If ``layer_type`` is not one of the three valid values.
+    """
+    if layer_type == "first":
+        return 1.0 / in_features
+    if layer_type == "hidden":
+        return math.sqrt(c / in_features) / omega
+    if layer_type == "last":
+        return math.sqrt(c / in_features)
+    raise ValueError(
+        f"layer_type must be 'first', 'hidden', or 'last', got {layer_type!r}"
+    )
+
+
+class SirenDense(PyroxModule):
+    r"""Sine-activated dense layer: ``y = sin(ω · (W x + b))`` or ``y = W x + b``.
+
+    Single primitive of a SIREN network.  Three init regimes
+    (Sitzmann et al. 2020, Theorem 1):
+
+    +----------+-------------------------------------------+-------------+
+    | Regime   | ``W`` init                                | Activation  |
+    +==========+===========================================+=============+
+    | first    | ``U(-1/d_in, 1/d_in)``                    | ``sin(ω··)``|
+    +----------+-------------------------------------------+-------------+
+    | hidden   | ``U(-√(c/d_in)/ω, √(c/d_in)/ω)``         | ``sin(ω··)``|
+    +----------+-------------------------------------------+-------------+
+    | last     | ``U(-√(c/d_in), √(c/d_in))``              | none        |
+    +----------+-------------------------------------------+-------------+
+
+    Bias ``b`` is initialised ``U(-1/√d_in, 1/√d_in)`` for every regime.
+
+    Attributes:
+        W: Weight matrix of shape ``(in_features, out_features)``.
+        b: Bias vector of shape ``(out_features,)``.
+        omega: Frequency multiplier applied inside the sine.
+        in_features: Input dimension.
+        out_features: Output dimension.
+        layer_type: One of ``"first"``, ``"hidden"``, ``"last"``.
+        c: Constant from Theorem 1 (default 6.0).
+        pyrox_name: Explicit scope name for NumPyro site registration.
+
+    Example:
+        >>> import jax.random as jr
+        >>> layer = SirenDense.init(3, 16, key=jr.PRNGKey(0), layer_type="first")
+        >>> import jax.numpy as jnp
+        >>> y = layer(jnp.ones((5, 3)))
+        >>> y.shape
+        (5, 16)
+    """
+
+    W: Float[Array, "in_features out_features"]
+    b: Float[Array, " out_features"]
+    omega: float = eqx.field(static=True)
+    in_features: int = eqx.field(static=True)
+    out_features: int = eqx.field(static=True)
+    layer_type: str = eqx.field(static=True)
+    c: float = eqx.field(static=True, default=6.0)
+    pyrox_name: str | None = eqx.field(static=True, default=None)
+
+    @classmethod
+    def init(
+        cls,
+        in_features: int,
+        out_features: int,
+        *,
+        key: Array,
+        omega: float = 30.0,
+        layer_type: Literal["first", "hidden", "last"] = "hidden",
+        c: float = 6.0,
+        pyrox_name: str | None = None,
+    ) -> SirenDense:
+        """Construct a ``SirenDense`` with Sitzmann-regime weight initialisation.
+
+        Args:
+            in_features: Input dimension.
+            out_features: Output dimension.
+            key: JAX PRNG key for weight and bias sampling.
+            omega: Frequency multiplier (default 30.0, as in Sitzmann et al.).
+            layer_type: Init regime — ``"first"``, ``"hidden"``, or ``"last"``.
+            c: Theorem-1 constant (default 6.0).
+            pyrox_name: Optional explicit scope name for NumPyro.
+
+        Returns:
+            Initialised :class:`SirenDense`.
+
+        Raises:
+            ValueError: If ``layer_type`` is not a valid regime name.
+        """
+        # Validate early — _siren_W_limit raises the same error but we want
+        # the message to surface at construction time.
+        valid = {"first", "hidden", "last"}
+        if layer_type not in valid:
+            raise ValueError(
+                f"layer_type must be one of {sorted(valid)}, got {layer_type!r}"
+            )
+        k_w, k_b = jax.random.split(key)
+        w_limit = _siren_W_limit(layer_type, in_features, omega, c)
+        W = jax.random.uniform(
+            k_w, (in_features, out_features), minval=-w_limit, maxval=w_limit
+        )
+        b_limit = 1.0 / math.sqrt(in_features)
+        b = jax.random.uniform(k_b, (out_features,), minval=-b_limit, maxval=b_limit)
+        return cls(
+            W=W,
+            b=b,
+            omega=omega,
+            in_features=in_features,
+            out_features=out_features,
+            layer_type=layer_type,
+            c=c,
+            pyrox_name=pyrox_name,
+        )
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D_out"]:
+        """Apply the sine-activated linear transform.
+
+        Args:
+            x: Input tensor of shape ``(*batch, in_features)``.
+
+        Returns:
+            ``sin(ω · (x W + b))`` for ``layer_type`` in ``{"first", "hidden"}``,
+            or ``x W + b`` for ``layer_type == "last"``.
+        """
+        pre = x @ self.W + self.b
+        if self.layer_type == "last":
+            return pre
+        return jnp.sin(self.omega * pre)
+
+
+class SIREN(PyroxModule):
+    r"""Multi-layer sinusoidal representation network (Sitzmann et al., NeurIPS 2020).
+
+    Topology:
+
+    .. math::
+
+        z_1 &= \sin(\omega_0 (W_0 x + b_0)), \\
+        z_{i+1} &= \sin(\omega (W_i z_i + b_i)), \quad i = 1 \ldots L-1, \\
+        y &= W_L z_L + b_L.
+
+    Each layer uses the corresponding Sitzmann Theorem 1 init regime
+    (:class:`SirenDense`):  ``"first"`` for layer 0, ``"hidden"`` for
+    intermediate layers, and ``"last"`` for the readout.
+
+    ``depth`` counts *all* layers including the readout; ``depth=2`` gives
+    one first-layer + one last-layer (no hidden layers); ``depth=5`` gives
+    first + 3 hidden + last.  Must be ≥ 2.
+
+    Attributes:
+        layers: List of :class:`SirenDense` of length ``depth``.
+        in_features: Input dimension.
+        hidden_features: Hidden dimension (all intermediate layers).
+        out_features: Output dimension.
+        depth: Total number of layers (including readout).  Must be ≥ 2.
+        first_omega: Frequency multiplier for the first layer (default 30.0).
+        hidden_omega: Frequency multiplier for hidden layers (default 30.0).
+        pyrox_name: Explicit scope name for NumPyro site registration.
+
+    Example:
+        >>> import jax.random as jr, jax.numpy as jnp
+        >>> net = SIREN.init(2, 64, 1, depth=5, key=jr.PRNGKey(0))
+        >>> net(jnp.zeros((10, 2))).shape
+        (10, 1)
+    """
+
+    layers: list
+    in_features: int = eqx.field(static=True)
+    hidden_features: int = eqx.field(static=True)
+    out_features: int = eqx.field(static=True)
+    depth: int = eqx.field(static=True)
+    first_omega: float = eqx.field(static=True)
+    hidden_omega: float = eqx.field(static=True)
+    pyrox_name: str | None = eqx.field(static=True, default=None)
+
+    @classmethod
+    def init(
+        cls,
+        in_features: int,
+        hidden_features: int,
+        out_features: int,
+        *,
+        depth: int,
+        key: Array,
+        first_omega: float = 30.0,
+        hidden_omega: float = 30.0,
+        c: float = 6.0,
+        pyrox_name: str | None = None,
+    ) -> SIREN:
+        """Construct a SIREN with the correct per-layer init regimes.
+
+        Args:
+            in_features: Input dimension.
+            hidden_features: Hidden dimension for all intermediate layers.
+            out_features: Output dimension.
+            depth: Total layers including readout.  Must be ≥ 2.
+            key: JAX PRNG key.
+            first_omega: Frequency for the first layer (default 30.0).
+            hidden_omega: Frequency for hidden layers (default 30.0).
+            c: Theorem-1 constant passed to each :class:`SirenDense`.
+            pyrox_name: Optional explicit scope name for NumPyro.
+
+        Returns:
+            Initialised :class:`SIREN`.
+
+        Raises:
+            ValueError: If ``depth < 2``.
+        """
+        if depth < 2:
+            raise ValueError(f"depth must be >= 2 (first + last); got depth={depth}")
+        keys = jax.random.split(key, depth)
+        layers: list[SirenDense] = []
+        for i in range(depth):
+            if i == 0:
+                layer = SirenDense.init(
+                    in_features,
+                    hidden_features,
+                    key=keys[i],
+                    omega=first_omega,
+                    layer_type="first",
+                    c=c,
+                )
+            elif i == depth - 1:
+                layer = SirenDense.init(
+                    hidden_features,
+                    out_features,
+                    key=keys[i],
+                    omega=hidden_omega,
+                    layer_type="last",
+                    c=c,
+                )
+            else:
+                layer = SirenDense.init(
+                    hidden_features,
+                    hidden_features,
+                    key=keys[i],
+                    omega=hidden_omega,
+                    layer_type="hidden",
+                    c=c,
+                )
+            layers.append(layer)
+        return cls(
+            layers=layers,
+            in_features=in_features,
+            hidden_features=hidden_features,
+            out_features=out_features,
+            depth=depth,
+            first_omega=first_omega,
+            hidden_omega=hidden_omega,
+            pyrox_name=pyrox_name,
+        )
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D_out"]:
+        """Run the forward pass through all SIREN layers.
+
+        Args:
+            x: Input tensor of shape ``(*batch, in_features)``.
+
+        Returns:
+            Output tensor of shape ``(*batch, out_features)``.
+        """
+        z = x
+        for layer in self.layers:
+            z = layer(z)
+        return z
+
+
+class BayesianSIREN(SIREN):
+    r"""SIREN with regime-scaled Normal priors on all layer weights.
+
+    Extends :class:`SIREN` by replacing the deterministic weight matrices with
+    NumPyro sample sites.  For layer :math:`i` with init half-width
+    :math:`a_i` (from :func:`_siren_W_limit`):
+
+    .. math::
+
+        W_i \sim \mathcal{N}(0,\, \sigma_0 \cdot a_i), \qquad
+        b_i \sim \mathcal{N}\!\left(0,\, \frac{\sigma_0}{\sqrt{d_i}}\right),
+
+    where :math:`\sigma_0` is ``prior_std`` and :math:`d_i` is the input
+    dimension of layer :math:`i`.  Scaling by :math:`a_i` preserves the
+    Sitzmann-regime activation variance in expectation, avoiding the
+    saturated-sine pathology that a flat :math:`\mathcal{N}(0, 1)` prior
+    would cause.
+
+    Registered sites: ``{scope}.layer_0.W``, ``{scope}.layer_0.b``, …,
+    ``{scope}.layer_{depth-1}.W``, ``{scope}.layer_{depth-1}.b``
+    — exactly ``2 · depth`` sites per forward call.
+
+    Attributes:
+        prior_std: Scale factor for the regime-scaled Normal prior (default 1.0).
+
+    Example:
+        >>> import jax.random as jr, jax.numpy as jnp
+        >>> from numpyro import handlers
+        >>> net = BayesianSIREN.init(2, 32, 1, depth=3, key=jr.PRNGKey(0))
+        >>> with handlers.seed(rng_seed=0):
+        ...     y = net(jnp.zeros((4, 2)))
+        >>> y.shape
+        (4, 1)
+    """
+
+    prior_std: float = eqx.field(static=True, default=1.0)
+
+    @classmethod
+    def init(  # type: ignore[override]
+        cls,
+        in_features: int,
+        hidden_features: int,
+        out_features: int,
+        *,
+        depth: int,
+        key: Array,
+        first_omega: float = 30.0,
+        hidden_omega: float = 30.0,
+        c: float = 6.0,
+        prior_std: float = 1.0,
+        pyrox_name: str | None = None,
+    ) -> BayesianSIREN:
+        """Construct a :class:`BayesianSIREN`.
+
+        Args:
+            in_features: Input dimension.
+            hidden_features: Hidden dimension.
+            out_features: Output dimension.
+            depth: Total layers including readout.  Must be ≥ 2.
+            key: JAX PRNG key (used to build the underlying deterministic layers).
+            first_omega: Frequency for the first layer.
+            hidden_omega: Frequency for hidden layers.
+            c: Theorem-1 constant.
+            prior_std: Scale factor for the Normal priors (default 1.0).
+            pyrox_name: Optional explicit scope name for NumPyro.
+
+        Returns:
+            Initialised :class:`BayesianSIREN`.
+
+        Raises:
+            ValueError: If ``depth < 2``.
+        """
+        siren = SIREN.init(
+            in_features,
+            hidden_features,
+            out_features,
+            depth=depth,
+            key=key,
+            first_omega=first_omega,
+            hidden_omega=hidden_omega,
+            c=c,
+        )
+        return cls(
+            layers=siren.layers,
+            in_features=in_features,
+            hidden_features=hidden_features,
+            out_features=out_features,
+            depth=depth,
+            first_omega=first_omega,
+            hidden_omega=hidden_omega,
+            prior_std=prior_std,
+            pyrox_name=pyrox_name,
+        )
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D_out"]:
+        """Sample weights from regime-scaled priors and run the forward pass.
+
+        Registers ``layer_{i}.W`` and ``layer_{i}.b`` NumPyro sample sites
+        for each layer ``i`` in ``[0, depth)``.
+
+        Args:
+            x: Input tensor of shape ``(*batch, in_features)``.
+
+        Returns:
+            Output tensor of shape ``(*batch, out_features)``.
+        """
+        z = x
+        for i, layer in enumerate(self.layers):
+            w_scale = self.prior_std * _siren_W_limit(
+                layer.layer_type, layer.in_features, layer.omega, layer.c
+            )
+            b_scale = self.prior_std / math.sqrt(layer.in_features)
+            W = self.pyrox_sample(
+                f"layer_{i}.W",
+                dist.Normal(0.0, w_scale)
+                .expand([layer.in_features, layer.out_features])
+                .to_event(2),
+            )
+            b = self.pyrox_sample(
+                f"layer_{i}.b",
+                dist.Normal(0.0, b_scale).expand([layer.out_features]).to_event(1),
+            )
+            pre = z @ W + b
+            z = pre if layer.layer_type == "last" else jnp.sin(layer.omega * pre)
+        return z

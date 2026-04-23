@@ -18,6 +18,9 @@ Dense / Bayesian-linear layers (``pyrox.nn._layers``):
 * :class:`LaplaceFourierFeatures` — SSGP-style RFF (Cauchy).
 * :class:`ArcCosineFourierFeatures` — arc-cosine / ReLU features.
 * :class:`RandomKitchenSinks` — RFF + learned linear head.
+* :class:`SirenDense` — single sine-activated dense layer (SIREN).
+* :class:`SIREN` — multi-layer sinusoidal representation network.
+* :class:`BayesianSIREN` — SIREN with regime-scaled Normal priors.
 
 Bayesian Neural Field stack (``pyrox.nn._bnf``):
 
@@ -50,7 +53,9 @@ from pyrox.nn._features import (
     unstandardize,
 )
 from pyrox.nn._layers import (
+    SIREN,
     ArcCosineFourierFeatures,
+    BayesianSIREN,
     DenseFlipout,
     DenseNCP,
     DenseReparameterization,
@@ -64,13 +69,16 @@ from pyrox.nn._layers import (
     RandomKitchenSinks,
     RBFCosineFeatures,
     RBFFourierFeatures,
+    SirenDense,
     VariationalFourierFeatures,
 )
 
 
 __all__ = [
+    "SIREN",
     "ArcCosineFourierFeatures",
     "BayesianNeuralField",
+    "BayesianSIREN",
     "DenseFlipout",
     "DenseNCP",
     "DenseReparameterization",
@@ -87,6 +95,7 @@ __all__ = [
     "RBFFourierFeatures",
     "RandomKitchenSinks",
     "SeasonalFeatures",
+    "SirenDense",
     "Standardization",
     "VariationalFourierFeatures",
     "fourier_features",
