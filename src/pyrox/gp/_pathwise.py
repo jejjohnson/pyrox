@@ -1,26 +1,40 @@
 """Pathwise GP posterior samplers via Matheron's rule.
 
-Provides callable posterior function draws for exact and sparse GP surfaces.
-Each sampled path can be evaluated repeatedly at arbitrary inputs without
-refactorizing a test-set covariance.
+Provides callable posterior function draws for exact and sparse GP
+surfaces. Each sampled path can be evaluated repeatedly at arbitrary
+inputs without refactorizing a test-set covariance.
+
+The zero-mean prior path is drawn via the shared random-Fourier-feature
+primitives in :mod:`pyrox._basis._rff` (:func:`draw_rff_cosine_basis` /
+:func:`evaluate_rff_cosine_paths`); this module then adds the posterior
+correction and the optional prior mean.
+
+Scope: RBF and Matern kernels; point-inducing :class:`SparseGPPrior`.
+Inducing-feature priors (:class:`pyrox.gp.FourierInducingFeatures`,
+:class:`pyrox.gp.SphericalHarmonicInducingFeatures`,
+:class:`pyrox.gp.LaplacianInducingFeatures`) are not yet covered —
+:class:`DecoupledPathwiseSampler` raises on construction when
+``prior.Z is None`` so the limitation surfaces before a long sample
+loop.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import cast
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import lineax as lx
-import numpyro.distributions as dist
 from gaussx import cholesky, unwhiten
 from jaxtyping import Array, Float
 
+from pyrox._basis._rff import (
+    draw_rff_cosine_basis,
+    evaluate_rff_cosine_paths,
+)
 from pyrox.gp._context import _kernel_context
 from pyrox.gp._guides import WhitenedGuide
-from pyrox.gp._kernels import RBF, Matern
 from pyrox.gp._models import ConditionedGP
 from pyrox.gp._protocols import Guide, Kernel
 from pyrox.gp._sparse import SparseGPPrior
@@ -28,9 +42,14 @@ from pyrox.gp._sparse import SparseGPPrior
 
 def _solve_with_cholesky(
     chol: lx.AbstractLinearOperator,
-    rhs: Float[Array, "N M"],
-) -> Float[Array, "N M"]:
-    """Solve ``L L^T x = rhs`` for batched row right-hand sides."""
+    rhs: Float[Array, "S R"],
+) -> Float[Array, "S R"]:
+    """Solve ``L L^T alpha^T = rhs^T`` column-wise; return ``alpha`` shape ``(S, R)``.
+
+    Each row of ``rhs`` is a per-path right-hand side; the output row
+    is ``(L L^T)^{-1}`` applied to that row, so downstream callers can
+    contract ``K_cross[n, r] * alpha[s, r]`` without extra transposes.
+    """
     left = jax.vmap(
         lambda col: lx.linear_solve(chol, col).value,
         in_axes=1,
@@ -42,84 +61,6 @@ def _solve_with_cholesky(
         out_axes=1,
     )(left)
     return solved.T
-
-
-def _sample_rff_parameters(
-    kernel: Kernel,
-    key: Array,
-    *,
-    n_paths: int,
-    n_features: int,
-    in_features: int,
-    dtype: jnp.dtype,
-) -> tuple[
-    Float[Array, ""],
-    Float[Array, ""],
-    Float[Array, "S D F"],
-    Float[Array, "S F"],
-    Float[Array, "S F"],
-]:
-    """Sample a cosine-bias RFF prior basis for supported stationary kernels."""
-    if n_features < 1:
-        raise ValueError(f"n_features must be >= 1, got {n_features}.")
-    if n_paths < 1:
-        raise ValueError(f"n_paths must be >= 1, got {n_paths}.")
-
-    with _kernel_context(kernel):
-        if isinstance(kernel, RBF):
-            variance = jnp.asarray(kernel.get_param("variance"), dtype=dtype)
-            lengthscale = jnp.asarray(kernel.get_param("lengthscale"), dtype=dtype)
-            w_key, b_key, weight_key = jax.random.split(key, 3)
-            omega = jax.random.normal(
-                w_key,
-                shape=(n_paths, in_features, n_features),
-                dtype=dtype,
-            )
-        elif isinstance(kernel, Matern):
-            variance = jnp.asarray(kernel.get_param("variance"), dtype=dtype)
-            lengthscale = jnp.asarray(kernel.get_param("lengthscale"), dtype=dtype)
-            w_key, b_key, weight_key = jax.random.split(key, 3)
-            omega = jnp.asarray(
-                dist.StudentT(df=2.0 * kernel.nu).sample(
-                    w_key,
-                    sample_shape=(n_paths, in_features, n_features),
-                ),
-                dtype=dtype,
-            )
-        else:
-            raise ValueError(
-                "Pathwise samplers currently support RBF and Matern kernels for "
-                f"their random-feature prior draws; got {type(kernel).__name__}."
-            )
-
-    phase = jax.random.uniform(
-        b_key,
-        shape=(n_paths, n_features),
-        minval=jnp.array(0.0, dtype=dtype),
-        maxval=jnp.array(2.0 * jnp.pi, dtype=dtype),
-        dtype=dtype,
-    )
-    weights = jax.random.normal(
-        weight_key,
-        shape=(n_paths, n_features),
-        dtype=dtype,
-    )
-    return variance, lengthscale, omega, phase, weights
-
-
-def _evaluate_rff_paths(
-    X: Float[Array, "N D"],
-    *,
-    variance: Float[Array, ""],
-    lengthscale: Float[Array, ""],
-    omega: Float[Array, "S D F"],
-    phase: Float[Array, "S F"],
-    weights: Float[Array, "S F"],
-) -> Float[Array, "S N"]:
-    """Evaluate the sampled zero-mean RFF prior paths at ``X``."""
-    angles = jnp.einsum("nd,sdf->snf", X, omega) / lengthscale + phase[:, None, :]
-    features = jnp.sqrt(2.0 * variance / omega.shape[-1]) * jnp.cos(angles)
-    return jnp.sum(features * weights[:, None, :], axis=-1)
 
 
 def _broadcast_mean(
@@ -134,6 +75,22 @@ def _broadcast_mean(
 
 class PathwiseFunction(eqx.Module):
     """Callable posterior function draw(s) produced by a pathwise sampler.
+
+    Carries the random-feature prior basis (``omega``, ``phase``,
+    ``feature_weights``) and the posterior correction weights evaluated
+    against either the training inputs (exact) or the inducing inputs
+    (sparse). Calling the instance on test points ``X_star`` evaluates
+
+    .. math::
+
+        f_{\\text{post}}(x_*) =
+            \\tilde{f}(x_*)
+            + K(x_*,\\, X_{\\mathrm{corr}})\\,\\alpha
+            + \\mu(x_*),
+
+    where :math:`\\tilde f` is the stored RFF prior draw and
+    :math:`X_{\\mathrm{corr}}` is either the training set (exact) or
+    the inducing set (sparse).
 
     Example:
         >>> prior = GPPrior(kernel=RBF(), X=X)
@@ -150,7 +107,7 @@ class PathwiseFunction(eqx.Module):
     """
 
     kernel: Kernel
-    ref_points: Float[Array, "R D"]
+    correction_points: Float[Array, "R D"]
     correction_weights: Float[Array, "S R"]
     omega: Float[Array, "S D F"]
     phase: Float[Array, "S F"]
@@ -161,7 +118,7 @@ class PathwiseFunction(eqx.Module):
 
     def __call__(self, X_star: Float[Array, "N D"]) -> Float[Array, "S N"]:
         """Evaluate the sampled function(s) at arbitrary inputs ``X_star``."""
-        prior = _evaluate_rff_paths(
+        prior = evaluate_rff_cosine_paths(
             X_star,
             variance=self.variance,
             lengthscale=self.lengthscale,
@@ -170,7 +127,7 @@ class PathwiseFunction(eqx.Module):
             weights=self.feature_weights,
         )
         with _kernel_context(self.kernel):
-            K_cross = self.kernel(X_star, self.ref_points)
+            K_cross = self.kernel(X_star, self.correction_points)
         update = jnp.einsum("nr,sr->sn", K_cross, self.correction_weights)
         mean = _broadcast_mean(self.mean_fn, X_star)
         return prior + update + mean[None, :]
@@ -178,6 +135,14 @@ class PathwiseFunction(eqx.Module):
 
 class PathwiseSampler(eqx.Module):
     """Exact-GP pathwise posterior sampler using Matheron's rule.
+
+    Given a :class:`ConditionedGP`, draws a zero-mean RFF prior path
+    ``f_tilde`` and an iid noise draw ``eps_tilde`` at the training
+    inputs, forms the residual ``y - mu(X) - f_tilde(X) - eps_tilde``,
+    solves it against the cached noisy operator ``K + (jitter + sigma^2)I``,
+    and stores the result as posterior correction weights. The returned
+    :class:`PathwiseFunction` is callable at any ``X_*`` in
+    :math:`\\mathcal{O}(F + N \\cdot N_*)` per path.
 
     Example:
         >>> posterior = GPPrior(kernel=RBF(), X=X).condition(y, jnp.array(0.05))
@@ -195,17 +160,24 @@ class PathwiseSampler(eqx.Module):
     n_features: int = eqx.field(static=True, default=512)
 
     def sample_paths(self, key: Array, n_paths: int = 1) -> PathwiseFunction:
-        """Sample callable posterior paths evaluated in ``O(n_features + N)``."""
+        """Sample callable posterior paths.
+
+        ``key`` is split into three subkeys: one for the RFF basis,
+        one for the iid training-noise draw, and one reserved for
+        future extensions.
+        """
+        rff_key, noise_key, _reserved = jax.random.split(key, 3)
+
         X = self.conditioned_gp.prior.X
-        variance, lengthscale, omega, phase, feature_weights = _sample_rff_parameters(
+        variance, lengthscale, omega, phase, feature_weights = draw_rff_cosine_basis(
             self.conditioned_gp.prior.kernel,
-            key,
+            rff_key,
             n_paths=n_paths,
             n_features=self.n_features,
             in_features=X.shape[1],
             dtype=X.dtype,
         )
-        prior_train = _evaluate_rff_paths(
+        prior_train = evaluate_rff_cosine_paths(
             X,
             variance=variance,
             lengthscale=lengthscale,
@@ -214,7 +186,6 @@ class PathwiseSampler(eqx.Module):
             weights=feature_weights,
         )
         mean_train = _broadcast_mean(self.conditioned_gp.prior.mean_fn, X)
-        noise_key = jax.random.fold_in(key, 1)
         noise = jnp.sqrt(jnp.asarray(self.conditioned_gp.noise_var, dtype=X.dtype)) * (
             jax.random.normal(noise_key, shape=(n_paths, X.shape[0]), dtype=X.dtype)
         )
@@ -224,19 +195,16 @@ class PathwiseSampler(eqx.Module):
         correction_weights = _solve_with_cholesky(
             cholesky(self.conditioned_gp.operator), residual
         )
-        return cast(
-            PathwiseFunction,
-            PathwiseFunction(
-                kernel=self.conditioned_gp.prior.kernel,
-                ref_points=X,
-                correction_weights=correction_weights,
-                omega=omega,
-                phase=phase,
-                feature_weights=feature_weights,
-                variance=variance,
-                lengthscale=lengthscale,
-                mean_fn=self.conditioned_gp.prior.mean_fn,
-            ),
+        return PathwiseFunction(  # ty: ignore[invalid-return-type]
+            kernel=self.conditioned_gp.prior.kernel,
+            correction_points=X,
+            correction_weights=correction_weights,
+            omega=omega,
+            phase=phase,
+            feature_weights=feature_weights,
+            variance=variance,
+            lengthscale=lengthscale,
+            mean_fn=self.conditioned_gp.prior.mean_fn,
         )
 
     def __call__(
@@ -256,6 +224,14 @@ class DecoupledPathwiseSampler(eqx.Module):
     the inducing-point basis, so each sampled path stays callable at arbitrary
     inputs after a one-time inducing solve.
 
+    Supported for point-inducing :class:`SparseGPPrior` (``Z=...``);
+    inducing-feature priors (``inducing=...``) are rejected at
+    construction with a clear error.
+
+    Handles :class:`WhitenedGuide` automatically: whitened guide draws
+    ``v ~ q(v)`` are unwhitened to inducing values ``u = L_ZZ v`` via
+    :func:`gaussx.unwhiten` before forming the inducing-space residual.
+
     Example:
         >>> prior = SparseGPPrior(kernel=RBF(), Z=Z)
         >>> guide = FullRankGuide.init(Z.shape[0])
@@ -268,24 +244,34 @@ class DecoupledPathwiseSampler(eqx.Module):
     guide: Guide
     n_features: int = eqx.field(static=True, default=512)
 
-    def sample_paths(self, key: Array, n_paths: int = 1) -> PathwiseFunction:
-        """Sample callable sparse posterior paths."""
+    def __check_init__(self) -> None:
         if self.prior.Z is None:
             raise ValueError(
                 "DecoupledPathwiseSampler currently requires a point-inducing "
-                "SparseGPPrior with `Z=...`."
+                "SparseGPPrior constructed with `Z=...`. Inducing-feature "
+                "priors (FourierInducingFeatures, SphericalHarmonicInducingFeatures, "
+                "LaplacianInducingFeatures) are not yet supported."
             )
 
+    def sample_paths(self, key: Array, n_paths: int = 1) -> PathwiseFunction:
+        """Sample callable sparse posterior paths.
+
+        ``key`` is split into two subkeys: one for the RFF basis and
+        one for ``n_paths`` independent guide draws.
+        """
+        rff_key, guide_key = jax.random.split(key, 2)
+
         Z = self.prior.Z
-        variance, lengthscale, omega, phase, feature_weights = _sample_rff_parameters(
+        assert Z is not None  # __check_init__ guarantees
+        variance, lengthscale, omega, phase, feature_weights = draw_rff_cosine_basis(
             self.prior.kernel,
-            key,
+            rff_key,
             n_paths=n_paths,
             n_features=self.n_features,
             in_features=Z.shape[1],
             dtype=Z.dtype,
         )
-        prior_inducing = _evaluate_rff_paths(
+        prior_inducing = evaluate_rff_cosine_paths(
             Z,
             variance=variance,
             lengthscale=lengthscale,
@@ -294,7 +280,7 @@ class DecoupledPathwiseSampler(eqx.Module):
             weights=feature_weights,
         )
 
-        guide_keys = jax.random.split(jax.random.fold_in(key, 1), n_paths)
+        guide_keys = jax.random.split(guide_key, n_paths)
         guide_samples = jax.vmap(self.guide.sample)(guide_keys)
         inducing_chol = cholesky(self.prior.inducing_operator())
         if isinstance(self.guide, WhitenedGuide):
@@ -308,19 +294,16 @@ class DecoupledPathwiseSampler(eqx.Module):
             inducing_chol,
             inducing_samples - prior_inducing,
         )
-        return cast(
-            PathwiseFunction,
-            PathwiseFunction(
-                kernel=self.prior.kernel,
-                ref_points=Z,
-                correction_weights=correction_weights,
-                omega=omega,
-                phase=phase,
-                feature_weights=feature_weights,
-                variance=variance,
-                lengthscale=lengthscale,
-                mean_fn=self.prior.mean_fn,
-            ),
+        return PathwiseFunction(  # ty: ignore[invalid-return-type]
+            kernel=self.prior.kernel,
+            correction_points=Z,
+            correction_weights=correction_weights,
+            omega=omega,
+            phase=phase,
+            feature_weights=feature_weights,
+            variance=variance,
+            lengthscale=lengthscale,
+            mean_fn=self.prior.mean_fn,
         )
 
     def __call__(
