@@ -937,8 +937,9 @@ class FourierFilter(PyroxModule):
             Initialised :class:`FourierFilter`.
         """
         k_omega, k_phi = jax.random.split(key)
-        std = freq_scale / math.sqrt(in_features)
-        Omega = jax.random.normal(k_omega, (out_features, in_features)) * std
+        # Per-element std: sigma_f / sqrt(D)  (Fathony et al. 2021 Sec 4.1)
+        omega_std = freq_scale / math.sqrt(in_features)
+        Omega = jax.random.normal(k_omega, (out_features, in_features)) * omega_std
         phi = jax.random.uniform(k_phi, (out_features,), minval=-jnp.pi, maxval=jnp.pi)
         return cls(
             Omega=Omega,
@@ -1037,7 +1038,8 @@ class GaborFilter(PyroxModule):
             Initialised :class:`GaborFilter`.
         """
         k_gamma, k_mu, k_omega, k_phi = jax.random.split(key, 4)
-        # gamma ~ Gamma(alpha, rate=beta)
+        # gamma ~ Gamma(alpha, rate=beta): jax.random.gamma samples Gamma(alpha, 1),
+        # dividing by beta converts to Gamma(alpha, rate=beta).
         gamma = jax.random.gamma(k_gamma, gamma_alpha, (out_features,)) / gamma_beta
         log_gamma = jnp.log(gamma)
         # mu ~ Uniform(domain_low, domain_high)
@@ -1194,7 +1196,7 @@ class FourierNet(PyroxModule):
             ValueError: If ``depth < 1``.
         """
         if depth < 1:
-            raise ValueError(f"depth must be >= 1, got {depth}.")
+            raise ValueError(f"depth must be at least 1, got {depth}.")
         keys = jax.random.split(key, 2 * depth)
         filter_keys = keys[:depth]
         linear_keys = keys[depth:]
@@ -1321,7 +1323,7 @@ class GaborNet(PyroxModule):
             ValueError: If ``depth < 1``.
         """
         if depth < 1:
-            raise ValueError(f"depth must be >= 1, got {depth}.")
+            raise ValueError(f"depth must be at least 1, got {depth}.")
         keys = jax.random.split(key, 2 * depth)
         filter_keys = keys[:depth]
         linear_keys = keys[depth:]
