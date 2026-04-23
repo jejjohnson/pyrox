@@ -104,7 +104,9 @@ def test_multi_output_inducing_cross_covariance_matches_single_latent_case():
     )
 
     K_zx = kernel(Z, X)
-    expected = jnp.concatenate([2.0 * K_zx, -1.0 * K_zx], axis=1)
+    K_uf = inducing.K_uf(X, (kernel,))
 
     assert jnp.allclose(inducing.K_uu((kernel,)), kernel(Z, Z))
-    assert jnp.allclose(inducing.K_uf(X, (kernel,)), expected)
+    assert K_uf.shape == (2, 6)
+    assert jnp.allclose(K_uf[:, :3], 2.0 * K_zx)
+    assert jnp.allclose(K_uf[:, 3:], -1.0 * K_zx)

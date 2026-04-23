@@ -360,7 +360,11 @@ class MultiOutputInducingVariables(eqx.Module):
         X: Float[Array, "N D"],
         kernels: tuple[Kernel, ...],
     ) -> Float[Array, "QM PN"]:
-        """Return the inducing-to-output cross-covariance for isotopic outputs."""
+        """Return the inducing-to-output cross-covariance for isotopic outputs.
+
+        The block layout is
+        ``K_uf[q*M:(q+1)*M, p*N:(p+1)*N] = mixing[p, q] * k_q(Z, X)``.
+        """
         _validate_kernel_count(kernels, self.num_latents)
         latent_blocks = self.inducing.cross_covariances(X, kernels)
         rows = []
