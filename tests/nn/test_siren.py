@@ -113,6 +113,11 @@ def test_siren_activation_variance_preserved():
     x = jr.normal(jr.PRNGKey(42), (4096, 64))
     z = x
     # Check each non-readout layer.
+    # Sitzmann Theorem 1 (§3.2) shows that with the prescribed init the
+    # post-sin activations are approximately N(0,1) at every layer.
+    # We use a relaxed window [0.3, 3.0] — roughly ±1.5 orders of magnitude
+    # from the target variance of 1.0 — to avoid test flakiness while still
+    # catching any init regime that causes explosive or collapsing activations.
     for layer in net.layers[:-1]:
         z = layer(z)
         var = float(jnp.var(z))

@@ -1076,7 +1076,7 @@ class SIREN(PyroxModule):
         (10, 1)
     """
 
-    layers: list
+    layers: list[SirenDense]
     in_features: int = eqx.field(static=True)
     hidden_features: int = eqx.field(static=True)
     out_features: int = eqx.field(static=True)
