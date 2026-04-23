@@ -219,7 +219,8 @@ class OILMMKernel(eqx.Module):
         _validate_kernel_count(self.kernels, self.mixing.shape[1])
         if self.mixing.shape[1] > self.mixing.shape[0]:
             raise ValueError(
-                "orthogonal mixing requires num_latents <= num_outputs; "
+                "orthogonal mixing requires num_latents <= num_outputs to form "
+                "a valid semi-orthogonal mixing matrix; "
                 f"got {self.mixing.shape[1]} latents and "
                 f"{self.mixing.shape[0]} outputs."
             )
@@ -244,7 +245,12 @@ class OILMMKernel(eqx.Module):
 
     def project_observations(self, Y: Float[Array, "N P"]) -> Float[Array, "N Q"]:
         """Project observations into latent space via ``Y @ W``."""
-        if Y.ndim != 2 or Y.shape[1] != self.num_outputs:
+        if Y.ndim != 2:
+            raise ValueError(
+                f"Y must be a 2D array with shape (N, {self.num_outputs}); "
+                f"got shape {Y.shape} with {Y.ndim} dimensions."
+            )
+        if Y.shape[1] != self.num_outputs:
             raise ValueError(
                 f"Y must have shape (N, {self.num_outputs}); got {Y.shape}."
             )
