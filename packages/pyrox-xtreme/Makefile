@@ -1,5 +1,5 @@
 # =============================================================================
-# pypackage_template Makefile
+# xtremax Makefile
 # =============================================================================
 #
 # PREREQUISITES:
@@ -36,7 +36,7 @@ PKG_VERSION := $(shell grep -E '^version\s*=' pyproject.toml 2>/dev/null \
 # ---------------------------------------------------------------------------
 # Paths (override via .env or command line)
 # ---------------------------------------------------------------------------
-PKGROOT ?= src/mypackage
+PKGROOT ?= src/xtremax
 
 # ---------------------------------------------------------------------------
 # ANSI colours
@@ -62,7 +62,8 @@ check-env-%:
 # Phony declarations
 # ---------------------------------------------------------------------------
 .PHONY: help install lint format typecheck test test-cov \
-        precommit build clean version docs docs-serve docs-deploy
+        precommit build clean version docs docs-serve docs-deploy \
+        gh-labels gh-sub gh-block gh-show
 
 .DEFAULT_GOAL := help
 
@@ -71,7 +72,7 @@ check-env-%:
 # ===========================================================================
 
 help: ## 📚 Show this help menu
-	@printf "$(YELLOW)🐍 pypackage_template$(RESET)\n"
+	@printf "$(YELLOW)🐍 xtremax$(RESET)\n"
 	@printf "%s\n" "-----------------------------------------------------------"
 	@awk 'BEGIN {FS = ":.*##"; printf ""} \
 	     /^[a-zA-Z_-]+:.*?##/ { printf "  $(BLUE)%-18s$(RESET) %s\n", $$1, $$2 } \
@@ -175,3 +176,20 @@ docs-serve: ## 🌐 Serve documentation locally
 
 docs-deploy: ## 🚀 Deploy documentation to GitHub Pages
 	uv run --group docs mkdocs gh-deploy --force
+
+gh-labels: ## 🏷️  Bootstrap the GitHub label taxonomy (type / area / layer / wave / priority)
+	bash .github/scripts/create-labels.sh
+
+gh-sub: ## 🔗 Link CHILDREN as sub-issues of PARENT (e.g. make gh-sub PARENT=7 CHILDREN="42 43 44")
+	@test -n "$(PARENT)"   || { echo "error: PARENT=<issue-number> required"   >&2; exit 1; }
+	@test -n "$(CHILDREN)" || { echo "error: CHILDREN=\"<a> <b> ...\" required" >&2; exit 1; }
+	bash .github/scripts/link-issues.sh sub $(PARENT) $(CHILDREN)
+
+gh-block: ## 🚧 Mark ISSUE as blocked by BLOCKED_BY (e.g. make gh-block ISSUE=44 BLOCKED_BY=43)
+	@test -n "$(ISSUE)"      || { echo "error: ISSUE=<issue-number> required"      >&2; exit 1; }
+	@test -n "$(BLOCKED_BY)" || { echo "error: BLOCKED_BY=<issue-number> required" >&2; exit 1; }
+	bash .github/scripts/link-issues.sh block $(ISSUE) $(BLOCKED_BY)
+
+gh-show: ## 🔍 Show parent / sub-issues / blocking / blocked-by for ISSUE
+	@test -n "$(ISSUE)" || { echo "error: ISSUE=<issue-number> required" >&2; exit 1; }
+	bash .github/scripts/link-issues.sh show $(ISSUE)

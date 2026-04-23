@@ -1,19 +1,19 @@
-# pypackage_template
+# xtremax
 
-[![Tests](https://github.com/jejjohnson/pypackage_template/actions/workflows/ci.yml/badge.svg)](https://github.com/jejjohnson/pypackage_template/actions/workflows/ci.yml)
-[![Lint](https://github.com/jejjohnson/pypackage_template/actions/workflows/lint.yml/badge.svg)](https://github.com/jejjohnson/pypackage_template/actions/workflows/lint.yml)
-[![Type Check](https://github.com/jejjohnson/pypackage_template/actions/workflows/typecheck.yml/badge.svg)](https://github.com/jejjohnson/pypackage_template/actions/workflows/typecheck.yml)
-[![Deploy Docs](https://github.com/jejjohnson/pypackage_template/actions/workflows/pages.yml/badge.svg)](https://github.com/jejjohnson/pypackage_template/actions/workflows/pages.yml)
-[![codecov](https://codecov.io/gh/jejjohnson/pypackage_template/branch/main/graph/badge.svg)](https://codecov.io/gh/jejjohnson/pypackage_template)
-[![PyPI version](https://img.shields.io/pypi/v/mypackage.svg)](https://pypi.org/project/mypackage/)
-[![Python versions](https://img.shields.io/pypi/pyversions/mypackage.svg)](https://pypi.org/project/mypackage/)
+[![Tests](https://github.com/jejjohnson/xtremax/actions/workflows/ci.yml/badge.svg)](https://github.com/jejjohnson/xtremax/actions/workflows/ci.yml)
+[![Lint](https://github.com/jejjohnson/xtremax/actions/workflows/lint.yml/badge.svg)](https://github.com/jejjohnson/xtremax/actions/workflows/lint.yml)
+[![Type Check](https://github.com/jejjohnson/xtremax/actions/workflows/typecheck.yml/badge.svg)](https://github.com/jejjohnson/xtremax/actions/workflows/typecheck.yml)
+[![Deploy Docs](https://github.com/jejjohnson/xtremax/actions/workflows/pages.yml/badge.svg)](https://github.com/jejjohnson/xtremax/actions/workflows/pages.yml)
+[![codecov](https://codecov.io/gh/jejjohnson/xtremax/branch/main/graph/badge.svg)](https://codecov.io/gh/jejjohnson/xtremax)
+[![PyPI version](https://img.shields.io/pypi/v/xtremax.svg)](https://pypi.org/project/xtremax/)
+[![Python versions](https://img.shields.io/pypi/pyversions/xtremax.svg)](https://pypi.org/project/xtremax/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://pre-commit.com/)
 
 Author: J. Emmanuel Johnson
-Repo: [https://github.com/jejjohnson/pypackage_template](https://github.com/jejjohnson/pypackage_template)
+Repo: [https://github.com/jejjohnson/xtremax](https://github.com/jejjohnson/xtremax)
 Website: [jejjohnson.netlify.com](https://jejjohnson.netlify.com)
 
 An opinionated, modern Python package template with best-practice tooling already wired up. When you use this template, you get linting, formatting, type checking, testing with coverage gates, auto-generated documentation, automated releases, security scanning, and AI agent instructions — all configured and integrated from day one. No boilerplate to write; just rename the package and start coding.
@@ -23,8 +23,8 @@ An opinionated, modern Python package template with best-practice tooling alread
 ## 📂 Repository Layout
 
 ```
-pypackage_template/
-├── src/mypackage/                    # Main package code (src layout)
+xtremax/
+├── src/xtremax/                    # Main package code (src layout)
 ├── tests/                            # pytest test suite
 ├── docs/                             # MkDocs documentation source
 ├── notebooks/                        # Jupyter notebooks
@@ -53,8 +53,8 @@ pypackage_template/
 
 ```bash
 # Prerequisites: uv (https://github.com/astral-sh/uv)
-git clone https://github.com/jejjohnson/pypackage_template.git
-cd pypackage_template
+git clone https://github.com/jejjohnson/xtremax.git
+cd xtremax
 make install      # install all dependency groups
 make test         # run tests
 make docs-serve   # preview docs locally
@@ -98,14 +98,14 @@ make docs-serve   # preview docs locally
 
 ### 📁 `src/` Layout
 
-**Directory:** `src/mypackage/`
+**Directory:** `src/xtremax/`
 
-Source code lives under `src/mypackage/` rather than at the repo root. This forces the package to be properly installed before it can be imported, which means:
+Source code lives under `src/xtremax/` rather than at the repo root. This forces the package to be properly installed before it can be imported, which means:
 
 - Packaging bugs (missing files, incorrect paths) are caught early rather than hidden by the flat-layout import shortcut.
 - Tests always exercise the installed package, not an accidentally-importable source directory.
 
-> **What:** All source code lives under `src/mypackage/` instead of at the repo root, so the package must be installed before it can be imported.
+> **What:** All source code lives under `src/xtremax/` instead of at the repo root, so the package must be installed before it can be imported.
 
 > **Why `src/` layout?** Industry best practice. See writings by Brett Cannon and Hynek Schlawack on why flat layouts silently mask packaging errors.
 
@@ -121,7 +121,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/mypackage"]
+packages = ["src/xtremax"]
 ```
 
 Zero-config, PEP 517 compliant. No `MANIFEST.in`, no surprises. Integrates cleanly with uv.
@@ -181,7 +181,7 @@ python-version = "3.12"
 ```toml
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=src/mypackage --cov-report=term-missing --cov-report=xml:coverage.xml"
+addopts = "--cov=src/xtremax --cov-report=term-missing --cov-report=xml:coverage.xml"
 
 [tool.coverage.report]
 fail_under = 80
@@ -329,15 +329,68 @@ Dependabot monitors both **GitHub Actions** versions and **Python (pip) dependen
 
 ### 🏷️ Auto PR Labeling — `.github/labeler.yml` + `label-pr.yml`
 
-File path patterns are mapped to labels automatically. For example:
+File path patterns are mapped to labels from the standard taxonomy (`area:*`, `layer:*`, `dependencies`). For example:
 
-- Changes in `src/` → `source` label
-- Changes in `.github/workflows/` → `ci` label
-- Changes in dependency files (e.g. `pyproject.toml`, `.pre-commit-config.yaml`) → `dependencies` label
+- Changes in `src/**/_primitives/` → `layer:0-primitives`
+- Changes in `tests/` → `area:testing`
+- Changes in `docs/`, `mkdocs.yml`, `*.md` → `area:docs`
+- Changes in `.github/`, `pyproject.toml`, `Makefile` → `area:engineering`
+- Changes in dependency files → `dependencies`
 
 > **What:** Automatic label application on every PR based on which files changed — no manual labelling required.
 
 > **Why auto-labeling?** At-a-glance PR categorization in the GitHub UI with zero manual effort.
+
+---
+
+### 🧭 Issue Templates + Epic Hierarchy — `.github/ISSUE_TEMPLATE/`
+
+**Files:** `.github/ISSUE_TEMPLATE/*.md`, `.github/scripts/create-labels.sh`, `docs/contributing.md`, `CONTRIBUTING.md`
+
+Six opinionated issue templates (plus a `config.yml`) enforce a two-layer epic model (**Wave → Theme → Issue**) and a consistent body format: Problem / User Story / Motivation / Proposed API / References / Implementation Steps / Definition of Done / Testing / Documentation / Relationships.
+
+| Template | Purpose |
+|---|---|
+| `Epic — Wave (L1)` | Release-scoped mega-epic; owns a milestone |
+| `Epic — Theme (L2)` | Parallel-safe group of issues under a wave |
+| `Feature / Enhancement` | One substantial deliverable |
+| `Design / ADR` | Resolves a design question for a new API |
+| `Bug report` | Something isn't working |
+| `Research / Comparative Analysis` | Investigate prior art and produce a prioritized roadmap of follow-up issues |
+
+The `Feature` and `Design` templates include two **optional** sections:
+
+- **Design Snapshot** — paste API sketches or excerpts from private / external design docs so the issue is self-contained.
+- **Mathematical Notes** — equations, sign conventions, numerical considerations.
+
+Both exist so that an implementer (human or AI agent) can work on an issue without opening other repos or chats.
+
+A companion label taxonomy (`type:*`, `area:*`, `layer:*`, `wave:*`, `priority:*`) is created by running:
+
+```bash
+make gh-labels       # idempotent; edit .github/scripts/create-labels.sh to customise
+```
+
+For planning a whole wave of issues at once, copy [`docs/templates/wave-backlog.md`](docs/templates/wave-backlog.md) into your project's `.plans/` directory and draft the wave as one reviewable file before opening GitHub issues. See [`docs/contributing.md`](docs/contributing.md) → "Drafting a wave backlog" for the workflow.
+
+Once issues are open, apply GitHub's **native sub-issue and blocked-by links** on top of the prose `## Relationships` block. A helper script and three Makefile targets wrap the GraphQL mutations:
+
+```bash
+make gh-sub   PARENT=7  CHILDREN="42 43 44"   # link sub-issues
+make gh-block ISSUE=44  BLOCKED_BY=43          # mark dependency
+make gh-show  ISSUE=44                         # inspect parent / sub-issues / blocking / blocked-by
+```
+
+Two Claude Code skills guide these workflows end-to-end:
+
+- [`create-gh-issue`](.claude/commands/create-gh-issue.md) — picks the right template, drafts the body with required sections, applies labels + milestone, opens via `gh issue create`, and chains to the linking skill for relationships. Handles single issues and bulk publishing of a `.plans/<wave>-backlog.md` file.
+- [`link-gh-issues`](.claude/commands/link-gh-issues.md) — bulk-apply sub-issue and blocked-by links from a drafted backlog or theme epic's Issues checklist.
+
+See [`docs/contributing.md`](docs/contributing.md) (or [`CONTRIBUTING.md`](CONTRIBUTING.md) at the repo root) for the full taxonomy, epic model, and conventions.
+
+> **What:** Six issue templates + a 24-label taxonomy + a `Wave → Theme → Issue` hierarchy + a wave-backlog drafting template under `docs/templates/` + `create-gh-issue` and `link-gh-issues` skills with helper scripts for filing issues and applying native sub-issue / blocked-by links, all documented in `docs/contributing.md`.
+
+> **Why an epic model?** Consistent issue structure lets humans and AI agents collaborate on planning without renegotiating conventions each time. Templates encode the conventions; `make gh-labels` bootstraps the labels; `make gh-sub` / `make gh-block` wire the native hierarchy.
 
 ---
 
@@ -363,6 +416,10 @@ All common tasks are available via `make`:
 | `make docs` | Build documentation site |
 | `make docs-serve` | Preview documentation locally |
 | `make docs-deploy` | Deploy documentation to GitHub Pages |
+| `make gh-labels` | Bootstrap the GitHub label taxonomy (idempotent) |
+| `make gh-sub` | Link CHILDREN as sub-issues of PARENT (e.g. `make gh-sub PARENT=7 CHILDREN="42 43"`) |
+| `make gh-block` | Mark ISSUE as blocked by BLOCKED_BY (`make gh-block ISSUE=44 BLOCKED_BY=43`) |
+| `make gh-show` | Show parent / sub-issues / blocking / blocked-by for an issue |
 | `make version` | Display package version and git hash |
 
 The Makefile auto-loads `.env` and exports its variables. The `check-env-VARNAME` guard pattern lets targets declare required env vars as prerequisites.
@@ -383,7 +440,7 @@ Documented variables:
 
 | Variable | Purpose |
 |----------|---------|
-| `PKGROOT` | Path to package source (default: `src/mypackage`) |
+| `PKGROOT` | Path to package source (default: `src/xtremax`) |
 | `PYPI_TOKEN` | PyPI token for publishing |
 | `GITHUB_TOKEN` | GitHub personal access token |
 
@@ -442,16 +499,18 @@ Defines the review checklist (style, idioms, packaging, docs, error handling, te
 
 Follow this checklist when using this repo as a base for a new project:
 
-1. **Search-and-replace** `mypackage` with your package name everywhere (source, config, docs)
+1. **Search-and-replace** `xtremax` with your package name everywhere (source, config, docs)
 2. **Update `[project]` in `pyproject.toml`**: name, description, authors, keywords, classifiers, `requires-python`
 3. **Update `mkdocs.yml`**: `site_name`, `site_description`, `repo_url`, `repo_name`
-4. **Rename `src/mypackage/`** to `src/<yourpackage>/`
+4. **Rename `src/xtremax/`** to `src/<yourpackage>/`
 5. **Copy `.env.example` to `.env`** (`make init`) and fill in values
 6. **Run `make install`** then **`make test`** to verify the baseline works
 7. **Set up Codecov** and add `CODECOV_TOKEN` to GitHub Secrets if you want coverage tracking
 8. **Update badge URLs** in this README to point at your repository
 9. **Update `[project.urls]`** in `pyproject.toml` to your repository URL
 10. Delete or update `CHANGELOG.md` and `.release-please-manifest.json` to start fresh
+11. **Bootstrap the GitHub label taxonomy**: `make gh-labels` (edits `.github/scripts/create-labels.sh` if you need to customise `area:*` / `layer:*` / `wave:*` for your project)
+12. **Review `docs/contributing.md`** and adjust the label taxonomy / epic model / contact links for your project; update `.github/ISSUE_TEMPLATE/config.yml` discussions URL
 
 ---
 

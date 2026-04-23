@@ -1,27 +1,27 @@
-# mypackage
+# xtremax
 
-> My short description for my project.
+> JAX/NumPyro-native library for extreme value modeling — custom distributions, Bayesian models, and spatiotemporal data extraction.
 
 ## Installation
 
 ```bash
-pip install mypackage
+pip install xtremax
 ```
 
 Or with `uv`:
 
 ```bash
-uv add mypackage
+uv add xtremax
 ```
 
 ## Quickstart
 
 ```python
-import mypackage
+import xtremax
 ```
 
 ## Links
 
 - [API Reference](api/reference.md)
-- [Changelog](CHANGELOG.md)
-- [GitHub](https://github.com/jejjohnson/pypackage_template)
+- [Changelog](changelog.md)
+- [GitHub](https://github.com/jejjohnson/xtremax)

@@ -1,24 +1,72 @@
-"ci":
+# PR auto-labeling rules.
+#
+# Applied by .github/workflows/label-pr.yml using actions/labeler.
+# Labels referenced here must exist — run `make gh-labels` to create them.
+# The `dependencies` label is also created by the bootstrap script so this
+# file works on a fresh repo with no manual label setup.
+#
+# Scopes below map file paths to the standard taxonomy:
+#   area:*   — which part of the project the change touches
+#   layer:*  — which implementation layer (if the project has a layer stack)
+#   type:*   — left to issue templates (NOT auto-applied on PRs)
+#
+# Adjust paths under layer:* to match your project's internal module layout.
+
+"area:engineering":
   - changed-files:
-    - any-glob-to-any-file: ".github/workflows/**"
+    - any-glob-to-any-file:
+      - ".github/**"
+      - "pyproject.toml"
+      - "Makefile"
+      - ".pre-commit-config.yaml"
+      - "uv.lock"
+
+"area:docs":
+  - changed-files:
+    - any-glob-to-any-file:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "notebooks/**"
+      - "*.md"
+
+"area:testing":
+  - changed-files:
+    - any-glob-to-any-file: "tests/**"
+
+# Catch-all for source changes that don't match a specific layer scope.
+# Ensures every `src/**` PR receives at least one area label.
+"area:code":
+  - changed-files:
+    - any-glob-to-any-file: "src/**"
+
+# --- Layer scopes — edit to match your project's layer stack --------------
+# Example layout for a library with a three-layer stack
+# (primitives → components → public models). Delete or rename if your
+# project doesn't have a formal layer split.
+
+"layer:0-primitives":
+  - changed-files:
+    - any-glob-to-any-file:
+      - "src/**/_primitives/**"
+      - "src/**/_src/primitives*.py"
+
+"layer:1-components":
+  - changed-files:
+    - any-glob-to-any-file:
+      - "src/**/_components/**"
+      - "src/**/_src/components*.py"
+
+"layer:2-models":
+  - changed-files:
+    - any-glob-to-any-file:
+      - "src/**/_models/**"
+      - "src/**/_src/models*.py"
+
+# --- Default / legacy labels retained for Dependabot compatibility ---------
 
 "dependencies":
   - changed-files:
     - any-glob-to-any-file:
       - "pyproject.toml"
       - ".pre-commit-config.yaml"
-
-"documentation":
-  - changed-files:
-    - any-glob-to-any-file:
-      - "docs/**"
-      - "mkdocs.yml"
-      - "*.md"
-
-"testing":
-  - changed-files:
-    - any-glob-to-any-file: "tests/**"
-
-"source":
-  - changed-files:
-    - any-glob-to-any-file: "src/**"
+      - "uv.lock"
