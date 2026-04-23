@@ -1,6 +1,6 @@
 # xtremax
 
-> My short description for my project.
+> JAX/NumPyro-native library for extreme value modeling — custom distributions, Bayesian models, and spatiotemporal data extraction.
 
 ## Installation
 
@@ -23,5 +23,5 @@ import xtremax
 ## Links
 
 - [API Reference](api/reference.md)
-- [Changelog](CHANGELOG.md)
+- [Changelog](changelog.md)
 - [GitHub](https://github.com/jejjohnson/xtremax)

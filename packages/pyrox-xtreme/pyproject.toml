@@ -1,7 +1,7 @@
 [project]
 name = "xtremax"
 version = "0.0.0"
-description = "My short description for my project."
+description = "JAX/NumPyro-native library for extreme value modeling — custom distributions, Bayesian models, and spatiotemporal data extraction."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
 ]

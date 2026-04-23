@@ -1,5 +1,5 @@
 site_name: xtremax
-site_description: My short description for my project.
+site_description: JAX/NumPyro-native library for extreme value modeling — custom distributions, Bayesian models, and spatiotemporal data extraction.
 site_author: J. Emmanuel Johnson
 repo_url: https://github.com/jejjohnson/xtremax
 repo_name: jejjohnson/xtremax
@@ -63,7 +63,7 @@ nav:
           - Integration: design_docs/examples/integration.md
   - API Reference: api/reference.md
   - Contributing: contributing.md
-  - Changelog: CHANGELOG.md
+  - Changelog: changelog.md
 
 markdown_extensions:
   - admonition
@@ -75,6 +75,9 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.details
+  - pymdownx.snippets:
+      base_path: [!relative $docs_dir/..]
+      check_paths: true
   - attr_list
   - md_in_html
   - toc:
