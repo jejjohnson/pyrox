@@ -4,14 +4,27 @@ These classes keep output mixing explicit instead of hiding it inside a
 specialized model. Independent latent kernels stay reusable, while the
 multi-output surface exposes the coregionalization matrices and the
 Kronecker-style factors that later solvers can exploit.
+
+The ``*_operator`` methods return structure-preserving
+:class:`lineax.AbstractLinearOperator` objects built from ``gaussx``
+primitives (:class:`gaussx.Kronecker`, :class:`gaussx.SumOperator`,
+:class:`gaussx.BlockDiag`) so downstream solvers and log-determinant
+strategies can exploit the block / Kronecker structure. Each method also
+exposes a dense counterpart (``cross_covariance``, ``K_uu``, ...) for
+users who want the materialized matrix.
 """
 
 from __future__ import annotations
 
+import functools
+
 import equinox as eqx
 import jax.numpy as jnp
+import lineax as lx
+from gaussx import BlockDiag, Kronecker, SumOperator, oilmm_back_project, oilmm_project
 from jaxtyping import Array, Float
 
+from pyrox.gp._context import _kernel_context
 from pyrox.gp._protocols import Kernel
 
 
@@ -30,31 +43,36 @@ def _validate_kernel_count(kernels: tuple[Kernel, ...], num_latents: int) -> Non
         )
 
 
-def _block_diag(
-    blocks: tuple[Float[Array, "R C"], ...],
-) -> Float[Array, "R_total C_total"]:
-    if not blocks:
-        raise ValueError("blocks must be non-empty.")
-    total_rows = sum(block.shape[0] for block in blocks)
-    total_cols = sum(block.shape[1] for block in blocks)
-    out = jnp.zeros((total_rows, total_cols), dtype=jnp.result_type(*blocks))
-    row_offset = 0
-    col_offset = 0
-    for block in blocks:
-        n_rows, n_cols = block.shape
-        row_slice = slice(row_offset, row_offset + n_rows)
-        col_slice = slice(col_offset, col_offset + n_cols)
-        out = out.at[row_slice, col_slice].set(block)
-        row_offset += n_rows
-        col_offset += n_cols
-    return out
+def _psd_matrix_op(M: Float[Array, "R R"]) -> lx.MatrixLinearOperator:
+    """Wrap a dense PSD matrix as a tagged lineax operator."""
+    return lx.MatrixLinearOperator(M, tags=lx.positive_semidefinite_tag)  # ty: ignore[invalid-return-type]
+
+
+def _kernel_eval(
+    kernel: Kernel,
+    X1: Float[Array, "N1 D"],
+    X2: Float[Array, "N2 D"],
+) -> Float[Array, "N1 N2"]:
+    """Evaluate ``kernel(X1, X2)`` under the kernel's per-call context."""
+    with _kernel_context(kernel):
+        return kernel(X1, X2)
+
+
+def _kernel_diag(
+    kernel: Kernel,
+    X: Float[Array, "N D"],
+) -> Float[Array, " N"]:
+    """Evaluate ``kernel.diag(X)`` under the kernel's per-call context."""
+    with _kernel_context(kernel):
+        return kernel.diag(X)
 
 
 class LMCKernel(eqx.Module):
     """Linear model of coregionalization for vector-valued GPs.
 
     Each output is a linear combination of latent scalar GPs:
-    ``f_p(x) = sum_q W[p, q] g_q(x)``.
+    ``f_p(x) = sum_q W[p, q] g_q(x)``. The cross-output covariance is
+    ``Cov[f_p(x), f_{p'}(x')] = sum_q (w_q w_q^T)[p, p'] k_q(x, x')``.
     """
 
     kernels: tuple[Kernel, ...]
@@ -88,7 +106,7 @@ class LMCKernel(eqx.Module):
     ) -> tuple[tuple[Float[Array, "P P"], Float[Array, "N1 N2"]], ...]:
         """Return ``(B_q, K_q(X1, X2))`` factors for each latent process."""
         return tuple(
-            (self.coregionalization_matrix(q), kernel(X1, X2))
+            (self.coregionalization_matrix(q), _kernel_eval(kernel, X1, X2))
             for q, kernel in enumerate(self.kernels)
         )
 
@@ -98,12 +116,30 @@ class LMCKernel(eqx.Module):
         X2: Float[Array, "N2 D"],
     ) -> Float[Array, "P P N1 N2"]:
         """Return output-pair covariance blocks with shape ``(P, P, N1, N2)``."""
-        blocks = None
-        for B_q, K_q in self.kronecker_factors(X1, X2):
-            term = B_q[:, :, None, None] * K_q[None, None, :, :]
-            blocks = term if blocks is None else blocks + term
-        assert blocks is not None
-        return blocks
+        terms = [
+            B_q[:, :, None, None] * K_q[None, None, :, :]
+            for B_q, K_q in self.kronecker_factors(X1, X2)
+        ]
+        return functools.reduce(jnp.add, terms)
+
+    def cross_covariance_operator(
+        self,
+        X1: Float[Array, "N1 D"],
+        X2: Float[Array, "N2 D"],
+    ) -> lx.AbstractLinearOperator:
+        """Return ``Cov[vec(F(X1)), vec(F(X2))]`` as a sum-of-Kroneckers operator.
+
+        The returned operator preserves the per-latent Kronecker structure
+        so structure-aware solvers can avoid materializing the full
+        ``(P*N1, P*N2)`` matrix.
+        """
+        terms = [
+            Kronecker(_psd_matrix_op(B_q), _psd_matrix_op(K_q))
+            for B_q, K_q in self.kronecker_factors(X1, X2)
+        ]
+        if len(terms) == 1:
+            return terms[0]  # ty: ignore[invalid-return-type]
+        return SumOperator(*terms)  # ty: ignore[invalid-return-type]
 
     def cross_covariance(
         self,
@@ -111,29 +147,34 @@ class LMCKernel(eqx.Module):
         X2: Float[Array, "N2 D"],
     ) -> Float[Array, "PN1 PN2"]:
         """Return the dense covariance of ``vec(F(X1))`` and ``vec(F(X2))``."""
-        full = None
-        for B_q, K_q in self.kronecker_factors(X1, X2):
-            term = jnp.kron(B_q, K_q)
-            full = term if full is None else full + term
-        assert full is not None
-        return full
+        return self.cross_covariance_operator(X1, X2).as_matrix()
+
+    def full_covariance_operator(
+        self, X: Float[Array, "N D"]
+    ) -> lx.AbstractLinearOperator:
+        """Return the Gram operator for isotopic multi-output observations."""
+        return self.cross_covariance_operator(X, X)
 
     def full_covariance(self, X: Float[Array, "N D"]) -> Float[Array, "PN PN"]:
         """Return the dense Gram matrix for isotopic multi-output observations."""
-        return self.cross_covariance(X, X)
+        return self.full_covariance_operator(X).as_matrix()
 
     def diag(self, X: Float[Array, "N D"]) -> Float[Array, "N P"]:
         """Return per-input, per-output marginal variances with shape ``(N, P)``."""
-        diag = None
-        for q, kernel in enumerate(self.kernels):
-            term = kernel.diag(X)[:, None] * jnp.square(self.mixing[:, q])[None, :]
-            diag = term if diag is None else diag + term
-        assert diag is not None
-        return diag
+        terms = [
+            _kernel_diag(kernel, X)[:, None] * jnp.square(self.mixing[:, q])[None, :]
+            for q, kernel in enumerate(self.kernels)
+        ]
+        return functools.reduce(jnp.add, terms)
 
 
 class ICMKernel(eqx.Module):
-    """Intrinsic coregionalization model with one shared latent kernel."""
+    """Intrinsic coregionalization model with one shared latent kernel.
+
+    The cross-output covariance is ``kron(B, k(X1, X2))`` with
+    ``B = W W^T + diag(kappa)``. When ``kappa is None`` the extra diagonal
+    term is omitted.
+    """
 
     kernel: Kernel
     mixing: Float[Array, "P Q"]
@@ -170,7 +211,7 @@ class ICMKernel(eqx.Module):
         X2: Float[Array, "N2 D"],
     ) -> tuple[Float[Array, "P P"], Float[Array, "N1 N2"]]:
         """Return the shared ``(B, K(X1, X2))`` Kronecker factors."""
-        return self.coregionalization_matrix(), self.kernel(X1, X2)
+        return self.coregionalization_matrix(), _kernel_eval(self.kernel, X1, X2)
 
     def output_covariance(
         self,
@@ -181,23 +222,40 @@ class ICMKernel(eqx.Module):
         B, K = self.kronecker_factors(X1, X2)
         return B[:, :, None, None] * K[None, None, :, :]
 
+    def cross_covariance_operator(
+        self,
+        X1: Float[Array, "N1 D"],
+        X2: Float[Array, "N2 D"],
+    ) -> Kronecker:
+        """Return ``Cov[vec(F(X1)), vec(F(X2))]`` as a ``Kronecker`` operator.
+
+        The ``kron(B, K)`` structure lets downstream solvers apply
+        :func:`gaussx.kronecker_mll` and related Kronecker-exact routines
+        instead of materializing a ``(P*N1, P*N2)`` matrix.
+        """
+        B, K = self.kronecker_factors(X1, X2)
+        return Kronecker(_psd_matrix_op(B), _psd_matrix_op(K))  # ty: ignore[invalid-return-type]
+
     def cross_covariance(
         self,
         X1: Float[Array, "N1 D"],
         X2: Float[Array, "N2 D"],
     ) -> Float[Array, "PN1 PN2"]:
         """Return the dense covariance of ``vec(F(X1))`` and ``vec(F(X2))``."""
-        B, K = self.kronecker_factors(X1, X2)
-        return jnp.kron(B, K)
+        return self.cross_covariance_operator(X1, X2).as_matrix()
+
+    def full_covariance_operator(self, X: Float[Array, "N D"]) -> Kronecker:
+        """Return the Gram operator for isotopic multi-output observations."""
+        return self.cross_covariance_operator(X, X)
 
     def full_covariance(self, X: Float[Array, "N D"]) -> Float[Array, "PN PN"]:
         """Return the dense Gram matrix for isotopic multi-output observations."""
-        return self.cross_covariance(X, X)
+        return self.full_covariance_operator(X).as_matrix()
 
     def diag(self, X: Float[Array, "N D"]) -> Float[Array, "N P"]:
         """Return per-input, per-output marginal variances with shape ``(N, P)``."""
         return (
-            self.kernel.diag(X)[:, None]
+            _kernel_diag(self.kernel, X)[:, None]
             * jnp.diag(self.coregionalization_matrix())[None, :]
         )
 
@@ -207,12 +265,13 @@ class OILMMKernel(eqx.Module):
 
     The latent GP kernels stay independent. Orthogonal mixing makes it
     possible to project observations into latent space and run ``Q`` scalar
-    GP problems instead of one monolithic multi-output solve.
+    GP problems instead of one monolithic multi-output solve. Observation
+    noise lives in a separate :class:`pyrox.gp.Likelihood`; this class
+    returns noise-free signal covariance, matching the LMC/ICM convention.
     """
 
     kernels: tuple[Kernel, ...]
     mixing: Float[Array, "P Q"]
-    noise_variance: Float[Array, ""]
 
     def __check_init__(self) -> None:
         _validate_mixing(self.mixing)
@@ -224,8 +283,6 @@ class OILMMKernel(eqx.Module):
                 f"got {self.mixing.shape[1]} latents and "
                 f"{self.mixing.shape[0]} outputs."
             )
-        if jnp.ndim(self.noise_variance) != 0:
-            raise ValueError("noise_variance must be a scalar.")
 
     @property
     def num_outputs(self) -> int:
@@ -238,23 +295,42 @@ class OILMMKernel(eqx.Module):
         return self.mixing.shape[1]
 
     def is_orthogonal(self, *, atol: float = 1e-6, rtol: float = 1e-6) -> bool:
-        """Whether the current mixing matrix satisfies ``W^T W ≈ I``."""
+        """Whether the current mixing matrix satisfies ``W^T W ≈ I``.
+
+        Returns a Python ``bool`` via a host sync; not usable inside
+        ``jax.jit`` / ``jax.vmap``.
+        """
         gram = self.mixing.T @ self.mixing
         eye = jnp.eye(self.num_latents, dtype=self.mixing.dtype)
         return bool(jnp.allclose(gram, eye, atol=atol, rtol=rtol))
 
-    def project_observations(self, Y: Float[Array, "N P"]) -> Float[Array, "N Q"]:
-        """Project observations into latent space via ``Y @ W``."""
-        if Y.ndim != 2:
-            raise ValueError(
-                f"Y must be a 2D array with shape (N, {self.num_outputs}); "
-                f"got shape {Y.shape} with {Y.ndim} dimensions."
-            )
-        if Y.shape[1] != self.num_outputs:
+    def project(
+        self,
+        Y: Float[Array, "N P"],
+        noise_var: Float[Array, " P"] | float,
+    ) -> tuple[Float[Array, "N Q"], Float[Array, " Q"]]:
+        """Project observations to latent space + per-latent noise variances.
+
+        Delegates to :func:`gaussx.oilmm_project`. Returns
+        ``(Y_latent, noise_latent)`` with shapes ``(N, Q)`` and ``(Q,)``;
+        the per-latent noise is ``noise_latent = (W**2).T @ noise_var``.
+        """
+        if Y.ndim != 2 or Y.shape[1] != self.num_outputs:
             raise ValueError(
                 f"Y must have shape (N, {self.num_outputs}); got {Y.shape}."
             )
-        return Y @ self.mixing
+        return oilmm_project(Y, self.mixing, noise_var)
+
+    def back_project(
+        self,
+        f_means: Float[Array, "N Q"],
+        f_vars: Float[Array, "N Q"],
+    ) -> tuple[Float[Array, "N P"], Float[Array, "N P"]]:
+        """Back-project latent GP predictive ``(means, vars)`` to output space.
+
+        Delegates to :func:`gaussx.oilmm_back_project`.
+        """
+        return oilmm_back_project(f_means, f_vars, self.mixing)
 
     def independent_gps(self) -> tuple[Kernel, ...]:
         """Return the latent scalar GP kernels used after projection."""
@@ -265,39 +341,54 @@ class OILMMKernel(eqx.Module):
         X1: Float[Array, "N1 D"],
         X2: Float[Array, "N2 D"],
     ) -> tuple[tuple[Float[Array, "P P"], Float[Array, "N1 N2"]], ...]:
-        """Return the latent signal factors before the isotropic noise term."""
+        """Return the latent signal factors before any observation noise."""
         return tuple(
-            (jnp.outer(self.mixing[:, q], self.mixing[:, q]), kernel(X1, X2))
+            (
+                jnp.outer(self.mixing[:, q], self.mixing[:, q]),
+                _kernel_eval(kernel, X1, X2),
+            )
             for q, kernel in enumerate(self.kernels)
         )
+
+    def signal_covariance_operator(
+        self,
+        X1: Float[Array, "N1 D"],
+        X2: Float[Array, "N2 D"],
+    ) -> lx.AbstractLinearOperator:
+        """Return the noise-free signal covariance as a structured operator."""
+        terms = [
+            Kronecker(_psd_matrix_op(B_q), _psd_matrix_op(K_q))
+            for B_q, K_q in self.signal_factors(X1, X2)
+        ]
+        if len(terms) == 1:
+            return terms[0]  # ty: ignore[invalid-return-type]
+        return SumOperator(*terms)  # ty: ignore[invalid-return-type]
 
     def signal_covariance(
         self,
         X1: Float[Array, "N1 D"],
         X2: Float[Array, "N2 D"],
     ) -> Float[Array, "PN1 PN2"]:
-        """Return the signal covariance without the observation-noise term."""
-        full = None
-        for B_q, K_q in self.signal_factors(X1, X2):
-            term = jnp.kron(B_q, K_q)
-            full = term if full is None else full + term
-        assert full is not None
-        return full
+        """Return the dense noise-free signal covariance matrix."""
+        return self.signal_covariance_operator(X1, X2).as_matrix()
+
+    def full_covariance_operator(
+        self, X: Float[Array, "N D"]
+    ) -> lx.AbstractLinearOperator:
+        """Return the noise-free Gram operator for isotopic observations."""
+        return self.signal_covariance_operator(X, X)
 
     def full_covariance(self, X: Float[Array, "N D"]) -> Float[Array, "PN PN"]:
-        """Return the dense Gram matrix plus isotropic observation noise."""
-        signal = self.signal_covariance(X, X)
-        noise = self.noise_variance * jnp.eye(signal.shape[0], dtype=signal.dtype)
-        return signal + noise
+        """Return the dense noise-free Gram matrix."""
+        return self.full_covariance_operator(X).as_matrix()
 
     def diag(self, X: Float[Array, "N D"]) -> Float[Array, "N P"]:
-        """Return per-input, per-output marginal variances including noise."""
-        diag = None
-        for q, kernel in enumerate(self.kernels):
-            term = kernel.diag(X)[:, None] * jnp.square(self.mixing[:, q])[None, :]
-            diag = term if diag is None else diag + term
-        assert diag is not None
-        return diag + self.noise_variance
+        """Return per-input, per-output marginal signal variances."""
+        terms = [
+            _kernel_diag(kernel, X)[:, None] * jnp.square(self.mixing[:, q])[None, :]
+            for q, kernel in enumerate(self.kernels)
+        ]
+        return functools.reduce(jnp.add, terms)
 
 
 class SharedInducingPoints(eqx.Module):
@@ -320,11 +411,27 @@ class SharedInducingPoints(eqx.Module):
         """Return one inducing covariance block per latent kernel."""
         if not kernels:
             raise ValueError("kernels must be non-empty.")
-        return tuple(kernel(self.locations, self.locations) for kernel in kernels)
+        return tuple(
+            _kernel_eval(kernel, self.locations, self.locations) for kernel in kernels
+        )
+
+    def K_uu_operator(self, kernels: tuple[Kernel, ...]) -> BlockDiag:
+        """Return the block-diagonal inducing covariance as a ``BlockDiag``.
+
+        Downstream solvers decompose a ``(Q*M, Q*M)`` solve into ``Q``
+        independent ``(M, M)`` solves via the ``block_diagonal_tag``.
+        """
+        if not kernels:
+            raise ValueError("kernels must be non-empty.")
+        blocks = tuple(
+            _psd_matrix_op(_kernel_eval(kernel, self.locations, self.locations))
+            for kernel in kernels
+        )
+        return BlockDiag(*blocks)  # ty: ignore[invalid-return-type]
 
     def K_uu(self, kernels: tuple[Kernel, ...]) -> Float[Array, "QM QM"]:
         """Materialize the block-diagonal inducing covariance over all latents."""
-        return _block_diag(self.latent_covariances(kernels))
+        return self.K_uu_operator(kernels).as_matrix()
 
     def cross_covariances(
         self,
@@ -334,11 +441,17 @@ class SharedInducingPoints(eqx.Module):
         """Return one ``K(Z, X)`` block per latent kernel."""
         if not kernels:
             raise ValueError("kernels must be non-empty.")
-        return tuple(kernel(self.locations, X) for kernel in kernels)
+        return tuple(_kernel_eval(kernel, self.locations, X) for kernel in kernels)
 
 
 class MultiOutputInducingVariables(eqx.Module):
-    """Shared inducing-point structure for LMC/ICM-style sparse workflows."""
+    """Shared inducing-point structure for LMC-style sparse workflows.
+
+    ``mixing[p, q]`` is the weight with which latent process ``q`` enters
+    output ``p``; the block layout of :meth:`K_uf` matches that convention.
+    ``ICMKernel`` with non-zero ``kappa`` cannot be represented here —
+    the extra diagonal does not fit the per-latent factorization.
+    """
 
     inducing: SharedInducingPoints
     mixing: Float[Array, "P Q"]
@@ -355,6 +468,11 @@ class MultiOutputInducingVariables(eqx.Module):
     def num_latents(self) -> int:
         """Number of latent scalar GPs ``Q``."""
         return self.mixing.shape[1]
+
+    def K_uu_operator(self, kernels: tuple[Kernel, ...]) -> BlockDiag:
+        """Return the block-diagonal inducing covariance as a ``BlockDiag``."""
+        _validate_kernel_count(kernels, self.num_latents)
+        return self.inducing.K_uu_operator(kernels)
 
     def K_uu(self, kernels: tuple[Kernel, ...]) -> Float[Array, "QM QM"]:
         """Return the block-diagonal inducing covariance over latent processes."""
