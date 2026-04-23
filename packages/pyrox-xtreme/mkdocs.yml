@@ -1,8 +1,8 @@
-site_name: mypackage
+site_name: xtremax
 site_description: My short description for my project.
 site_author: J. Emmanuel Johnson
-repo_url: https://github.com/jejjohnson/pypackage_template
-repo_name: jejjohnson/pypackage_template
+repo_url: https://github.com/jejjohnson/xtremax
+repo_name: jejjohnson/xtremax
 
 theme:
   name: material
@@ -43,8 +43,26 @@ plugins:
 nav:
   - Home: index.md
   - Examples:
-      - Demo: notebooks/example_demo.py
+      - Demo: notebooks/example_demo.ipynb
+  - Design:
+      - Overview: design_docs/README.md
+      - Vision: design_docs/vision.md
+      - Architecture: design_docs/architecture.md
+      - Boundaries: design_docs/boundaries.md
+      - Decisions: design_docs/decisions.md
+      - API:
+          - Overview: design_docs/api/README.md
+          - Primitives: design_docs/api/primitives.md
+          - Components: design_docs/api/components.md
+          - Models: design_docs/api/models.md
+      - Examples:
+          - Overview: design_docs/examples/README.md
+          - Primitives: design_docs/examples/primitives.md
+          - Components: design_docs/examples/components.md
+          - Models: design_docs/examples/models.md
+          - Integration: design_docs/examples/integration.md
   - API Reference: api/reference.md
+  - Contributing: contributing.md
   - Changelog: CHANGELOG.md
 
 markdown_extensions:
