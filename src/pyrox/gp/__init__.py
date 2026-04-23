@@ -6,6 +6,9 @@
 * :class:`Parameterized` kernel classes that wrap those functions with
   constraints, priors, and guide metadata — re-exported from this
   module.
+* Multi-output GP structures — :class:`LMCKernel`, :class:`ICMKernel`,
+  :class:`OILMMKernel`, and shared inducing-point helpers for explicit
+  cross-output structure without monolithic model classes.
 * Abstract protocols (:class:`Kernel`, :class:`Guide`,
   :class:`Integrator`, :class:`Likelihood`) plus five concrete sparse
   variational guides — :class:`FullRankGuide`, :class:`MeanFieldGuide`,
@@ -62,6 +65,13 @@ from pyrox.gp._likelihoods import (
     DistLikelihood,
     GaussianLikelihood,
 )
+from pyrox.gp._multi_output import (
+    ICMKernel,
+    LMCKernel,
+    MultiOutputInducingVariables,
+    OILMMKernel,
+    SharedInducingPoints,
+)
 from pyrox.gp._models import (
     ConditionedGP,
     GPPrior,
@@ -91,18 +101,23 @@ __all__ = [
     "GPPrior",
     "GaussianLikelihood",
     "Guide",
+    "ICMKernel",
     "InducingFeatures",
     "Integrator",
     "Kernel",
     "LaplacianInducingFeatures",
     "Likelihood",
+    "LMCKernel",
     "Linear",
     "Matern",
     "MeanFieldGuide",
+    "MultiOutputInducingVariables",
     "NaturalGuide",
+    "OILMMKernel",
     "Periodic",
     "Polynomial",
     "RationalQuadratic",
+    "SharedInducingPoints",
     "SparseGPPrior",
     "SphericalHarmonicInducingFeatures",
     "White",
