@@ -30,7 +30,9 @@ def _validate_kernel_count(kernels: tuple[Kernel, ...], num_latents: int) -> Non
         )
 
 
-def _block_diag(blocks: tuple[Float[Array, "R C"], ...]) -> Float[Array, "R_total C_total"]:
+def _block_diag(
+    blocks: tuple[Float[Array, "R C"], ...],
+) -> Float[Array, "R_total C_total"]:
     if not blocks:
         raise ValueError("blocks must be non-empty.")
     total_rows = sum(block.shape[0] for block in blocks)
@@ -40,9 +42,9 @@ def _block_diag(blocks: tuple[Float[Array, "R C"], ...]) -> Float[Array, "R_tota
     col_offset = 0
     for block in blocks:
         n_rows, n_cols = block.shape
-        out = out.at[row_offset : row_offset + n_rows, col_offset : col_offset + n_cols].set(
-            block
-        )
+        row_slice = slice(row_offset, row_offset + n_rows)
+        col_slice = slice(col_offset, col_offset + n_cols)
+        out = out.at[row_slice, col_slice].set(block)
         row_offset += n_rows
         col_offset += n_cols
     return out
@@ -194,9 +196,10 @@ class ICMKernel(eqx.Module):
 
     def diag(self, X: Float[Array, "N D"]) -> Float[Array, "N P"]:
         """Return per-input, per-output marginal variances with shape ``(N, P)``."""
-        return self.kernel.diag(X)[:, None] * jnp.diag(self.coregionalization_matrix())[
-            None, :
-        ]
+        return (
+            self.kernel.diag(X)[:, None]
+            * jnp.diag(self.coregionalization_matrix())[None, :]
+        )
 
 
 class OILMMKernel(eqx.Module):
@@ -217,7 +220,8 @@ class OILMMKernel(eqx.Module):
         if self.mixing.shape[1] > self.mixing.shape[0]:
             raise ValueError(
                 "orthogonal mixing requires num_latents <= num_outputs; "
-                f"got {self.mixing.shape[1]} latents and {self.mixing.shape[0]} outputs."
+                f"got {self.mixing.shape[1]} latents and "
+                f"{self.mixing.shape[0]} outputs."
             )
         if jnp.ndim(self.noise_variance) != 0:
             raise ValueError("noise_variance must be a scalar.")
@@ -241,7 +245,9 @@ class OILMMKernel(eqx.Module):
     def project_observations(self, Y: Float[Array, "N P"]) -> Float[Array, "N Q"]:
         """Project observations into latent space via ``Y @ W``."""
         if Y.ndim != 2 or Y.shape[1] != self.num_outputs:
-            raise ValueError(f"Y must have shape (N, {self.num_outputs}); got {Y.shape}.")
+            raise ValueError(
+                f"Y must have shape (N, {self.num_outputs}); got {Y.shape}."
+            )
         return Y @ self.mixing
 
     def independent_gps(self) -> tuple[Kernel, ...]:

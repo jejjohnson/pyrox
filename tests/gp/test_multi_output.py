@@ -5,12 +5,11 @@ from __future__ import annotations
 import jax.numpy as jnp
 
 from pyrox.gp import (
+    RBF,
     ICMKernel,
     LMCKernel,
-    OILMMKernel,
-    RBF,
-    LMCKernel,
     MultiOutputInducingVariables,
+    OILMMKernel,
     SharedInducingPoints,
 )
 

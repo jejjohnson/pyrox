@@ -65,18 +65,18 @@ from pyrox.gp._likelihoods import (
     DistLikelihood,
     GaussianLikelihood,
 )
+from pyrox.gp._models import (
+    ConditionedGP,
+    GPPrior,
+    gp_factor,
+    gp_sample,
+)
 from pyrox.gp._multi_output import (
     ICMKernel,
     LMCKernel,
     MultiOutputInducingVariables,
     OILMMKernel,
     SharedInducingPoints,
-)
-from pyrox.gp._models import (
-    ConditionedGP,
-    GPPrior,
-    gp_factor,
-    gp_sample,
 )
 from pyrox.gp._protocols import (
     Guide,
@@ -105,9 +105,9 @@ __all__ = [
     "InducingFeatures",
     "Integrator",
     "Kernel",
+    "LMCKernel",
     "LaplacianInducingFeatures",
     "Likelihood",
-    "LMCKernel",
     "Linear",
     "Matern",
     "MeanFieldGuide",
