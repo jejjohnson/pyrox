@@ -365,9 +365,8 @@ class MultiOutputInducingVariables(eqx.Module):
         latent_blocks = self.inducing.cross_covariances(X, kernels)
         rows = []
         for q, K_zx in enumerate(latent_blocks):
-            row = jnp.concatenate(
-                [self.mixing[p, q] * K_zx for p in range(self.num_outputs)], axis=1
-            )
+            scaled = self.mixing[:, q][:, None, None] * K_zx[None, :, :]
+            row = jnp.transpose(scaled, (1, 0, 2)).reshape(K_zx.shape[0], -1)
             rows.append(row)
         return jnp.concatenate(rows, axis=0)
 
