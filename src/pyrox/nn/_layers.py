@@ -1,6 +1,16 @@
-"""Uncertainty-aware dense layers for Bayesian and stochastic NNs.
+"""Coordinate encoders and uncertainty-aware dense layers.
 
-Five layer families:
+Deterministic coordinate encoders:
+
+* :class:`Degree2Radians` — element-wise degrees-to-radians conversion.
+* :class:`LonLatScale` — affine lon/lat scaling into a fixed range.
+* :class:`Cartesian3DEncoder` — lon/lat lift to unit Cartesian
+  coordinates on :math:`S^2`.
+* :class:`CyclicEncoder` — periodic ``(cos, sin)`` feature map.
+* :class:`SphericalHarmonicEncoder` — real spherical-harmonic features
+  via :func:`pyrox._basis.real_spherical_harmonics`.
+
+Uncertainty-aware dense / random-feature layers:
 
 * :class:`DenseReparameterization` — weight-space Bayesian linear layer
   using the reparameterization trick (Kingma & Welling, 2014).
@@ -18,7 +28,7 @@ Five layer families:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 import equinox as eqx
 import jax
@@ -26,10 +36,110 @@ import jax.numpy as jnp
 import numpyro.distributions as dist
 from jaxtyping import Array, Float
 
-from pyrox._basis import fourier_basis, spectral_density
+from pyrox._basis import fourier_basis, real_spherical_harmonics, spectral_density
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
 from pyrox.gp._context import _kernel_context
 from pyrox.gp._protocols import Kernel
+from pyrox.nn._geo import cyclic_encode, deg2rad, lonlat_scale, lonlat_to_cartesian3d
+
+
+class Degree2Radians(PyroxModule):
+    """Element-wise degrees-to-radians conversion."""
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, ...]) -> Float[Array, ...]:
+        return deg2rad(x)
+
+
+class LonLatScale(PyroxModule):
+    """Affine-rescale lon/lat columns into ``[-1, 1]``."""
+
+    lon_range: tuple[float, float] = eqx.field(static=True, default=(-180.0, 180.0))
+    lat_range: tuple[float, float] = eqx.field(static=True, default=(-90.0, 90.0))
+
+    def __post_init__(self) -> None:
+        if self.lon_range[1] <= self.lon_range[0]:
+            raise ValueError(f"lon_range must satisfy min < max; got {self.lon_range}.")
+        if self.lat_range[1] <= self.lat_range[0]:
+            raise ValueError(f"lat_range must satisfy min < max; got {self.lat_range}.")
+
+    @pyrox_method
+    def __call__(self, lonlat: Float[Array, "N 2"]) -> Float[Array, "N 2"]:
+        return lonlat_scale(
+            lonlat,
+            lon_range=self.lon_range,
+            lat_range=self.lat_range,
+        )
+
+
+class Cartesian3DEncoder(PyroxModule):
+    """Lift lon/lat coordinates onto the unit sphere :math:`S^2`."""
+
+    input_unit: Literal["degrees", "radians"] = eqx.field(
+        static=True, default="radians"
+    )
+
+    def __post_init__(self) -> None:
+        if self.input_unit not in {"degrees", "radians"}:
+            raise ValueError(
+                f"input_unit must be 'degrees' or 'radians'; got {self.input_unit!r}."
+            )
+
+    @pyrox_method
+    def __call__(self, lonlat: Float[Array, "N 2"]) -> Float[Array, "N 3"]:
+        return lonlat_to_cartesian3d(lonlat, input_unit=self.input_unit)
+
+
+class CyclicEncoder(PyroxModule):
+    """Encode periodic inputs as concatenated cos/sin features."""
+
+    @pyrox_method
+    def __call__(
+        self,
+        angles: Float[Array, " N"] | Float[Array, "N D"],
+    ) -> Float[Array, "N F"]:
+        return cyclic_encode(angles)
+
+
+class SphericalHarmonicEncoder(PyroxModule):
+    """Real spherical-harmonic features on the unit sphere."""
+
+    l_max: int = eqx.field(static=True)
+    input_mode: Literal["cartesian", "lonlat"] = eqx.field(
+        static=True, default="cartesian"
+    )
+
+    def __post_init__(self) -> None:
+        if self.l_max < 0:
+            raise ValueError(f"l_max must be >= 0; got {self.l_max}.")
+        if self.input_mode not in {"cartesian", "lonlat"}:
+            raise ValueError(
+                f"input_mode must be 'cartesian' or 'lonlat'; got {self.input_mode!r}."
+            )
+
+    @property
+    def num_features(self) -> int:
+        return (self.l_max + 1) ** 2
+
+    @pyrox_method
+    def __call__(
+        self,
+        x: Float[Array, "N 3"] | Float[Array, "N 2"],
+    ) -> Float[Array, "N M"]:
+        if self.input_mode == "cartesian":
+            if x.ndim != 2 or x.shape[-1] != 3:
+                raise ValueError(
+                    "x must be (N, 3) when input_mode='cartesian'; "
+                    f"got shape {x.shape}."
+                )
+            unit_xyz = x
+        else:
+            if x.ndim != 2 or x.shape[-1] != 2:
+                raise ValueError(
+                    f"x must be (N, 2) when input_mode='lonlat'; got shape {x.shape}."
+                )
+            unit_xyz = lonlat_to_cartesian3d(x, input_unit="radians")
+        return real_spherical_harmonics(unit_xyz, l_max=self.l_max)
 
 
 class DenseReparameterization(PyroxModule):
