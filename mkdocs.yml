@@ -47,6 +47,7 @@ nav:
       - Core: api/core.md
       - GP: api/gp.md
       - NN: api/nn.md
+      - 'NN / MFN': api/nn/mfn.md
       - Inference: api/inference.md
       - Preprocessing: api/preprocessing.md
       - Estimator: api/api.md
