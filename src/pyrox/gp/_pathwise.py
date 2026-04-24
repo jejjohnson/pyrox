@@ -35,9 +35,49 @@ from pyrox._basis._rff import (
 )
 from pyrox.gp._context import _kernel_context
 from pyrox.gp._guides import WhitenedGuide
+from pyrox.gp._kernels import RBF, Matern
 from pyrox.gp._models import ConditionedGP
 from pyrox.gp._protocols import Guide, Kernel
 from pyrox.gp._sparse import SparseGPPrior
+from pyrox.gp._src import kernels as _kernel_fns
+
+
+def _frozen_kernel_fn(
+    kernel: Kernel,
+    variance: Float[Array, ""],
+    lengthscale: Float[Array, ""],
+) -> Callable[[Float[Array, "N1 D"], Float[Array, "N2 D"]], Float[Array, "N1 N2"]]:
+    """Return ``(X1, X2) -> K(X1, X2)`` with frozen hyperparameters.
+
+    Pattern B/C kernels read ``variance`` / ``lengthscale`` via
+    ``get_param`` under a ``_kernel_context``, which resamples on every
+    call for kernels that registered priors. The pathwise sampler must
+    instead reuse the *same* hyperparameter draw that produced the RFF
+    prior basis, so the posterior correction term ``K(x_*, X_corr)``
+    uses values consistent with ``omega / lengthscale`` in the RFF draw.
+
+    This helper closes over the captured scalars and calls the pure math
+    primitive directly, bypassing the ``pyrox_sample`` layer entirely.
+    Only RBF and Matern are supported — same scope as
+    :func:`pyrox._basis._rff.draw_rff_cosine_basis`.
+    """
+    if isinstance(kernel, RBF):
+
+        def rbf_fn(X1, X2):
+            return _kernel_fns.rbf_kernel(X1, X2, variance, lengthscale)
+
+        return rbf_fn
+    if isinstance(kernel, Matern):
+        nu = kernel.nu
+
+        def matern_fn(X1, X2):
+            return _kernel_fns.matern_kernel(X1, X2, variance, lengthscale, nu)
+
+        return matern_fn
+    raise NotImplementedError(
+        "Pathwise sampling currently supports RBF and Matern kernels; "
+        f"got {type(kernel).__name__}."
+    )
 
 
 def _solve_with_cholesky(
@@ -92,6 +132,11 @@ class PathwiseFunction(eqx.Module):
     :math:`X_{\\mathrm{corr}}` is either the training set (exact) or
     the inducing set (sparse).
 
+    The kernel enters only as a frozen ``(X1, X2) -> K`` callable with
+    the sample-time ``variance`` and ``lengthscale`` baked in, so
+    repeated evaluations stay consistent with the original RFF draw
+    even for Pattern B/C kernels that register hyperparameter priors.
+
     Example:
         >>> prior = GPPrior(kernel=RBF(), X=X)
         >>> posterior = prior.condition(y, noise_var=jnp.array(0.05))
@@ -106,7 +151,9 @@ class PathwiseFunction(eqx.Module):
         >>> thompson_values = paths(X_candidates)
     """
 
-    kernel: Kernel
+    kernel_fn: Callable[
+        [Float[Array, "N1 D"], Float[Array, "N2 D"]], Float[Array, "N1 N2"]
+    ]
     correction_points: Float[Array, "R D"]
     correction_weights: Float[Array, "S R"]
     omega: Float[Array, "S D F"]
@@ -126,8 +173,7 @@ class PathwiseFunction(eqx.Module):
             phase=self.phase,
             weights=self.feature_weights,
         )
-        with _kernel_context(self.kernel):
-            K_cross = self.kernel(X_star, self.correction_points)
+        K_cross = self.kernel_fn(X_star, self.correction_points)
         update = jnp.einsum("nr,sr->sn", K_cross, self.correction_weights)
         mean = _broadcast_mean(self.mean_fn, X_star)
         return prior + update + mean[None, :]
@@ -142,7 +188,11 @@ class PathwiseSampler(eqx.Module):
     solves it against the cached noisy operator ``K + (jitter + sigma^2)I``,
     and stores the result as posterior correction weights. The returned
     :class:`PathwiseFunction` is callable at any ``X_*`` in
-    :math:`\\mathcal{O}(F + N \\cdot N_*)` per path.
+    :math:`\\mathcal{O}(N_* \\cdot F \\cdot D + N_* \\cdot N)` per path,
+    where ``N`` is the number of training (correction) points: the RFF
+    prior term recomputes features over ``X_*`` each call
+    (``N_* · F · D``), and the correction term forms a fresh
+    ``K(X_*, X)`` block (``N_* · N``).
 
     Example:
         >>> posterior = GPPrior(kernel=RBF(), X=X).condition(y, jnp.array(0.05))
@@ -169,8 +219,9 @@ class PathwiseSampler(eqx.Module):
         rff_key, noise_key, _reserved = jax.random.split(key, 3)
 
         X = self.conditioned_gp.prior.X
+        kernel = self.conditioned_gp.prior.kernel
         variance, lengthscale, omega, phase, feature_weights = draw_rff_cosine_basis(
-            self.conditioned_gp.prior.kernel,
+            kernel,
             rff_key,
             n_paths=n_paths,
             n_features=self.n_features,
@@ -196,7 +247,7 @@ class PathwiseSampler(eqx.Module):
             cholesky(self.conditioned_gp.operator), residual
         )
         return PathwiseFunction(  # ty: ignore[invalid-return-type]
-            kernel=self.conditioned_gp.prior.kernel,
+            kernel_fn=_frozen_kernel_fn(kernel, variance, lengthscale),
             correction_points=X,
             correction_weights=correction_weights,
             omega=omega,
@@ -257,32 +308,40 @@ class DecoupledPathwiseSampler(eqx.Module):
         """Sample callable sparse posterior paths.
 
         ``key`` is split into two subkeys: one for the RFF basis and
-        one for ``n_paths`` independent guide draws.
+        one for ``n_paths`` independent guide draws. The RFF basis
+        draw and the :math:`K_{zz}` assembly share a single
+        ``_kernel_context`` so kernels with hyperparameter priors
+        (Pattern B / C) sample ``(variance, lengthscale)`` once — without
+        this, ``prior_inducing`` and ``inducing_operator`` would be
+        built from inconsistent hyperparameter draws and the Matheron
+        correction would be wrong.
         """
         rff_key, guide_key = jax.random.split(key, 2)
 
         Z = self.prior.Z
         assert Z is not None  # __check_init__ guarantees
-        variance, lengthscale, omega, phase, feature_weights = draw_rff_cosine_basis(
-            self.prior.kernel,
-            rff_key,
-            n_paths=n_paths,
-            n_features=self.n_features,
-            in_features=Z.shape[1],
-            dtype=Z.dtype,
-        )
-        prior_inducing = evaluate_rff_cosine_paths(
-            Z,
-            variance=variance,
-            lengthscale=lengthscale,
-            omega=omega,
-            phase=phase,
-            weights=feature_weights,
-        )
+        with _kernel_context(self.prior.kernel):
+            basis = draw_rff_cosine_basis(
+                self.prior.kernel,
+                rff_key,
+                n_paths=n_paths,
+                n_features=self.n_features,
+                in_features=Z.shape[1],
+                dtype=Z.dtype,
+            )
+            variance, lengthscale, omega, phase, feature_weights = basis
+            prior_inducing = evaluate_rff_cosine_paths(
+                Z,
+                variance=variance,
+                lengthscale=lengthscale,
+                omega=omega,
+                phase=phase,
+                weights=feature_weights,
+            )
+            inducing_chol = cholesky(self.prior.inducing_operator())
 
         guide_keys = jax.random.split(guide_key, n_paths)
         guide_samples = jax.vmap(self.guide.sample)(guide_keys)
-        inducing_chol = cholesky(self.prior.inducing_operator())
         if isinstance(self.guide, WhitenedGuide):
             inducing_samples = jax.vmap(lambda sample: unwhiten(sample, inducing_chol))(
                 guide_samples
@@ -295,7 +354,7 @@ class DecoupledPathwiseSampler(eqx.Module):
             inducing_samples - prior_inducing,
         )
         return PathwiseFunction(  # ty: ignore[invalid-return-type]
-            kernel=self.prior.kernel,
+            kernel_fn=_frozen_kernel_fn(self.prior.kernel, variance, lengthscale),
             correction_points=Z,
             correction_weights=correction_weights,
             omega=omega,

@@ -102,10 +102,12 @@ prior    = SparseGPPrior(kernel=kernel, inducing=features)   # K_uu is diagonal!
 
 Callable posterior function draws via Matheron's rule. Each sampled
 path is a :class:`PathwiseFunction` that evaluates in
-``O(F + N_corr · N_*)`` per path, so the same draw can be reused at
-arbitrary test sets without rebuilding a test-set covariance — the
-standard enabler for Thompson sampling, Bayesian optimization, and
-posterior visualization.
+``O(N_* · F · D + N_* · N_corr)`` per path — ``N_* · F · D`` for the
+RFF prior draw and ``N_* · N_corr`` for the kernel correction against
+the ``N_corr`` training (exact) or inducing (decoupled) points — so the
+same draw can be reused at arbitrary test sets without rebuilding a
+test-set covariance. Standard enabler for Thompson sampling, Bayesian
+optimization, and posterior visualization.
 
 ```python
 from pyrox.gp import (

@@ -273,3 +273,61 @@ def test_decoupled_pathwise_determinism_under_same_key():
     second = sampler(key, X_star, n_paths=2)
 
     assert jnp.allclose(first, second, atol=0.0)
+
+
+def test_pathwise_function_repeated_eval_is_deterministic_for_pattern_b_kernel():
+    """Regression for P1: PathwiseFunction must not resample kernel hyperparams
+    when evaluated multiple times. With a Pattern B/C kernel carrying a
+    LogNormal prior on its lengthscale, repeated calls to ``paths(X_star)``
+    used to differ because ``get_param("lengthscale")`` resampled under each
+    new ``_kernel_context``. Now the kernel evaluation is closed over the
+    sample-time hyperparams in :class:`PathwiseFunction``.
+    """
+    import numpyro.distributions as dist
+    from numpyro import handlers
+
+    X, y = _toy_dataset(n=5)
+    X_star = jnp.array([[-0.5], [0.0], [0.5]])
+    kernel = RBF(init_variance=1.0, init_lengthscale=0.4)
+    kernel.set_prior("lengthscale", dist.LogNormal(jnp.log(0.4), 0.1))
+    with handlers.seed(rng_seed=0):
+        posterior = GPPrior(kernel=kernel, X=X, jitter=1e-6).condition(
+            y, jnp.array(0.05)
+        )
+        paths = PathwiseSampler(posterior, n_features=128).sample_paths(
+            jax.random.PRNGKey(0), n_paths=2
+        )
+    # PathwiseFunction.__call__ must NOT need an outer handlers.seed: the
+    # kernel hyperparameters are baked in. Two calls outside any seed
+    # handler return identical values.
+    first = paths(X_star)
+    second = paths(X_star)
+    assert jnp.allclose(first, second, atol=0.0)
+
+
+def test_decoupled_pathwise_consistent_kernel_context_for_pattern_b_kernel():
+    """Regression for P1: DecoupledPathwiseSampler.sample_paths must draw the
+    RFF basis and assemble K_zz under one shared kernel context for kernels
+    with hyperparameter priors, so the prior_inducing path and inducing solve
+    use the same (variance, lengthscale) draw."""
+    import numpyro.distributions as dist
+    from numpyro import handlers
+
+    Z = jnp.linspace(-1.0, 1.0, 4).reshape(-1, 1)
+    kernel = RBF(init_variance=1.0, init_lengthscale=0.5)
+    kernel.set_prior("lengthscale", dist.LogNormal(jnp.log(0.5), 0.1))
+    prior = SparseGPPrior(kernel=kernel, Z=Z, jitter=1e-8)
+    guide = FullRankGuide.init(Z.shape[0], scale=0.2)
+    sampler = DecoupledPathwiseSampler(prior, guide, n_features=128)
+    key = jax.random.PRNGKey(123)
+    X_star = jnp.array([[-0.5], [0.0], [0.5]])
+    with handlers.seed(rng_seed=0):
+        paths_a = sampler.sample_paths(key, n_paths=2)
+    with handlers.seed(rng_seed=0):
+        paths_b = sampler.sample_paths(key, n_paths=2)
+    out_a = paths_a(X_star)
+    out_b = paths_b(X_star)
+    assert jnp.all(jnp.isfinite(out_a))
+    # Two seeded sample_paths calls under the same rng_seed should yield
+    # identical hyperparameter draws and therefore identical paths.
+    assert jnp.allclose(out_a, out_b, atol=1e-6)
