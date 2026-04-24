@@ -220,6 +220,15 @@ class PathwiseSampler(eqx.Module):
 
         X = self.conditioned_gp.prior.X
         kernel = self.conditioned_gp.prior.kernel
+        # Reuse the resolved (variance, lengthscale) captured by
+        # GPPrior.condition under its kernel context. For Pattern B/C
+        # kernels the cached operator was built with these exact
+        # values; resampling here would put the RFF basis in a
+        # different posterior than the cached training solve.
+        cached = self.conditioned_gp.resolved_hyperparams
+        cached_variance, cached_lengthscale = (
+            cached if cached is not None else (None, None)
+        )
         variance, lengthscale, omega, phase, feature_weights = draw_rff_cosine_basis(
             kernel,
             rff_key,
@@ -227,6 +236,8 @@ class PathwiseSampler(eqx.Module):
             n_features=self.n_features,
             in_features=X.shape[1],
             dtype=X.dtype,
+            variance=cached_variance,
+            lengthscale=cached_lengthscale,
         )
         prior_train = evaluate_rff_cosine_paths(
             X,
@@ -237,8 +248,16 @@ class PathwiseSampler(eqx.Module):
             weights=feature_weights,
         )
         mean_train = _broadcast_mean(self.conditioned_gp.prior.mean_fn, X)
-        noise = jnp.sqrt(jnp.asarray(self.conditioned_gp.noise_var, dtype=X.dtype)) * (
-            jax.random.normal(noise_key, shape=(n_paths, X.shape[0]), dtype=X.dtype)
+        # Matheron requires Cov(eps_tilde) to match the diagonal added to
+        # the cached operator. _noisy_operator uses (noise_var + jitter) I,
+        # so eps_tilde must have the same variance — otherwise the
+        # correction solve is inconsistent and paths are under-dispersed
+        # (pronounced when jitter is bumped up for stability).
+        noise_var = jnp.asarray(self.conditioned_gp.noise_var, dtype=X.dtype)
+        jitter = jnp.asarray(self.conditioned_gp.prior.jitter, dtype=X.dtype)
+        eps_var = noise_var + jitter
+        noise = jnp.sqrt(eps_var) * jax.random.normal(
+            noise_key, shape=(n_paths, X.shape[0]), dtype=X.dtype
         )
         residual = (
             self.conditioned_gp.y[None, :] - (mean_train[None, :] + prior_train) - noise
@@ -307,16 +326,22 @@ class DecoupledPathwiseSampler(eqx.Module):
     def sample_paths(self, key: Array, n_paths: int = 1) -> PathwiseFunction:
         """Sample callable sparse posterior paths.
 
-        ``key`` is split into two subkeys: one for the RFF basis and
-        one for ``n_paths`` independent guide draws. The RFF basis
+        ``key`` is split into three subkeys: one for the RFF basis, one
+        for ``n_paths`` independent guide draws, and one for the
+        jitter-augmentation of the prior inducing draw. The RFF basis
         draw and the :math:`K_{zz}` assembly share a single
         ``_kernel_context`` so kernels with hyperparameter priors
-        (Pattern B / C) sample ``(variance, lengthscale)`` once — without
-        this, ``prior_inducing`` and ``inducing_operator`` would be
-        built from inconsistent hyperparameter draws and the Matheron
-        correction would be wrong.
+        (Pattern B / C) sample ``(variance, lengthscale)`` once.
+
+        The Matheron correction needs ``Cov(u_tilde) = K_{zz} + \
+        \\text{jitter}\\,I`` so it matches the operator that the
+        correction is solved against. The bare RFF draw at ``Z``
+        produces only the ``K_{zz}`` part; we add an iid Gaussian
+        with variance ``jitter`` per inducing index to close the gap —
+        without this, paths are under-dispersed when jitter is bumped
+        up for stability.
         """
-        rff_key, guide_key = jax.random.split(key, 2)
+        rff_key, guide_key, jitter_key = jax.random.split(key, 3)
 
         Z = self.prior.Z
         assert Z is not None  # __check_init__ guarantees
@@ -339,6 +364,12 @@ class DecoupledPathwiseSampler(eqx.Module):
                 weights=feature_weights,
             )
             inducing_chol = cholesky(self.prior.inducing_operator())
+
+        # See docstring: u_tilde must have covariance K_zz + jitter I.
+        jitter = jnp.asarray(self.prior.jitter, dtype=Z.dtype)
+        prior_inducing = prior_inducing + jnp.sqrt(jitter) * jax.random.normal(
+            jitter_key, shape=prior_inducing.shape, dtype=Z.dtype
+        )
 
         guide_keys = jax.random.split(guide_key, n_paths)
         guide_samples = jax.vmap(self.guide.sample)(guide_keys)

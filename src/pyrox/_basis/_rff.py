@@ -57,33 +57,49 @@ from pyrox.gp._kernels import RBF, Matern
 from pyrox.gp._protocols import Kernel
 
 
-def _draw_spectral_frequencies_and_hyperparams(
+def _draw_spectral_frequencies(
     kernel: Kernel,
     key: Array,
     *,
     shape: tuple[int, ...],
     dtype: jnp.dtype,
-) -> tuple[Float[Array, ""], Float[Array, ""], Float[Array, " ..."]]:
-    """Sample spectral frequencies + read kernel hyperparameters.
+) -> Float[Array, " ..."]:
+    """Sample spectral frequencies for the kernel's spectral density.
+
+    Pure function of the kernel *type* (and ``Matern.nu``); no
+    hyperparameter prior sites are registered, so this is safe to call
+    outside any :func:`_kernel_context`.
+    """
+    if isinstance(kernel, RBF):
+        return jax.random.normal(key, shape=shape, dtype=dtype)
+    if isinstance(kernel, Matern):
+        return jnp.asarray(
+            dist.StudentT(df=2.0 * kernel.nu).sample(key, sample_shape=shape),
+            dtype=dtype,
+        )
+    raise NotImplementedError(
+        "RFF frequency sampling currently supports RBF and Matern kernels; "
+        f"got {type(kernel).__name__}."
+    )
+
+
+def _read_kernel_hyperparams(
+    kernel: Kernel,
+    *,
+    dtype: jnp.dtype,
+) -> tuple[Float[Array, ""], Float[Array, ""]]:
+    """Read ``(variance, lengthscale)`` from the kernel.
 
     Must be called inside a :func:`pyrox.gp._context._kernel_context`
     so Pattern B / C kernels register their ``pyrox_sample`` sites once.
     """
-    if isinstance(kernel, RBF):
-        variance = jnp.asarray(kernel.get_param("variance"), dtype=dtype)
-        lengthscale = jnp.asarray(kernel.get_param("lengthscale"), dtype=dtype)
-        omega = jax.random.normal(key, shape=shape, dtype=dtype)
-        return variance, lengthscale, omega
-    if isinstance(kernel, Matern):
-        variance = jnp.asarray(kernel.get_param("variance"), dtype=dtype)
-        lengthscale = jnp.asarray(kernel.get_param("lengthscale"), dtype=dtype)
-        omega = jnp.asarray(
-            dist.StudentT(df=2.0 * kernel.nu).sample(key, sample_shape=shape),
-            dtype=dtype,
+    if isinstance(kernel, (RBF, Matern)):
+        return (
+            jnp.asarray(kernel.get_param("variance"), dtype=dtype),
+            jnp.asarray(kernel.get_param("lengthscale"), dtype=dtype),
         )
-        return variance, lengthscale, omega
     raise NotImplementedError(
-        "RFF frequency sampling currently supports RBF and Matern kernels; "
+        "Hyperparameter read currently supports RBF and Matern kernels; "
         f"got {type(kernel).__name__}."
     )
 
@@ -96,6 +112,8 @@ def draw_rff_cosine_basis(
     n_features: int,
     in_features: int,
     dtype: jnp.dtype,
+    variance: Float[Array, ""] | None = None,
+    lengthscale: Float[Array, ""] | None = None,
 ) -> tuple[
     Float[Array, ""],
     Float[Array, ""],
@@ -114,33 +132,52 @@ def draw_rff_cosine_basis(
         n_features: Number of random features per draw ``F``.
         in_features: Input dimension ``D``.
         dtype: Floating dtype for all outputs.
+        variance, lengthscale: Optional pre-resolved scalar overrides.
+            When provided, the helper skips ``kernel.get_param`` —
+            essential when the same hyperparameter draw needs to be
+            reused across a chain of operations (e.g. matching the
+            cached operator on a :class:`ConditionedGP`). When
+            ``None``, the values are read from the kernel under a
+            fresh :func:`_kernel_context`, which resamples hyperparam
+            priors for Pattern B/C kernels.
 
     Returns:
         ``(variance, lengthscale, omega, phase, weights)`` where
-        ``variance`` and ``lengthscale`` are scalars read from the
-        kernel under its :func:`pyrox.gp._context._kernel_context` (so
-        Pattern B / C kernels with prior'd hyperparameters register
-        their ``pyrox_sample`` sites here), ``omega`` has shape
+        ``variance`` and ``lengthscale`` are either the supplied
+        overrides or scalars read from the kernel; ``omega`` has shape
         ``(S, D, F)``, and ``phase`` / ``weights`` have shape ``(S, F)``.
 
     Raises:
-        ValueError: If ``n_paths < 1`` or ``n_features < 1``.
+        ValueError: If ``n_paths < 1`` or ``n_features < 1``, or if
+            exactly one of ``variance`` / ``lengthscale`` is supplied.
         NotImplementedError: For unsupported kernels.
     """
     if n_features < 1:
         raise ValueError(f"n_features must be >= 1, got {n_features}.")
     if n_paths < 1:
         raise ValueError(f"n_paths must be >= 1, got {n_paths}.")
+    if (variance is None) != (lengthscale is None):
+        raise ValueError(
+            "variance and lengthscale must both be supplied together or both omitted."
+        )
 
     freq_key, phase_key, weight_key = jax.random.split(key, 3)
 
-    with _kernel_context(kernel):
-        variance, lengthscale, omega = _draw_spectral_frequencies_and_hyperparams(
-            kernel,
-            freq_key,
-            shape=(n_paths, in_features, n_features),
-            dtype=dtype,
-        )
+    # Spectral frequency draw is pure (depends only on kernel *type*),
+    # so it never needs a kernel context. Reading variance/lengthscale
+    # does — gate behind the optional override path.
+    omega = _draw_spectral_frequencies(
+        kernel,
+        freq_key,
+        shape=(n_paths, in_features, n_features),
+        dtype=dtype,
+    )
+    if variance is not None and lengthscale is not None:
+        variance = jnp.asarray(variance, dtype=dtype)
+        lengthscale = jnp.asarray(lengthscale, dtype=dtype)
+    else:
+        with _kernel_context(kernel):
+            variance, lengthscale = _read_kernel_hyperparams(kernel, dtype=dtype)
 
     phase = jax.random.uniform(
         phase_key,

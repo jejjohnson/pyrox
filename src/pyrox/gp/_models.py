@@ -135,8 +135,18 @@ class GPPrior(eqx.Module):
         alongside ``noise_var`` in the conditioned operator and solve, so
         every downstream predict / sample call sees the regularized
         covariance.
+
+        The operator construction and any subsequent hyperparameter
+        capture share one :func:`_kernel_context`, so for Pattern B/C
+        kernels with priors the cached operator and the resolved
+        hyperparameters on the returned :class:`ConditionedGP` come from
+        the same draw. Downstream consumers (notably
+        :class:`pyrox.gp.PathwiseSampler`) reuse those values to stay
+        consistent with the cached operator.
         """
-        operator = self._noisy_operator(noise_var)
+        with _kernel_context(self.kernel):
+            operator = self._noisy_operator(noise_var)
+            resolved_hyperparams = _resolve_kernel_hyperparams(self.kernel)
         residual = y - self.mean(self.X)
         cache = build_prediction_cache(
             operator, residual, solver=self._resolved_solver()
@@ -147,7 +157,33 @@ class GPPrior(eqx.Module):
             noise_var=noise_var,
             cache=cache,
             operator=operator,
+            resolved_hyperparams=resolved_hyperparams,
         )
+
+
+def _resolve_kernel_hyperparams(
+    kernel: Kernel,
+) -> tuple[Float[Array, ""], Float[Array, ""]] | None:
+    """Capture ``(variance, lengthscale)`` for kernels that expose them.
+
+    Must be called inside the same :func:`_kernel_context` as the
+    kernel evaluation that downstream code wants to stay consistent
+    with — Pattern B/C kernels register their priors per call, and a
+    fresh outer context would resample.
+
+    Returns ``None`` for kernels without those names so callers fall
+    back to whatever default the consumer expects (e.g.
+    :func:`pyrox._basis.draw_rff_cosine_basis` will read them itself).
+    """
+    get_param = getattr(kernel, "get_param", None)
+    if get_param is None:
+        return None
+    try:
+        variance = jnp.asarray(get_param("variance"))
+        lengthscale = jnp.asarray(get_param("lengthscale"))
+    except (KeyError, AttributeError, ValueError):
+        return None
+    return variance, lengthscale
 
 
 class ConditionedGP(eqx.Module):
@@ -163,6 +199,7 @@ class ConditionedGP(eqx.Module):
     noise_var: Float[Array, ""]
     cache: PredictionCache
     operator: lx.AbstractLinearOperator
+    resolved_hyperparams: tuple[Float[Array, ""], Float[Array, ""]] | None = None
 
     def predict_mean(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
         r""":math:`\mu_* = \mu(X_*) + K_{*f}\,\alpha`."""

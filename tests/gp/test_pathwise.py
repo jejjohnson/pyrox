@@ -331,3 +331,77 @@ def test_decoupled_pathwise_consistent_kernel_context_for_pattern_b_kernel():
     # Two seeded sample_paths calls under the same rng_seed should yield
     # identical hyperparameter draws and therefore identical paths.
     assert jnp.allclose(out_a, out_b, atol=1e-6)
+
+
+def test_dense_pathwise_reuses_conditioned_hyperparams_for_rff_basis():
+    """Regression for P1 (codex 24/04): the RFF basis on a Pattern B/C
+    kernel must reuse the (variance, lengthscale) draw that produced the
+    cached operator on ConditionedGP, otherwise the basis and the
+    correction solve are from different posteriors."""
+    import numpyro.distributions as dist
+    from numpyro import handlers
+
+    X, y = _toy_dataset(n=6)
+    kernel = RBF(init_variance=1.0, init_lengthscale=0.5)
+    kernel.set_prior("lengthscale", dist.LogNormal(jnp.log(0.5), 0.3))
+    with handlers.seed(rng_seed=0):
+        posterior = GPPrior(kernel=kernel, X=X, jitter=1e-6).condition(
+            y, jnp.array(0.05)
+        )
+    cached = posterior.resolved_hyperparams
+    assert cached is not None, "condition() must cache resolved hyperparams"
+    cached_variance, cached_lengthscale = cached
+    paths = PathwiseSampler(posterior, n_features=128).sample_paths(
+        jax.random.PRNGKey(0), n_paths=2
+    )
+    # PathwiseFunction stores variance/lengthscale equal to the cached values.
+    assert jnp.allclose(paths.variance, cached_variance)
+    assert jnp.allclose(paths.lengthscale, cached_lengthscale)
+
+
+def test_dense_pathwise_residual_noise_includes_jitter():
+    """Regression for P2 (codex 24/04): when jitter is non-trivial, eps_tilde
+    in PathwiseSampler must have variance noise_var + jitter to match the
+    diagonal added to the cached operator. Otherwise pathwise empirical
+    variance under-shoots ConditionedGP.predict_var."""
+    X, y = _toy_dataset(n=5)
+    X_star = jnp.array([[-0.5], [0.0], [0.5]])
+    # Bumped-up jitter so the bug would matter.
+    posterior = GPPrior(
+        kernel=RBF(init_variance=1.0, init_lengthscale=0.5),
+        X=X,
+        jitter=0.05,
+    ).condition(y, jnp.array(0.02))
+    draws = PathwiseSampler(posterior, n_features=4096)(
+        jax.random.PRNGKey(0), X_star, n_paths=512
+    )
+    # ConditionedGP.predict_var is the analytic posterior variance under the
+    # SAME (jitter + noise_var) operator, so empirical variance from paths
+    # should match it once the jitter-aware residual noise is in place.
+    analytic_var = posterior.predict_var(X_star)
+    empirical_var = jnp.var(draws, axis=0)
+    assert jnp.allclose(empirical_var, analytic_var, atol=0.1, rtol=0.1)
+
+
+def test_decoupled_pathwise_inducing_jitter_makes_paths_match_guide_predict():
+    """Regression for P2 (codex 24/04): the inducing prior draw needs an
+    iid jitter-noise term so its covariance matches K_zz + jitter I.
+    Without it, decoupled paths are under-dispersed vs guide.predict when
+    jitter is non-trivial."""
+    Z = jnp.linspace(-1.5, 1.5, 5).reshape(-1, 1)
+    kernel = RBF(init_variance=1.0, init_lengthscale=0.5)
+    prior = SparseGPPrior(kernel=kernel, Z=Z, jitter=0.05)
+    guide = FullRankGuide(
+        mean=jnp.linspace(-0.3, 0.3, Z.shape[0]),
+        scale_tril=0.2 * jnp.eye(Z.shape[0]),
+    )
+    X_star = jnp.array([[-0.9], [0.0], [1.1]])
+    K_zz_op, K_xz, K_xx_diag = prior.predictive_blocks(X_star)
+    _svgp_mean, svgp_var = guide.predict(K_xz, K_zz_op, K_xx_diag)
+    draws = DecoupledPathwiseSampler(prior, guide, n_features=4096)(
+        jax.random.PRNGKey(0), X_star, n_paths=512
+    )
+    empirical_var = jnp.var(draws, axis=0)
+    # Match guide.predict's analytic SVGP variance — only correct once
+    # the prior_inducing draw is augmented to cov K_zz + jitter I.
+    assert jnp.allclose(empirical_var, svgp_var, atol=0.15, rtol=0.15)
