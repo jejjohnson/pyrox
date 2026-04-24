@@ -45,6 +45,75 @@ def _validate_kernel_count(kernels: tuple[Kernel, ...], num_latents: int) -> Non
         )
 
 
+def _kernel_has_priors(kernel: Kernel) -> bool:
+    """Return ``True`` if ``kernel`` has at least one prior registered.
+
+    Non-:class:`pyrox.PyroxModule` kernels (Pattern A pure equinox
+    modules) cannot register sample sites and are reported as having no
+    priors regardless of any other state.
+    """
+    state_fn = getattr(kernel, "_state", None)
+    if state_fn is None:
+        return False
+    try:
+        state = state_fn()
+    except Exception:  # pragma: no cover - defensive
+        return False
+    return any(
+        getattr(entry, "prior", None) is not None
+        for entry in getattr(state, "params", {}).values()
+    )
+
+
+def _validate_kernel_scopes_unique(kernels: tuple[Kernel, ...]) -> None:
+    """Reject distinct priored kernel instances that share a pyrox scope.
+
+    Multi-output kernel collections accept a tuple of latent kernels.
+    Two distinct :class:`pyrox.PyroxModule`-based kernels that share the
+    same ``pyrox_name`` (e.g. two ``RBF()`` instances both named
+    ``"RBF"``) and have priors set would each try to register identical
+    sample-site names in a NumPyro trace, raising the duplicate-site
+    error. We catch this at construction with an actionable message so
+    the user can either (a) reuse a single instance to tie
+    hyperparameters or (b) set distinct ``pyrox_name`` values per
+    latent, e.g. ``RBF(pyrox_name='RBF_q0')``.
+
+    Reusing the same instance across slots (intentional tying) is fine
+    and not flagged. Kernels without priors do not register sample
+    sites and are not flagged either, so the validator stays silent for
+    pure deterministic Pattern A kernels.
+    """
+    scope_to_owner: dict[str, tuple[int, int]] = {}  # scope -> (id, position)
+    collisions: list[tuple[int, int, str]] = []  # (q1, q2, scope)
+    for q, kernel in enumerate(kernels):
+        scope_fn = getattr(kernel, "_pyrox_scope_name", None)
+        if scope_fn is None or not _kernel_has_priors(kernel):
+            continue
+        scope = scope_fn()
+        prior = scope_to_owner.get(scope)
+        if prior is None:
+            scope_to_owner[scope] = (id(kernel), q)
+            continue
+        prior_id, prior_q = prior
+        if prior_id == id(kernel):
+            continue  # same instance — intentional tying
+        collisions.append((prior_q, q, scope))
+    if collisions:
+        offenders = ", ".join(
+            f"positions {q1} and {q2} share scope {scope!r}"
+            for q1, q2, scope in collisions
+        )
+        raise ValueError(
+            "distinct latent kernel instances with priors share pyrox scope "
+            f"name(s): {offenders}. Each priored kernel registers sample "
+            "sites under its scope name, so distinct instances sharing one "
+            "scope would raise duplicate-site errors under a NumPyro trace. "
+            "Either reuse one kernel instance to tie hyperparameters across "
+            "latents, or set distinct `pyrox_name` values per kernel "
+            "(e.g. `RBF(pyrox_name='RBF_q0')`, `RBF(pyrox_name='RBF_q1')`)."
+        )
+
+
 def _check_nonnegative_concrete(arr: Float[Array, " ..."], *, name: str) -> None:
     """Best-effort nonnegativity check for an array that may be traced.
 
@@ -112,6 +181,7 @@ class LMCKernel(eqx.Module):
     def __check_init__(self) -> None:
         _validate_mixing(self.mixing)
         _validate_kernel_count(self.kernels, self.mixing.shape[1])
+        _validate_kernel_scopes_unique(self.kernels)
 
     @property
     def num_outputs(self) -> int:
@@ -344,6 +414,7 @@ class OILMMKernel(eqx.Module):
                 "Project via `jnp.linalg.qr(W)[0]` before construction, or "
                 "pass check_orthogonal=False to bypass."
             )
+        _validate_kernel_scopes_unique(self.kernels)
 
     @property
     def num_outputs(self) -> int:
@@ -489,6 +560,7 @@ class SharedInducingPoints(eqx.Module):
         """
         if not kernels:
             raise ValueError("kernels must be non-empty.")
+        _validate_kernel_scopes_unique(kernels)
         with _kernel_contexts(kernels):
             return tuple(kernel(self.locations, self.locations) for kernel in kernels)
 
@@ -500,6 +572,7 @@ class SharedInducingPoints(eqx.Module):
         """
         if not kernels:
             raise ValueError("kernels must be non-empty.")
+        _validate_kernel_scopes_unique(kernels)
         with _kernel_contexts(kernels):
             blocks = tuple(
                 _psd_matrix_op(kernel(self.locations, self.locations))
@@ -519,6 +592,7 @@ class SharedInducingPoints(eqx.Module):
         """Return one ``K(Z, X)`` block per latent kernel."""
         if not kernels:
             raise ValueError("kernels must be non-empty.")
+        _validate_kernel_scopes_unique(kernels)
         with _kernel_contexts(kernels):
             return tuple(kernel(self.locations, X) for kernel in kernels)
 
@@ -541,6 +615,7 @@ class SharedInducingPoints(eqx.Module):
         """
         if not kernels:
             raise ValueError("kernels must be non-empty.")
+        _validate_kernel_scopes_unique(kernels)
         with _kernel_contexts(kernels):
             K_uu_blocks = tuple(
                 kernel(self.locations, self.locations) for kernel in kernels

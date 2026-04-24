@@ -642,3 +642,99 @@ def test_shared_inducing_K_uu_shares_context_when_kernel_tied_across_latents():
     with numpyro.handlers.trace() as tr, handlers.seed(rng_seed=2):
         model()
     assert "RBF.variance" in tr
+
+
+# ---------------------------------------------------------------------------
+# Scope-name uniqueness validator (untied priored kernels)
+# ---------------------------------------------------------------------------
+
+
+def test_lmc_rejects_distinct_priored_kernels_sharing_scope():
+    """Regression for codex P1: two distinct ``RBF()`` instances both
+    default to ``pyrox_name='RBF'``. With priors set, both would
+    register identical sample sites in a NumPyro trace, raising the
+    duplicate-site error. Catch this at construction.
+    """
+    k0 = RBF()
+    k0.set_prior("variance", dist.LogNormal(0.0, 0.3))
+    k1 = RBF()
+    k1.set_prior("variance", dist.LogNormal(0.0, 0.3))
+    with pytest.raises(ValueError, match="distinct latent kernel instances"):
+        LMCKernel(
+            kernels=(k0, k1),
+            mixing=jnp.array([[1.0, 0.5], [0.25, -1.0]]),
+        )
+
+
+def test_oilmm_rejects_distinct_priored_kernels_sharing_scope():
+    k0 = RBF()
+    k0.set_prior("variance", dist.LogNormal(0.0, 0.3))
+    k1 = RBF()
+    k1.set_prior("variance", dist.LogNormal(0.0, 0.3))
+    with pytest.raises(ValueError, match="distinct latent kernel instances"):
+        OILMMKernel(kernels=(k0, k1), mixing=jnp.eye(2))
+
+
+def test_lmc_accepts_distinct_priored_kernels_with_explicit_unique_scopes():
+    """User-set distinct ``pyrox_name`` values bypass the validator."""
+    k0 = RBF(pyrox_name="RBF_q0")
+    k0.set_prior("variance", dist.LogNormal(0.0, 0.3))
+    k1 = RBF(pyrox_name="RBF_q1")
+    k1.set_prior("variance", dist.LogNormal(0.0, 0.3))
+    lmc = LMCKernel(
+        kernels=(k0, k1),
+        mixing=jnp.array([[1.0, 0.5], [0.25, -1.0]]),
+    )
+    assert lmc.num_latents == 2
+
+    # Trace registers both site names without collision.
+    X = jnp.array([[0.0], [0.5], [1.0]])
+
+    def model():
+        return lmc.full_covariance(X)
+
+    with numpyro.handlers.trace() as tr, handlers.seed(rng_seed=5):
+        model()
+    assert "RBF_q0.variance" in tr
+    assert "RBF_q1.variance" in tr
+
+
+def test_lmc_accepts_distinct_kernels_without_priors_sharing_scope():
+    """Pure deterministic kernels (no priors) cannot collide on a
+    NumPyro trace, so the validator must not flag two ``RBF()``
+    instances without priors — this is the common usage in tests and
+    pure-MAP workflows.
+    """
+    lmc = LMCKernel(
+        kernels=(
+            RBF(init_variance=1.0, init_lengthscale=0.5),
+            RBF(init_variance=0.8, init_lengthscale=1.2),
+        ),
+        mixing=jnp.array([[1.0, 0.5], [0.25, -1.0]]),
+    )
+    assert lmc.num_latents == 2
+
+
+def test_lmc_accepts_tied_priored_kernel_reused_across_latents():
+    """The same priored instance reused across latents is intentional
+    hyperparameter tying and must remain accepted.
+    """
+    kernel = RBF()
+    kernel.set_prior("variance", dist.LogNormal(0.0, 0.3))
+    lmc = LMCKernel(
+        kernels=(kernel, kernel),
+        mixing=jnp.array([[1.0, 0.5], [0.25, -1.0]]),
+    )
+    assert lmc.num_latents == 2
+
+
+def test_shared_inducing_K_uu_rejects_distinct_priored_kernels_sharing_scope():
+    """The validator also fires on lower-level ``SharedInducingPoints``
+    helpers when the user passes priored colliding kernels directly."""
+    k0 = RBF()
+    k0.set_prior("variance", dist.LogNormal(0.0, 0.3))
+    k1 = RBF()
+    k1.set_prior("variance", dist.LogNormal(0.0, 0.3))
+    shared = SharedInducingPoints(locations=jnp.array([[-1.0], [1.0]]))
+    with pytest.raises(ValueError, match="distinct latent kernel instances"):
+        shared.K_uu((k0, k1))
