@@ -19,8 +19,10 @@ from __future__ import annotations
 import functools
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 import lineax as lx
+import numpy as np
 from gaussx import BlockDiag, Kronecker, SumOperator, oilmm_back_project, oilmm_project
 from jaxtyping import Array, Float
 
@@ -40,6 +42,26 @@ def _validate_kernel_count(kernels: tuple[Kernel, ...], num_latents: int) -> Non
         raise ValueError(
             "kernels must contain exactly one kernel per latent process; "
             f"got {len(kernels)} kernels for {num_latents} latent processes."
+        )
+
+
+def _check_nonnegative_concrete(arr: Float[Array, " ..."], *, name: str) -> None:
+    """Best-effort nonnegativity check for an array that may be traced.
+
+    Materializes the value via :func:`numpy.asarray` and asserts no
+    entry is negative. Under ``jax.jit`` / ``jax.vmap`` the array is a
+    tracer and cannot be materialized — in that case we silently skip
+    the check; the caller is responsible for keeping the value valid
+    inside a transformation.
+    """
+    try:
+        concrete = np.asarray(arr)
+    except jax.errors.TracerArrayConversionError:
+        return
+    if (concrete < 0).any():
+        raise ValueError(
+            f"{name} must be nonnegative for the resulting matrix to remain "
+            f"positive semi-definite; got entries < 0."
         )
 
 
@@ -199,11 +221,20 @@ class ICMKernel(eqx.Module):
 
     def __check_init__(self) -> None:
         _validate_mixing(self.mixing)
-        if self.kappa is not None and self.kappa.shape != (self.mixing.shape[0],):
-            raise ValueError(
-                "kappa must have shape (num_outputs,) when provided; "
-                f"got {self.kappa.shape}."
-            )
+        if self.kappa is not None:
+            if self.kappa.shape != (self.mixing.shape[0],):
+                raise ValueError(
+                    "kappa must have shape (num_outputs,) when provided; "
+                    f"got {self.kappa.shape}."
+                )
+            # ``B = W W^T + diag(kappa)`` is downstream wrapped with the
+            # PSD tag (``_psd_matrix_op``). ``W W^T`` is PSD by
+            # construction, but a negative ``kappa`` entry can pull
+            # ``B`` out of PSD and silently break Cholesky-based solver
+            # paths. Reject at construction when the value is concrete;
+            # under ``jax.jit`` the check is a no-op (see
+            # :func:`_check_nonnegative_concrete`).
+            _check_nonnegative_concrete(self.kappa, name="ICMKernel.kappa")
 
     @property
     def num_outputs(self) -> int:
@@ -491,6 +522,32 @@ class SharedInducingPoints(eqx.Module):
         with _kernel_contexts(kernels):
             return tuple(kernel(self.locations, X) for kernel in kernels)
 
+    def inducing_blocks(
+        self,
+        X: Float[Array, "N D"],
+        kernels: tuple[Kernel, ...],
+    ) -> tuple[tuple[Float[Array, "M M"], ...], tuple[Float[Array, "M N"], ...]]:
+        """Return ``(K_uu_blocks, K_uf_blocks)`` under one shared context.
+
+        Pairs the per-latent ``K(Z, Z)`` and ``K(Z, X)`` evaluations so
+        Pattern B/C kernels with priored hyperparameters register their
+        :func:`pyrox_sample` sites once across the K_uu/K_uf pair.
+        Calling :meth:`latent_covariances` and :meth:`cross_covariances`
+        sequentially would close and reopen each kernel's per-call
+        context between the two calls, clearing the sample-site cache
+        and tripping duplicate-site registration under a NumPyro trace
+        (or resampling inconsistent hyperparameters under
+        :func:`numpyro.handlers.seed`).
+        """
+        if not kernels:
+            raise ValueError("kernels must be non-empty.")
+        with _kernel_contexts(kernels):
+            K_uu_blocks = tuple(
+                kernel(self.locations, self.locations) for kernel in kernels
+            )
+            K_uf_blocks = tuple(kernel(self.locations, X) for kernel in kernels)
+        return K_uu_blocks, K_uf_blocks
+
 
 class MultiOutputInducingVariables(eqx.Module):
     """Shared inducing-point structure for LMC-style sparse workflows.
@@ -564,12 +621,42 @@ class MultiOutputInducingVariables(eqx.Module):
         """
         _validate_kernel_count(kernels, self.num_latents)
         latent_blocks = self.inducing.cross_covariances(X, kernels)
+        return self._assemble_K_uf(latent_blocks)
+
+    def _assemble_K_uf(
+        self, latent_blocks: tuple[Float[Array, "M N"], ...]
+    ) -> Float[Array, "QM PN"]:
+        """Stack per-latent ``K(Z, X)`` blocks into the ``(Q*M, P*N)`` ``K_uf``."""
         rows = []
         for q, K_zx in enumerate(latent_blocks):
             scaled = self.mixing[:, q][:, None, None] * K_zx[None, :, :]
             row = jnp.transpose(scaled, (1, 0, 2)).reshape(K_zx.shape[0], -1)
             rows.append(row)
         return jnp.concatenate(rows, axis=0)
+
+    def inducing_blocks(
+        self,
+        X: Float[Array, "N D"],
+        kernels: tuple[Kernel, ...],
+    ) -> tuple[BlockDiag, Float[Array, "QM PN"]]:
+        """Return ``(K_uu_op, K_uf)`` under one shared kernel context.
+
+        Use this in place of separate :meth:`K_uu_operator` /
+        :meth:`K_uf` calls when assembling an SVGP-style sparse
+        predictive: it shares one per-call context per unique kernel
+        instance across both blocks, so Pattern B/C kernels with priored
+        hyperparameters register their :func:`pyrox_sample` sites
+        exactly once and the two blocks see the same hyperparameter
+        draw. Sequential calls would close the per-call context between
+        ``K_uu`` and ``K_uf``, which would re-register sites under a
+        NumPyro trace (or resample inconsistent hyperparameters under
+        :func:`numpyro.handlers.seed`).
+        """
+        _validate_kernel_count(kernels, self.num_latents)
+        K_uu_blocks, K_uf_blocks = self.inducing.inducing_blocks(X, kernels)
+        K_uu_op = BlockDiag(*(_psd_matrix_op(B) for B in K_uu_blocks))
+        K_uf = self._assemble_K_uf(K_uf_blocks)
+        return K_uu_op, K_uf  # ty: ignore[invalid-return-type]
 
 
 __all__ = [

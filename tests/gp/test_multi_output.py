@@ -421,6 +421,69 @@ def test_multi_output_inducing_K_uu_operator_is_block_diagonal():
     assert jnp.allclose(op.as_matrix(), inducing.K_uu(kernels))
 
 
+def test_multi_output_inducing_blocks_matches_separate_K_uu_K_uf():
+    Z = jnp.array([[-1.0], [1.0]])
+    X = jnp.array([[0.0], [0.5], [1.0]])
+    kernels = (
+        RBF(init_variance=1.0, init_lengthscale=0.5),
+        RBF(init_variance=0.8, init_lengthscale=1.2),
+    )
+    inducing = MultiOutputInducingVariables(
+        inducing=SharedInducingPoints(locations=Z),
+        mixing=jnp.array([[1.0, 0.5], [-0.3, 2.0]]),
+    )
+    K_uu_op, K_uf = inducing.inducing_blocks(X, kernels)
+    assert is_block_diagonal(K_uu_op)
+    assert jnp.allclose(K_uu_op.as_matrix(), inducing.K_uu(kernels))
+    assert jnp.allclose(K_uf, inducing.K_uf(X, kernels))
+
+
+def test_multi_output_inducing_blocks_shares_context_when_kernel_tied():
+    """Regression for the codex P1 review: K_uu and K_uf called
+    sequentially via separate ``_kernel_contexts`` would re-register
+    sample sites for a tied kernel, tripping a NumPyro trace duplicate-
+    site error. ``inducing_blocks`` shares one context across the pair.
+    """
+    kernel = RBF()
+    kernel.set_prior("variance", dist.LogNormal(0.0, 0.3))
+    kernel.set_prior("lengthscale", dist.LogNormal(0.0, 0.3))
+    Z = jnp.array([[-1.0], [0.0], [1.0]])
+    X = jnp.array([[-0.5], [0.5]])
+    inducing = MultiOutputInducingVariables(
+        inducing=SharedInducingPoints(locations=Z),
+        mixing=jnp.array([[1.0, 0.5], [-0.3, 2.0]]),
+    )
+
+    def model():
+        return inducing.inducing_blocks(X, (kernel, kernel))
+
+    with numpyro.handlers.trace() as tr, handlers.seed(rng_seed=3):
+        K_uu_op, K_uf = model()
+    assert "RBF.variance" in tr
+    assert "RBF.lengthscale" in tr
+    # Outputs are still well-formed.
+    assert K_uu_op.as_matrix().shape == (6, 6)
+    assert K_uf.shape == (6, 4)
+
+
+def test_shared_inducing_blocks_shares_context_when_kernel_tied():
+    kernel = RBF()
+    kernel.set_prior("variance", dist.LogNormal(0.0, 0.3))
+    Z = jnp.array([[-1.0], [0.0], [1.0]])
+    X = jnp.array([[-0.5], [0.5]])
+    shared = SharedInducingPoints(locations=Z)
+
+    def model():
+        return shared.inducing_blocks(X, (kernel, kernel))
+
+    with numpyro.handlers.trace() as tr, handlers.seed(rng_seed=4):
+        K_uu_blocks, K_uf_blocks = model()
+    assert "RBF.variance" in tr
+    # Blocks for tied kernel must be identical (same hyperparameter draw).
+    assert jnp.allclose(K_uu_blocks[0], K_uu_blocks[1])
+    assert jnp.allclose(K_uf_blocks[0], K_uf_blocks[1])
+
+
 # ---------------------------------------------------------------------------
 # Validators
 # ---------------------------------------------------------------------------
@@ -446,6 +509,48 @@ def test_icm_rejects_mismatched_kappa_shape():
             mixing=jnp.array([[1.0], [0.5]]),
             kappa=jnp.array([0.1, 0.2, 0.3]),
         )
+
+
+def test_icm_rejects_negative_kappa():
+    """Regression: a negative ``kappa`` entry can pull ``B`` out of PSD,
+    but downstream operators tag ``B`` as PSD — silently breaking
+    Cholesky-backed solvers. The validator catches this at construction.
+    """
+    with pytest.raises(ValueError, match=r"ICMKernel\.kappa must be nonnegative"):
+        ICMKernel(
+            kernel=RBF(),
+            mixing=jnp.array([[1.0], [0.5]]),
+            kappa=jnp.array([0.1, -0.2]),
+        )
+
+
+def test_icm_accepts_zero_kappa():
+    """Zero kappa is on the PSD boundary and must remain accepted."""
+    icm = ICMKernel(
+        kernel=RBF(),
+        mixing=jnp.array([[1.0], [0.5]]),
+        kappa=jnp.zeros((2,)),
+    )
+    assert icm.num_outputs == 2
+
+
+def test_icm_kappa_check_is_no_op_under_jit():
+    """The nonnegativity check is best-effort: under tracing the kappa
+    value is not concrete and the check is skipped, leaving construction
+    inside ``jax.jit`` valid (the check still runs at the outer
+    eager-construction boundary the user controls).
+    """
+    mixing = jnp.array([[1.0], [0.5]])
+
+    @jax.jit
+    def make(kappa):
+        icm = ICMKernel(kernel=RBF(), mixing=mixing, kappa=kappa)
+        return icm.coregionalization_matrix()
+
+    # Even with negative kappa the jitted construction must not raise —
+    # the check has no concrete value to inspect.
+    out = make(jnp.array([0.1, -0.2]))
+    assert out.shape == (2, 2)
 
 
 def test_oilmm_rejects_more_latents_than_outputs():
