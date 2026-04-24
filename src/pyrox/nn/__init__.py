@@ -19,6 +19,16 @@ Dense / Bayesian-linear layers (``pyrox.nn._layers``):
 * :class:`ArcCosineFourierFeatures` — arc-cosine / ReLU features.
 * :class:`RandomKitchenSinks` — RFF + learned linear head.
 
+Multiplicative Filter Networks (``pyrox.nn._layers``):
+
+* :class:`FourierFilter` — single Fourier filter primitive.
+* :class:`GaborFilter` — single Gabor filter primitive.
+* :class:`FourierNet` — multiplicative Fourier filter network.
+* :class:`GaborNet` — multiplicative Gabor filter network.
+* :class:`BayesianFourierNet` — FourierNet with NumPyro priors.
+* :class:`BayesianGaborNet` — GaborNet with NumPyro priors.
+* :func:`mfn_forward` — pure-JAX MFN forward helper.
+
 Bayesian Neural Field stack (``pyrox.nn._bnf``):
 
 * :class:`Standardization` — affine normalization with fixed mean/std.
@@ -51,10 +61,16 @@ from pyrox.nn._features import (
 )
 from pyrox.nn._layers import (
     ArcCosineFourierFeatures,
+    BayesianFourierNet,
+    BayesianGaborNet,
     DenseFlipout,
     DenseNCP,
     DenseReparameterization,
     DenseVariational,
+    FourierFilter,
+    FourierNet,
+    GaborFilter,
+    GaborNet,
     HSGPFeatures,
     LaplaceFourierFeatures,
     MaternFourierFeatures,
@@ -65,17 +81,24 @@ from pyrox.nn._layers import (
     RBFCosineFeatures,
     RBFFourierFeatures,
     VariationalFourierFeatures,
+    mfn_forward,
 )
 
 
 __all__ = [
     "ArcCosineFourierFeatures",
+    "BayesianFourierNet",
+    "BayesianGaborNet",
     "BayesianNeuralField",
     "DenseFlipout",
     "DenseNCP",
     "DenseReparameterization",
     "DenseVariational",
     "FourierFeatures",
+    "FourierFilter",
+    "FourierNet",
+    "GaborFilter",
+    "GaborNet",
     "HSGPFeatures",
     "InteractionFeatures",
     "LaplaceFourierFeatures",
@@ -91,6 +114,7 @@ __all__ = [
     "VariationalFourierFeatures",
     "fourier_features",
     "interaction_features",
+    "mfn_forward",
     "seasonal_features",
     "seasonal_frequencies",
     "standardize",

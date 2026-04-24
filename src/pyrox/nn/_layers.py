@@ -17,14 +17,15 @@ Five layer families:
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import math
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, PRNGKeyArray
 
 from pyrox._basis import fourier_basis, spectral_density
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
@@ -874,3 +875,667 @@ class HSGPFeatures(PyroxModule):
             dist.Normal(0.0, 1.0).expand([self.num_basis]).to_event(1),
         )
         return jnp.einsum("nm,m->n", Phi, sqrt_S * alpha)
+
+
+# ---------------------------------------------------------------------------
+# Multiplicative Filter Networks (Fathony et al., ICLR 2021)
+# ---------------------------------------------------------------------------
+
+
+class FourierFilter(PyroxModule):
+    r"""Single Fourier filter: :math:`g(x) = \sin(\Omega x + \varphi)`.
+
+    One multiplicative filter primitive for use inside a
+    :class:`FourierNet`.  Outputs a vector of sinusoidal activations:
+
+    .. math::
+
+        g(x) = \sin(x\,\Omega^\top + \varphi)
+
+    Init follows Fathony et al. (2021) §4.1: frequencies are drawn as
+    :math:`\Omega_{ij} \sim \mathcal{N}(0,\,\sigma_f^2/D)` where
+    :math:`D` is ``in_features`` and :math:`\sigma_f` is
+    ``freq_scale``; phases are drawn as
+    :math:`\varphi_i \sim \mathrm{Uniform}(-\pi, \pi)`.
+
+    Attributes:
+        Omega: Frequency matrix of shape ``(out_features, in_features)``.
+        phi: Phase vector of shape ``(out_features,)``.
+        in_features: Input dimension.
+        out_features: Output (filter) dimension.
+        pyrox_name: Optional explicit scope name for NumPyro site
+            registration (used only in :class:`BayesianFourierNet`).
+    """
+
+    Omega: Float[Array, "out in"]
+    phi: Float[Array, " out"]
+    in_features: int = eqx.field(static=True)
+    out_features: int = eqx.field(static=True)
+    pyrox_name: str | None = None
+
+    @classmethod
+    def init(
+        cls,
+        in_features: int,
+        out_features: int,
+        *,
+        key: PRNGKeyArray,
+        freq_scale: float = 256.0,
+        pyrox_name: str | None = None,
+    ) -> FourierFilter:
+        """Construct with Fathony-et-al. §4.1 initialization.
+
+        Args:
+            in_features: Input dimension.
+            out_features: Number of filters (output dimension).
+            key: JAX PRNG key.
+            freq_scale: Frequency standard deviation :math:`\\sigma_f`
+                (default 256, as in the original paper).
+            pyrox_name: Optional scope name.
+
+        Returns:
+            Initialised :class:`FourierFilter`.
+        """
+        k_omega, k_phi = jax.random.split(key)
+        # Per-element std: sigma_f / sqrt(D)  (Fathony et al. 2021 Sec 4.1)
+        omega_std = freq_scale / math.sqrt(in_features)
+        Omega = jax.random.normal(k_omega, (out_features, in_features)) * omega_std
+        phi = jax.random.uniform(k_phi, (out_features,), minval=-jnp.pi, maxval=jnp.pi)
+        return cls(
+            Omega=Omega,
+            phi=phi,
+            in_features=in_features,
+            out_features=out_features,
+            pyrox_name=pyrox_name,
+        )
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, "N D"]) -> Float[Array, "N H"]:
+        """Apply the Fourier filter to a batch of inputs.
+
+        Args:
+            x: Input array of shape ``(N, D)`` or ``(D,)`` (single point).
+
+        Returns:
+            Filter output of shape ``(N, H)``.
+        """
+        return jnp.sin(jnp.atleast_2d(x) @ self.Omega.T + self.phi)
+
+
+class GaborFilter(PyroxModule):
+    r"""Single Gabor filter:
+    :math:`g(x) = \sin(\Omega x + \varphi) \odot \exp(-\tfrac{\gamma}{2}\|x - \mu\|^2)`.
+
+    One multiplicative filter primitive for use inside a
+    :class:`GaborNet`.  Each filter is a sinusoidal oscillation
+    modulated by a Gaussian envelope:
+
+    .. math::
+
+        g(x) = \sin(x\,\Omega^\top + \varphi)
+                \odot \exp\!\bigl(-\tfrac{\gamma}{2}\|x - \mu\|^2\bigr)
+
+    Init follows Fathony et al. (2021) §4.2:
+
+    1. :math:`\gamma_i \sim \mathrm{Gamma}(\alpha, \beta)` (per filter).
+    2. :math:`\mu_i \sim \mathrm{Uniform}(\texttt{domain\_low},
+       \texttt{domain\_high})` (per input dimension).
+    3. :math:`\Omega_{i,:} \sim \mathcal{N}(0, \gamma_i\,I_D)` — the
+       load-bearing tied initialization: frequency scale matches the
+       filter-specific bandwidth.
+
+    :math:`\gamma` is stored in log space so no positivity constraint is
+    needed on the optimizer.
+
+    Attributes:
+        Omega: Frequency matrix ``(out_features, in_features)``.
+        phi: Phase vector ``(out_features,)``.
+        mu: Envelope centres ``(out_features, in_features)``.
+        log_gamma: Log-bandwidth ``(out_features,)``; stored in log space
+            so :math:`\gamma = \exp(\texttt{log\_gamma}) > 0` without
+            optimizer constraints.
+        in_features: Input dimension.
+        out_features: Output (filter) dimension.
+        domain: ``(low, high)`` used for :math:`\mu` initialization (static).
+        pyrox_name: Optional scope name for NumPyro sites.
+    """
+
+    Omega: Float[Array, "out in"]
+    phi: Float[Array, " out"]
+    mu: Float[Array, "out in"]
+    log_gamma: Float[Array, " out"]
+    in_features: int = eqx.field(static=True)
+    out_features: int = eqx.field(static=True)
+    domain: tuple[float, float] = eqx.field(static=True)
+    pyrox_name: str | None = None
+
+    @classmethod
+    def init(
+        cls,
+        in_features: int,
+        out_features: int,
+        *,
+        key: PRNGKeyArray,
+        domain: tuple[float, float] = (-1.0, 1.0),
+        gamma_alpha: float = 6.0,
+        gamma_beta: float = 1.0,
+        pyrox_name: str | None = None,
+    ) -> GaborFilter:
+        """Construct with Fathony-et-al. §4.2 initialization.
+
+        Args:
+            in_features: Input dimension.
+            out_features: Number of filters (output dimension).
+            key: JAX PRNG key.
+            domain: ``(low, high)`` for :math:`\\mu` initialization.
+            gamma_alpha: Shape parameter of the Gamma prior on
+                :math:`\\gamma` (default 6.0).
+            gamma_beta: Rate parameter of the Gamma prior on
+                :math:`\\gamma` (default 1.0).
+            pyrox_name: Optional scope name.
+
+        Returns:
+            Initialised :class:`GaborFilter`.
+        """
+        k_gamma, k_mu, k_omega, k_phi = jax.random.split(key, 4)
+        # gamma ~ Gamma(alpha, rate=beta): jax.random.gamma samples Gamma(alpha, 1),
+        # dividing by beta converts to Gamma(alpha, rate=beta).
+        gamma = jax.random.gamma(k_gamma, gamma_alpha, (out_features,)) / gamma_beta
+        log_gamma = jnp.log(gamma)
+        # mu ~ Uniform(domain_low, domain_high)
+        mu = jax.random.uniform(
+            k_mu, (out_features, in_features), minval=domain[0], maxval=domain[1]
+        )
+        # Omega_i ~ N(0, gamma_i * I_D)  -- tied init (Fathony et al. 2021 Sec 4.2)
+        Omega = jax.random.normal(k_omega, (out_features, in_features)) * jnp.sqrt(
+            gamma[:, None]
+        )
+        phi = jax.random.uniform(k_phi, (out_features,), minval=-jnp.pi, maxval=jnp.pi)
+        return cls(
+            Omega=Omega,
+            phi=phi,
+            mu=mu,
+            log_gamma=log_gamma,
+            in_features=in_features,
+            out_features=out_features,
+            domain=domain,
+            pyrox_name=pyrox_name,
+        )
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, "N D"]) -> Float[Array, "N H"]:
+        """Apply the Gabor filter to a batch of inputs.
+
+        Args:
+            x: Input array of shape ``(N, D)`` or ``(D,)`` (single point).
+
+        Returns:
+            Filter output of shape ``(N, H)``.
+        """
+        x2d = jnp.atleast_2d(x)
+        gamma = jnp.exp(self.log_gamma)  # (H,)
+        # squared distance: (N, H)
+        diff = x2d[:, None, :] - self.mu[None, :, :]  # (N, H, D)
+        sq_dist = jnp.sum(diff**2, axis=-1)  # (N, H)
+        envelope = jnp.exp(-0.5 * gamma[None, :] * sq_dist)  # (N, H)
+        sinusoidal = jnp.sin(x2d @ self.Omega.T + self.phi)  # (N, H)
+        return sinusoidal * envelope
+
+
+def mfn_forward(
+    x: Float[Array, "N D"],
+    filters: Sequence[Callable[[Array], Array]],
+    linears: Sequence[Callable[[Array], Array]],
+) -> Float[Array, "N O"]:
+    """Pure-JAX MFN forward pass given user-supplied filter and linear callables.
+
+    Implements the Fathony et al. (2021) multiplicative chaining:
+
+    .. math::
+
+        z_1 = g_1(x), \\quad
+        z_{i+1} = g_{i+1}(x) \\odot (W_i z_i + b_i), \\quad
+        y = W_L z_L + b_L.
+
+    Exists as an escape hatch so users can plug custom filter families
+    (e.g. wavelet, complex-Gabor) into the MFN topology without
+    subclassing :class:`FourierNet` or :class:`GaborNet`.
+
+    ``filters`` and ``linears`` must have the same length :math:`L`.
+    ``linears`` are treated as single-sample callables and are
+    :func:`jax.vmap`-ed over the batch dimension internally.
+    :class:`FourierFilter` / :class:`GaborFilter` instances handle
+    batched input natively.
+
+    Args:
+        x: Input array of shape ``(N, D)``.
+        filters: Length-``L`` list of filter callables ``(N, D) -> (N, H)``.
+        linears: Length-``L`` list of linear callables ``(H,) -> (H_out,)``,
+            e.g. :class:`equinox.nn.Linear` instances.
+
+    Returns:
+        Output array of shape ``(N, O)``.
+    """
+    x = jnp.atleast_2d(x)
+    z = filters[0](x)
+    for f, lin in zip(filters[1:], linears[:-1], strict=True):
+        z = f(x) * jax.vmap(lin)(z)
+    return jax.vmap(linears[-1])(z)
+
+
+class FourierNet(PyroxModule):
+    r"""Multiplicative Fourier Filter Network (Fathony et al., ICLR 2021).
+
+    Chains :class:`FourierFilter` primitives multiplicatively:
+
+    .. math::
+
+        z_1 = g_1(x), \quad
+        z_{i+1} = g_{i+1}(x) \odot (W_i z_i + b_i), \quad
+        y = W_L z_L + b_L.
+
+    Each :math:`g_i` is a :class:`FourierFilter` of width
+    ``hidden_features``; the last linear is the readout projecting to
+    ``out_features``.
+
+    Unlike SIREN, no special per-layer initialization ceremony is
+    required: standard Gaussian / uniform init on all filter parameters
+    gives stable training.
+
+    Note:
+        Single-point input ``(D,)`` is automatically promoted to
+        ``(1, D)`` and the result is squeezed back to ``(O,)``.
+
+    Attributes:
+        filters: Length-``depth`` list of :class:`FourierFilter` primitives.
+        linears: Length-``depth`` list of :class:`~equinox.nn.Linear` layers
+            (last one is the readout).
+        in_features: Input dimension.
+        hidden_features: Filter / hidden width.
+        out_features: Output dimension.
+        depth: Number of filter layers :math:`L`.
+        pyrox_name: Optional scope name for NumPyro sites.
+    """
+
+    filters: list[FourierFilter]
+    linears: list[eqx.nn.Linear]
+    in_features: int = eqx.field(static=True)
+    hidden_features: int = eqx.field(static=True)
+    out_features: int = eqx.field(static=True)
+    depth: int = eqx.field(static=True)
+    pyrox_name: str | None = None
+
+    @classmethod
+    def init(
+        cls,
+        in_features: int,
+        hidden_features: int,
+        out_features: int,
+        *,
+        depth: int,
+        key: PRNGKeyArray,
+        freq_scale: float = 256.0,
+        pyrox_name: str | None = None,
+    ) -> FourierNet:
+        """Construct a :class:`FourierNet`.
+
+        Args:
+            in_features: Input dimension.
+            hidden_features: Filter width (all hidden layers).
+            out_features: Output dimension.
+            depth: Number of filter layers :math:`L` (must be ≥ 1).
+            key: JAX PRNG key.
+            freq_scale: Frequency scale passed to each
+                :class:`FourierFilter` (default 256).
+            pyrox_name: Optional scope name.
+
+        Returns:
+            Initialised :class:`FourierNet`.
+
+        Raises:
+            ValueError: If ``depth < 1``.
+        """
+        if depth < 1:
+            raise ValueError(f"depth must be at least 1, got {depth}.")
+        keys = jax.random.split(key, 2 * depth)
+        filter_keys = keys[:depth]
+        linear_keys = keys[depth:]
+        filters = [
+            FourierFilter.init(
+                in_features, hidden_features, key=filter_keys[i], freq_scale=freq_scale
+            )
+            for i in range(depth)
+        ]
+        linears = [
+            eqx.nn.Linear(
+                hidden_features,
+                hidden_features if i < depth - 1 else out_features,
+                key=linear_keys[i],
+            )
+            for i in range(depth)
+        ]
+        return cls(
+            filters=filters,
+            linears=linears,
+            in_features=in_features,
+            hidden_features=hidden_features,
+            out_features=out_features,
+            depth=depth,
+            pyrox_name=pyrox_name,
+        )
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, "N D"]) -> Float[Array, "N O"]:
+        """Run the MFN forward pass.
+
+        Args:
+            x: Input of shape ``(N, D)`` or ``(D,)`` (single point).
+
+        Returns:
+            Output of shape ``(N, O)`` or ``(O,)`` if input was 1-D.
+        """
+        squeeze = x.ndim == 1
+        out = mfn_forward(x, self.filters, self.linears)
+        return out[0] if squeeze else out
+
+
+class GaborNet(PyroxModule):
+    r"""Multiplicative Gabor Filter Network (Fathony et al., ICLR 2021).
+
+    Same MFN topology as :class:`FourierNet` but each :math:`g_i` is a
+    :class:`GaborFilter` — a sinusoidal oscillation modulated by a
+    Gaussian envelope:
+
+    .. math::
+
+        g_i(x) = \sin(\Omega_i x + \varphi_i)
+                  \odot \exp\!\bigl(-\tfrac{\gamma_i}{2}\|x - \mu_i\|^2\bigr).
+
+    The tied :math:`\Omega_i \sim \mathcal{N}(0,\gamma_i I)` initialization
+    means each filter's frequency scale matches its spatial bandwidth, giving
+    a multi-resolution basis whose effective kernel is the Hadamard product
+    of :math:`L` localized RBF kernels.
+
+    **Connection to** :class:`~pyrox.nn.RBFFourierFeatures`: a depth-1
+    ``GaborNet`` with :math:`\mu = 0` is a localized variant of random
+    Fourier features; as :math:`\gamma \to 0` (very wide envelope) it
+    recovers the plain RBF-RFF feature map.
+
+    Note:
+        Single-point input ``(D,)`` is automatically promoted to
+        ``(1, D)`` and the result is squeezed back to ``(O,)``.
+
+    Attributes:
+        filters: Length-``depth`` list of :class:`GaborFilter` primitives.
+        linears: Length-``depth`` list of :class:`~equinox.nn.Linear` layers.
+        in_features: Input dimension.
+        hidden_features: Filter / hidden width.
+        out_features: Output dimension.
+        depth: Number of filter layers :math:`L`.
+        domain: ``(low, high)`` used for :math:`\\mu` initialization.
+        gamma_alpha: Shape parameter of the :math:`\\gamma` Gamma prior.
+        gamma_beta: Rate parameter of the :math:`\\gamma` Gamma prior.
+        pyrox_name: Optional scope name for NumPyro sites.
+    """
+
+    filters: list[GaborFilter]
+    linears: list[eqx.nn.Linear]
+    in_features: int = eqx.field(static=True)
+    hidden_features: int = eqx.field(static=True)
+    out_features: int = eqx.field(static=True)
+    depth: int = eqx.field(static=True)
+    domain: tuple[float, float] = eqx.field(static=True)
+    gamma_alpha: float = eqx.field(static=True)
+    gamma_beta: float = eqx.field(static=True)
+    pyrox_name: str | None = None
+
+    @classmethod
+    def init(
+        cls,
+        in_features: int,
+        hidden_features: int,
+        out_features: int,
+        *,
+        depth: int,
+        key: PRNGKeyArray,
+        domain: tuple[float, float] = (-1.0, 1.0),
+        gamma_alpha: float = 6.0,
+        gamma_beta: float = 1.0,
+        pyrox_name: str | None = None,
+    ) -> GaborNet:
+        """Construct a :class:`GaborNet`.
+
+        Args:
+            in_features: Input dimension.
+            hidden_features: Filter width (all hidden layers).
+            out_features: Output dimension.
+            depth: Number of filter layers :math:`L` (must be ≥ 1).
+            key: JAX PRNG key.
+            domain: ``(low, high)`` for :math:`\\mu` initialization.
+            gamma_alpha: Gamma shape for :math:`\\gamma` init (default 6.0).
+            gamma_beta: Gamma rate for :math:`\\gamma` init (default 1.0).
+            pyrox_name: Optional scope name.
+
+        Returns:
+            Initialised :class:`GaborNet`.
+
+        Raises:
+            ValueError: If ``depth < 1``.
+        """
+        if depth < 1:
+            raise ValueError(f"depth must be at least 1, got {depth}.")
+        keys = jax.random.split(key, 2 * depth)
+        filter_keys = keys[:depth]
+        linear_keys = keys[depth:]
+        filters = [
+            GaborFilter.init(
+                in_features,
+                hidden_features,
+                key=filter_keys[i],
+                domain=domain,
+                gamma_alpha=gamma_alpha,
+                gamma_beta=gamma_beta,
+            )
+            for i in range(depth)
+        ]
+        linears = [
+            eqx.nn.Linear(
+                hidden_features,
+                hidden_features if i < depth - 1 else out_features,
+                key=linear_keys[i],
+            )
+            for i in range(depth)
+        ]
+        return cls(
+            filters=filters,
+            linears=linears,
+            in_features=in_features,
+            hidden_features=hidden_features,
+            out_features=out_features,
+            depth=depth,
+            domain=domain,
+            gamma_alpha=gamma_alpha,
+            gamma_beta=gamma_beta,
+            pyrox_name=pyrox_name,
+        )
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, "N D"]) -> Float[Array, "N O"]:
+        """Run the MFN forward pass.
+
+        Args:
+            x: Input of shape ``(N, D)`` or ``(D,)`` (single point).
+
+        Returns:
+            Output of shape ``(N, O)`` or ``(O,)`` if input was 1-D.
+        """
+        squeeze = x.ndim == 1
+        out = mfn_forward(x, self.filters, self.linears)
+        return out[0] if squeeze else out
+
+
+class BayesianFourierNet(FourierNet):
+    r"""FourierNet with Bayesian priors on all filter and linear weights.
+
+    A thin subclass of :class:`FourierNet` that overrides ``__call__`` to
+    register NumPyro sample sites for every parameter:
+
+    - Per filter *i*: ``filter_{i}.Omega`` and ``filter_{i}.phi``.
+    - Per linear *i*: ``linear_{i}.W`` and ``linear_{i}.b``.
+
+    Total number of sites: :math:`4L` where :math:`L` is ``depth``.
+
+    Priors:
+
+    - :math:`\Omega_i \sim \mathcal{N}(0, \sigma^2)` (matrix).
+    - :math:`\varphi_i \sim \mathrm{Uniform}(-\pi, \pi)`.
+    - :math:`W_i \sim \mathcal{N}(0, \sigma^2)` (matrix).
+    - :math:`b_i \sim \mathcal{N}(0, \sigma^2)` (vector).
+
+    Attributes:
+        prior_std: Prior standard deviation :math:`\\sigma` for Gaussian
+            sites (default 1.0).  Phase sites always use
+            :math:`\mathrm{Uniform}(-\pi, \pi)`.
+    """
+
+    prior_std: float = 1.0
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, "N D"]) -> Float[Array, "N O"]:
+        """Forward pass with sampled parameters.
+
+        Args:
+            x: Input of shape ``(N, D)`` or ``(D,)`` (single point).
+
+        Returns:
+            Output of shape ``(N, O)`` or ``(O,)`` if input was 1-D.
+        """
+        squeeze = x.ndim == 1
+        x2d = jnp.atleast_2d(x)
+
+        sampled_filters: list[FourierFilter] = []
+        for i, f in enumerate(self.filters):
+            Omega = self.pyrox_sample(
+                f"filter_{i}.Omega",
+                dist.Normal(0.0, self.prior_std)
+                .expand([f.out_features, f.in_features])
+                .to_event(2),
+            )
+            phi = self.pyrox_sample(
+                f"filter_{i}.phi",
+                dist.Uniform(-jnp.pi, jnp.pi).expand([f.out_features]).to_event(1),
+            )
+            sampled_filters.append(
+                eqx.tree_at(lambda ff: (ff.Omega, ff.phi), f, (Omega, phi))
+            )
+
+        sampled_linears: list[eqx.nn.Linear] = []
+        for i, lin in enumerate(self.linears):
+            W = self.pyrox_sample(
+                f"linear_{i}.W",
+                dist.Normal(0.0, self.prior_std)
+                .expand([lin.out_features, lin.in_features])
+                .to_event(2),
+            )
+            b_vec = self.pyrox_sample(
+                f"linear_{i}.b",
+                dist.Normal(0.0, self.prior_std).expand([lin.out_features]).to_event(1),
+            )
+            sampled_linears.append(
+                eqx.tree_at(lambda ll: (ll.weight, ll.bias), lin, (W, b_vec))
+            )
+
+        out = mfn_forward(x2d, sampled_filters, sampled_linears)
+        return out[0] if squeeze else out
+
+
+class BayesianGaborNet(GaborNet):
+    r"""GaborNet with Bayesian priors on all filter and linear weights.
+
+    A thin subclass of :class:`GaborNet` that overrides ``__call__`` to
+    register NumPyro sample sites for every parameter:
+
+    - Per filter *i*: ``filter_{i}.Omega``, ``filter_{i}.phi``,
+      ``filter_{i}.mu``, and ``filter_{i}.log_gamma``.
+    - Per linear *i*: ``linear_{i}.W`` and ``linear_{i}.b``.
+
+    Total number of sites: :math:`6L` where :math:`L` is ``depth``.
+
+    Priors:
+
+    - :math:`\Omega_i \sim \mathcal{N}(0, \sigma^2)` (matrix).
+    - :math:`\varphi_i \sim \mathrm{Uniform}(-\pi, \pi)`.
+    - :math:`\mu_i \sim \mathrm{Uniform}(\texttt{domain\_low},\texttt{domain\_high})`.
+    - :math:`\log\gamma_i \sim \mathcal{N}(0, \sigma^2)` (log-space).
+    - :math:`W_i \sim \mathcal{N}(0, \sigma^2)` (matrix).
+    - :math:`b_i \sim \mathcal{N}(0, \sigma^2)` (vector).
+
+    Attributes:
+        prior_std: Prior standard deviation :math:`\\sigma` for Gaussian
+            and log-gamma sites (default 1.0).
+    """
+
+    prior_std: float = 1.0
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, "N D"]) -> Float[Array, "N O"]:
+        """Forward pass with sampled parameters.
+
+        Args:
+            x: Input of shape ``(N, D)`` or ``(D,)`` (single point).
+
+        Returns:
+            Output of shape ``(N, O)`` or ``(O,)`` if input was 1-D.
+        """
+        squeeze = x.ndim == 1
+        x2d = jnp.atleast_2d(x)
+        low, high = self.domain
+
+        sampled_filters: list[GaborFilter] = []
+        for i, f in enumerate(self.filters):
+            Omega = self.pyrox_sample(
+                f"filter_{i}.Omega",
+                dist.Normal(0.0, self.prior_std)
+                .expand([f.out_features, f.in_features])
+                .to_event(2),
+            )
+            phi = self.pyrox_sample(
+                f"filter_{i}.phi",
+                dist.Uniform(-jnp.pi, jnp.pi).expand([f.out_features]).to_event(1),
+            )
+            mu = self.pyrox_sample(
+                f"filter_{i}.mu",
+                dist.Uniform(low, high)
+                .expand([f.out_features, f.in_features])
+                .to_event(2),
+            )
+            log_gamma = self.pyrox_sample(
+                f"filter_{i}.log_gamma",
+                dist.Normal(0.0, self.prior_std).expand([f.out_features]).to_event(1),
+            )
+            sampled_filters.append(
+                eqx.tree_at(
+                    lambda ff: (ff.Omega, ff.phi, ff.mu, ff.log_gamma),
+                    f,
+                    (Omega, phi, mu, log_gamma),
+                )
+            )
+
+        sampled_linears: list[eqx.nn.Linear] = []
+        for i, lin in enumerate(self.linears):
+            W = self.pyrox_sample(
+                f"linear_{i}.W",
+                dist.Normal(0.0, self.prior_std)
+                .expand([lin.out_features, lin.in_features])
+                .to_event(2),
+            )
+            b_vec = self.pyrox_sample(
+                f"linear_{i}.b",
+                dist.Normal(0.0, self.prior_std).expand([lin.out_features]).to_event(1),
+            )
+            sampled_linears.append(
+                eqx.tree_at(lambda ll: (ll.weight, ll.bias), lin, (W, b_vec))
+            )
+
+        out = mfn_forward(x2d, sampled_filters, sampled_linears)
+        return out[0] if squeeze else out
