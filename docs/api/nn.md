@@ -71,9 +71,9 @@ y = layer(jnp.ones((5, 3)))  # (5, 64)
 net = SIREN.init(2, 64, 1, depth=5, key=jr.PRNGKey(0))
 y = net(jnp.zeros((100, 2)))  # (100, 1)
 
-# Bayesian variant (requires handlers.seed context)
+# Bayesian variant (no key needed — weights come from the prior)
 from numpyro import handlers
-bnet = BayesianSIREN.init(2, 32, 1, depth=3, key=jr.PRNGKey(0))
+bnet = BayesianSIREN.init(2, 32, 1, depth=3)
 with handlers.seed(rng_seed=0):
     y = bnet(jnp.zeros((10, 2)))  # (10, 1)
 ```

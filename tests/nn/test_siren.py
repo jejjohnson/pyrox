@@ -6,6 +6,8 @@ Covers :class:`pyrox.nn.SirenDense`, :class:`pyrox.nn.SIREN`, and
 
 from __future__ import annotations
 
+import math
+
 import jax
 import jax.numpy as jnp
 import jax.random as jr
@@ -59,7 +61,6 @@ def test_siren_dense_activation_regimes():
             out_features=out_f,
             layer_type=lt,
             c=6.0,
-            pyrox_name=None,
         )
 
     layer_first = make_layer("first")
@@ -105,24 +106,23 @@ def test_siren_composite_output_shape():
 
 
 def test_siren_activation_variance_preserved():
-    """Hidden-layer activations should have variance in [0.3, 3.0] at every layer."""
+    """Hidden-layer activations should have bounded variance at every layer."""
     depth = 5
     hidden = 64
     net = SIREN.init(64, hidden, 1, depth=depth, key=jr.PRNGKey(3))
 
     x = jr.normal(jr.PRNGKey(42), (4096, 64))
     z = x
-    # Check each non-readout layer.
-    # Sitzmann Theorem 1 (§3.2) shows that with the prescribed init the
-    # post-sin activations are approximately N(0,1) at every layer.
-    # We use a relaxed window [0.3, 3.0] — roughly ±1.5 orders of magnitude
-    # from the target variance of 1.0 — to avoid test flakiness while still
-    # catching any init regime that causes explosive or collapsing activations.
+    # Sitzmann Theorem 1 (§3.2) keeps post-sin activations in a stable regime
+    # at every hidden layer — in the saturated-sine limit Var(sin) ≈ 0.5.
+    # We use [0.3, 1.5] — tight enough to catch explosive / collapsing / badly
+    # scaled init (e.g. omega=1 or W~U(-1,1)), loose enough to absorb the
+    # finite-sample estimator noise at 4096 samples.
     for layer in net.layers[:-1]:
         z = layer(z)
         var = float(jnp.var(z))
-        assert 0.3 <= var <= 3.0, (
-            f"Hidden-layer variance {var:.4f} outside [0.3, 3.0] — "
+        assert 0.3 <= var <= 1.5, (
+            f"Hidden-layer variance {var:.4f} outside [0.3, 1.5] — "
             "SIREN init may be incorrect."
         )
 
@@ -202,7 +202,7 @@ def test_siren_fits_1d_sinusoid():
 
 def test_bayesian_siren_registers_sites():
     depth = 4
-    net = BayesianSIREN.init(2, 16, 1, depth=depth, key=jr.PRNGKey(7), pyrox_name="bs")
+    net = BayesianSIREN.init(2, 16, 1, depth=depth, pyrox_name="bs")
     x = jnp.ones((3, 2))
 
     with handlers.trace() as tr, handlers.seed(rng_seed=0):
@@ -232,7 +232,6 @@ def test_bayesian_siren_prior_respects_init_scale():
         hidden,
         1,
         depth=depth,
-        key=jr.PRNGKey(8),
         prior_std=prior_std,
         pyrox_name="bsp",
     )
@@ -247,10 +246,11 @@ def test_bayesian_siren_prior_respects_init_scale():
         for i in range(depth):
             w_samples[i].append(np.asarray(tr[f"bsp.layer_{i}.W"]["value"]))
 
-    for i, layer in enumerate(net.layers):
-        expected_std = prior_std * _siren_W_limit(
-            layer.layer_type, layer.in_features, layer.omega, layer.c
-        )
+    # Normal stddev is a/√3 so Var(W) matches Sitzmann's U(-a, a) init exactly.
+    inv_sqrt3 = 1.0 / math.sqrt(3.0)
+    for i, spec in enumerate(net.specs):
+        a = _siren_W_limit(spec.layer_type, spec.in_features, spec.omega, spec.c)
+        expected_std = prior_std * a * inv_sqrt3
         all_w = np.concatenate([w.ravel() for w in w_samples[i]])
         empirical_std = float(np.std(all_w))
         assert abs(empirical_std - expected_std) / expected_std < 0.20, (
