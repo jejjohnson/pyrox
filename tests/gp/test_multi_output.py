@@ -565,6 +565,42 @@ def test_oilmm_rejects_more_latents_than_outputs():
         )
 
 
+def test_multi_output_inducing_from_kernel_rejects_nonzero_kappa():
+    """``from_kernel`` drops ``kernel.kappa``, so accepting a non-zero
+    ``kappa`` would make K_ff (which keeps ``diag(kappa)``) inconsistent
+    with the sparse K_uu / K_uf blocks. Must fail fast instead.
+    """
+    shared = SharedInducingPoints(locations=jnp.zeros((2, 1)))
+    icm = ICMKernel(
+        kernel=RBF(),
+        mixing=jnp.array([[1.0], [0.5]]),
+        kappa=jnp.array([0.1, 0.2]),
+    )
+    with pytest.raises(ValueError, match=r"ICMKernel\.kappa must be None or all zeros"):
+        MultiOutputInducingVariables.from_kernel(icm, shared)
+
+
+def test_multi_output_inducing_from_kernel_accepts_zero_kappa():
+    """All-zero ``kappa`` is equivalent to ``None`` for this construction."""
+    shared = SharedInducingPoints(locations=jnp.zeros((2, 1)))
+    icm = ICMKernel(
+        kernel=RBF(),
+        mixing=jnp.array([[1.0], [0.5]]),
+        kappa=jnp.zeros((2,)),
+    )
+    inducing = MultiOutputInducingVariables.from_kernel(icm, shared)
+    assert inducing.num_outputs == 2
+    assert inducing.num_latents == 1
+
+
+def test_multi_output_inducing_from_kernel_accepts_none_kappa():
+    """``kappa=None`` (the common case) must keep working."""
+    shared = SharedInducingPoints(locations=jnp.zeros((2, 1)))
+    icm = ICMKernel(kernel=RBF(), mixing=jnp.array([[1.0], [0.5]]))
+    inducing = MultiOutputInducingVariables.from_kernel(icm, shared)
+    assert inducing.num_outputs == 2
+
+
 def test_multi_output_inducing_rejects_non_2d_mixing():
     with pytest.raises(ValueError, match="num_outputs, num_latents"):
         MultiOutputInducingVariables(

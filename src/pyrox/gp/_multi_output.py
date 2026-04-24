@@ -107,6 +107,30 @@ def _validate_kernel_scopes_unique(kernels: tuple[Kernel, ...]) -> None:
         )
 
 
+def _require_all_zero_concrete(arr: Float[Array, " ..."], *, name: str) -> None:
+    """Require that ``arr`` is concretely all zero; raise otherwise.
+
+    Used to reject :class:`ICMKernel` with a non-zero ``kappa`` in
+    constructors that drop the ``diag(kappa)`` term (e.g.
+    :meth:`MultiOutputInducingVariables.from_kernel`). Under
+    ``jax.jit`` / ``jax.vmap`` the array is a tracer and cannot be
+    materialized — in that case we skip the check (consistent with
+    :func:`_check_nonnegative_concrete`).
+    """
+    try:
+        concrete = np.asarray(arr)
+    except jax.errors.TracerArrayConversionError:
+        return
+    if (concrete != 0).any():
+        raise ValueError(
+            f"{name} must be None or all zeros for this construction; "
+            f"the extra `diag(kappa)` term would be silently dropped and "
+            f"produce inconsistent K_ff / K_uu / K_uf. Either set "
+            f"`kappa=None` (or all zeros) on the ICMKernel, or use the "
+            f"dense multi-output workflow that keeps `kappa`."
+        )
+
+
 def _check_nonnegative_concrete(arr: Float[Array, " ..."], *, name: str) -> None:
     """Best-effort nonnegativity check for an array that may be traced.
 
@@ -646,11 +670,17 @@ class MultiOutputInducingVariables(eqx.Module):
         :class:`OILMMKernel` is rejected because the sparse inducing
         workflow does not currently exploit orthogonal projection.
 
-        For :class:`ICMKernel` with non-zero ``kappa``, the extra
-        diagonal term is dropped — users should use a dense solve if
-        the ``kappa`` contribution matters.
+        :class:`ICMKernel` with non-zero ``kappa`` is rejected: the
+        sparse blocks assembled downstream (:meth:`K_uu` / :meth:`K_uf`)
+        do not carry the ``diag(kappa)`` contribution that is present
+        in :meth:`ICMKernel.K_ff`, so accepting it here would silently
+        produce inconsistent covariance terms and underestimate output
+        variance. Users who need the ``kappa`` contribution should use
+        the dense multi-output solve.
         """
         if isinstance(kernel, (LMCKernel, ICMKernel)):
+            if isinstance(kernel, ICMKernel) and kernel.kappa is not None:
+                _require_all_zero_concrete(kernel.kappa, name="ICMKernel.kappa")
             return cls(inducing=inducing, mixing=kernel.mixing)
         raise TypeError(
             "from_kernel only accepts LMCKernel or ICMKernel; "
