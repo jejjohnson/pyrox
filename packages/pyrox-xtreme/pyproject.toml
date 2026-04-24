@@ -31,6 +31,7 @@ dependencies = [
     "pandas>=2",
     "jaxtyping>=0.2",
     "einops>=0.7",
+    "equinox>=0.11",
 ]
 
 [project.optional-dependencies]
@@ -94,6 +95,13 @@ ignore = [
     # attributes (`arg_constraints`, `reparametrized_params`).
     "RUF012",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Jupytext notebook sources use single-line paragraphs in markdown cells
+# and sometimes have long Colab-badge URLs; keep those unwrapped.
+# RUF001 triggers on typographic en/em dashes used in narrative prose.
+"docs/notebooks/*.py" = ["E501", "RUF001"]
+"docs/notebooks/*.ipynb" = ["E501", "RUF001"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true

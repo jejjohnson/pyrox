@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from xtremax import distributions, extraction, primitives, simulations
+from xtremax import distributions, extraction, point_processes, primitives, simulations
 from xtremax.distributions import (
     FrechetType2GEVD,
     GeneralizedExtremeValueDistribution,
@@ -70,6 +70,7 @@ __all__ = [
     "gumbel_log_prob",
     "gumbel_mean",
     "gumbel_return_level",
+    "point_processes",
     "primitives",
     "simulations",
     "weibull_cdf",
