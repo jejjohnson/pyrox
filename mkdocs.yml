@@ -58,6 +58,8 @@ nav:
       - "Regression Masterclass — Pattern 3 (Parameterized)": notebooks/regression_masterclass_parameterized.ipynb
       - "Ensemble Primitives Tutorial": notebooks/ensemble_primitives_tutorial.ipynb
       - "Ensemble Runner (EnsembleMAP / EnsembleVI) Tutorial": notebooks/ensemble_runner_tutorial.ipynb
+      - "Pathwise GP Posterior Sampling": notebooks/gp_pathwise.ipynb
+      - "Pathwise GP × NumPyro — extended use cases": notebooks/gp_pathwise_numpyro.ipynb
   - Contributing: contributing.md
   - Changelog: CHANGELOG.md
 
