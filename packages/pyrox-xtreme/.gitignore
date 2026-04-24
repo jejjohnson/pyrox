@@ -117,3 +117,4 @@ venv.bak/
 
 # Plans (tracked via GitHub issues, not committed)
 .plans/
+.pr-review/

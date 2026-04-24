@@ -100,8 +100,8 @@ ignore = [
 # Jupytext notebook sources use single-line paragraphs in markdown cells
 # and sometimes have long Colab-badge URLs; keep those unwrapped.
 # RUF001 triggers on typographic en/em dashes used in narrative prose.
-"docs/notebooks/*.py" = ["E501", "RUF001"]
-"docs/notebooks/*.ipynb" = ["E501", "RUF001"]
+"docs/notebooks/*.py" = ["E501", "RUF001", "B905"]
+"docs/notebooks/*.ipynb" = ["E501", "RUF001", "B905"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
@@ -120,6 +120,11 @@ invalid-method-override = "ignore"
 unresolved-attribute = "ignore"
 invalid-return-type = "ignore"
 not-iterable = "ignore"
+# JAX scan/vmap outputs: ty doesn't narrow to ArrayLike; subscripts
+# and tuple unpacking on JAX traced outputs are structurally fine at
+# runtime but opaque to the type inferencer.
+not-subscriptable = "ignore"
+invalid-assignment = "ignore"
 # NumPyro's `constraints.interval` is a class (factory); ty reads its
 # `__call__` as `(self, x)` rather than the constructor, flagging two-arg
 # construction. This is a stub/type-inference mismatch, not a real bug.

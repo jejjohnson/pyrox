@@ -44,6 +44,12 @@ nav:
   - Home: index.md
   - Examples:
       - Demo: notebooks/example_demo.ipynb
+      - HPP — from scratch + NumPyro: notebooks/hpp_from_scratch_and_numpyro.ipynb
+      - IPP — from scratch + NumPyro: notebooks/ipp_from_scratch_and_numpyro.ipynb
+      - Renewal — from scratch + NumPyro: notebooks/renewal_from_scratch_and_numpyro.ipynb
+      - Hawkes — from scratch + NumPyro: notebooks/hawkes_from_scratch_and_numpyro.ipynb
+      - Marked TPP — from scratch + NumPyro: notebooks/marked_from_scratch_and_numpyro.ipynb
+      - Thinning / observation op — from scratch + NumPyro: notebooks/thinning_from_scratch_and_numpyro.ipynb
   - Design:
       - Overview: design_docs/README.md
       - Vision: design_docs/vision.md
