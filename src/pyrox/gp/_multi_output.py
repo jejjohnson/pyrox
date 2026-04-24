@@ -45,49 +45,39 @@ def _validate_kernel_count(kernels: tuple[Kernel, ...], num_latents: int) -> Non
         )
 
 
-def _kernel_has_priors(kernel: Kernel) -> bool:
-    """Return ``True`` if ``kernel`` has at least one prior registered.
-
-    Non-:class:`pyrox.PyroxModule` kernels (Pattern A pure equinox
-    modules) cannot register sample sites and are reported as having no
-    priors regardless of any other state.
-    """
-    state_fn = getattr(kernel, "_state", None)
-    if state_fn is None:
-        return False
-    try:
-        state = state_fn()
-    except Exception:  # pragma: no cover - defensive
-        return False
-    return any(
-        getattr(entry, "prior", None) is not None
-        for entry in getattr(state, "params", {}).values()
-    )
-
-
 def _validate_kernel_scopes_unique(kernels: tuple[Kernel, ...]) -> None:
-    """Reject distinct priored kernel instances that share a pyrox scope.
+    """Reject distinct :class:`PyroxModule` kernels that share a pyrox scope.
 
     Multi-output kernel collections accept a tuple of latent kernels.
     Two distinct :class:`pyrox.PyroxModule`-based kernels that share the
-    same ``pyrox_name`` (e.g. two ``RBF()`` instances both named
-    ``"RBF"``) and have priors set would each try to register identical
-    sample-site names in a NumPyro trace, raising the duplicate-site
-    error. We catch this at construction with an actionable message so
-    the user can either (a) reuse a single instance to tie
-    hyperparameters or (b) set distinct ``pyrox_name`` values per
-    latent, e.g. ``RBF(pyrox_name='RBF_q0')``.
+    same ``pyrox_name`` (e.g. two ``RBF()`` instances both defaulting to
+    ``"RBF"``) collide on **two** kinds of NumPyro sites:
 
-    Reusing the same instance across slots (intentional tying) is fine
-    and not flagged. Kernels without priors do not register sample
-    sites and are not flagged either, so the validator stays silent for
-    pure deterministic Pattern A kernels.
+    * :func:`pyrox_sample` (priors): identical ``RBF.variance`` site
+      names raise the NumPyro duplicate-site error in a single trace.
+    * :func:`pyrox_param` (deterministic hyperparameters): identical
+      ``RBF.lengthscale`` ``numpyro.param`` registrations are silently
+      *tied* by the param store — the second registration receives the
+      first kernel's value, corrupting any multi-latent fit (SVI, MAP)
+      where the latents are meant to vary independently.
+
+    The second failure mode is silent and the more dangerous one, so
+    this validator does **not** require priors to be set. Any two
+    distinct :class:`PyroxModule` instances sharing a scope are
+    flagged. Reusing the same instance across slots (intentional
+    hyperparameter tying) is fine. Pure :class:`equinox.Module` kernels
+    (no ``_pyrox_scope_name``) are silently allowed since they cannot
+    register NumPyro sites.
+
+    The error message points the user at the two fixes: reuse one
+    instance for tying, or set distinct ``pyrox_name`` values per
+    latent, e.g. ``RBF(pyrox_name='RBF_q0')``.
     """
     scope_to_owner: dict[str, tuple[int, int]] = {}  # scope -> (id, position)
     collisions: list[tuple[int, int, str]] = []  # (q1, q2, scope)
     for q, kernel in enumerate(kernels):
         scope_fn = getattr(kernel, "_pyrox_scope_name", None)
-        if scope_fn is None or not _kernel_has_priors(kernel):
+        if scope_fn is None:
             continue
         scope = scope_fn()
         prior = scope_to_owner.get(scope)
@@ -104,13 +94,16 @@ def _validate_kernel_scopes_unique(kernels: tuple[Kernel, ...]) -> None:
             for q1, q2, scope in collisions
         )
         raise ValueError(
-            "distinct latent kernel instances with priors share pyrox scope "
-            f"name(s): {offenders}. Each priored kernel registers sample "
-            "sites under its scope name, so distinct instances sharing one "
-            "scope would raise duplicate-site errors under a NumPyro trace. "
-            "Either reuse one kernel instance to tie hyperparameters across "
-            "latents, or set distinct `pyrox_name` values per kernel "
-            "(e.g. `RBF(pyrox_name='RBF_q0')`, `RBF(pyrox_name='RBF_q1')`)."
+            f"distinct latent kernel instances share pyrox scope name(s): "
+            f"{offenders}. Each PyroxModule kernel registers `pyrox_param` "
+            f"and `pyrox_sample` sites under its scope name, so two "
+            f"distinct instances sharing one scope would silently tie "
+            f"`numpyro.param` hyperparameters (deterministic case) or "
+            f"raise the duplicate-site error (priored case) under a "
+            f"NumPyro trace. Either reuse one kernel instance to tie "
+            f"hyperparameters across latents, or set distinct "
+            f"`pyrox_name` values per kernel (e.g. "
+            f"`RBF(pyrox_name='RBF_q0')`, `RBF(pyrox_name='RBF_q1')`)."
         )
 
 

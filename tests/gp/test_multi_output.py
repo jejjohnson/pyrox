@@ -42,8 +42,8 @@ def test_lmc_output_covariance_is_symmetric():
     X = jnp.array([[0.0], [0.5], [1.0]])
     lmc = LMCKernel(
         kernels=(
-            RBF(init_variance=1.0, init_lengthscale=0.5),
-            RBF(init_variance=0.8, init_lengthscale=1.2),
+            RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+            RBF(pyrox_name="RBF_q1", init_variance=0.8, init_lengthscale=1.2),
         ),
         mixing=jnp.array([[1.0, 0.5], [0.25, -1.0]]),
     )
@@ -57,8 +57,8 @@ def test_lmc_handles_d_gt_1():
     X = jax.random.uniform(jax.random.PRNGKey(0), (4, 3))
     lmc = LMCKernel(
         kernels=(
-            RBF(init_variance=1.0, init_lengthscale=0.5),
-            RBF(init_variance=0.8, init_lengthscale=1.2),
+            RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+            RBF(pyrox_name="RBF_q1", init_variance=0.8, init_lengthscale=1.2),
         ),
         mixing=jnp.array([[1.0, 0.5], [0.25, -1.0]]),
     )
@@ -72,8 +72,8 @@ def test_lmc_diag_matches_full_covariance_diagonal():
     X = jnp.array([[0.0], [0.5], [1.0]])
     lmc = LMCKernel(
         kernels=(
-            RBF(init_variance=1.0, init_lengthscale=0.5),
-            RBF(init_variance=0.8, init_lengthscale=1.2),
+            RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+            RBF(pyrox_name="RBF_q1", init_variance=0.8, init_lengthscale=1.2),
         ),
         mixing=jnp.array([[1.0, 0.5], [0.25, -1.0]]),
     )
@@ -88,8 +88,8 @@ def test_lmc_cross_covariance_operator_is_sum_kronecker():
     X = jnp.array([[0.0], [0.5], [1.0]])
     lmc = LMCKernel(
         kernels=(
-            RBF(init_variance=1.0, init_lengthscale=0.5),
-            RBF(init_variance=0.8, init_lengthscale=1.2),
+            RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+            RBF(pyrox_name="RBF_q1", init_variance=0.8, init_lengthscale=1.2),
         ),
         mixing=jnp.array([[1.0, 0.5], [0.25, -1.0]]),
     )
@@ -116,8 +116,8 @@ def test_lmc_cross_covariance_operator_rectangular_X1_X2():
     X2 = jnp.array([[0.2], [0.7]])
     lmc = LMCKernel(
         kernels=(
-            RBF(init_variance=1.0, init_lengthscale=0.5),
-            RBF(init_variance=0.8, init_lengthscale=1.0),
+            RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+            RBF(pyrox_name="RBF_q1", init_variance=0.8, init_lengthscale=1.0),
         ),
         mixing=jnp.array([[1.0, 0.5], [0.25, -1.0]]),
     )
@@ -152,8 +152,8 @@ def test_lmc_cross_covariance_operator_square_non_psd_X1_ne_X2():
     X2 = jnp.array([[0.2], [0.6], [0.9]])  # same length, different points
     lmc = LMCKernel(
         kernels=(
-            RBF(init_variance=1.0, init_lengthscale=0.5),
-            RBF(init_variance=0.8, init_lengthscale=1.0),
+            RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+            RBF(pyrox_name="RBF_q1", init_variance=0.8, init_lengthscale=1.0),
         ),
         mixing=jnp.array([[1.0, 0.5], [0.25, -1.0]]),
     )
@@ -186,8 +186,8 @@ def test_oilmm_signal_covariance_operator_rectangular_X1_X2():
     mixing = jnp.eye(2)
     oilmm = OILMMKernel(
         kernels=(
-            RBF(init_variance=1.0, init_lengthscale=0.5),
-            RBF(init_variance=0.8, init_lengthscale=1.0),
+            RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+            RBF(pyrox_name="RBF_q1", init_variance=0.8, init_lengthscale=1.0),
         ),
         mixing=mixing,
     )
@@ -203,8 +203,8 @@ def test_oilmm_signal_covariance_operator_square_non_psd_X1_ne_X2():
     mixing = jnp.eye(2)
     oilmm = OILMMKernel(
         kernels=(
-            RBF(init_variance=1.0, init_lengthscale=0.5),
-            RBF(init_variance=0.8, init_lengthscale=1.0),
+            RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+            RBF(pyrox_name="RBF_q1", init_variance=0.8, init_lengthscale=1.0),
         ),
         mixing=mixing,
     )
@@ -265,8 +265,8 @@ def test_oilmm_projection_and_back_project_round_trip():
     Y = jnp.array([[1.0, 2.0], [3.0, 4.0]])
     mixing = jnp.eye(2)
     kernels = (
-        RBF(init_variance=1.0, init_lengthscale=0.5),
-        RBF(init_variance=2.0, init_lengthscale=1.0),
+        RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+        RBF(pyrox_name="RBF_q1", init_variance=2.0, init_lengthscale=1.0),
     )
     oilmm = OILMMKernel(kernels=kernels, mixing=mixing)
 
@@ -288,8 +288,8 @@ def test_oilmm_project_routes_to_gaussx_primitive():
     Y = jax.random.normal(jax.random.PRNGKey(4), (6, 4))
     noise_var = jnp.array([0.1, 0.2, 0.3, 0.4])
     kernels = (
-        RBF(init_variance=1.0, init_lengthscale=0.5),
-        RBF(init_variance=0.9, init_lengthscale=0.8),
+        RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+        RBF(pyrox_name="RBF_q1", init_variance=0.9, init_lengthscale=0.8),
     )
     oilmm = OILMMKernel(kernels=kernels, mixing=mixing)
     expected_Y, expected_noise = oilmm_project(Y, mixing, noise_var)
@@ -301,8 +301,8 @@ def test_oilmm_project_routes_to_gaussx_primitive():
 def test_oilmm_back_project_round_trips_through_mixing():
     mixing, _ = jnp.linalg.qr(jax.random.normal(jax.random.PRNGKey(5), (3, 2)))
     kernels = (
-        RBF(init_variance=1.0, init_lengthscale=0.5),
-        RBF(init_variance=0.9, init_lengthscale=0.8),
+        RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+        RBF(pyrox_name="RBF_q1", init_variance=0.9, init_lengthscale=0.8),
     )
     oilmm = OILMMKernel(kernels=kernels, mixing=mixing)
     f_means = jax.random.normal(jax.random.PRNGKey(6), (5, 2))
@@ -321,8 +321,8 @@ def test_shared_inducing_points_build_block_diagonal_covariance():
     Z = jnp.array([[-1.0], [1.0]])
     shared = SharedInducingPoints(locations=Z)
     kernels = (
-        RBF(init_variance=1.0, init_lengthscale=0.5),
-        RBF(init_variance=2.0, init_lengthscale=1.5),
+        RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+        RBF(pyrox_name="RBF_q1", init_variance=2.0, init_lengthscale=1.5),
     )
 
     K_uu = shared.K_uu(kernels)
@@ -338,8 +338,8 @@ def test_shared_inducing_K_uu_operator_is_block_diagonal_tagged():
     Z = jnp.array([[-1.0], [0.0], [1.0]])
     shared = SharedInducingPoints(locations=Z)
     kernels = (
-        RBF(init_variance=1.0, init_lengthscale=0.5),
-        RBF(init_variance=2.0, init_lengthscale=1.5),
+        RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+        RBF(pyrox_name="RBF_q1", init_variance=2.0, init_lengthscale=1.5),
     )
     op = shared.K_uu_operator(kernels)
     assert is_block_diagonal(op)
@@ -351,8 +351,8 @@ def test_shared_inducing_block_diag_solve_matches_dense():
     Z = jnp.array([[-1.0], [0.0], [1.0]])
     shared = SharedInducingPoints(locations=Z)
     kernels = (
-        RBF(init_variance=1.0, init_lengthscale=0.5),
-        RBF(init_variance=2.0, init_lengthscale=1.5),
+        RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+        RBF(pyrox_name="RBF_q1", init_variance=2.0, init_lengthscale=1.5),
     )
     op = shared.K_uu_operator(kernels)
     v = jax.random.normal(jax.random.PRNGKey(9), (op.in_size(),))
@@ -383,8 +383,8 @@ def test_multi_output_inducing_K_uf_multiple_latents_and_outputs():
     Z = jnp.array([[-1.0], [1.0]])
     X = jnp.array([[0.0], [0.5], [1.0]])
     kernels = (
-        RBF(init_variance=1.0, init_lengthscale=0.5),
-        RBF(init_variance=0.8, init_lengthscale=1.2),
+        RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+        RBF(pyrox_name="RBF_q1", init_variance=0.8, init_lengthscale=1.2),
     )
     mixing = jnp.array([[1.0, 0.5], [-0.3, 2.0]])
     inducing = MultiOutputInducingVariables(
@@ -409,8 +409,8 @@ def test_multi_output_inducing_K_uf_multiple_latents_and_outputs():
 def test_multi_output_inducing_K_uu_operator_is_block_diagonal():
     Z = jnp.array([[-1.0], [1.0]])
     kernels = (
-        RBF(init_variance=1.0, init_lengthscale=0.5),
-        RBF(init_variance=0.8, init_lengthscale=1.2),
+        RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+        RBF(pyrox_name="RBF_q1", init_variance=0.8, init_lengthscale=1.2),
     )
     inducing = MultiOutputInducingVariables(
         inducing=SharedInducingPoints(locations=Z),
@@ -425,8 +425,8 @@ def test_multi_output_inducing_blocks_matches_separate_K_uu_K_uf():
     Z = jnp.array([[-1.0], [1.0]])
     X = jnp.array([[0.0], [0.5], [1.0]])
     kernels = (
-        RBF(init_variance=1.0, init_lengthscale=0.5),
-        RBF(init_variance=0.8, init_lengthscale=1.2),
+        RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+        RBF(pyrox_name="RBF_q1", init_variance=0.8, init_lengthscale=1.2),
     )
     inducing = MultiOutputInducingVariables(
         inducing=SharedInducingPoints(locations=Z),
@@ -556,7 +556,11 @@ def test_icm_kappa_check_is_no_op_under_jit():
 def test_oilmm_rejects_more_latents_than_outputs():
     with pytest.raises(ValueError, match="num_latents <= num_outputs"):
         OILMMKernel(
-            kernels=(RBF(), RBF(), RBF()),
+            kernels=(
+                RBF(pyrox_name="RBF_q0"),
+                RBF(pyrox_name="RBF_q1"),
+                RBF(pyrox_name="RBF_q2"),
+            ),
             mixing=jnp.eye(3)[:2, :],  # (2, 3) — too many latents for 2 outputs
         )
 
@@ -699,20 +703,48 @@ def test_lmc_accepts_distinct_priored_kernels_with_explicit_unique_scopes():
     assert "RBF_q1.variance" in tr
 
 
-def test_lmc_accepts_distinct_kernels_without_priors_sharing_scope():
-    """Pure deterministic kernels (no priors) cannot collide on a
-    NumPyro trace, so the validator must not flag two ``RBF()``
-    instances without priors — this is the common usage in tests and
-    pure-MAP workflows.
+def test_lmc_rejects_distinct_non_priored_kernels_sharing_scope():
+    """Even without priors set, two distinct ``RBF()`` instances both
+    register ``pyrox_param`` sites under the same ``RBF.lengthscale`` /
+    ``RBF.variance`` names. NumPyro's param store dedups by name, so
+    inside an SVI/MAP trace the two latents would silently share one
+    parameter — corrupting fits where the latents are meant to vary
+    independently. The validator catches this at construction.
+    """
+    with pytest.raises(ValueError, match="distinct latent kernel instances"):
+        LMCKernel(
+            kernels=(
+                RBF(init_variance=1.0, init_lengthscale=0.5),
+                RBF(init_variance=0.8, init_lengthscale=1.2),
+            ),
+            mixing=jnp.array([[1.0, 0.5], [0.25, -1.0]]),
+        )
+
+
+def test_lmc_silent_param_tying_regression_documented():
+    """Counterpart to the validator: if you bypass the validator by
+    using explicit unique scopes, the two latents register *distinct*
+    ``numpyro.param`` sites and stay independent under a trace. This
+    documents the contract the validator protects.
     """
     lmc = LMCKernel(
         kernels=(
-            RBF(init_variance=1.0, init_lengthscale=0.5),
-            RBF(init_variance=0.8, init_lengthscale=1.2),
+            RBF(pyrox_name="RBF_q0", init_variance=1.0, init_lengthscale=0.5),
+            RBF(pyrox_name="RBF_q1", init_variance=0.8, init_lengthscale=1.2),
         ),
         mixing=jnp.array([[1.0, 0.5], [0.25, -1.0]]),
     )
-    assert lmc.num_latents == 2
+    X = jnp.array([[0.0], [0.5], [1.0]])
+
+    def model():
+        return lmc.full_covariance(X)
+
+    with numpyro.handlers.trace() as tr, handlers.seed(rng_seed=7):
+        model()
+    assert "RBF_q0.variance" in tr
+    assert "RBF_q1.variance" in tr
+    assert "RBF_q0.lengthscale" in tr
+    assert "RBF_q1.lengthscale" in tr
 
 
 def test_lmc_accepts_tied_priored_kernel_reused_across_latents():
