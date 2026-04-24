@@ -33,14 +33,18 @@ Bayesian Neural Field stack (``pyrox.nn._bnf``):
 * :class:`InteractionFeatures` — element-wise products on column pairs.
 * :class:`BayesianNeuralField` — full BNF MLP with Logistic(0, 1) priors.
 
-Pure-JAX feature helpers (``pyrox.nn._features``):
+Geographic / spherical helpers (``pyrox.nn._geo``):
 
 * :func:`deg2rad`, :func:`lonlat_scale`, :func:`lonlat_to_cartesian3d`,
-  :func:`cyclic_encode`, :func:`spherical_harmonic_encode` — geographic
-  and spherical preprocessing helpers.
+  :func:`cyclic_encode`, :func:`spherical_harmonic_encode` —
+  pure-JAX preprocessing helpers for lon/lat inputs.
+
+Pure-JAX feature helpers (``pyrox.nn._features``):
+
 * :func:`fourier_features`, :func:`seasonal_features`,
   :func:`interaction_features`, :func:`standardize`,
-  :func:`unstandardize` — pandas-free building blocks the layers wrap.
+  :func:`unstandardize` — pandas-free building blocks the BNF layers
+  wrap.
 """
 
 from pyrox.nn._bnf import (

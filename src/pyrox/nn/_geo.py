@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Literal
 
 import jax.numpy as jnp
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, Num
 
 from pyrox._basis import real_spherical_harmonics
 
@@ -35,7 +35,7 @@ def _validate_input_unit(input_unit: Literal["degrees", "radians"]) -> None:
         )
 
 
-def _promote_to_floating(x: Float[Array, ...]) -> Float[Array, ...]:
+def _promote_to_floating(x: Num[Array, ...]) -> Float[Array, ...]:
     """Promote integer arrays to ``float32`` so affine ops don't truncate."""
     if jnp.issubdtype(x.dtype, jnp.integer):
         return x.astype(jnp.float32)
@@ -56,7 +56,7 @@ def deg2rad(x: Float[Array, ...]) -> Float[Array, ...]:
 
 
 def lonlat_scale(
-    lonlat: Float[Array, "N 2"],
+    lonlat: Num[Array, "N 2"],
     *,
     lon_range: tuple[float, float] = (-180.0, 180.0),
     lat_range: tuple[float, float] = (-90.0, 90.0),

@@ -51,7 +51,7 @@ def test_deg2rad_matches_numpy():
     np.testing.assert_allclose(np.asarray(deg2rad(x2)), np.deg2rad(np.asarray(x2)))
 
 
-def test_lonlat_scale_maps_to_unit_interval():
+def test_lonlat_scale_maps_to_minus_one_one():
     lonlat = jnp.array(
         [
             [-180.0, -90.0],

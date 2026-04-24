@@ -35,7 +35,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, Num
 
 from pyrox._basis import fourier_basis, real_spherical_harmonics, spectral_density
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
@@ -101,7 +101,7 @@ class LonLatScale(eqx.Module):
         _validate_range(self.lon_range, name="lon_range")
         _validate_range(self.lat_range, name="lat_range")
 
-    def __call__(self, lonlat: Float[Array, "N 2"]) -> Float[Array, "N 2"]:
+    def __call__(self, lonlat: Num[Array, "N 2"]) -> Float[Array, "N 2"]:
         return lonlat_scale(
             lonlat,
             lon_range=self.lon_range,
