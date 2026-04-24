@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import numpyro
+import numpyro.distributions as dist
+import numpyro.handlers as handlers
 import pytest
 from gaussx import is_block_diagonal, is_kronecker, oilmm_project, solve
 
@@ -105,6 +108,111 @@ def test_lmc_single_latent_operator_is_kronecker_tagged():
     )
     op = lmc.cross_covariance_operator(X, X)
     assert is_kronecker(op)
+
+
+def test_lmc_cross_covariance_operator_rectangular_X1_X2():
+    """Regression: rectangular cross-covariance must not be tagged PSD."""
+    X1 = jnp.array([[0.0], [0.5], [1.0]])
+    X2 = jnp.array([[0.2], [0.7]])
+    lmc = LMCKernel(
+        kernels=(
+            RBF(init_variance=1.0, init_lengthscale=0.5),
+            RBF(init_variance=0.8, init_lengthscale=1.0),
+        ),
+        mixing=jnp.array([[1.0, 0.5], [0.25, -1.0]]),
+    )
+    op = lmc.cross_covariance_operator(X1, X2)
+    dense = lmc.cross_covariance(X1, X2)
+    assert dense.shape == (6, 4)
+    assert jnp.allclose(op.as_matrix(), dense)
+
+
+def test_icm_cross_covariance_operator_rectangular_X1_X2():
+    X1 = jnp.array([[0.0], [0.5], [1.0]])
+    X2 = jnp.array([[0.2], [0.7]])
+    icm = ICMKernel(
+        kernel=RBF(init_variance=1.0, init_lengthscale=0.5),
+        mixing=jnp.array([[1.0, 0.2], [0.3, 0.8]]),
+    )
+    op = icm.cross_covariance_operator(X1, X2)
+    dense = icm.cross_covariance(X1, X2)
+    assert dense.shape == (6, 4)
+    assert jnp.allclose(op.as_matrix(), dense)
+
+
+def test_lmc_cross_covariance_operator_square_non_psd_X1_ne_X2():
+    """Regression: N1 == N2 but X1 != X2 yields a square, non-symmetric K_q.
+
+    The old ``_kron_block_op`` inferred PSD from ``K.shape[0] == K.shape[1]``,
+    which would mis-tag such a cross-covariance and break structural
+    dispatch. The fix uses the caller-provided ``psd_K`` flag, so square
+    cross-covariances stay untagged.
+    """
+    X1 = jnp.array([[0.0], [0.5], [1.0]])
+    X2 = jnp.array([[0.2], [0.6], [0.9]])  # same length, different points
+    lmc = LMCKernel(
+        kernels=(
+            RBF(init_variance=1.0, init_lengthscale=0.5),
+            RBF(init_variance=0.8, init_lengthscale=1.0),
+        ),
+        mixing=jnp.array([[1.0, 0.5], [0.25, -1.0]]),
+    )
+    op = lmc.cross_covariance_operator(X1, X2)
+    dense = lmc.cross_covariance(X1, X2)
+    assert dense.shape == (6, 6)
+    assert jnp.allclose(op.as_matrix(), dense)
+    # The dense cross-covariance must not be symmetric — this is exactly
+    # the configuration the old shape-based PSD tag would have mis-tagged.
+    assert not jnp.allclose(dense, dense.T)
+
+
+def test_icm_cross_covariance_operator_square_non_psd_X1_ne_X2():
+    X1 = jnp.array([[0.0], [0.5], [1.0]])
+    X2 = jnp.array([[0.2], [0.6], [0.9]])
+    icm = ICMKernel(
+        kernel=RBF(init_variance=1.0, init_lengthscale=0.5),
+        mixing=jnp.array([[1.0, 0.2], [0.3, 0.8]]),
+    )
+    op = icm.cross_covariance_operator(X1, X2)
+    dense = icm.cross_covariance(X1, X2)
+    assert dense.shape == (6, 6)
+    assert jnp.allclose(op.as_matrix(), dense)
+    assert not jnp.allclose(dense, dense.T)
+
+
+def test_oilmm_signal_covariance_operator_rectangular_X1_X2():
+    X1 = jnp.array([[0.0], [0.5], [1.0]])
+    X2 = jnp.array([[0.2], [0.7]])
+    mixing = jnp.eye(2)
+    oilmm = OILMMKernel(
+        kernels=(
+            RBF(init_variance=1.0, init_lengthscale=0.5),
+            RBF(init_variance=0.8, init_lengthscale=1.0),
+        ),
+        mixing=mixing,
+    )
+    op = oilmm.signal_covariance_operator(X1, X2)
+    dense = oilmm.signal_covariance(X1, X2)
+    assert dense.shape == (6, 4)
+    assert jnp.allclose(op.as_matrix(), dense)
+
+
+def test_oilmm_signal_covariance_operator_square_non_psd_X1_ne_X2():
+    X1 = jnp.array([[0.0], [0.5], [1.0]])
+    X2 = jnp.array([[0.2], [0.6], [0.9]])
+    mixing = jnp.eye(2)
+    oilmm = OILMMKernel(
+        kernels=(
+            RBF(init_variance=1.0, init_lengthscale=0.5),
+            RBF(init_variance=0.8, init_lengthscale=1.0),
+        ),
+        mixing=mixing,
+    )
+    op = oilmm.signal_covariance_operator(X1, X2)
+    dense = oilmm.signal_covariance(X1, X2)
+    assert dense.shape == (6, 6)
+    assert jnp.allclose(op.as_matrix(), dense)
+    assert not jnp.allclose(dense, dense.T)
 
 
 # ---------------------------------------------------------------------------
@@ -365,3 +473,67 @@ def test_shared_inducing_K_uu_rejects_empty_kernel_tuple():
     shared = SharedInducingPoints(locations=jnp.zeros((2, 1)))
     with pytest.raises(ValueError, match="non-empty"):
         shared.K_uu(())
+
+
+# ---------------------------------------------------------------------------
+# Shared kernel-context regression (hyperparameter tying across latents)
+# ---------------------------------------------------------------------------
+
+
+def test_lmc_full_covariance_shares_context_when_kernel_tied_across_latents():
+    """Reusing one priored kernel instance across latents must not trip
+    duplicate sample-site registration.
+
+    Regression for the codex P1 review comment: opening a fresh
+    ``_kernel_context`` per kernel call clears the per-call cache between
+    calls, so a NumPyro trace sees a second registration of the same
+    site name. Sharing one context across the multi-kernel builder loop
+    collapses the two calls into a single cached registration.
+    """
+    kernel = RBF()
+    kernel.set_prior("variance", dist.LogNormal(0.0, 0.3))
+    kernel.set_prior("lengthscale", dist.LogNormal(0.0, 0.3))
+    # Deliberately reuse the same instance for both latents.
+    lmc = LMCKernel(
+        kernels=(kernel, kernel),
+        mixing=jnp.array([[1.0, 0.5], [0.25, -1.0]]),
+    )
+    X = jnp.array([[0.0], [0.5], [1.0]])
+
+    def model():
+        return lmc.full_covariance(X)
+
+    with numpyro.handlers.trace() as tr, handlers.seed(rng_seed=0):
+        model()
+    # Each priored hyperparameter registered exactly once despite two
+    # latents sharing the kernel instance.
+    assert "RBF.variance" in tr
+    assert "RBF.lengthscale" in tr
+
+
+def test_oilmm_signal_covariance_shares_context_when_kernel_tied_across_latents():
+    kernel = RBF()
+    kernel.set_prior("variance", dist.LogNormal(0.0, 0.3))
+    mixing = jnp.eye(2)
+    oilmm = OILMMKernel(kernels=(kernel, kernel), mixing=mixing)
+    X = jnp.array([[0.0], [0.5], [1.0]])
+
+    def model():
+        return oilmm.signal_covariance(X, X)
+
+    with numpyro.handlers.trace() as tr, handlers.seed(rng_seed=1):
+        model()
+    assert "RBF.variance" in tr
+
+
+def test_shared_inducing_K_uu_shares_context_when_kernel_tied_across_latents():
+    kernel = RBF()
+    kernel.set_prior("variance", dist.LogNormal(0.0, 0.3))
+    shared = SharedInducingPoints(locations=jnp.array([[-1.0], [0.0], [1.0]]))
+
+    def model():
+        return shared.K_uu((kernel, kernel))
+
+    with numpyro.handlers.trace() as tr, handlers.seed(rng_seed=2):
+        model()
+    assert "RBF.variance" in tr

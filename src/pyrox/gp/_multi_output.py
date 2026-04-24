@@ -24,7 +24,7 @@ import lineax as lx
 from gaussx import BlockDiag, Kronecker, SumOperator, oilmm_back_project, oilmm_project
 from jaxtyping import Array, Float
 
-from pyrox.gp._context import _kernel_context
+from pyrox.gp._context import _kernel_context, _kernel_contexts
 from pyrox.gp._protocols import Kernel
 
 
@@ -44,27 +44,36 @@ def _validate_kernel_count(kernels: tuple[Kernel, ...], num_latents: int) -> Non
 
 
 def _psd_matrix_op(M: Float[Array, "R R"]) -> lx.MatrixLinearOperator:
-    """Wrap a dense PSD matrix as a tagged lineax operator."""
+    """Wrap a square PSD matrix as a tagged lineax operator."""
     return lx.MatrixLinearOperator(M, tags=lx.positive_semidefinite_tag)  # ty: ignore[invalid-return-type]
 
 
-def _kernel_eval(
-    kernel: Kernel,
-    X1: Float[Array, "N1 D"],
-    X2: Float[Array, "N2 D"],
-) -> Float[Array, "N1 N2"]:
-    """Evaluate ``kernel(X1, X2)`` under the kernel's per-call context."""
-    with _kernel_context(kernel):
-        return kernel(X1, X2)
+def _matrix_op(M: Float[Array, "R C"]) -> lx.MatrixLinearOperator:
+    """Wrap a (possibly rectangular) matrix as an untagged lineax operator.
+
+    Used for cross-covariance blocks where the ``positive_semidefinite``
+    tag would be wrong and trigger a ``lineax`` shape check against
+    symmetry.
+    """
+    return lx.MatrixLinearOperator(M)  # ty: ignore[invalid-return-type]
 
 
-def _kernel_diag(
-    kernel: Kernel,
-    X: Float[Array, "N D"],
-) -> Float[Array, " N"]:
-    """Evaluate ``kernel.diag(X)`` under the kernel's per-call context."""
-    with _kernel_context(kernel):
-        return kernel.diag(X)
+def _kron_block_op(
+    B: Float[Array, "P P"],
+    K: Float[Array, "R C"],
+    *,
+    psd_K: bool,
+) -> lx.MatrixLinearOperator:
+    """Wrap the per-latent Kronecker factors with appropriate tags.
+
+    ``B`` is always square PSD. The caller must declare whether ``K`` is
+    PSD via ``psd_K`` — true only for the train-train Gram (``X1 is X2``).
+    A square but non-symmetric cross-covariance (``N1 == N2`` with
+    ``X1 != X2``) is *not* PSD, so shape alone is not a safe inference.
+    """
+    B_op = _psd_matrix_op(B)
+    K_op = _psd_matrix_op(K) if psd_K else _matrix_op(K)
+    return Kronecker(B_op, K_op)  # ty: ignore[invalid-return-type]
 
 
 class LMCKernel(eqx.Module):
@@ -104,11 +113,17 @@ class LMCKernel(eqx.Module):
         X1: Float[Array, "N1 D"],
         X2: Float[Array, "N2 D"],
     ) -> tuple[tuple[Float[Array, "P P"], Float[Array, "N1 N2"]], ...]:
-        """Return ``(B_q, K_q(X1, X2))`` factors for each latent process."""
-        return tuple(
-            (self.coregionalization_matrix(q), _kernel_eval(kernel, X1, X2))
-            for q, kernel in enumerate(self.kernels)
-        )
+        """Return ``(B_q, K_q(X1, X2))`` factors for each latent process.
+
+        All latent kernel evaluations share one per-call context per
+        unique kernel instance, so reusing the same kernel across latents
+        (for hyperparameter tying) registers each sample site exactly once.
+        """
+        with _kernel_contexts(self.kernels):
+            return tuple(
+                (self.coregionalization_matrix(q), kernel(X1, X2))
+                for q, kernel in enumerate(self.kernels)
+            )
 
     def output_covariance(
         self,
@@ -133,12 +148,13 @@ class LMCKernel(eqx.Module):
         so structure-aware solvers can avoid materializing the full
         ``(P*N1, P*N2)`` matrix.
         """
+        psd_K = X1 is X2
         terms = [
-            Kronecker(_psd_matrix_op(B_q), _psd_matrix_op(K_q))
+            _kron_block_op(B_q, K_q, psd_K=psd_K)
             for B_q, K_q in self.kronecker_factors(X1, X2)
         ]
         if len(terms) == 1:
-            return terms[0]  # ty: ignore[invalid-return-type]
+            return terms[0]
         return SumOperator(*terms)  # ty: ignore[invalid-return-type]
 
     def cross_covariance(
@@ -161,10 +177,11 @@ class LMCKernel(eqx.Module):
 
     def diag(self, X: Float[Array, "N D"]) -> Float[Array, "N P"]:
         """Return per-input, per-output marginal variances with shape ``(N, P)``."""
-        terms = [
-            _kernel_diag(kernel, X)[:, None] * jnp.square(self.mixing[:, q])[None, :]
-            for q, kernel in enumerate(self.kernels)
-        ]
+        with _kernel_contexts(self.kernels):
+            terms = [
+                kernel.diag(X)[:, None] * jnp.square(self.mixing[:, q])[None, :]
+                for q, kernel in enumerate(self.kernels)
+            ]
         return functools.reduce(jnp.add, terms)
 
 
@@ -211,7 +228,8 @@ class ICMKernel(eqx.Module):
         X2: Float[Array, "N2 D"],
     ) -> tuple[Float[Array, "P P"], Float[Array, "N1 N2"]]:
         """Return the shared ``(B, K(X1, X2))`` Kronecker factors."""
-        return self.coregionalization_matrix(), _kernel_eval(self.kernel, X1, X2)
+        with _kernel_context(self.kernel):
+            return self.coregionalization_matrix(), self.kernel(X1, X2)
 
     def output_covariance(
         self,
@@ -234,7 +252,7 @@ class ICMKernel(eqx.Module):
         instead of materializing a ``(P*N1, P*N2)`` matrix.
         """
         B, K = self.kronecker_factors(X1, X2)
-        return Kronecker(_psd_matrix_op(B), _psd_matrix_op(K))  # ty: ignore[invalid-return-type]
+        return _kron_block_op(B, K, psd_K=X1 is X2)  # ty: ignore[invalid-return-type]
 
     def cross_covariance(
         self,
@@ -254,10 +272,11 @@ class ICMKernel(eqx.Module):
 
     def diag(self, X: Float[Array, "N D"]) -> Float[Array, "N P"]:
         """Return per-input, per-output marginal variances with shape ``(N, P)``."""
-        return (
-            _kernel_diag(self.kernel, X)[:, None]
-            * jnp.diag(self.coregionalization_matrix())[None, :]
-        )
+        with _kernel_context(self.kernel):
+            return (
+                self.kernel.diag(X)[:, None]
+                * jnp.diag(self.coregionalization_matrix())[None, :]
+            )
 
 
 class OILMMKernel(eqx.Module):
@@ -268,10 +287,15 @@ class OILMMKernel(eqx.Module):
     GP problems instead of one monolithic multi-output solve. Observation
     noise lives in a separate :class:`pyrox.gp.Likelihood`; this class
     returns noise-free signal covariance, matching the LMC/ICM convention.
+
+    Pass ``check_orthogonal=True`` to verify ``W^T W ≈ I`` at
+    construction — useful as a defensive check when ``W`` comes from
+    an external computation that may drift off the Stiefel manifold.
     """
 
     kernels: tuple[Kernel, ...]
     mixing: Float[Array, "P Q"]
+    check_orthogonal: bool = eqx.field(static=True, default=False)
 
     def __check_init__(self) -> None:
         _validate_mixing(self.mixing)
@@ -282,6 +306,12 @@ class OILMMKernel(eqx.Module):
                 "a valid semi-orthogonal mixing matrix; "
                 f"got {self.mixing.shape[1]} latents and "
                 f"{self.mixing.shape[0]} outputs."
+            )
+        if self.check_orthogonal and not self.is_orthogonal():
+            raise ValueError(
+                "mixing must satisfy W^T W ≈ I when check_orthogonal=True. "
+                "Project via `jnp.linalg.qr(W)[0]` before construction, or "
+                "pass check_orthogonal=False to bypass."
             )
 
     @property
@@ -341,14 +371,19 @@ class OILMMKernel(eqx.Module):
         X1: Float[Array, "N1 D"],
         X2: Float[Array, "N2 D"],
     ) -> tuple[tuple[Float[Array, "P P"], Float[Array, "N1 N2"]], ...]:
-        """Return the latent signal factors before any observation noise."""
-        return tuple(
-            (
-                jnp.outer(self.mixing[:, q], self.mixing[:, q]),
-                _kernel_eval(kernel, X1, X2),
+        """Return the latent signal factors before any observation noise.
+
+        All latent kernel evaluations share one per-call context per
+        unique kernel instance, mirroring :meth:`LMCKernel.kronecker_factors`.
+        """
+        with _kernel_contexts(self.kernels):
+            return tuple(
+                (
+                    jnp.outer(self.mixing[:, q], self.mixing[:, q]),
+                    kernel(X1, X2),
+                )
+                for q, kernel in enumerate(self.kernels)
             )
-            for q, kernel in enumerate(self.kernels)
-        )
 
     def signal_covariance_operator(
         self,
@@ -356,12 +391,13 @@ class OILMMKernel(eqx.Module):
         X2: Float[Array, "N2 D"],
     ) -> lx.AbstractLinearOperator:
         """Return the noise-free signal covariance as a structured operator."""
+        psd_K = X1 is X2
         terms = [
-            Kronecker(_psd_matrix_op(B_q), _psd_matrix_op(K_q))
+            _kron_block_op(B_q, K_q, psd_K=psd_K)
             for B_q, K_q in self.signal_factors(X1, X2)
         ]
         if len(terms) == 1:
-            return terms[0]  # ty: ignore[invalid-return-type]
+            return terms[0]
         return SumOperator(*terms)  # ty: ignore[invalid-return-type]
 
     def signal_covariance(
@@ -371,6 +407,12 @@ class OILMMKernel(eqx.Module):
     ) -> Float[Array, "PN1 PN2"]:
         """Return the dense noise-free signal covariance matrix."""
         return self.signal_covariance_operator(X1, X2).as_matrix()
+
+    # LMC / ICM-parity aliases — OILMM's "signal covariance" is the
+    # noise-free vec-cross covariance, same semantics as
+    # ``LMCKernel.cross_covariance`` since noise is no longer kernel-side.
+    cross_covariance_operator = signal_covariance_operator
+    cross_covariance = signal_covariance
 
     def full_covariance_operator(
         self, X: Float[Array, "N D"]
@@ -384,10 +426,11 @@ class OILMMKernel(eqx.Module):
 
     def diag(self, X: Float[Array, "N D"]) -> Float[Array, "N P"]:
         """Return per-input, per-output marginal signal variances."""
-        terms = [
-            _kernel_diag(kernel, X)[:, None] * jnp.square(self.mixing[:, q])[None, :]
-            for q, kernel in enumerate(self.kernels)
-        ]
+        with _kernel_contexts(self.kernels):
+            terms = [
+                kernel.diag(X)[:, None] * jnp.square(self.mixing[:, q])[None, :]
+                for q, kernel in enumerate(self.kernels)
+            ]
         return functools.reduce(jnp.add, terms)
 
 
@@ -408,12 +451,15 @@ class SharedInducingPoints(eqx.Module):
     def latent_covariances(
         self, kernels: tuple[Kernel, ...]
     ) -> tuple[Float[Array, "M M"], ...]:
-        """Return one inducing covariance block per latent kernel."""
+        """Return one inducing covariance block per latent kernel.
+
+        Shares a per-call context per unique kernel instance so a kernel
+        reused across latents registers its sample sites once.
+        """
         if not kernels:
             raise ValueError("kernels must be non-empty.")
-        return tuple(
-            _kernel_eval(kernel, self.locations, self.locations) for kernel in kernels
-        )
+        with _kernel_contexts(kernels):
+            return tuple(kernel(self.locations, self.locations) for kernel in kernels)
 
     def K_uu_operator(self, kernels: tuple[Kernel, ...]) -> BlockDiag:
         """Return the block-diagonal inducing covariance as a ``BlockDiag``.
@@ -423,10 +469,11 @@ class SharedInducingPoints(eqx.Module):
         """
         if not kernels:
             raise ValueError("kernels must be non-empty.")
-        blocks = tuple(
-            _psd_matrix_op(_kernel_eval(kernel, self.locations, self.locations))
-            for kernel in kernels
-        )
+        with _kernel_contexts(kernels):
+            blocks = tuple(
+                _psd_matrix_op(kernel(self.locations, self.locations))
+                for kernel in kernels
+            )
         return BlockDiag(*blocks)  # ty: ignore[invalid-return-type]
 
     def K_uu(self, kernels: tuple[Kernel, ...]) -> Float[Array, "QM QM"]:
@@ -441,7 +488,8 @@ class SharedInducingPoints(eqx.Module):
         """Return one ``K(Z, X)`` block per latent kernel."""
         if not kernels:
             raise ValueError("kernels must be non-empty.")
-        return tuple(_kernel_eval(kernel, self.locations, X) for kernel in kernels)
+        with _kernel_contexts(kernels):
+            return tuple(kernel(self.locations, X) for kernel in kernels)
 
 
 class MultiOutputInducingVariables(eqx.Module):
@@ -458,6 +506,31 @@ class MultiOutputInducingVariables(eqx.Module):
 
     def __check_init__(self) -> None:
         _validate_mixing(self.mixing)
+
+    @classmethod
+    def from_kernel(
+        cls,
+        kernel: LMCKernel | ICMKernel,
+        inducing: SharedInducingPoints,
+    ) -> MultiOutputInducingVariables:
+        """Construct from a kernel, sharing its mixing matrix.
+
+        Avoids the footgun of maintaining two independent ``mixing``
+        copies that can silently disagree between ``K_ff`` and ``K_uf``.
+        Only :class:`LMCKernel` and :class:`ICMKernel` are accepted;
+        :class:`OILMMKernel` is rejected because the sparse inducing
+        workflow does not currently exploit orthogonal projection.
+
+        For :class:`ICMKernel` with non-zero ``kappa``, the extra
+        diagonal term is dropped — users should use a dense solve if
+        the ``kappa`` contribution matters.
+        """
+        if isinstance(kernel, (LMCKernel, ICMKernel)):
+            return cls(inducing=inducing, mixing=kernel.mixing)
+        raise TypeError(
+            "from_kernel only accepts LMCKernel or ICMKernel; "
+            f"got {type(kernel).__name__}."
+        )
 
     @property
     def num_outputs(self) -> int:
