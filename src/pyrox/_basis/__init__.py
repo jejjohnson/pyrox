@@ -13,6 +13,9 @@ Public surface:
 - :func:`real_spherical_harmonics` — real SHs on the unit 2-sphere.
 - :func:`graph_laplacian_eigpairs` — smallest eigenpairs of a graph Laplacian.
 - :func:`spectral_density` — kernel spectral density evaluated at frequency magnitudes.
+- :func:`draw_rff_cosine_basis` / :func:`evaluate_rff_cosine_paths` — pure
+  random-Fourier-feature prior draws for RBF/Matern kernels, shared by
+  :mod:`pyrox.gp._pathwise`.
 """
 
 from pyrox._basis._fourier import (
@@ -22,11 +25,14 @@ from pyrox._basis._fourier import (
     fourier_eigenvalues_1d,
 )
 from pyrox._basis._laplacian import graph_laplacian_eigpairs
+from pyrox._basis._rff import draw_rff_cosine_basis, evaluate_rff_cosine_paths
 from pyrox._basis._spectral_density import spectral_density
 from pyrox._basis._spherical import harmonic_degrees, real_spherical_harmonics
 
 
 __all__ = [
+    "draw_rff_cosine_basis",
+    "evaluate_rff_cosine_paths",
     "fourier_basis",
     "fourier_basis_1d",
     "fourier_eigenvalues",

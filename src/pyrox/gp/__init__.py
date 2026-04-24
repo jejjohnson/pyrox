@@ -20,8 +20,10 @@
   delegates its math there, and so will the future natural-gradient /
   CVI inference paths.
 * Model-facing entry points — :class:`GPPrior`, :class:`ConditionedGP`,
-  :class:`SparseGPPrior`, :func:`gp_factor`, :func:`gp_sample` — the
-  NumPyro-aware shell on top of gaussx linear algebra.
+  :class:`SparseGPPrior`, :class:`PathwiseSampler`,
+  :class:`DecoupledPathwiseSampler`, :func:`gp_factor`,
+  :func:`gp_sample` — the NumPyro-aware shell on top of gaussx linear
+  algebra.
 
 *Scalable matrix construction* and *solver strategies* — numerically
 stable matrix assembly, implicit operators, batched matvec, Cholesky /
@@ -78,6 +80,11 @@ from pyrox.gp._multi_output import (
     OILMMKernel,
     SharedInducingPoints,
 )
+from pyrox.gp._pathwise import (
+    DecoupledPathwiseSampler,
+    PathwiseFunction,
+    PathwiseSampler,
+)
 from pyrox.gp._protocols import (
     Guide,
     Integrator,
@@ -94,6 +101,7 @@ __all__ = [
     "Constant",
     "Cosine",
     "DecoupledInducingFeatures",
+    "DecoupledPathwiseSampler",
     "DeltaGuide",
     "DistLikelihood",
     "FourierInducingFeatures",
@@ -114,6 +122,8 @@ __all__ = [
     "MultiOutputInducingVariables",
     "NaturalGuide",
     "OILMMKernel",
+    "PathwiseFunction",
+    "PathwiseSampler",
     "Periodic",
     "Polynomial",
     "RationalQuadratic",
