@@ -1,10 +1,13 @@
 # NN API
 
-The `pyrox.nn` subpackage ships uncertainty-aware neural network layers in three families:
+The `pyrox.nn` subpackage ships uncertainty-aware neural network layers in four families:
 
-1. **Dense / Bayesian-linear layers** (`pyrox.nn._layers`) — twelve layers covering reparameterization, Flipout, NCP, MC-Dropout, and several random-feature variants.
-2. **Bayesian Neural Field stack** (`pyrox.nn._bnf`) — five layers that together implement the BNF architecture (Saad et al., Nat. Comms. 2024).
-3. **Pure-JAX feature helpers** (`pyrox.nn._features`) — pandas-free building blocks the BNF layers wrap.
+1. **Geographic / spherical encoders** (`pyrox.nn._geo` plus deterministic wrappers in `pyrox.nn._layers`) — degree/radian, lon/lat, cyclic, and spherical-harmonic preprocessing for geophysical inputs.
+2. **Dense / Bayesian-linear layers** (`pyrox.nn._layers`) — twelve layers covering reparameterization, Flipout, NCP, MC-Dropout, and several random-feature variants.
+3. **Bayesian Neural Field stack** (`pyrox.nn._bnf`) — five layers that together implement the BNF architecture (Saad et al., Nat. Comms. 2024).
+4. **Pure-JAX feature helpers** (`pyrox.nn._features`) — pandas-free building blocks the BNF layers wrap.
+
+See also: [Geo encoders](nn/geo_encoders.md) for the longitude/latitude and spherical-harmonic API surface.
 
 ## Dense / Bayesian-linear layers
 

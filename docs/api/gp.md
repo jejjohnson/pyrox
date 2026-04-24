@@ -98,6 +98,50 @@ prior    = SparseGPPrior(kernel=kernel, inducing=features)   # K_uu is diagonal!
 
 ::: pyrox.gp.SparseGPPrior
 
+## Pathwise posterior samplers (#39)
+
+Callable posterior function draws via Matheron's rule. Each sampled
+path is a :class:`PathwiseFunction` that evaluates in
+``O(N_* · F · D + N_* · N_corr)`` per path — ``N_* · F · D`` for the
+RFF prior draw and ``N_* · N_corr`` for the kernel correction against
+the ``N_corr`` training (exact) or inducing (decoupled) points — so the
+same draw can be reused at arbitrary test sets without rebuilding a
+test-set covariance. Standard enabler for Thompson sampling, Bayesian
+optimization, and posterior visualization.
+
+```python
+from pyrox.gp import (
+    RBF,
+    GPPrior,
+    PathwiseSampler,
+    DecoupledPathwiseSampler,
+    FullRankGuide,
+    SparseGPPrior,
+)
+import jax
+import jax.numpy as jnp
+
+# Exact GP:
+posterior = GPPrior(kernel=RBF(), X=X).condition(y, jnp.array(0.05))
+paths = PathwiseSampler(posterior, n_features=512).sample_paths(
+    jax.random.PRNGKey(0), n_paths=32
+)
+draws = paths(X_star)            # (32, N_star)
+
+# Sparse / decoupled:
+sparse  = SparseGPPrior(kernel=RBF(), Z=Z)
+guide   = FullRankGuide.init(Z.shape[0])
+paths   = DecoupledPathwiseSampler(sparse, guide).sample_paths(key, n_paths=16)
+samples = paths(X_star)
+```
+
+Currently supports RBF and Matern kernels. Point-inducing
+``SparseGPPrior`` only — inducing-feature priors raise at construction.
+
+::: pyrox.gp.PathwiseSampler
+::: pyrox.gp.DecoupledPathwiseSampler
+::: pyrox.gp.PathwiseFunction
+
 ## Component protocols
 
 Abstract pyrox-local bases for the orthogonal component stack. Wave 2

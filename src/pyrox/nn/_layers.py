@@ -1,6 +1,17 @@
-"""Uncertainty-aware dense layers for Bayesian and stochastic NNs.
+"""Coordinate encoders and uncertainty-aware dense layers.
 
-Five layer families:
+Deterministic coordinate encoders (pure ``equinox.Module`` wrappers
+around the helpers in :mod:`pyrox.nn._geo`):
+
+* :class:`Deg2Rad` — element-wise degrees-to-radians conversion.
+* :class:`LonLatScale` — affine lon/lat scaling.
+* :class:`Cartesian3DEncoder` — lon/lat lift to unit Cartesian
+  coordinates on :math:`S^2`.
+* :class:`CyclicEncoder` — periodic ``(cos, sin)`` feature map.
+* :class:`SphericalHarmonicEncoder` — real spherical-harmonic features
+  via :func:`pyrox._basis.real_spherical_harmonics`.
+
+Uncertainty-aware dense / random-feature layers:
 
 * :class:`DenseReparameterization` — weight-space Bayesian linear layer
   using the reparameterization trick (Kingma & Welling, 2014).
@@ -29,12 +40,193 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, Num
 
-from pyrox._basis import fourier_basis, spectral_density
+from pyrox._basis import fourier_basis, real_spherical_harmonics, spectral_density
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
 from pyrox.gp._context import _kernel_context
 from pyrox.gp._protocols import Kernel
+from pyrox.nn._geo import (
+    _validate_input_unit,
+    _validate_range,
+    cyclic_encode,
+    deg2rad,
+    lonlat_scale,
+    lonlat_to_cartesian3d,
+)
+
+
+class Deg2Rad(eqx.Module):
+    """Element-wise degrees-to-radians conversion.
+
+    Stateless ``equinox.Module`` wrapper around :func:`deg2rad` — no
+    learnable parameters and no sample sites.
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> Deg2Rad()(jnp.array([0.0, 90.0, 180.0]))
+        Array([0.       , 1.5707964, 3.1415927], dtype=float32)
+        >>> # Composes with other encoders in eqx.nn.Sequential.
+        >>> import equinox as eqx
+        >>> pipeline = eqx.nn.Sequential([Deg2Rad(), Cartesian3DEncoder()])
+    """
+
+    def __call__(self, x: Float[Array, ...]) -> Float[Array, ...]:
+        return deg2rad(x)
+
+
+class LonLatScale(eqx.Module):
+    """Affine-rescale lon/lat columns.
+
+    Values inside the given ranges map into ``[-1, 1]``; out-of-range
+    values are *not* clipped. The default ranges assume ``lonlat`` is
+    in degrees.
+
+    Attributes:
+        lon_range: ``(min, max)`` longitude domain (must satisfy
+            ``min < max``).
+        lat_range: ``(min, max)`` latitude domain (must satisfy
+            ``min < max``).
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> LonLatScale()(jnp.array([[0.0, 0.0]]))
+        Array([[0., 0.]], dtype=float32)
+        >>> # Regional grid in degrees:
+        >>> LonLatScale(lon_range=(-10.0, 10.0), lat_range=(40.0, 60.0))(
+        ...     jnp.array([[0.0, 50.0]])
+        ... )
+        Array([[0., 0.]], dtype=float32)
+    """
+
+    lon_range: tuple[float, float] = eqx.field(static=True, default=(-180.0, 180.0))
+    lat_range: tuple[float, float] = eqx.field(static=True, default=(-90.0, 90.0))
+
+    def __post_init__(self) -> None:
+        _validate_range(self.lon_range, name="lon_range")
+        _validate_range(self.lat_range, name="lat_range")
+
+    def __call__(self, lonlat: Num[Array, "N 2"]) -> Float[Array, "N 2"]:
+        return lonlat_scale(
+            lonlat,
+            lon_range=self.lon_range,
+            lat_range=self.lat_range,
+        )
+
+
+class Cartesian3DEncoder(eqx.Module):
+    """Lift lon/lat coordinates onto the unit sphere :math:`S^2`.
+
+    Stateless wrapper around :func:`lonlat_to_cartesian3d`. Uses the
+    same axis convention as
+    :class:`pyrox.gp.SphericalHarmonicInducingFeatures`.
+
+    Attributes:
+        input_unit: Whether the input is in ``"degrees"`` or
+            ``"radians"``.
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> # Prime meridian / equator → +x
+        >>> Cartesian3DEncoder()(jnp.array([[0.0, 0.0]]))
+        Array([[1., 0., 0.]], dtype=float32)
+        >>> # Degrees input:
+        >>> Cartesian3DEncoder(input_unit="degrees")(jnp.array([[0.0, 90.0]]))[:, 2]
+        Array([1.], dtype=float32)
+    """
+
+    input_unit: Literal["degrees", "radians"] = eqx.field(
+        static=True, default="radians"
+    )
+
+    def __post_init__(self) -> None:
+        _validate_input_unit(self.input_unit)
+
+    def __call__(self, lonlat: Float[Array, "N 2"]) -> Float[Array, "N 3"]:
+        return lonlat_to_cartesian3d(lonlat, input_unit=self.input_unit)
+
+
+class CyclicEncoder(eqx.Module):
+    """Encode periodic inputs as concatenated cos/sin features.
+
+    Stateless wrapper around :func:`cyclic_encode`.
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> CyclicEncoder()(jnp.array([0.0, jnp.pi]))[:, 0]
+        Array([ 1., -1.], dtype=float32)
+        >>> # 2-D input: each column encoded independently.
+        >>> CyclicEncoder()(jnp.zeros((3, 2))).shape
+        (3, 4)
+    """
+
+    def __call__(
+        self,
+        angles: Float[Array, " N"] | Float[Array, "N D"],
+    ) -> Float[Array, "N F"]:
+        return cyclic_encode(angles)
+
+
+class SphericalHarmonicEncoder(eqx.Module):
+    """Real spherical-harmonic features on the unit sphere.
+
+    Stateless wrapper that evaluates
+    :func:`pyrox._basis.real_spherical_harmonics` on either already-
+    cartesian inputs (``input_mode='cartesian'``) or lon/lat pairs
+    (``input_mode='lonlat'``, assumed in radians).
+
+    Attributes:
+        l_max: Maximum harmonic degree (must be ``>= 0``). The output
+            has ``(l_max + 1) ** 2`` features.
+        input_mode: ``"cartesian"`` for ``(N, 3)`` unit-sphere inputs
+            or ``"lonlat"`` for ``(N, 2)`` lon/lat pairs in radians.
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> xyz = jnp.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+        >>> SphericalHarmonicEncoder(l_max=3)(xyz).shape
+        (2, 16)
+        >>> # Lon/lat input mode (radians):
+        >>> lonlat = jnp.array([[0.0, 0.0], [0.5 * jnp.pi, 0.0]])
+        >>> SphericalHarmonicEncoder(l_max=3, input_mode="lonlat")(lonlat).shape
+        (2, 16)
+    """
+
+    l_max: int = eqx.field(static=True)
+    input_mode: Literal["cartesian", "lonlat"] = eqx.field(
+        static=True, default="cartesian"
+    )
+
+    def __post_init__(self) -> None:
+        if self.l_max < 0:
+            raise ValueError(f"l_max must be >= 0; got {self.l_max}.")
+        if self.input_mode not in {"cartesian", "lonlat"}:
+            raise ValueError(
+                f"input_mode must be 'cartesian' or 'lonlat'; got {self.input_mode!r}."
+            )
+
+    @property
+    def num_features(self) -> int:
+        return (self.l_max + 1) ** 2
+
+    def __call__(
+        self,
+        x: Float[Array, "N 3"] | Float[Array, "N 2"],
+    ) -> Float[Array, "N M"]:
+        if self.input_mode == "cartesian":
+            if x.ndim != 2 or x.shape[-1] != 3:
+                raise ValueError(
+                    "x must be (N, 3) when input_mode='cartesian'; "
+                    f"got shape {x.shape}."
+                )
+            unit_xyz = x
+        else:
+            if x.ndim != 2 or x.shape[-1] != 2:
+                raise ValueError(
+                    f"x must be (N, 2) when input_mode='lonlat'; got shape {x.shape}."
+                )
+            unit_xyz = lonlat_to_cartesian3d(x, input_unit="radians")
+        return real_spherical_harmonics(unit_xyz, l_max=self.l_max)
 
 
 class DenseReparameterization(PyroxModule):

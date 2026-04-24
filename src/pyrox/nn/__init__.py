@@ -1,7 +1,13 @@
-"""Bayesian and uncertainty-aware neural network layers.
+"""Bayesian, spectral, and coordinate-encoding neural network layers.
 
 Dense / Bayesian-linear layers (``pyrox.nn._layers``):
 
+* :class:`Deg2Rad` — element-wise degrees-to-radians conversion.
+* :class:`LonLatScale` — affine lon/lat scaling into ``[-1, 1]``.
+* :class:`Cartesian3DEncoder` — lon/lat lift to unit Cartesian
+  coordinates on :math:`S^2`.
+* :class:`CyclicEncoder` — periodic cos/sin encoding.
+* :class:`SphericalHarmonicEncoder` — real spherical-harmonic features.
 * :class:`DenseReparameterization` — weight-space Bayesian linear via
   the reparameterization trick.
 * :class:`DenseFlipout` — variance-reduced Bayesian linear via the
@@ -30,11 +36,18 @@ Bayesian Neural Field stack (``pyrox.nn._bnf``):
 * :class:`InteractionFeatures` — element-wise products on column pairs.
 * :class:`BayesianNeuralField` — full BNF MLP with Logistic(0, 1) priors.
 
+Geographic / spherical helpers (``pyrox.nn._geo``):
+
+* :func:`deg2rad`, :func:`lonlat_scale`, :func:`lonlat_to_cartesian3d`,
+  :func:`cyclic_encode`, :func:`spherical_harmonic_encode` —
+  pure-JAX preprocessing helpers for lon/lat inputs.
+
 Pure-JAX feature helpers (``pyrox.nn._features``):
 
 * :func:`fourier_features`, :func:`seasonal_features`,
   :func:`interaction_features`, :func:`standardize`,
-  :func:`unstandardize` — pandas-free building blocks the layers wrap.
+  :func:`unstandardize` — pandas-free building blocks the BNF layers
+  wrap.
 """
 
 from pyrox.nn._bnf import (
@@ -52,16 +65,27 @@ from pyrox.nn._features import (
     standardize,
     unstandardize,
 )
+from pyrox.nn._geo import (
+    cyclic_encode,
+    deg2rad,
+    lonlat_scale,
+    lonlat_to_cartesian3d,
+    spherical_harmonic_encode,
+)
 from pyrox.nn._layers import (
     SIREN,
     ArcCosineFourierFeatures,
     BayesianSIREN,
+    Cartesian3DEncoder,
+    CyclicEncoder,
+    Deg2Rad,
     DenseFlipout,
     DenseNCP,
     DenseReparameterization,
     DenseVariational,
     HSGPFeatures,
     LaplaceFourierFeatures,
+    LonLatScale,
     MaternFourierFeatures,
     MCDropout,
     NCPContinuousPerturb,
@@ -70,6 +94,7 @@ from pyrox.nn._layers import (
     RBFCosineFeatures,
     RBFFourierFeatures,
     SirenDense,
+    SphericalHarmonicEncoder,
     VariationalFourierFeatures,
 )
 
@@ -79,6 +104,9 @@ __all__ = [
     "ArcCosineFourierFeatures",
     "BayesianNeuralField",
     "BayesianSIREN",
+    "Cartesian3DEncoder",
+    "CyclicEncoder",
+    "Deg2Rad",
     "DenseFlipout",
     "DenseNCP",
     "DenseReparameterization",
@@ -87,6 +115,7 @@ __all__ = [
     "HSGPFeatures",
     "InteractionFeatures",
     "LaplaceFourierFeatures",
+    "LonLatScale",
     "MCDropout",
     "MaternFourierFeatures",
     "NCPContinuousPerturb",
@@ -96,12 +125,18 @@ __all__ = [
     "RandomKitchenSinks",
     "SeasonalFeatures",
     "SirenDense",
+    "SphericalHarmonicEncoder",
     "Standardization",
     "VariationalFourierFeatures",
+    "cyclic_encode",
+    "deg2rad",
     "fourier_features",
     "interaction_features",
+    "lonlat_scale",
+    "lonlat_to_cartesian3d",
     "seasonal_features",
     "seasonal_frequencies",
+    "spherical_harmonic_encode",
     "standardize",
     "unstandardize",
 ]

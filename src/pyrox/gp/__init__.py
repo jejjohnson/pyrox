@@ -6,6 +6,9 @@
 * :class:`Parameterized` kernel classes that wrap those functions with
   constraints, priors, and guide metadata — re-exported from this
   module.
+* Multi-output GP structures — :class:`LMCKernel`, :class:`ICMKernel`,
+  :class:`OILMMKernel`, and shared inducing-point helpers for explicit
+  cross-output structure without monolithic model classes.
 * Abstract protocols (:class:`Kernel`, :class:`Guide`,
   :class:`Integrator`, :class:`Likelihood`) plus five concrete sparse
   variational guides — :class:`FullRankGuide`, :class:`MeanFieldGuide`,
@@ -17,8 +20,10 @@
   delegates its math there, and so will the future natural-gradient /
   CVI inference paths.
 * Model-facing entry points — :class:`GPPrior`, :class:`ConditionedGP`,
-  :class:`SparseGPPrior`, :func:`gp_factor`, :func:`gp_sample` — the
-  NumPyro-aware shell on top of gaussx linear algebra.
+  :class:`SparseGPPrior`, :class:`PathwiseSampler`,
+  :class:`DecoupledPathwiseSampler`, :func:`gp_factor`,
+  :func:`gp_sample` — the NumPyro-aware shell on top of gaussx linear
+  algebra.
 
 *Scalable matrix construction* and *solver strategies* — numerically
 stable matrix assembly, implicit operators, batched matvec, Cholesky /
@@ -68,6 +73,18 @@ from pyrox.gp._models import (
     gp_factor,
     gp_sample,
 )
+from pyrox.gp._multi_output import (
+    ICMKernel,
+    LMCKernel,
+    MultiOutputInducingVariables,
+    OILMMKernel,
+    SharedInducingPoints,
+)
+from pyrox.gp._pathwise import (
+    DecoupledPathwiseSampler,
+    PathwiseFunction,
+    PathwiseSampler,
+)
 from pyrox.gp._protocols import (
     Guide,
     Integrator,
@@ -84,6 +101,7 @@ __all__ = [
     "Constant",
     "Cosine",
     "DecoupledInducingFeatures",
+    "DecoupledPathwiseSampler",
     "DeltaGuide",
     "DistLikelihood",
     "FourierInducingFeatures",
@@ -91,18 +109,25 @@ __all__ = [
     "GPPrior",
     "GaussianLikelihood",
     "Guide",
+    "ICMKernel",
     "InducingFeatures",
     "Integrator",
     "Kernel",
+    "LMCKernel",
     "LaplacianInducingFeatures",
     "Likelihood",
     "Linear",
     "Matern",
     "MeanFieldGuide",
+    "MultiOutputInducingVariables",
     "NaturalGuide",
+    "OILMMKernel",
+    "PathwiseFunction",
+    "PathwiseSampler",
     "Periodic",
     "Polynomial",
     "RationalQuadratic",
+    "SharedInducingPoints",
     "SparseGPPrior",
     "SphericalHarmonicInducingFeatures",
     "White",

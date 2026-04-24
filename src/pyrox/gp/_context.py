@@ -20,7 +20,7 @@ the context manager is itself a no-op.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 
 from pyrox.gp._protocols import Kernel
 
@@ -33,4 +33,33 @@ def _kernel_context(kernel: Kernel) -> Iterator[None]:
         yield
         return
     with ctx():
+        yield
+
+
+@contextlib.contextmanager
+def _kernel_contexts(kernels: Iterable[Kernel]) -> Iterator[None]:
+    """Scope a group of kernel calls under one shared per-call context each.
+
+    Opens one :func:`_kernel_context` per **unique kernel instance** (by
+    :func:`id`) and holds them all open for the duration of the block.
+    This is the right primitive for multi-output builders that loop over
+    several latent kernels: if the caller reuses the same
+    :class:`pyrox.PyroxModule`-based kernel instance across latents (for
+    hyperparameter tying), we must not open and close a fresh per-call
+    context on every iteration — that would clear the sample-site cache
+    between iterations and cause duplicate-site registration under a
+    NumPyro trace, or resample independent hyperparameter draws per
+    iteration under :func:`numpyro.handlers.seed`.
+
+    Distinct kernel instances get distinct contexts, which is fine — the
+    per-call cache is per-instance.
+    """
+    seen: set[int] = set()
+    with contextlib.ExitStack() as stack:
+        for kernel in kernels:
+            key = id(kernel)
+            if key in seen:
+                continue
+            seen.add(key)
+            stack.enter_context(_kernel_context(kernel))
         yield
