@@ -3,8 +3,8 @@
 These helpers are deterministic, pandas-free building blocks for
 longitude/latitude preprocessing and spherical-harmonic feature maps.
 The corresponding stateful wrappers in :mod:`pyrox.nn._layers` expose
-the same transforms as :class:`pyrox._core.pyrox_module.PyroxModule`
-instances.
+the same transforms as :class:`equinox.Module` instances so they
+compose inside :class:`equinox.nn.Sequential`.
 """
 
 from __future__ import annotations
@@ -28,15 +28,30 @@ def _validate_range(bounds: tuple[float, float], *, name: str) -> None:
         raise ValueError(f"{name} must satisfy min < max; got {bounds}.")
 
 
-def _validate_input_unit(input_unit: Literal["degrees", "radians"] | str) -> None:
+def _validate_input_unit(input_unit: Literal["degrees", "radians"]) -> None:
     if input_unit not in {"degrees", "radians"}:
         raise ValueError(
             f"input_unit must be 'degrees' or 'radians'; got {input_unit!r}."
         )
 
 
+def _promote_to_floating(x: Float[Array, ...]) -> Float[Array, ...]:
+    """Promote integer arrays to ``float32`` so affine ops don't truncate."""
+    if jnp.issubdtype(x.dtype, jnp.integer):
+        return x.astype(jnp.float32)
+    return x
+
+
 def deg2rad(x: Float[Array, ...]) -> Float[Array, ...]:
-    """Convert degrees to radians element-wise."""
+    r"""Convert degrees to radians element-wise.
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> deg2rad(jnp.array([0.0, 90.0, 180.0]))
+        Array([0.       , 1.5707964, 3.1415927], dtype=float32)
+        >>> deg2rad(jnp.array([[45.0, -90.0], [270.0, 360.0]])).shape
+        (2, 2)
+    """
     return x * (jnp.pi / 180.0)
 
 
@@ -46,20 +61,48 @@ def lonlat_scale(
     lon_range: tuple[float, float] = (-180.0, 180.0),
     lat_range: tuple[float, float] = (-90.0, 90.0),
 ) -> Float[Array, "N 2"]:
-    """Affine-rescale lon/lat columns into ``[-1, 1]``.
+    """Affine-rescale lon/lat columns.
+
+    Values inside the given ranges map into ``[-1, 1]``; out-of-range
+    values are not clipped and map outside ``[-1, 1]`` linearly. The
+    default ranges assume ``lonlat`` is in degrees; pass matching
+    ``lon_range`` / ``lat_range`` in whatever unit you use.
+
+    Integer inputs are promoted to ``float32`` before the affine step
+    so ``(lonlat - lower) / (upper - lower)`` is not computed in
+    integer arithmetic (which would silently round the output to
+    ``-1 / 0 / 1``).
 
     Args:
         lonlat: Longitude/latitude matrix of shape ``(N, 2)``.
-        lon_range: Closed longitude domain in degrees.
-        lat_range: Closed latitude domain in degrees.
+        lon_range: ``(min, max)`` longitude domain (must satisfy
+            ``min < max``).
+        lat_range: ``(min, max)`` latitude domain (must satisfy
+            ``min < max``).
 
     Returns:
         Rescaled lon/lat array of shape ``(N, 2)``.
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> lonlat = jnp.array([[-180.0, -90.0], [0.0, 0.0], [180.0, 90.0]])
+        >>> lonlat_scale(lonlat)
+        Array([[-1., -1.],
+               [ 0.,  0.],
+               [ 1.,  1.]], dtype=float32)
+        >>> # Custom domain (e.g. a regional grid in degrees)
+        >>> lonlat_scale(
+        ...     jnp.array([[0.0, 50.0]]),
+        ...     lon_range=(-10.0, 10.0),
+        ...     lat_range=(40.0, 60.0),
+        ... )
+        Array([[0., 0.]], dtype=float32)
     """
     _validate_lonlat_shape(lonlat)
     _validate_range(lon_range, name="lon_range")
     _validate_range(lat_range, name="lat_range")
 
+    lonlat = _promote_to_floating(lonlat)
     lower = jnp.asarray([lon_range[0], lat_range[0]], dtype=lonlat.dtype)
     upper = jnp.asarray([lon_range[1], lat_range[1]], dtype=lonlat.dtype)
     return 2.0 * (lonlat - lower) / (upper - lower) - 1.0
@@ -80,14 +123,32 @@ def lonlat_to_cartesian3d(
         y = \cos(\phi)\sin(\lambda), \quad
         z = \sin(\phi),
 
-    where ``lon = λ`` and ``lat = ϕ``.
+    where ``lon = λ`` and ``lat = ϕ``. This matches the axis
+    convention expected by
+    :class:`pyrox.gp.SphericalHarmonicInducingFeatures`, so the NN and
+    GP spherical paths line up.
 
     Args:
         lonlat: Longitude/latitude matrix of shape ``(N, 2)``.
-        input_unit: Whether ``lonlat`` is in degrees or radians.
+        input_unit: Whether ``lonlat`` is in ``"degrees"`` or
+            ``"radians"``.
 
     Returns:
         Unit Cartesian coordinates of shape ``(N, 3)``.
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> # Prime meridian / equator → +x
+        >>> lonlat_to_cartesian3d(jnp.array([[0.0, 0.0]]))
+        Array([[1., 0., 0.]], dtype=float32)
+        >>> # 90° east / equator → +y
+        >>> lonlat_to_cartesian3d(jnp.array([[90.0, 0.0]]), input_unit="degrees")
+        Array([[...e-08, 1.0000000e+00, 0.0000000e+00]], dtype=float32)
+        >>> # North pole → +z
+        >>> lonlat_to_cartesian3d(
+        ...     jnp.array([[0.0, 0.5 * jnp.pi]])
+        ... )[:, 2]
+        Array([1.], dtype=float32)
     """
     _validate_lonlat_shape(lonlat)
     _validate_input_unit(input_unit)
@@ -117,6 +178,15 @@ def cyclic_encode(
     Returns:
         ``(N, 2)`` for vector input or ``(N, 2 * D)`` for matrix input,
         laid out as ``[cos_0, ..., cos_{D-1}, sin_0, ..., sin_{D-1}]``.
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> cyclic_encode(jnp.array([0.0, jnp.pi]))
+        Array([[ 1.0000000e+00,  0.0000000e+00],
+               [-1.0000000e+00, -8.7422777e-08]], dtype=float32)
+        >>> # Multi-dimensional input: each column is encoded independently.
+        >>> cyclic_encode(jnp.zeros((3, 2))).shape
+        (3, 4)
     """
     if angles.ndim == 1:
         promoted = angles[:, None]
@@ -138,10 +208,20 @@ def spherical_harmonic_encode(
     Args:
         lonlat: Longitude/latitude matrix of shape ``(N, 2)``.
         l_max: Maximum harmonic degree.
-        input_unit: Whether ``lonlat`` is in degrees or radians.
+        input_unit: Whether ``lonlat`` is in ``"degrees"`` or
+            ``"radians"``.
 
     Returns:
         Real spherical-harmonic features of shape ``(N, (l_max + 1)^2)``.
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> lonlat = jnp.array([[0.0, 0.0], [1.5707964, 0.0]])
+        >>> spherical_harmonic_encode(lonlat, l_max=3).shape
+        (2, 16)
+        >>> # Pairs with the GP side for a consistent basis:
+        >>> spherical_harmonic_encode(lonlat, l_max=0).shape
+        (2, 1)
     """
     unit_xyz = lonlat_to_cartesian3d(lonlat, input_unit=input_unit)
     return real_spherical_harmonics(unit_xyz, l_max=l_max)

@@ -2,7 +2,7 @@
 
 Dense / Bayesian-linear layers (``pyrox.nn._layers``):
 
-* :class:`Degree2Radians` — element-wise degrees-to-radians conversion.
+* :class:`Deg2Rad` — element-wise degrees-to-radians conversion.
 * :class:`LonLatScale` — affine lon/lat scaling into ``[-1, 1]``.
 * :class:`Cartesian3DEncoder` — lon/lat lift to unit Cartesian
   coordinates on :math:`S^2`.
@@ -69,7 +69,7 @@ from pyrox.nn._layers import (
     ArcCosineFourierFeatures,
     Cartesian3DEncoder,
     CyclicEncoder,
-    Degree2Radians,
+    Deg2Rad,
     DenseFlipout,
     DenseNCP,
     DenseReparameterization,
@@ -94,7 +94,7 @@ __all__ = [
     "BayesianNeuralField",
     "Cartesian3DEncoder",
     "CyclicEncoder",
-    "Degree2Radians",
+    "Deg2Rad",
     "DenseFlipout",
     "DenseNCP",
     "DenseReparameterization",

@@ -13,7 +13,7 @@ from pyrox.gp import RBF, SphericalHarmonicInducingFeatures
 from pyrox.nn import (
     Cartesian3DEncoder,
     CyclicEncoder,
-    Degree2Radians,
+    Deg2Rad,
     LonLatScale,
     SphericalHarmonicEncoder,
     cyclic_encode,
@@ -155,7 +155,7 @@ def test_sh_encoder_lonlat_input_mode():
 @pytest.mark.parametrize(
     ("layer", "x"),
     [
-        (Degree2Radians(), jnp.array([[0.0, 90.0]], dtype=jnp.float32)),
+        (Deg2Rad(), jnp.array([[0.0, 90.0]], dtype=jnp.float32)),
         (LonLatScale(), jnp.array([[0.0, 0.0]], dtype=jnp.float32)),
         (
             Cartesian3DEncoder(input_unit="degrees"),
@@ -176,7 +176,7 @@ def test_encoders_jit(layer: object, x: jnp.ndarray):
 @pytest.mark.parametrize(
     "layer",
     [
-        Degree2Radians(),
+        Deg2Rad(),
         LonLatScale(),
         Cartesian3DEncoder(),
         CyclicEncoder(),
@@ -196,7 +196,7 @@ def test_encoders_composition_end_to_end():
         ],
         dtype=jnp.float32,
     )
-    radians = Degree2Radians()(lonlat_deg)
+    radians = Deg2Rad()(lonlat_deg)
     scaled = LonLatScale()(lonlat_deg)
     xyz = Cartesian3DEncoder(input_unit="radians")(radians)
     sh = SphericalHarmonicEncoder(l_max=3, input_mode="cartesian")(xyz)
@@ -215,3 +215,26 @@ def test_encoders_reject_bad_shapes():
         SphericalHarmonicEncoder(l_max=2, input_mode="lonlat")(
             jnp.zeros((3, 3), dtype=jnp.float32)
         )
+
+
+def test_lonlat_scale_does_not_clip_out_of_range():
+    """Out-of-range lon/lat values map linearly outside ``[-1, 1]``;
+    ``lonlat_scale`` is a pure affine transform by design.
+    """
+    lonlat = jnp.array([[-270.0, -135.0], [360.0, 135.0]], dtype=jnp.float32)
+    scaled = lonlat_scale(lonlat)
+    # 2 * (lonlat - lower) / (upper - lower) - 1, no clipping.
+    np.testing.assert_allclose(np.asarray(scaled[:, 0]), np.array([-1.5, 2.0]))
+    np.testing.assert_allclose(np.asarray(scaled[:, 1]), np.array([-1.5, 1.5]))
+
+
+def test_lonlat_scale_promotes_integer_input_to_float():
+    """Integer inputs are promoted to ``float32`` so the affine op does
+    not get truncated to ``-1 / 0 / 1`` by integer division.
+    """
+    lonlat_int = jnp.array([[-90, -45], [45, 30]], dtype=jnp.int32)
+    scaled = lonlat_scale(lonlat_int)
+    assert scaled.dtype == jnp.float32
+    np.testing.assert_allclose(
+        np.asarray(scaled), np.array([[-0.5, -0.5], [0.25, 1.0 / 3.0]]), atol=1e-6
+    )

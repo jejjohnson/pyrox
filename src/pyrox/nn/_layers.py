@@ -1,9 +1,10 @@
 """Coordinate encoders and uncertainty-aware dense layers.
 
-Deterministic coordinate encoders:
+Deterministic coordinate encoders (pure ``equinox.Module`` wrappers
+around the helpers in :mod:`pyrox.nn._geo`):
 
-* :class:`Degree2Radians` — element-wise degrees-to-radians conversion.
-* :class:`LonLatScale` — affine lon/lat scaling into a fixed range.
+* :class:`Deg2Rad` — element-wise degrees-to-radians conversion.
+* :class:`LonLatScale` — affine lon/lat scaling.
 * :class:`Cartesian3DEncoder` — lon/lat lift to unit Cartesian
   coordinates on :math:`S^2`.
 * :class:`CyclicEncoder` — periodic ``(cos, sin)`` feature map.
@@ -40,30 +41,66 @@ from pyrox._basis import fourier_basis, real_spherical_harmonics, spectral_densi
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
 from pyrox.gp._context import _kernel_context
 from pyrox.gp._protocols import Kernel
-from pyrox.nn._geo import cyclic_encode, deg2rad, lonlat_scale, lonlat_to_cartesian3d
+from pyrox.nn._geo import (
+    _validate_input_unit,
+    _validate_range,
+    cyclic_encode,
+    deg2rad,
+    lonlat_scale,
+    lonlat_to_cartesian3d,
+)
 
 
-class Degree2Radians(PyroxModule):
-    """Element-wise degrees-to-radians conversion."""
+class Deg2Rad(eqx.Module):
+    """Element-wise degrees-to-radians conversion.
 
-    @pyrox_method
+    Stateless ``equinox.Module`` wrapper around :func:`deg2rad` — no
+    learnable parameters and no sample sites.
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> Deg2Rad()(jnp.array([0.0, 90.0, 180.0]))
+        Array([0.       , 1.5707964, 3.1415927], dtype=float32)
+        >>> # Composes with other encoders in eqx.nn.Sequential.
+        >>> import equinox as eqx
+        >>> pipeline = eqx.nn.Sequential([Deg2Rad(), Cartesian3DEncoder()])
+    """
+
     def __call__(self, x: Float[Array, ...]) -> Float[Array, ...]:
         return deg2rad(x)
 
 
-class LonLatScale(PyroxModule):
-    """Affine-rescale lon/lat columns into ``[-1, 1]``."""
+class LonLatScale(eqx.Module):
+    """Affine-rescale lon/lat columns.
+
+    Values inside the given ranges map into ``[-1, 1]``; out-of-range
+    values are *not* clipped. The default ranges assume ``lonlat`` is
+    in degrees.
+
+    Attributes:
+        lon_range: ``(min, max)`` longitude domain (must satisfy
+            ``min < max``).
+        lat_range: ``(min, max)`` latitude domain (must satisfy
+            ``min < max``).
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> LonLatScale()(jnp.array([[0.0, 0.0]]))
+        Array([[0., 0.]], dtype=float32)
+        >>> # Regional grid in degrees:
+        >>> LonLatScale(lon_range=(-10.0, 10.0), lat_range=(40.0, 60.0))(
+        ...     jnp.array([[0.0, 50.0]])
+        ... )
+        Array([[0., 0.]], dtype=float32)
+    """
 
     lon_range: tuple[float, float] = eqx.field(static=True, default=(-180.0, 180.0))
     lat_range: tuple[float, float] = eqx.field(static=True, default=(-90.0, 90.0))
 
     def __post_init__(self) -> None:
-        if self.lon_range[1] <= self.lon_range[0]:
-            raise ValueError(f"lon_range must satisfy min < max; got {self.lon_range}.")
-        if self.lat_range[1] <= self.lat_range[0]:
-            raise ValueError(f"lat_range must satisfy min < max; got {self.lat_range}.")
+        _validate_range(self.lon_range, name="lon_range")
+        _validate_range(self.lat_range, name="lat_range")
 
-    @pyrox_method
     def __call__(self, lonlat: Float[Array, "N 2"]) -> Float[Array, "N 2"]:
         return lonlat_scale(
             lonlat,
@@ -72,28 +109,52 @@ class LonLatScale(PyroxModule):
         )
 
 
-class Cartesian3DEncoder(PyroxModule):
-    """Lift lon/lat coordinates onto the unit sphere :math:`S^2`."""
+class Cartesian3DEncoder(eqx.Module):
+    """Lift lon/lat coordinates onto the unit sphere :math:`S^2`.
+
+    Stateless wrapper around :func:`lonlat_to_cartesian3d`. Uses the
+    same axis convention as
+    :class:`pyrox.gp.SphericalHarmonicInducingFeatures`.
+
+    Attributes:
+        input_unit: Whether the input is in ``"degrees"`` or
+            ``"radians"``.
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> # Prime meridian / equator → +x
+        >>> Cartesian3DEncoder()(jnp.array([[0.0, 0.0]]))
+        Array([[1., 0., 0.]], dtype=float32)
+        >>> # Degrees input:
+        >>> Cartesian3DEncoder(input_unit="degrees")(jnp.array([[0.0, 90.0]]))[:, 2]
+        Array([1.], dtype=float32)
+    """
 
     input_unit: Literal["degrees", "radians"] = eqx.field(
         static=True, default="radians"
     )
 
     def __post_init__(self) -> None:
-        if self.input_unit not in {"degrees", "radians"}:
-            raise ValueError(
-                f"input_unit must be 'degrees' or 'radians'; got {self.input_unit!r}."
-            )
+        _validate_input_unit(self.input_unit)
 
-    @pyrox_method
     def __call__(self, lonlat: Float[Array, "N 2"]) -> Float[Array, "N 3"]:
         return lonlat_to_cartesian3d(lonlat, input_unit=self.input_unit)
 
 
-class CyclicEncoder(PyroxModule):
-    """Encode periodic inputs as concatenated cos/sin features."""
+class CyclicEncoder(eqx.Module):
+    """Encode periodic inputs as concatenated cos/sin features.
 
-    @pyrox_method
+    Stateless wrapper around :func:`cyclic_encode`.
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> CyclicEncoder()(jnp.array([0.0, jnp.pi]))[:, 0]
+        Array([ 1., -1.], dtype=float32)
+        >>> # 2-D input: each column encoded independently.
+        >>> CyclicEncoder()(jnp.zeros((3, 2))).shape
+        (3, 4)
+    """
+
     def __call__(
         self,
         angles: Float[Array, " N"] | Float[Array, "N D"],
@@ -101,8 +162,30 @@ class CyclicEncoder(PyroxModule):
         return cyclic_encode(angles)
 
 
-class SphericalHarmonicEncoder(PyroxModule):
-    """Real spherical-harmonic features on the unit sphere."""
+class SphericalHarmonicEncoder(eqx.Module):
+    """Real spherical-harmonic features on the unit sphere.
+
+    Stateless wrapper that evaluates
+    :func:`pyrox._basis.real_spherical_harmonics` on either already-
+    cartesian inputs (``input_mode='cartesian'``) or lon/lat pairs
+    (``input_mode='lonlat'``, assumed in radians).
+
+    Attributes:
+        l_max: Maximum harmonic degree (must be ``>= 0``). The output
+            has ``(l_max + 1) ** 2`` features.
+        input_mode: ``"cartesian"`` for ``(N, 3)`` unit-sphere inputs
+            or ``"lonlat"`` for ``(N, 2)`` lon/lat pairs in radians.
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> xyz = jnp.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+        >>> SphericalHarmonicEncoder(l_max=3)(xyz).shape
+        (2, 16)
+        >>> # Lon/lat input mode (radians):
+        >>> lonlat = jnp.array([[0.0, 0.0], [0.5 * jnp.pi, 0.0]])
+        >>> SphericalHarmonicEncoder(l_max=3, input_mode="lonlat")(lonlat).shape
+        (2, 16)
+    """
 
     l_max: int = eqx.field(static=True)
     input_mode: Literal["cartesian", "lonlat"] = eqx.field(
@@ -121,7 +204,6 @@ class SphericalHarmonicEncoder(PyroxModule):
     def num_features(self) -> int:
         return (self.l_max + 1) ** 2
 
-    @pyrox_method
     def __call__(
         self,
         x: Float[Array, "N 3"] | Float[Array, "N 2"],

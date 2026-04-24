@@ -9,13 +9,13 @@ import equinox as eqx
 
 from pyrox.nn import (
     Cartesian3DEncoder,
-    Degree2Radians,
+    Deg2Rad,
     SphericalHarmonicEncoder,
 )
 
 encoder = eqx.nn.Sequential(
     [
-        Degree2Radians(),
+        Deg2Rad(),
         Cartesian3DEncoder(input_unit="radians"),
         SphericalHarmonicEncoder(l_max=8, input_mode="cartesian"),
     ]
@@ -27,7 +27,7 @@ features = encoder(lonlat_deg)  # (N, 81)
 
 ## Stateful encoder layers
 
-::: pyrox.nn.Degree2Radians
+::: pyrox.nn.Deg2Rad
 
 ::: pyrox.nn.LonLatScale
 
