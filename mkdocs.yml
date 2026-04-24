@@ -46,7 +46,9 @@ nav:
       - Overview: api/reference.md
       - Core: api/core.md
       - GP: api/gp.md
-      - NN: api/nn.md
+      - NN:
+          - Overview: api/nn.md
+          - Geo encoders: api/nn/geo_encoders.md
       - Inference: api/inference.md
       - Preprocessing: api/preprocessing.md
       - Estimator: api/api.md
