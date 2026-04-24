@@ -225,7 +225,7 @@ def test_bayesian_siren_registers_sites():
 
 def test_bayesian_siren_prior_respects_init_scale():
     depth = 3
-    hidden = 512
+    hidden = 128
     prior_std = 2.0
     net = BayesianSIREN.init(
         hidden,
@@ -237,22 +237,27 @@ def test_bayesian_siren_prior_respects_init_scale():
     )
     x = jnp.ones((1, hidden))
 
+    # Stream sum-of-squares per layer so we never hold more than one draw in
+    # memory.  The prior is Normal(0, scale) so the second moment equals the
+    # variance, and `sqrt(E[W²])` is the stddev estimator.
     n_samples = 32
-    w_samples: dict[int, list[np.ndarray]] = {i: [] for i in range(depth)}
+    sum_sq = np.zeros(depth, dtype=np.float64)
+    counts = np.zeros(depth, dtype=np.int64)
 
     for s in range(n_samples):
         with handlers.trace() as tr, handlers.seed(rng_seed=s):
             net(x)
         for i in range(depth):
-            w_samples[i].append(np.asarray(tr[f"bsp.layer_{i}.W"]["value"]))
+            w = np.asarray(tr[f"bsp.layer_{i}.W"]["value"], dtype=np.float64)
+            sum_sq[i] += float((w**2).sum())
+            counts[i] += w.size
 
     # Normal stddev is a/√3 so Var(W) matches Sitzmann's U(-a, a) init exactly.
     inv_sqrt3 = 1.0 / math.sqrt(3.0)
     for i, spec in enumerate(net.specs):
         a = _siren_W_limit(spec.layer_type, spec.in_features, spec.omega, spec.c)
         expected_std = prior_std * a * inv_sqrt3
-        all_w = np.concatenate([w.ravel() for w in w_samples[i]])
-        empirical_std = float(np.std(all_w))
+        empirical_std = float(np.sqrt(sum_sq[i] / counts[i]))
         assert abs(empirical_std - expected_std) / expected_std < 0.20, (
             f"Layer {i} W prior std {empirical_std:.6f} deviates "
             f">20% from expected {expected_std:.6f}"

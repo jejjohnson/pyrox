@@ -53,9 +53,9 @@ keeps pre-activation variance stable across depth.
 
 | Layer | `W` init | Activation |
 |-------|----------|------------|
-| `"first"` | `U(-1/d_in, 1/d_in)` | `sin(ω₀ · ·)` |
-| `"hidden"` | `U(-√(c/d_in)/ω, √(c/d_in)/ω)` | `sin(ω · ·)` |
-| `"last"` | `U(-√(c/d_in), √(c/d_in))` | none (linear) |
+| `"first"` | `U(-1/d_in, 1/d_in)` | `sin(ω₀ · (W x + b))` |
+| `"hidden"` | `U(-√(c/d_in)/ω, √(c/d_in)/ω)` | `sin(ω · (W x + b))` |
+| `"last"` | `U(-√(c/d_in), √(c/d_in))` | none (linear) — `W x + b` |
 
 Bias `b` is initialised `U(-1/√d_in, 1/√d_in)` for every regime.
 Typical choice: `ω₀ = ω = 30` for image / high-frequency INR tasks.

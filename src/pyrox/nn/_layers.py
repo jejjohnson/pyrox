@@ -1128,6 +1128,13 @@ def _siren_W_limit(
     )
 
 
+def _require_positive(**values: float) -> None:
+    """Raise ``ValueError`` if any keyword value is non-positive."""
+    for name, v in values.items():
+        if v <= 0:
+            raise ValueError(f"{name} must be > 0, got {v}.")
+
+
 def _build_siren_specs(
     in_features: int,
     hidden_features: int,
@@ -1226,8 +1233,16 @@ class SirenDense(eqx.Module):
             Initialised :class:`SirenDense`.
 
         Raises:
-            ValueError: If ``layer_type`` is not a valid regime name.
+            ValueError: If ``layer_type`` is not a valid regime name, or if any of
+                ``in_features``, ``out_features``, ``omega``, or ``c`` is
+                non-positive.
         """
+        _require_positive(
+            in_features=in_features,
+            out_features=out_features,
+            omega=omega,
+            c=c,
+        )
         k_w, k_b = jax.random.split(key)
         # _siren_W_limit validates layer_type.
         w_limit = _siren_W_limit(layer_type, in_features, omega, c)
@@ -1334,10 +1349,19 @@ class SIREN(eqx.Module):
             Initialised :class:`SIREN`.
 
         Raises:
-            ValueError: If ``depth < 2``.
+            ValueError: If ``depth < 2`` or any of the feature dimensions,
+                omegas, or ``c`` is non-positive.
         """
         if depth < 2:
             raise ValueError(f"depth must be >= 2 (first + last); got depth={depth}")
+        _require_positive(
+            in_features=in_features,
+            hidden_features=hidden_features,
+            out_features=out_features,
+            first_omega=first_omega,
+            hidden_omega=hidden_omega,
+            c=c,
+        )
         specs = _build_siren_specs(
             in_features,
             hidden_features,
@@ -1478,12 +1502,20 @@ class BayesianSIREN(PyroxModule):
             Initialised :class:`BayesianSIREN`.
 
         Raises:
-            ValueError: If ``depth < 2`` or ``prior_std <= 0``.
+            ValueError: If ``depth < 2``, or any of the feature dimensions,
+                omegas, ``c``, or ``prior_std`` is non-positive.
         """
         if depth < 2:
             raise ValueError(f"depth must be >= 2 (first + last); got depth={depth}")
-        if prior_std <= 0:
-            raise ValueError(f"prior_std must be > 0, got {prior_std}.")
+        _require_positive(
+            in_features=in_features,
+            hidden_features=hidden_features,
+            out_features=out_features,
+            first_omega=first_omega,
+            hidden_omega=hidden_omega,
+            c=c,
+            prior_std=prior_std,
+        )
         specs = _build_siren_specs(
             in_features,
             hidden_features,
