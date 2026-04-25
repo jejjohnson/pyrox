@@ -38,20 +38,26 @@ from xtremax.point_processes._adapters import (
     time_varying_marks,
     time_varying_retention,
 )
+from xtremax.point_processes._domain import RectangularDomain
 from xtremax.point_processes._history import EventHistory
 from xtremax.point_processes._integration import (
     cumulative_log_intensity,
     integrate_log_intensity,
 )
+from xtremax.point_processes._integration_spatial import (
+    integrate_log_intensity_spatial,
+)
 
 
 __all__ = [
     "EventHistory",
+    "RectangularDomain",
     "constant_mark_distribution",
     "constant_retention",
     "cumulative_log_intensity",
     "distributions",
     "integrate_log_intensity",
+    "integrate_log_intensity_spatial",
     "operators",
     "primitives",
     "time_varying_marks",
