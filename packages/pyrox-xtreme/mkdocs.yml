@@ -57,6 +57,7 @@ nav:
       - IPP-spatiotemporal — from scratch + NumPyro: notebooks/ipp_spatiotemporal_from_scratch_and_numpyro.ipynb
       - Marked spatiotemporal — from scratch + NumPyro: notebooks/marked_spatiotemporal_from_scratch_and_numpyro.ipynb
       - Hawkes-spatiotemporal — from scratch + NumPyro: notebooks/hawkes_spatiotemporal_from_scratch_and_numpyro.ipynb
+      - Latent ODE for irregular IPPs: notebooks/latent_ode_ipp.ipynb
   - Design:
       - Overview: design_docs/README.md
       - Vision: design_docs/vision.md

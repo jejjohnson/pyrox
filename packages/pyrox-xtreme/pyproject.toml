@@ -71,6 +71,12 @@ docs = [
     # but pymdownx.highlight 10.21.x still passes the untitled-code-block title
     # through as None. Pin until a fixed pymdown-extensions release ships (#38).
     "pygments>=2.19,<2.20",
+    # Latent-ODE notebook only: diffrax for the ODE solver, interpax for the
+    # observation-path interpolation, optax for training. Not used elsewhere
+    # in the package, so they live in the docs group rather than main deps.
+    "diffrax>=0.7.2",
+    "interpax>=0.3.14",
+    "optax>=0.2.8",
 ]
 
 [build-system]
