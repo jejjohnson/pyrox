@@ -50,6 +50,13 @@ nav:
       - Hawkes — from scratch + NumPyro: notebooks/hawkes_from_scratch_and_numpyro.ipynb
       - Marked TPP — from scratch + NumPyro: notebooks/marked_from_scratch_and_numpyro.ipynb
       - Thinning / observation op — from scratch + NumPyro: notebooks/thinning_from_scratch_and_numpyro.ipynb
+      - HPP-spatial — from scratch + NumPyro: notebooks/hpp_spatial_from_scratch_and_numpyro.ipynb
+      - IPP-spatial — from scratch + NumPyro: notebooks/ipp_spatial_from_scratch_and_numpyro.ipynb
+      - Marked spatial — from scratch + NumPyro: notebooks/marked_spatial_from_scratch_and_numpyro.ipynb
+      - HPP-spatiotemporal — from scratch + NumPyro: notebooks/hpp_spatiotemporal_from_scratch_and_numpyro.ipynb
+      - IPP-spatiotemporal — from scratch + NumPyro: notebooks/ipp_spatiotemporal_from_scratch_and_numpyro.ipynb
+      - Marked spatiotemporal — from scratch + NumPyro: notebooks/marked_spatiotemporal_from_scratch_and_numpyro.ipynb
+      - Hawkes-spatiotemporal — from scratch + NumPyro: notebooks/hawkes_spatiotemporal_from_scratch_and_numpyro.ipynb
   - Design:
       - Overview: design_docs/README.md
       - Vision: design_docs/vision.md

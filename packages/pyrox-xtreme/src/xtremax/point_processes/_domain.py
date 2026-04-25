@@ -1,4 +1,4 @@
-"""Axis-aligned rectangular domain for spatial point processes.
+"""Axis-aligned rectangular domain and temporal interval for point processes.
 
 A spatial point process needs three things from its domain: dimension
 ``d``, total volume ``|D|``, and the ability to draw uniform candidate
@@ -6,6 +6,13 @@ locations. ``RectangularDomain`` packages those into an ``equinox``
 PyTree so it threads through ``jit`` / ``vmap`` like any other operator
 state. Polygon, sphere, and manifold domains are out of scope for v1 —
 this is the same restriction the upstream snippet enforces.
+
+For spatiotemporal processes the time axis carries a different semantic
+contract (it is causally ordered and supports time rescaling), so it
+gets its own :class:`TemporalDomain` rather than reusing
+:class:`RectangularDomain` with ``d = 1``. Existing temporal-only
+processes still accept a bare ``t_max: float`` for backwards
+compatibility — the new type is opt-in via the spatiotemporal API.
 """
 
 from __future__ import annotations
@@ -115,3 +122,81 @@ class RectangularDomain(eqx.Module):
         """
         u = random.uniform(key, shape=(*tuple(shape), self.n_dims))
         return self.lo + u * self.side_lengths
+
+
+class TemporalDomain(eqx.Module):
+    """Half-open temporal interval ``[t0, t1) ⊂ ℝ``.
+
+    Parallel to :class:`RectangularDomain` but specialised to one
+    causally-ordered axis. Used by spatiotemporal point processes so the
+    time domain stays explicit (``[t0, t1)`` instead of an implicit
+    ``[0, T]``) and so callers can shift the origin without re-deriving
+    quadrature offsets.
+
+    Args:
+        t0: Inclusive start time.
+        t1: Exclusive end time. Must satisfy ``t1 > t0``.
+    """
+
+    t0: Float[Array, ...]
+    t1: Float[Array, ...]
+
+    def __init__(self, t0: ArrayLike, t1: ArrayLike) -> None:
+        t0_arr = jnp.asarray(t0)
+        t1_arr = jnp.asarray(t1)
+        if t0_arr.shape != t1_arr.shape:
+            raise ValueError(
+                f"TemporalDomain: `t0` shape {t0_arr.shape} does not match "
+                f"`t1` shape {t1_arr.shape}."
+            )
+        try:
+            if not bool(jnp.all(t1_arr > t0_arr)):
+                raise ValueError(
+                    f"TemporalDomain requires `t1 > t0`; got "
+                    f"t0={t0_arr.tolist()}, t1={t1_arr.tolist()}."
+                )
+        except jax.errors.ConcretizationTypeError as exc:  # pragma: no cover
+            del exc
+        self.t0 = t0_arr
+        self.t1 = t1_arr
+
+    @classmethod
+    def from_duration(cls, duration: ArrayLike) -> TemporalDomain:
+        """Interval anchored at zero: ``t0 = 0``, ``t1 = duration``.
+
+        Mirrors the source-snippet convention where users pass an
+        ``observation_window`` scalar directly.
+        """
+        dur = jnp.asarray(duration)
+        return cls(jnp.zeros_like(dur), dur)
+
+    @property
+    def duration(self) -> Float[Array, ...]:
+        """Length of the interval ``t1 - t0``."""
+        return self.t1 - self.t0
+
+    def volume(self) -> Float[Array, ...]:
+        """Lebesgue measure of the interval — alias for :attr:`duration`.
+
+        Provided for API symmetry with :class:`RectangularDomain` so
+        joint-domain code can call ``spatial.volume() * temporal.volume()``
+        without special-casing the temporal axis.
+        """
+        return self.duration
+
+    def contains(self, t: Float[Array, ...]) -> Array:
+        """Boolean ``True`` where ``t ∈ [t0, t1)``."""
+        return (t >= self.t0) & (t < self.t1)
+
+    def sample_uniform(
+        self,
+        key: PRNGKeyArray,
+        shape: tuple[int, ...] = (),
+    ) -> Float[Array, ...]:
+        """Draw uniform times in the interval.
+
+        Output shape is exactly ``shape``; no trailing dimension axis,
+        because time is scalar.
+        """
+        u = random.uniform(key, shape=tuple(shape))
+        return self.t0 + u * self.duration

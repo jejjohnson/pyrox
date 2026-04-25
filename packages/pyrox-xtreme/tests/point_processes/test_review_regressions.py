@@ -627,3 +627,196 @@ class TestHppSpatialDistCountPathNoClip:
         lp_mask = d_pp.log_prob((locs, mask))
         lp_count = d_pp.log_prob((locs, n))
         assert jnp.allclose(lp_mask, lp_count)
+
+
+# ====================================================================
+# PR #13 — spatiotemporal port review fixes
+# ====================================================================
+
+
+class TestStppHawkesIntensityHandlesPaddingTimes:
+    """Codex P1: ``β·exp(-β·dt)`` must stay finite for padding times.
+
+    Padding rows live at ``temporal.t1`` so ``dt = t_query - t_pad``
+    can go negative when querying before the window end. Without the
+    ``jnp.clip(dt, 0, inf)`` guard the exponential overflows and
+    poisons the masked-out branch with ``inf · 0 = nan``.
+    """
+
+    def test_no_nan_with_padding_times_in_future(self) -> None:
+        from xtremax.point_processes.primitives import stpp_hawkes_intensity
+
+        # All slots are padding; padding times in the "future".
+        event_locs = jnp.zeros((4, 2))
+        event_times = jnp.array([100.0, 100.0, 100.0, 100.0])
+        mask = jnp.zeros(4, dtype=jnp.bool_)
+        s = jnp.array([1.0, 1.0])
+        # Query at t=0.5 — all event_times are >> t, so dt is hugely
+        # negative and exp(-β·dt) overflows without the clip.
+        lam = stpp_hawkes_intensity(
+            s,
+            jnp.asarray(0.5),
+            event_locs,
+            event_times,
+            mask,
+            mu=0.3,
+            alpha=0.5,
+            beta=2.0,
+            sigma=0.5,
+        )
+        assert jnp.isfinite(lam)
+        assert jnp.allclose(lam, 0.3)
+
+
+class TestStppHawkesLogProbCausalityByTimestamp:
+    """Codex P2: causal mask must use timestamps, not buffer position.
+
+    Position-based causality silently treats whichever rows the caller
+    wrote first as "earlier". For a buffer that is permuted relative
+    to time order this would inject future events as parents.
+    """
+
+    def test_log_prob_invariant_to_row_permutation(self) -> None:
+        from xtremax.point_processes import RectangularDomain, TemporalDomain
+        from xtremax.point_processes.primitives import stpp_hawkes_log_prob
+
+        spatial = RectangularDomain.from_size(jnp.array([4.0, 4.0]))
+        temporal = TemporalDomain.from_duration(2.0)
+        locs = jnp.array([[1.0, 1.0], [3.0, 1.0], [2.0, 2.0]])
+        times = jnp.array([0.2, 1.0, 1.5])
+        mask = jnp.array([True, True, True])
+
+        kwargs = dict(
+            mu=0.3,
+            alpha=0.4,
+            beta=1.0,
+            sigma=0.5,
+            spatial=spatial,
+            temporal=temporal,
+            boundary_correction=False,
+        )
+        lp_sorted = stpp_hawkes_log_prob(locs, times, mask, **kwargs)
+        # Reverse the buffer; timestamps now decrease with row index.
+        # A position-based causality check would treat row 0 (t=1.5)
+        # as a parent of row 2 (t=0.2), which is wrong.
+        lp_reversed = stpp_hawkes_log_prob(locs[::-1], times[::-1], mask, **kwargs)
+        assert jnp.allclose(lp_sorted, lp_reversed, rtol=1e-5)
+
+
+class TestStppHawkesSampleNoOOB:
+    """Codex/Copilot P1: sampler must not scatter at ``n_max``.
+
+    Out-of-bounds scatter under JAX's default
+    ``promise_in_bounds`` semantics is backend-dependent; in
+    rejection-heavy runs the buffer state can become inconsistent.
+    """
+
+    def test_high_rejection_rate_keeps_buffer_clean(self) -> None:
+        # μ=0, α=0 → never any acceptance; every step is a rejection.
+        # Without the clip-to-(n_max-1) guard this would scatter at
+        # ``n_max`` repeatedly.
+        from jax import random
+
+        from xtremax.point_processes import RectangularDomain, TemporalDomain
+        from xtremax.point_processes.primitives import stpp_hawkes_sample
+
+        spatial = RectangularDomain.from_size(jnp.array([2.0, 2.0]))
+        temporal = TemporalDomain.from_duration(1.0)
+        locs, times, mask, n = stpp_hawkes_sample(
+            random.PRNGKey(0),
+            mu=1e-9,
+            alpha=0.0,
+            beta=1.0,
+            sigma=0.5,
+            spatial=spatial,
+            temporal=temporal,
+            max_events=8,
+        )
+        # All slots remain padding; no real events; finite buffers.
+        assert int(n) == 0
+        assert not bool(jnp.any(mask))
+        assert jnp.all(jnp.isfinite(locs))
+        assert jnp.all(jnp.isfinite(times))
+
+
+class TestStppHawkesSampleZeroBaselineDoesNotDivByZero:
+    """Codex P1: λ̄ must be floored before division.
+
+    With μ=0 and an empty history, the Ogata clock rate
+    ``λ̄·|D|`` is exactly 0 and the inter-event time
+    ``-log(u)/λ̄`` becomes ``inf``. The acceptance ratio
+    ``λ/λ̄`` then becomes ``0/0 = nan``.
+    """
+
+    def test_mu_zero_buffer_finite(self) -> None:
+        from jax import random
+
+        from xtremax.point_processes import RectangularDomain, TemporalDomain
+        from xtremax.point_processes.primitives import stpp_hawkes_sample
+
+        spatial = RectangularDomain.from_size(jnp.array([2.0, 2.0]))
+        temporal = TemporalDomain.from_duration(1.0)
+        locs, times, _mask, n = stpp_hawkes_sample(
+            random.PRNGKey(0),
+            mu=0.0,
+            alpha=0.0,
+            beta=1.0,
+            sigma=0.5,
+            spatial=spatial,
+            temporal=temporal,
+            max_events=8,
+        )
+        assert jnp.all(jnp.isfinite(locs))
+        assert jnp.all(jnp.isfinite(times))
+        assert int(n) == 0
+
+
+class TestPearsonResidualsNoSentinelArtifact:
+    """Codex P1: ``-1`` was being interpreted as last-cell index.
+
+    The original code used ``masked_idx = where(mask, cell_idx, -1)``
+    intending ``-1`` as a sentinel for padding rows. Under JAX's
+    negative-index semantics this actually wrote padding into the
+    last cell, then the follow-up ``where(arange(n) >= 0, ...)`` was
+    a no-op. The 0/1 weight already does the masking; we drop the
+    sentinel and verify the last cell's residual matches a manual
+    count.
+    """
+
+    def test_last_cell_residual_uses_real_count_only(self) -> None:
+        from xtremax.point_processes import RectangularDomain, TemporalDomain
+        from xtremax.point_processes.primitives import (
+            ipp_spatiotemporal_pearson_residuals,
+        )
+
+        spatial = RectangularDomain.from_size(jnp.array([2.0, 2.0]))
+        temporal = TemporalDomain.from_duration(2.0)
+
+        def log_lam(s, t):
+            return jnp.full(s.shape[:-1], jnp.log(0.5))
+
+        # Pack three real events into the last cell; pad with two
+        # padding rows whose locations would land in cell 0 (the
+        # default ``spatial.lo`` padding) but whose mask is False.
+        locs = jnp.array([[1.5, 1.5], [1.6, 1.6], [1.4, 1.7], [0.0, 0.0], [0.0, 0.0]])
+        times = jnp.array([1.5, 1.6, 1.7, 0.0, 0.0])
+        mask = jnp.array([True, True, True, False, False])
+        residuals = ipp_spatiotemporal_pearson_residuals(
+            locs,
+            times,
+            mask,
+            log_lam,
+            spatial,
+            temporal,
+            n_spatial_bins=2,
+            n_temporal_bins=2,
+            n_integration_points=4,
+        )
+        # 2*2*2 = 8 cells. Last cell has expected count 0.5, count 3,
+        # so residual = (3 - 0.5) / sqrt(0.5) ≈ 3.535.
+        # If padding had bled in via the -1 wrap the count would be
+        # different. We assert the last-cell residual matches the
+        # ground-truth derivation.
+        last_residual = residuals[-1]
+        expected_last = (3.0 - 0.5) / jnp.sqrt(0.5)
+        assert jnp.allclose(last_residual, expected_last, rtol=5e-2)
