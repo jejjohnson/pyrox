@@ -1801,11 +1801,11 @@ wheels = [
 
 [[package]]
 name = "pygments"
-version = "2.20.0"
+version = "2.19.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c3/b2/bc9c9196916376152d655522fdcebac55e66de6603a76a02bca1b6414f6c/pygments-2.20.0.tar.gz", hash = "sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f", size = 4955991, upload-time = "2026-03-29T13:29:33.898Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/b2/bc9c9196916376152d655522fdcebac55e66de6603a76a02bca1b6414f6c/pygments-2.19.1.tar.gz", hash = "sha256:61c1a6f7d2b70c2a5e8ba849d0b84d61e93a9e8f1f0a8ec02ebf0dfbf08bb0cf", size = 4967073 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f4/7e/a72dd26f3b0f4f2bf1dd8923c85f7ceb43172af56d63c7383eb62b332364/pygments-2.20.0-py3-none-any.whl", hash = "sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176", size = 1231151, upload-time = "2026-03-29T13:29:30.038Z" },
+    { url = "https://files.pythonhosted.org/packages/f4/7e/a72dd26f3b0f4f2bf1dd8923c85f7ceb43172af56d63c7383eb62b332364/pygments-2.19.1-py3-none-any.whl", hash = "sha256:0068a889b5cf36a9d4ae69b7c5ecd1e9b15ab25b47c4b8e6fa76b6b97adc5e77", size = 1211829 },
 ]
 
 [[package]]
@@ -1917,7 +1917,7 @@ docs = [
     { name = "mkdocs-jupyter", specifier = ">=0.26.2" },
     { name = "mkdocs-material", specifier = ">=9.7.6" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0.3" },
-    { name = "pygments", specifier = ">=2.20.0,<2.21" },
+    { name = "pygments", specifier = ">=2.18.0,<2.20" },
     { name = "watermark", specifier = ">=2.4" },
 ]
 examples = [
