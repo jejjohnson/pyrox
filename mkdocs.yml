@@ -62,6 +62,9 @@ nav:
       - "Ensemble Runner (EnsembleMAP / EnsembleVI) Tutorial": notebooks/ensemble_runner_tutorial.ipynb
       - "Pathwise GP Posterior Sampling": notebooks/gp_pathwise.ipynb
       - "Pathwise GP × NumPyro — extended use cases": notebooks/gp_pathwise_numpyro.ipynb
+      - "SIREN — Sinusoidal Implicit Neural Representations": notebooks/siren_inr.ipynb
+      - "Spatiotemporal Preprocessing — Geo, Time, Pandas": notebooks/spatiotemporal_preprocessing.ipynb
+      - "Multi-Output Gaussian Processes — LMC, ICM, OILMM": notebooks/multioutput_gp.ipynb
   - Contributing: contributing.md
   - Changelog: CHANGELOG.md
 
