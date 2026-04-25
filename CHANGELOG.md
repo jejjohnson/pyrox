@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.0.7](https://github.com/jejjohnson/pyrox/compare/v0.0.6...v0.0.7) (2026-04-25)
+
+
+### Features
+
+* **gp:** multi-output kernels (LMC/ICM/OILMM) + gaussx-structured inducing operators ([#100](https://github.com/jejjohnson/pyrox/issues/100)) ([a2451a8](https://github.com/jejjohnson/pyrox/commit/a2451a848f1101f482ab116fc0e5bcbfe5c156a7))
+* **gp:** pathwise posterior samplers via Matheron's rule ([#39](https://github.com/jejjohnson/pyrox/issues/39)) ([#101](https://github.com/jejjohnson/pyrox/issues/101)) ([714d997](https://github.com/jejjohnson/pyrox/commit/714d99797758268438654e5e47c74f1e651c8b26))
+* **nn,gp:** spectral layers + inducing features for scalable GPs ([#41](https://github.com/jejjohnson/pyrox/issues/41) + [#49](https://github.com/jejjohnson/pyrox/issues/49)) ([#84](https://github.com/jejjohnson/pyrox/issues/84)) ([c122a87](https://github.com/jejjohnson/pyrox/commit/c122a87544d244192db622731d24b4a648eba853))
+* **nn:** geographic and spherical coordinate encoders ([#99](https://github.com/jejjohnson/pyrox/issues/99)) ([1709f5f](https://github.com/jejjohnson/pyrox/commit/1709f5fc2958795fc587c2791ce1cb1ab5fdb7ea))
+* **nn:** siren — sinusoidal representation network layer + composite ([#98](https://github.com/jejjohnson/pyrox/issues/98)) ([6f15abd](https://github.com/jejjohnson/pyrox/commit/6f15abd0f0048dbcd601bb4debcc879f889095a6))
+
 ## [0.0.6](https://github.com/jejjohnson/pyrox/compare/v0.0.5...v0.0.6) (2026-04-21)
 
 
