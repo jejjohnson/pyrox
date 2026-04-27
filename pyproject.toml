@@ -77,8 +77,9 @@ docs = [
     "watermark>=2.4",
     # pygments 2.20.0 dropped the None -> '' coercion for HtmlFormatter(filename=...),
     # but pymdownx.highlight 10.21.x still passes the untitled-code-block title
-    # through as None. Pin until a fixed pymdown-extensions release ships.
-    "pygments>=2.20.0,<2.21",
+    # through as None. Pin to the last 2.19.x until a fixed pymdown-extensions
+    # release ships.
+    "pygments>=2.18,<2.20",
 ]
 examples = [
     "matplotlib>=3.10.8",
@@ -116,7 +117,7 @@ ignore = ["E402", "E721", "E731", "E741"]
 # example notebooks that demonstrate the same patterns.
 "src/pyrox/_basis/**" = ["F722"]
 "src/pyrox/gp/**" = ["F722"]
-"src/pyrox/nn/**" = ["F722"]
+"src/pyrox/nn/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 # RUF001/002/003 flag Greek letters and the multiplication sign in
 # strings/docstrings/comments. These are intentional math notation in
 # the inference module and the example notebooks, so suppress them.
@@ -125,7 +126,7 @@ ignore = ["E402", "E721", "E731", "E741"]
 "src/pyrox/preprocessing/**" = ["F722"]
 "tests/basis/**" = ["F722"]
 "tests/gp/**" = ["F722"]
-"tests/nn/**" = ["F722"]
+"tests/nn/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "tests/inference/**" = ["F722"]
 "tests/api/**" = ["F722"]
 "tests/preprocessing/**" = ["F722"]
