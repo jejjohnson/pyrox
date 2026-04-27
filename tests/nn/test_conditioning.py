@@ -448,14 +448,25 @@ def test_hyper_fourier_features_shared_vs_per_sample_agree_on_broadcast():
     )
 
 
-def test_hyper_fourier_features_validates_pnet_output_shape():
-    """``init`` must reject a parameter_net whose output shape is wrong."""
+def test_hyper_fourier_features_init_does_not_invoke_parameter_net():
+    """``init`` must not invoke ``parameter_net`` — Bayesian parameter
+    nets rely on ``pyrox_sample`` which would raise outside a seed
+    handler. Use a parameter_net that explodes if called; init must succeed."""
     in_f, n_f, K = 1, 8, 3
-    bad = _make_pnet(K, _flat_size(in_f, n_f) + 1, key=jr.key(0))  # off by 1
-    with pytest.raises(ValueError, match="parameter_net"):
-        HyperFourierFeatures.init(
-            parameter_net=bad, in_features=in_f, n_features=n_f, cond_dim=K
-        )
+
+    class _ExplodingPnet(eqx.Module):
+        """Mimics a Bayesian parameter net that needs a seed handler."""
+
+        def __call__(self, _z):
+            raise RuntimeError(
+                "called without a seed handler — should not happen at init"
+            )
+
+    pnet = _ExplodingPnet()
+    # Construction must succeed without invoking pnet.
+    HyperFourierFeatures.init(
+        parameter_net=pnet, in_features=in_f, n_features=n_f, cond_dim=K
+    )
 
 
 def test_hyper_fourier_features_rejects_mismatched_input():

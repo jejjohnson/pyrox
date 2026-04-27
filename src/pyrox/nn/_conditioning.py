@@ -81,7 +81,23 @@ def _broadcast_z(z: Array, n_rows: int) -> Array:
 
 
 def _atleast_2d_pair(h: Array, z: Array) -> tuple[Array, Array, bool]:
-    """Promote ``h``, ``z`` to 2D for the inner kernel; record whether to squeeze."""
+    """Promote ``h``, ``z`` to 2D for the inner kernel; record whether to squeeze.
+
+    Conditioners accept either ``(C,)`` or ``(N, C)`` for ``h`` and
+    correspondingly ``(K,)`` or ``(N, K)`` for ``z``. Higher-rank batch
+    shapes are rejected here with a clear error rather than silently
+    misbroadcasting.
+    """
+    if h.ndim not in (1, 2):
+        raise ValueError(
+            f"Conditioners accept h of shape (C,) or (N, C); got h.ndim={h.ndim}. "
+            "For higher-rank batches, flatten leading axes first."
+        )
+    if z.ndim not in (1, 2):
+        raise ValueError(
+            f"Conditioners accept z of shape (K,) or (N, K); got z.ndim={z.ndim}. "
+            "For higher-rank batches, flatten leading axes first."
+        )
     squeeze = h.ndim == 1
     if squeeze:
         h = einops.rearrange(h, "c -> 1 c")
@@ -586,6 +602,15 @@ class BayesianConcatConditioner(AbstractConditioner):
         h: Float[Array, "*batch C"],
         z: Float[Array, "*batch K"] | Float[Array, " K"],
     ) -> Float[Array, "*batch C"]:
+        if h.shape[-1] != self.num_features:
+            raise ValueError(
+                f"h.shape[-1]={h.shape[-1]} does not match "
+                f"num_features={self.num_features}."
+            )
+        if z.shape[-1] != self.cond_dim:
+            raise ValueError(
+                f"z.shape[-1]={z.shape[-1]} does not match cond_dim={self.cond_dim}."
+            )
         in_dim = self.num_features + self.cond_dim
         W = self.pyrox_sample(
             "proj_W",
@@ -660,6 +685,15 @@ class BayesianAffineModulation(AbstractConditioner):
         h: Float[Array, "*batch C"],
         z: Float[Array, "*batch K"] | Float[Array, " K"],
     ) -> Float[Array, "*batch C"]:
+        if h.shape[-1] != self.num_features:
+            raise ValueError(
+                f"h.shape[-1]={h.shape[-1]} does not match "
+                f"num_features={self.num_features}."
+            )
+        if z.shape[-1] != self.cond_dim:
+            raise ValueError(
+                f"z.shape[-1]={z.shape[-1]} does not match cond_dim={self.cond_dim}."
+            )
         out_dim = 2 * self.num_features
         W = self.pyrox_sample(
             "gen_W",
@@ -738,6 +772,14 @@ class BayesianHyperLinear(AbstractConditioner):
         x: Float[Array, "*batch C_in"],
         z: Float[Array, "*batch K"] | Float[Array, " K"],
     ) -> Float[Array, "*batch C_out"]:
+        if x.shape[-1] != self.target_in:
+            raise ValueError(
+                f"x.shape[-1]={x.shape[-1]} does not match target_in={self.target_in}."
+            )
+        if z.shape[-1] != self.cond_dim:
+            raise ValueError(
+                f"z.shape[-1]={z.shape[-1]} does not match cond_dim={self.cond_dim}."
+            )
         flat_size = self.target_out * self.target_in + self.target_out
         W_gen = self.pyrox_sample(
             "gen_W",
@@ -849,7 +891,7 @@ class ConditionedINR(PyroxModule):
         key: PRNGKeyArray,
         mode: ConditionedMode = "feature",
         pyrox_name: str | None = None,
-        **conditioner_kwargs: float,
+        **conditioner_kwargs: object,
     ) -> ConditionedINR:
         """Build a :class:`ConditionedINR` around ``inner``.
 
@@ -914,15 +956,18 @@ class ConditionedINR(PyroxModule):
         conditioners: list[AbstractConditioner] = []
         for i, k in enumerate(keys):
             num_features = _layer_out_features(layers[i], i)
+            # When the parent has no explicit scope name, leave each
+            # conditioner's pyrox_name unset so PyroxModule's id-based
+            # fallback applies — that keeps sample-site names unique
+            # across multiple ConditionedINR instances in one trace.
+            child_name = f"{pyrox_name}.cond_{i}" if pyrox_name else None
             conditioners.append(
                 _build_conditioner(
                     conditioner_cls,
                     num_features=num_features,
                     cond_dim=cond_dim,
                     key=k,
-                    pyrox_name=(
-                        f"{pyrox_name}.cond_{i}" if pyrox_name else f"cond_{i}"
-                    ),
+                    pyrox_name=child_name,
                     **conditioner_kwargs,
                 )
             )
@@ -965,7 +1010,7 @@ def _build_conditioner(
     cond_dim: int,
     key: PRNGKeyArray,
     pyrox_name: str | None,
-    **kwargs: float,
+    **kwargs: object,
 ) -> AbstractConditioner:
     """Construct a conditioner, threading the key only for variants that need one."""
     if cls is HyperLinear:
@@ -976,7 +1021,7 @@ def _build_conditioner(
             cond_dim=cond_dim,
             key=key,
             pyrox_name=pyrox_name,
-            **kwargs,
+            **kwargs,  # ty: ignore[invalid-argument-type]
         )
     if cls is BayesianHyperLinear:
         return BayesianHyperLinear.init(
@@ -984,7 +1029,7 @@ def _build_conditioner(
             target_out=num_features,
             cond_dim=cond_dim,
             pyrox_name=pyrox_name,
-            **kwargs,
+            **kwargs,  # ty: ignore[invalid-argument-type]
         )
     if cls in (BayesianConcatConditioner, BayesianAffineModulation):
         # Bayesian variants don't need a PRNG key (weights come from prior).
@@ -1202,14 +1247,22 @@ class HyperFourierFeatures(PyroxModule):
             \bigl[\cos(W(z)^\top x / \ell(z) + b(z)),\;
                   \sin(W(z)^\top x / \ell(z) + b(z))\bigr]
 
-    The parameter net runs once per call; the generated features are
-    reused across all rows of ``x`` — same efficiency trick as
-    :class:`HyperLinear`'s shared path.
+    Two execution modes are supported:
+
+    * **Shared mode** (``z.ndim == 1``): the parameter net runs once
+      and the generated features are reused across all rows of ``x``
+      — same efficiency trick as :class:`HyperLinear`'s shared path.
+    * **Per-sample mode** (``z.ndim == 2``): a distinct
+      ``(W, b, log_lengthscale)`` is generated per row of ``z`` via
+      ``jax.vmap`` and applied with ``einops.einsum``. This is
+      substantially more expensive in compute and memory because the
+      Fourier parameters are no longer shared across rows of ``x``,
+      but it is required when each ``x`` row needs its own context.
 
     The flat output of ``parameter_net(z)`` must have size
     ``in_features * n_features + n_features + 1`` (frequencies, phases,
-    log-lengthscale). The layer validates this at construction time by
-    invoking ``parameter_net`` on a dummy ``z``.
+    log-lengthscale). ``init`` does **not** invoke ``parameter_net`` —
+    a misshapen output surfaces only on the first call.
 
     Attributes:
         parameter_net: Callable ``(K,) -> (P,)`` producing the flat
@@ -1251,26 +1304,20 @@ class HyperFourierFeatures(PyroxModule):
         cond_dim: int,
         pyrox_name: str | None = None,
     ) -> HyperFourierFeatures:
-        """Build :class:`HyperFourierFeatures` and validate parameter_net output."""
+        """Build :class:`HyperFourierFeatures`.
+
+        ``parameter_net`` is **not** invoked at construction time, so
+        Bayesian / numpyro-aware parameter nets that rely on
+        ``pyrox_sample`` work without needing a seed handler at init.
+        The expected output size is ``in_features * n_features +
+        n_features + 1``; a mismatch surfaces as a shape error on the
+        first ``__call__``.
+        """
         if in_features <= 0 or n_features <= 0 or cond_dim <= 0:
             raise ValueError(
                 "in_features, n_features, and cond_dim must all be positive; got "
                 f"in_features={in_features}, n_features={n_features}, "
                 f"cond_dim={cond_dim}."
-            )
-        expected = in_features * n_features + n_features + 1
-        try:
-            probe = parameter_net(jnp.zeros((cond_dim,)))  # ty: ignore[call-non-callable]
-        except Exception as exc:  # pragma: no cover — re-raised below for clarity
-            raise ValueError(
-                f"parameter_net failed when called with a dummy z of shape "
-                f"({cond_dim},). Make sure parameter_net accepts a 1-D array."
-            ) from exc
-        if probe.shape != (expected,):
-            raise ValueError(
-                f"parameter_net(z) must return shape ({expected},) — splits "
-                f"into W:({in_features},{n_features}), b:({n_features},), "
-                f"log_l:(). Got shape {probe.shape}."
             )
         return cls(
             parameter_net=parameter_net,
