@@ -1736,8 +1736,6 @@ class DeepVSSGP(PyroxModule):
                 .expand([2 * self.n_features, out_dim])
                 .to_event(2),
             )
-            zw = z @ W_freq / ls
-            scale = jnp.sqrt(1.0 / self.n_features)
-            phi = scale * jnp.concatenate([jnp.cos(zw), jnp.sin(zw)], axis=-1)
+            phi = _rff_forward(W_freq, ls, self.n_features, z)
             z = phi @ W_proj
         return z

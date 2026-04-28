@@ -195,11 +195,10 @@ def test_pyrox_name_scoping():
     assert sample_names == expected
 
 
-def test_jr_independence():
-    """Sanity: jax.random.split-style isolation between forward calls."""
-    # Make sure repeated forward passes inside the same seed handler give
-    # consistent reproducibility (i.e., the layer doesn't pull from a hidden
-    # global counter).
+def test_determinism_under_reseeding():
+    """Two independent forward passes under the same ``rng_seed`` produce
+    identical outputs — i.e., randomness comes solely from the seeded handler,
+    with no hidden global counter."""
     net = DeepVSSGP.init(
         in_features=2,
         hidden_features=4,
