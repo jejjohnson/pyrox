@@ -64,7 +64,9 @@ nav:
       - "Pathwise GP Posterior Sampling": notebooks/gp_pathwise.ipynb
       - "Pathwise GP × NumPyro — extended use cases": notebooks/gp_pathwise_numpyro.ipynb
       - "SIREN — Sinusoidal Implicit Neural Representations": notebooks/siren_inr.ipynb
-      - "Random Fourier Features — Bochner, SSGP, Bayesian Spectral Regression": notebooks/random_fourier_features.ipynb
+      - "Random Fourier Features → SSGP → VSSGP — Three Spectral Views of a Gaussian Process": notebooks/random_fourier_features.ipynb
+      - "Random Fourier Features as Neural Networks — Fixed, Learned, Ensemble": notebooks/rff_as_neural_networks.ipynb
+      - "Deep Random Feature Expansions — Stacked Spectral GPs (Cutajar 2017)": notebooks/deep_random_fourier_features.ipynb
       - "Conditional Neural Fields — FiLM, Hypernetworks, NIF": notebooks/conditioning.ipynb
       - "Spatiotemporal Preprocessing — Geo, Time, Pandas": notebooks/spatiotemporal_preprocessing.ipynb
       - "Multi-Output Gaussian Processes — LMC, ICM, OILMM": notebooks/multioutput_gp.ipynb
