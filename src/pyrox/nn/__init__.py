@@ -27,6 +27,8 @@ Dense / Bayesian-linear layers (``pyrox.nn._layers``):
 * :class:`SirenDense` — single sine-activated dense layer (SIREN).
 * :class:`SIREN` — multi-layer sinusoidal representation network.
 * :class:`BayesianSIREN` — SIREN with regime-scaled Normal priors.
+* :class:`DeepVSSGP` — deep random feature expansion for variational
+  SSGP (Cutajar et al. 2017).
 
 Bayesian Neural Field stack (``pyrox.nn._bnf``):
 
@@ -92,6 +94,7 @@ from pyrox.nn._layers import (
     BayesianSIREN,
     Cartesian3DEncoder,
     CyclicEncoder,
+    DeepVSSGP,
     Deg2Rad,
     DenseFlipout,
     DenseNCP,
@@ -128,6 +131,7 @@ __all__ = [
     "ConditionedINR",
     "ConditionedRFFNet",
     "CyclicEncoder",
+    "DeepVSSGP",
     "Deg2Rad",
     "DenseFlipout",
     "DenseNCP",
