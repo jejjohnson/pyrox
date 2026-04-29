@@ -14,8 +14,17 @@ import jax.numpy as jnp
 import jax.scipy.linalg as jsl
 import pytest
 
-from pyrox.gp import MaternSDE
-from pyrox.gp._src.kernels import matern_kernel
+from pyrox.gp import (
+    ConstantSDE,
+    CosineSDE,
+    MaternSDE,
+    PeriodicSDE,
+    ProductSDE,
+    QuasiPeriodicSDE,
+    SumSDE,
+)
+from pyrox.gp._sde_kernels import _scaled_bessel_i_seq
+from pyrox.gp._src.kernels import matern_kernel, periodic_kernel
 
 
 # --- structural shape contract -------------------------------------------
@@ -199,3 +208,250 @@ def test_sde_kernel_is_jit_compatible(order: int) -> None:
     A, Q = go(sde, jnp.array([0.1, 0.2]))
     d = order + 1
     assert A.shape == (2, d, d) and Q.shape == (2, d, d)
+
+
+# --- ConstantSDE ----------------------------------------------------------
+
+
+def test_constant_sde_recovers_variance() -> None:
+    sde = ConstantSDE(variance=2.5)
+    F, L, H, Q_c, P_inf = sde.sde_params()
+    assert sde.state_dim == 1
+    assert jnp.allclose(F, 0.0)
+    assert jnp.allclose(L, 0.0)
+    assert jnp.allclose(Q_c, 0.0)
+    assert jnp.allclose((H @ P_inf @ H.T).squeeze(), 2.5)
+
+
+def test_constant_sde_discretise_is_identity() -> None:
+    sde = ConstantSDE(variance=1.0)
+    A, Q = sde.discretise(jnp.array([0.0, 0.5, 5.0]))
+    assert jnp.allclose(A, jnp.ones((3, 1, 1)))
+    assert jnp.allclose(Q, jnp.zeros((3, 1, 1)))
+
+
+# --- CosineSDE ------------------------------------------------------------
+
+
+def test_cosine_sde_autocov_matches_cosine_kernel() -> None:
+    """The closed-form rotation transition reproduces ``sigma^2 cos(omega tau)``.
+
+    We use the closed-form ``A_k`` produced by :meth:`CosineSDE.discretise`
+    rather than a generic ``expm`` of the generator: float32 ``expm`` of a
+    rotation generator accumulates ~1e-3 error for ``omega * tau`` of order
+    10, which would mask kernel-correctness issues. The closed-form path
+    is exact to machine precision and is what downstream Kalman code uses.
+    """
+    sigma2 = 1.7
+    omega = 2.5
+    sde = CosineSDE(variance=sigma2, frequency=omega)
+    _F, _L, H, _Q_c, P_inf = sde.sde_params()
+
+    taus = jnp.linspace(0.0, 4.0, 33)
+    A, _Q = sde.discretise(taus)
+    # K(tau) = H A(tau) P_inf H^T
+    K_sde = jnp.einsum("ij,njk,kl,lm->n", H, A, P_inf, H.T)
+    K_true = sigma2 * jnp.cos(omega * taus)
+    assert jnp.allclose(K_sde, K_true, atol=1e-5)
+
+
+def test_cosine_sde_discretise_is_pure_rotation() -> None:
+    sde = CosineSDE(variance=1.0, frequency=3.0)
+    dt = jnp.array([0.0, 0.1, 0.5, 1.0])
+    A, Q = sde.discretise(dt)
+    # Q should be identically zero (deterministic).
+    assert jnp.allclose(Q, jnp.zeros_like(Q))
+    # A should be a rotation: A.T @ A = I and det(A) = 1.
+    AtA = jnp.einsum("nij,nik->njk", A, A)
+    assert jnp.allclose(AtA, jnp.broadcast_to(jnp.eye(2), (4, 2, 2)), atol=1e-6)
+    dets = jnp.linalg.det(A)
+    assert jnp.allclose(dets, jnp.ones(4), atol=1e-6)
+
+
+def test_cosine_sde_closed_form_matches_expm() -> None:
+    """Closed-form rotation override matches the generic ``expm`` path."""
+    sde = CosineSDE(variance=1.0, frequency=1.7)
+    F, _L, _H, _Q_c, _P_inf = sde.sde_params()
+    dt = jnp.array([0.05, 0.3, 0.9])
+    A_closed, _ = sde.discretise(dt)
+    A_expm = jax.vmap(lambda t: jsl.expm(F * t))(dt)
+    assert jnp.allclose(A_closed, A_expm, atol=1e-5)
+
+
+# --- SumSDE ---------------------------------------------------------------
+
+
+def test_sum_sde_state_dim_and_shapes() -> None:
+    components = (
+        MaternSDE(variance=1.0, lengthscale=0.5, order=1),
+        ConstantSDE(variance=0.4),
+        CosineSDE(variance=0.3, frequency=2.0),
+    )
+    sde = SumSDE(components)
+    assert sde.state_dim == 2 + 1 + 2
+    F, _L, H, _Q_c, P_inf = sde.sde_params()
+    assert F.shape == (5, 5)
+    assert H.shape == (1, 5)
+    assert P_inf.shape == (5, 5)
+    # Block-diagonal structure: off-block entries of F are zero.
+    # Block boundaries are at rows/cols 0..1, 2, 3..4.
+    assert jnp.allclose(F[2:3, 0:2], 0.0)
+    assert jnp.allclose(F[3:5, 0:3], 0.0)
+
+
+def test_sum_sde_autocov_equals_sum_of_components() -> None:
+    """Autocovariance of ``Sum(k1, k2, ...)`` equals ``sum_i k_i``."""
+    sigma2_m, ell = 0.7, 0.4
+    c0 = 0.3
+    components = (
+        MaternSDE(variance=sigma2_m, lengthscale=ell, order=1),
+        ConstantSDE(variance=c0),
+    )
+    sde = SumSDE(components)
+    F, _L, H, _Q_c, P_inf = sde.sde_params()
+
+    taus = jnp.linspace(0.0, 2.5, 21)
+    K_sde = jax.vmap(lambda t: (H @ jsl.expm(F * t) @ P_inf @ H.T).squeeze())(taus)
+
+    X = taus[:, None]
+    X0 = jnp.zeros((1, 1))
+    K_truth = matern_kernel(
+        X, X0, jnp.asarray(sigma2_m), jnp.asarray(ell), nu=1.5
+    ).squeeze() + jnp.asarray(c0)
+    assert jnp.allclose(K_sde, K_truth, atol=1e-5)
+
+
+def test_sum_sde_lyapunov_holds() -> None:
+    components = (
+        MaternSDE(variance=1.0, lengthscale=0.5, order=2),
+        MaternSDE(variance=0.5, lengthscale=1.0, order=1),
+    )
+    sde = SumSDE(components)
+    F, L, _H, Q_c, P_inf = sde.sde_params()
+    res = F @ P_inf + P_inf @ F.T + L @ Q_c @ L.T
+    scale = jnp.maximum(jnp.abs(F @ P_inf).max(), 1.0)
+    assert jnp.allclose(res, jnp.zeros_like(res), atol=1e-5 * scale)
+
+
+def test_sum_sde_empty_raises() -> None:
+    with pytest.raises(ValueError, match="at least one component"):
+        SumSDE(())
+
+
+# --- ProductSDE ----------------------------------------------------------
+
+
+def test_product_sde_state_dim_and_lyapunov() -> None:
+    left = MaternSDE(variance=1.0, lengthscale=0.4, order=1)
+    right = CosineSDE(variance=1.0, frequency=2.0)
+    prod = ProductSDE(left, right)
+    assert prod.state_dim == 2 * 2
+
+    F, L, _H, Q_c, P_inf = prod.sde_params()
+    res = F @ P_inf + P_inf @ F.T + L @ Q_c @ L.T
+    scale = jnp.maximum(jnp.abs(F @ P_inf).max(), 1.0)
+    assert jnp.allclose(res, jnp.zeros_like(res), atol=1e-5 * scale)
+
+
+def test_product_sde_autocov_matches_product_of_components() -> None:
+    """Autocovariance of ``Product(k1, k2)`` equals ``k1 * k2``."""
+    sigma2_m, ell = 1.2, 0.5
+    omega = 2.0 * jnp.pi  # period 1
+    left = MaternSDE(variance=sigma2_m, lengthscale=ell, order=1)
+    right = CosineSDE(variance=1.0, frequency=omega)
+    prod = ProductSDE(left, right)
+
+    F, _L, H, _Q_c, P_inf = prod.sde_params()
+
+    taus = jnp.linspace(0.0, 2.0, 21)
+    K_sde = jax.vmap(lambda t: (H @ jsl.expm(F * t) @ P_inf @ H.T).squeeze())(taus)
+
+    X = taus[:, None]
+    X0 = jnp.zeros((1, 1))
+    K_left = matern_kernel(
+        X, X0, jnp.asarray(sigma2_m), jnp.asarray(ell), nu=1.5
+    ).squeeze()
+    K_right = jnp.cos(omega * taus)
+    K_truth = K_left * K_right
+    assert jnp.allclose(K_sde, K_truth, atol=1e-4)
+
+
+def test_quasi_periodic_is_product() -> None:
+    qp = QuasiPeriodicSDE(
+        MaternSDE(variance=1.0, lengthscale=2.0, order=1),
+        PeriodicSDE(variance=1.0, lengthscale=1.0, period=1.0, n_harmonics=4),
+    )
+    assert isinstance(qp, ProductSDE)
+    # State dim is d_mat * d_per = 2 * (1 + 2*4) = 18.
+    assert qp.state_dim == 2 * 9
+
+
+# --- PeriodicSDE ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("x", [0.05, 0.25, 1.0, 4.0, 11.0, 30.0])
+def test_scaled_bessel_recursion_matches_scipy(x: float) -> None:
+    """Sanity-check the Bessel helper against scipy's reference."""
+    sp = pytest.importorskip("scipy.special")
+    ours = _scaled_bessel_i_seq(jnp.asarray(x), j_max=10)
+    truth = jnp.exp(-x) * jnp.array([sp.iv(j, x) for j in range(11)])
+    assert jnp.allclose(ours, truth, rtol=1e-4, atol=1e-6)
+
+
+def test_periodic_sde_invalid_n_harmonics_raises() -> None:
+    with pytest.raises(ValueError, match="n_harmonics"):
+        PeriodicSDE(variance=1.0, lengthscale=1.0, period=1.0, n_harmonics=0)
+
+
+def test_periodic_sde_no_driving_noise() -> None:
+    """``L = 0`` and ``Q_c = 0`` (deterministic harmonic decomposition)."""
+    sde = PeriodicSDE(variance=1.0, lengthscale=1.0, period=1.0, n_harmonics=5)
+    _F, L, _H, Q_c, _P_inf = sde.sde_params()
+    assert jnp.allclose(L, 0.0)
+    assert jnp.allclose(Q_c, 0.0)
+
+
+def test_periodic_sde_lyapunov_holds() -> None:
+    sde = PeriodicSDE(variance=1.0, lengthscale=1.0, period=2.0, n_harmonics=6)
+    F, L, _H, Q_c, P_inf = sde.sde_params()
+    res = F @ P_inf + P_inf @ F.T + L @ Q_c @ L.T
+    assert jnp.allclose(res, jnp.zeros_like(res), atol=1e-5)
+
+
+def test_periodic_sde_autocov_matches_dense_periodic_kernel() -> None:
+    """Truncated SDE autocov approximates the MacKay periodic kernel."""
+    sigma2 = 1.0
+    ell = 1.0
+    period = 2.0
+    sde = PeriodicSDE(variance=sigma2, lengthscale=ell, period=period, n_harmonics=8)
+    F, _L, H, _Q_c, P_inf = sde.sde_params()
+
+    taus = jnp.linspace(0.0, 2.0 * period, 41)
+    K_sde = jax.vmap(lambda t: (H @ jsl.expm(F * t) @ P_inf @ H.T).squeeze())(taus)
+
+    X = taus[:, None]
+    X0 = jnp.zeros((1, 1))
+    K_dense = periodic_kernel(
+        X, X0, jnp.asarray(sigma2), jnp.asarray(ell), jnp.asarray(period)
+    ).squeeze()
+    # 8 harmonics matches MacKay to better than 1e-3 in float32.
+    assert jnp.allclose(K_sde, K_dense, atol=1e-3)
+
+
+# --- jit compatibility for new kernels -----------------------------------
+
+
+def test_sum_and_product_sde_jit_compatible() -> None:
+    summed = SumSDE(
+        (MaternSDE(variance=1.0, lengthscale=0.5, order=1), ConstantSDE(0.3))
+    )
+    product = ProductSDE(MaternSDE(order=1), CosineSDE(frequency=2.0))
+
+    @jax.jit
+    def discretise(s: object, dt: jax.Array) -> tuple[jax.Array, jax.Array]:
+        return s.discretise(dt)  # type: ignore[attr-defined]
+
+    A_s, Q_s = discretise(summed, jnp.array([0.1, 0.2]))
+    A_p, Q_p = discretise(product, jnp.array([0.1, 0.2]))
+    assert A_s.shape == (2, 3, 3) and Q_s.shape == (2, 3, 3)
+    assert A_p.shape == (2, 4, 4) and Q_p.shape == (2, 4, 4)
