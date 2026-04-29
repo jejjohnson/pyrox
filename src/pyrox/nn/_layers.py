@@ -495,6 +495,17 @@ def _rff_forward(
     return scale * jnp.concatenate([jnp.cos(z), jnp.sin(z)], axis=-1)
 
 
+def _rff_cosine_forward(
+    W: Float[Array, "D_in n_features"],
+    b: Float[Array, " n_features"],
+    lengthscale: float | Float[Array, ""],
+    n_features: int,
+    x: Float[Array, "*batch D_in"],
+) -> Float[Array, "*batch n_features"]:
+    """Shared single-cosine RFF feature map: ``sqrt(2/D) cos(xW/l + b)``."""
+    return jnp.sqrt(2.0 / n_features) * jnp.cos(x @ W / lengthscale + b)
+
+
 class RBFFourierFeatures(PyroxModule):
     r"""SSGP-style RFF layer with RBF spectral density.
 
@@ -763,8 +774,143 @@ class RBFCosineFeatures(PyroxModule):
             "lengthscale",
             dist.LogNormal(jnp.log(jnp.asarray(self.init_lengthscale)), 1.0),
         )
-        z = x @ W / ls + b
-        return jnp.sqrt(2.0 / self.n_features) * jnp.cos(z)
+        return _rff_cosine_forward(W, b, ls, self.n_features, x)
+
+
+class MaternCosineFeatures(PyroxModule):
+    r"""Cosine-bias variant of random Fourier features for the Matern kernel.
+
+    Single-cosine analogue of :class:`MaternFourierFeatures`:
+
+    .. math::
+
+        \phi(x) = \sqrt{2 / D}\,\cos(x W / \ell + b)
+
+    where :math:`W \sim \mathrm{StudentT}(2\nu)` (the Matern spectral
+    density) and :math:`b \sim \mathrm{Uniform}(0, 2\pi)`. Output dim is
+    ``n_features`` (vs ``2 * n_features`` for the ``[cos, sin]``
+    variant). Approximates the same kernel as
+    :class:`MaternFourierFeatures` in expectation but with higher
+    variance per draw — see Sutherland & Schneider (2015).
+
+    All parameters (:math:`W`, :math:`b`, :math:`\ell`) are
+    ``pyrox_sample`` sites.
+
+    Attributes:
+        in_features: Input dimension.
+        n_features: Number of random features (= output dimension).
+        nu: Smoothness parameter :math:`\nu`.
+        init_lengthscale: Prior location for the lengthscale.
+        pyrox_name: Explicit scope name for NumPyro site registration.
+    """
+
+    in_features: int = eqx.field(static=True)
+    n_features: int = eqx.field(static=True)
+    nu: float = eqx.field(static=True, default=1.5)
+    init_lengthscale: float = 1.0
+    pyrox_name: str | None = None
+
+    @classmethod
+    def init(
+        cls,
+        in_features: int,
+        n_features: int,
+        *,
+        nu: float = 1.5,
+        lengthscale: float = 1.0,
+    ) -> MaternCosineFeatures:
+        if lengthscale <= 0:
+            raise ValueError(f"lengthscale must be > 0, got {lengthscale}.")
+        if nu <= 0:
+            raise ValueError(f"nu must be > 0, got {nu}.")
+        return cls(
+            in_features=in_features,
+            n_features=n_features,
+            nu=nu,
+            init_lengthscale=lengthscale,
+        )
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D_rff"]:
+        W = self.pyrox_sample(
+            "W",
+            dist.StudentT(df=2.0 * self.nu, loc=0.0, scale=1.0)
+            .expand([self.in_features, self.n_features])
+            .to_event(2),
+        )
+        b = self.pyrox_sample(
+            "b",
+            dist.Uniform(0.0, 2.0 * jnp.pi).expand([self.n_features]).to_event(1),
+        )
+        ls = self.pyrox_sample(
+            "lengthscale",
+            dist.LogNormal(jnp.log(jnp.asarray(self.init_lengthscale)), 1.0),
+        )
+        return _rff_cosine_forward(W, b, ls, self.n_features, x)
+
+
+class LaplaceCosineFeatures(PyroxModule):
+    r"""Cosine-bias variant of random Fourier features for the Laplace kernel.
+
+    Single-cosine analogue of :class:`LaplaceFourierFeatures` (the
+    Matern-1/2 kernel):
+
+    .. math::
+
+        \phi(x) = \sqrt{2 / D}\,\cos(x W / \ell + b)
+
+    where :math:`W \sim \mathrm{Cauchy}(0, 1)` (Student-t with
+    ``df = 1``) and :math:`b \sim \mathrm{Uniform}(0, 2\pi)`. Output
+    dim is ``n_features``.
+
+    All parameters (:math:`W`, :math:`b`, :math:`\ell`) are
+    ``pyrox_sample`` sites.
+
+    Attributes:
+        in_features: Input dimension.
+        n_features: Number of random features (= output dimension).
+        init_lengthscale: Prior location for the lengthscale.
+        pyrox_name: Explicit scope name for NumPyro site registration.
+    """
+
+    in_features: int = eqx.field(static=True)
+    n_features: int = eqx.field(static=True)
+    init_lengthscale: float = 1.0
+    pyrox_name: str | None = None
+
+    @classmethod
+    def init(
+        cls,
+        in_features: int,
+        n_features: int,
+        *,
+        lengthscale: float = 1.0,
+    ) -> LaplaceCosineFeatures:
+        if lengthscale <= 0:
+            raise ValueError(f"lengthscale must be > 0, got {lengthscale}.")
+        return cls(
+            in_features=in_features,
+            n_features=n_features,
+            init_lengthscale=lengthscale,
+        )
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D_rff"]:
+        W = self.pyrox_sample(
+            "W",
+            dist.StudentT(df=1.0, loc=0.0, scale=1.0)
+            .expand([self.in_features, self.n_features])
+            .to_event(2),
+        )
+        b = self.pyrox_sample(
+            "b",
+            dist.Uniform(0.0, 2.0 * jnp.pi).expand([self.n_features]).to_event(1),
+        )
+        ls = self.pyrox_sample(
+            "lengthscale",
+            dist.LogNormal(jnp.log(jnp.asarray(self.init_lengthscale)), 1.0),
+        )
+        return _rff_cosine_forward(W, b, ls, self.n_features, x)
 
 
 class ArcCosineFourierFeatures(PyroxModule):

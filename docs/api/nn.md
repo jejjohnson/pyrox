@@ -29,7 +29,11 @@ See also: [Geo encoders](nn/geo_encoders.md) for the longitude/latitude and sphe
 
 ::: pyrox.nn.MaternFourierFeatures
 
+::: pyrox.nn.MaternCosineFeatures
+
 ::: pyrox.nn.LaplaceFourierFeatures
+
+::: pyrox.nn.LaplaceCosineFeatures
 
 ::: pyrox.nn.ArcCosineFourierFeatures
 
