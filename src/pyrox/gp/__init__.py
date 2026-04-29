@@ -90,7 +90,9 @@ from pyrox.gp._protocols import (
     Integrator,
     Kernel,
     Likelihood,
+    SDEKernel,
 )
+from pyrox.gp._sde_kernels import MaternSDE
 from pyrox.gp._sparse import SparseGPPrior
 
 
@@ -118,6 +120,7 @@ __all__ = [
     "Likelihood",
     "Linear",
     "Matern",
+    "MaternSDE",
     "MeanFieldGuide",
     "MultiOutputInducingVariables",
     "NaturalGuide",
@@ -127,6 +130,7 @@ __all__ = [
     "Periodic",
     "Polynomial",
     "RationalQuadratic",
+    "SDEKernel",
     "SharedInducingPoints",
     "SparseGPPrior",
     "SphericalHarmonicInducingFeatures",

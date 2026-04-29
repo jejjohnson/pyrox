@@ -1,10 +1,12 @@
 """Layer 1 — abstract protocol classes for GP components.
 
-Four orthogonal pyrox-local protocols that compose into a GP model.
+Five orthogonal pyrox-local protocols that compose into a GP model.
 Wave 2 ships the abstract definitions only for :class:`Guide`,
 :class:`Integrator`, and :class:`Likelihood`; concrete implementations
 land in later waves. :class:`Kernel` already has concrete implementations
-in this wave (:class:`pyrox.gp.RBF`, etc.).
+in this wave (:class:`pyrox.gp.RBF`, etc.). :class:`SDEKernel` is the
+state-space face of stationary 1-D kernels — concrete implementations
+(:class:`pyrox.gp.MaternSDE`, ...) land in the temporal-GP waves.
 
 Solver strategies intentionally live in :mod:`gaussx`, not here. Use
 ``gaussx.AbstractSolverStrategy`` (combined solve + logdet),
@@ -14,6 +16,8 @@ and ``gaussx.ComposedSolver``. The pyrox model entry points
 (``GPPrior``, ``gp_factor``, ``gp_sample``) accept any solver strategy.
 
 * :class:`Kernel` — covariance structure, ``(X1, X2) -> Gram``.
+* :class:`SDEKernel` — state-space representation of a stationary 1-D
+  kernel for linear-time temporal GP inference.
 * :class:`Guide` — variational posterior structure.
 * :class:`Integrator` — expectations under a Gaussian.
 * :class:`Likelihood` — observation model.
@@ -26,7 +30,9 @@ from collections.abc import Callable
 from typing import Any
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
+import jax.scipy.linalg as jsl
 from jaxtyping import Array, Float
 
 
@@ -59,6 +65,85 @@ class Kernel(eqx.Module):
         broadcast for the ``O(N)`` shortcut.
         """
         return jnp.diag(self(X, X))
+
+
+class SDEKernel(eqx.Module):
+    r"""Abstract base for kernels with state-space (SDE) representations.
+
+    Stationary kernels with rational spectral densities admit exact
+    finite-dimensional state-space representations of the form
+
+    .. math::
+        d\mathbf{x}(t) = F\,\mathbf{x}(t)\, dt + L\, dw(t),
+        \qquad f(t) = H\,\mathbf{x}(t)
+
+    where :math:`w(t)` is white noise with spectral density :math:`Q_c`
+    and :math:`P_\infty` is the stationary state covariance solving the
+    Lyapunov equation :math:`F P_\infty + P_\infty F^\top + L Q_c L^\top = 0`.
+
+    Discretisation at time step :math:`\Delta t` gives
+
+    .. math::
+        A_k = \exp(F\,\Delta t),
+        \qquad Q_k = P_\infty - A_k\,P_\infty\,A_k^\top,
+
+    so that :math:`x_{k+1} = A_k x_k + q_k` with :math:`q_k \sim \mathcal{N}(0, Q_k)`.
+
+    Concrete subclasses implement :meth:`sde_params` returning the
+    closed-form ``(F, L, H, Q_c, P_inf)`` tuple. :meth:`discretise`
+    defaults to a generic ``expm``-based implementation; subclasses with
+    closed-form transitions (e.g. Matern-1/2) may override it.
+
+    The continuous-time autocovariance recovered from the SDE is
+    :math:`k(\tau) = H\,\exp(F|\tau|)\,P_\infty\,H^\top` for stationary
+    kernels.
+    """
+
+    @property
+    @abstractmethod
+    def state_dim(self) -> int:
+        """State dimension :math:`d` of the SDE representation."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def sde_params(
+        self,
+    ) -> tuple[
+        Float[Array, "d d"],
+        Float[Array, "d s"],
+        Float[Array, "1 d"],
+        Float[Array, "s s"],
+        Float[Array, "d d"],
+    ]:
+        """Return ``(F, L, H, Q_c, P_inf)`` defining the continuous SDE."""
+        raise NotImplementedError
+
+    def discretise(
+        self,
+        dt: Float[Array, " N"],
+    ) -> tuple[Float[Array, "N d d"], Float[Array, "N d d"]]:
+        r"""Discretise the SDE at time steps ``dt``.
+
+        Default implementation evaluates ``A_k = expm(F dt_k)`` via
+        ``jax.scipy.linalg.expm`` and ``Q_k = P_\infty - A_k P_\infty A_k^\top``.
+        Subclasses with closed-form transitions should override.
+
+        Args:
+            dt: ``(N,)`` array of (non-negative) time steps.
+
+        Returns:
+            Tuple ``(A, Q)`` of ``(N, d, d)`` arrays.
+        """
+        F, _L, _H, _Q_c, P_inf = self.sde_params()
+
+        def _step(
+            dt_n: Float[Array, ""],
+        ) -> tuple[Float[Array, "d d"], Float[Array, "d d"]]:
+            A = jsl.expm(F * dt_n)
+            Q = P_inf - A @ P_inf @ A.T
+            return A, Q
+
+        return jax.vmap(_step)(jnp.asarray(dt))
 
 
 class Guide(eqx.Module):
