@@ -142,6 +142,30 @@ Currently supports RBF and Matern kernels. Point-inducing
 ::: pyrox.gp.DecoupledPathwiseSampler
 ::: pyrox.gp.PathwiseFunction
 
+## State-space (SDE) kernels
+
+Stationary 1-D kernels expressed as linear time-invariant SDEs. Once in
+state-space form, GP inference on a 1-D grid reduces to Kalman filtering
+in ``O(N d^3)`` instead of ``O(N^3)`` Cholesky. The protocol exposes
+``sde_params() -> (F, L, H, Q_c, P_inf)`` and ``discretise(dt) -> (A_k, Q_k)``
+for downstream Kalman / RTS use.
+
+```python
+import jax.numpy as jnp
+from pyrox.gp import MaternSDE
+
+sde = MaternSDE(variance=1.0, lengthscale=0.5, order=1)  # nu = 3/2
+F, L, H, Q_c, P_inf = sde.sde_params()                   # closed form
+A, Q = sde.discretise(jnp.array([0.05, 0.1, 0.2]))       # (3, 2, 2) each
+```
+
+The composition rules (`SumSDE`, `ProductSDE`), additional kernels
+(`CosineSDE`, `PeriodicSDE`), and the Kalman-based `MarkovGPPrior`
+arrive in subsequent issues (#37 finish, #38).
+
+::: pyrox.gp.SDEKernel
+::: pyrox.gp.MaternSDE
+
 ## Component protocols
 
 Abstract pyrox-local bases for the orthogonal component stack. Wave 2
