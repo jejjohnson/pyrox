@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.8](https://github.com/jejjohnson/pyrox/compare/v0.0.7...v0.0.8) (2026-04-29)
+
+
+### Features
+
+* **gp:** add SDEKernel protocol and MaternSDE (Markov GP foundation, [#37](https://github.com/jejjohnson/pyrox/issues/37) partial) ([#113](https://github.com/jejjohnson/pyrox/issues/113)) ([67ce79b](https://github.com/jejjohnson/pyrox/commit/67ce79bf60134b3807dbd2a6ff968df244051835))
+* **nn:** canonical cosine RFF layers + spectral-kernel notebook trio ([#112](https://github.com/jejjohnson/pyrox/issues/112)) ([5840f8c](https://github.com/jejjohnson/pyrox/commit/5840f8cf07c2c2020b622a932c7816a3825684c3))
+
 ## [0.0.7](https://github.com/jejjohnson/pyrox/compare/v0.0.6...v0.0.7) (2026-04-28)
 
 
