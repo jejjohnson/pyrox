@@ -398,6 +398,21 @@ def test_scaled_bessel_recursion_matches_scipy(x: float) -> None:
     assert jnp.allclose(ours, truth, rtol=1e-4, atol=1e-6)
 
 
+def test_scaled_bessel_zero_argument_limit() -> None:
+    """``exp(-0) I_j(0)`` is ``[1, 0, 0, ...]``; helper must not return NaN."""
+    seq = _scaled_bessel_i_seq(jnp.asarray(0.0), j_max=5)
+    assert jnp.all(jnp.isfinite(seq))
+    expected = jnp.zeros(6).at[0].set(1.0)
+    assert jnp.allclose(seq, expected, atol=1e-7)
+
+
+def test_periodic_sde_handles_infinite_lengthscale() -> None:
+    """``lengthscale -> inf`` yields ``x = 1/ell^2 = 0``; ``P_inf`` must be finite."""
+    sde = PeriodicSDE(variance=1.0, lengthscale=jnp.inf, period=1.0, n_harmonics=4)
+    _F, _L, _H, _Q_c, P_inf = sde.sde_params()
+    assert jnp.all(jnp.isfinite(P_inf))
+
+
 def test_periodic_sde_invalid_n_harmonics_raises() -> None:
     with pytest.raises(ValueError, match="n_harmonics"):
         PeriodicSDE(variance=1.0, lengthscale=1.0, period=1.0, n_harmonics=0)
@@ -416,6 +431,26 @@ def test_periodic_sde_lyapunov_holds() -> None:
     F, L, _H, Q_c, P_inf = sde.sde_params()
     res = F @ P_inf + P_inf @ F.T + L @ Q_c @ L.T
     assert jnp.allclose(res, jnp.zeros_like(res), atol=1e-5)
+
+
+def test_periodic_sde_closed_form_discretise_is_pure_rotation() -> None:
+    """``discretise`` returns block rotations and ``Q_k = 0``.
+
+    For ``j * omega_0 * dt`` of order 5 (e.g. period 1, J=5, dt of a few
+    units), float32 ``expm`` accumulates ~1e-3 error and produces a
+    spurious nonzero ``Q_k``; the closed-form override is exact.
+    """
+    sde = PeriodicSDE(variance=1.0, lengthscale=1.0, period=0.5, n_harmonics=5)
+    dt = jnp.array([0.0, 0.05, 0.3, 1.0])
+    A, Q = sde.discretise(dt)
+    d = sde.state_dim
+    # Q is identically zero (deterministic dynamics).
+    assert jnp.allclose(Q, jnp.zeros_like(Q))
+    # A is orthogonal: A^T A = I (rotation blocks plus 1x1 identity).
+    AtA = jnp.einsum("nij,nik->njk", A, A)
+    assert jnp.allclose(AtA, jnp.broadcast_to(jnp.eye(d), (4, d, d)), atol=1e-5)
+    # dt = 0 gives the identity transition.
+    assert jnp.allclose(A[0], jnp.eye(d), atol=1e-7)
 
 
 def test_periodic_sde_autocov_matches_dense_periodic_kernel() -> None:
@@ -442,14 +477,16 @@ def test_periodic_sde_autocov_matches_dense_periodic_kernel() -> None:
 
 
 def test_sum_and_product_sde_jit_compatible() -> None:
+    from pyrox.gp import SDEKernel
+
     summed = SumSDE(
         (MaternSDE(variance=1.0, lengthscale=0.5, order=1), ConstantSDE(0.3))
     )
     product = ProductSDE(MaternSDE(order=1), CosineSDE(frequency=2.0))
 
     @jax.jit
-    def discretise(s: object, dt: jax.Array) -> tuple[jax.Array, jax.Array]:
-        return s.discretise(dt)  # type: ignore[attr-defined]
+    def discretise(s: SDEKernel, dt: jax.Array) -> tuple[jax.Array, jax.Array]:
+        return s.discretise(dt)
 
     A_s, Q_s = discretise(summed, jnp.array([0.1, 0.2]))
     A_p, Q_p = discretise(product, jnp.array([0.1, 0.2]))

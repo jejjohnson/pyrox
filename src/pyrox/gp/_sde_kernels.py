@@ -460,17 +460,28 @@ def _scaled_bessel_i_seq(
     """
     js = jnp.arange(j_max + 1, dtype=x.dtype)  # (J+1,)
     ks = jnp.arange(n_terms, dtype=x.dtype)  # (K,)
-    log_half_x = jnp.log(x / 2.0)
+
+    # Guard the ``x == 0`` limit. ``log(x/2)`` becomes ``-inf`` and the
+    # ``j == k == 0`` term yields ``0 * -inf -> NaN`` in IEEE arithmetic;
+    # mathematically the scaled sequence is ``[1, 0, 0, ...]`` because
+    # ``I_0(0) = 1`` and ``I_j(0) = 0`` for ``j >= 1``. Compute on a safe
+    # positive value and ``where`` over the result so the limit is well-defined
+    # (e.g. ``PeriodicSDE`` with ``lengthscale = inf`` reduces to the constant
+    # kernel rather than NaN-poisoning ``P_inf``).
+    safe_x = jnp.where(x == 0, jnp.asarray(1.0, dtype=x.dtype), x)
+    log_half_x = jnp.log(safe_x / 2.0)
     # log_term[j, k] = (j + 2k) log(x/2) - x - log(k!) - log((k+j)!)
     j_grid = js[:, None]
     k_grid = ks[None, :]
     log_term = (
         (j_grid + 2.0 * k_grid) * log_half_x
-        - x
+        - safe_x
         - jss.gammaln(k_grid + 1.0)
         - jss.gammaln(k_grid + j_grid + 1.0)
     )
-    return jnp.exp(jss.logsumexp(log_term, axis=1))
+    series_result = jnp.exp(jss.logsumexp(log_term, axis=1))
+    zero_result = (js == 0).astype(x.dtype)
+    return jnp.where(x == 0, zero_result, series_result)
 
 
 class PeriodicSDE(SDEKernel):
@@ -496,10 +507,12 @@ class PeriodicSDE(SDEKernel):
         q_0 = \sigma^2 e^{-1/\ell^2} I_0(1/\ell^2),\qquad
         q_j = 2 \sigma^2 e^{-1/\ell^2} I_j(1/\ell^2)\quad (j \geq 1).
 
-    Bessel coefficients are computed via Miller's downward recursion
-    (see :func:`_scaled_bessel_i_seq`). For ``n_harmonics`` around 7 the
-    truncation matches the dense MacKay periodic kernel to better than
-    1e-6 across the typical hyperparameter regime.
+    The scaled modified Bessel coefficients are computed by
+    :func:`_scaled_bessel_i_seq` using a log-space Taylor-series
+    accumulation (``logsumexp`` over ``(j + 2k) log(x/2) - x - log(k!) -
+    log((k+j)!)``). For ``n_harmonics`` around 7 the truncation matches
+    the dense MacKay periodic kernel to better than 1e-6 across the
+    typical hyperparameter regime.
 
     References:
         Solin & Sarkka (2014), *Explicit Link Between Periodic Covariance
@@ -588,6 +601,53 @@ class PeriodicSDE(SDEKernel):
         )
         P_inf = jnp.diag(diag)
         return F, L, H, Q_c, P_inf
+
+    def discretise(
+        self,
+        dt: Float[Array, " N"],
+    ) -> tuple[Float[Array, "N d d"], Float[Array, "N d d"]]:
+        r"""Closed-form discretisation: harmonic block rotations, ``Q_k = 0``.
+
+        The drift ``F`` is exactly block-diagonal with ``(0)`` (DC mode)
+        and ``J`` skew-symmetric ``2x2`` rotation generators
+        :math:`F_j = \mathrm{skew}(j\,\omega_0)`. The matrix exponential
+        of each block has a closed form (identity for the DC mode and a
+        2-D rotation for each harmonic), and ``Q_k`` vanishes identically
+        because the diffusion is zero. Using the closed form avoids the
+        float32 ``expm`` accumulation that affects ``CosineSDE`` for
+        large ``j * omega_0 * dt``.
+        """
+        J = self.n_harmonics
+        d = 1 + 2 * J
+        T = self.period
+        omega0 = 2.0 * jnp.pi / T
+
+        dt = jnp.asarray(dt)
+        n = dt.shape[0]
+        # Per-harmonic frequencies (J,)
+        js = jnp.arange(1, J + 1, dtype=dt.dtype)
+        omegas = js * omega0  # (J,)
+        # Angles per (step, harmonic) pair: (n, J)
+        theta = dt[:, None] * omegas[None, :]
+        c = jnp.cos(theta)  # (n, J)
+        s = jnp.sin(theta)  # (n, J)
+
+        A = jnp.zeros((n, d, d), dtype=dt.dtype)
+        # DC mode: identity in the leading 1x1 block.
+        A = A.at[:, 0, 0].set(jnp.ones((n,), dtype=dt.dtype))
+        # Harmonic rotation blocks. Block j occupies indices
+        # ``[1 + 2(j-1) : 1 + 2j]`` (cos, sin coordinates).
+        idx_cos = 1 + 2 * jnp.arange(J)
+        idx_sin = idx_cos + 1
+        # A[:, cos, cos] = cos, A[:, cos, sin] = -sin,
+        # A[:, sin, cos] = sin, A[:, sin, sin] = cos.
+        A = A.at[:, idx_cos, idx_cos].set(c)
+        A = A.at[:, idx_cos, idx_sin].set(-s)
+        A = A.at[:, idx_sin, idx_cos].set(s)
+        A = A.at[:, idx_sin, idx_sin].set(c)
+
+        Q = jnp.zeros((n, d, d), dtype=dt.dtype)
+        return A, Q
 
 
 class QuasiPeriodicSDE(ProductSDE):
