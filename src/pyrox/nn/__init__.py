@@ -21,7 +21,9 @@ Dense / Bayesian-linear layers (``pyrox.nn._layers``):
 * :class:`RBFFourierFeatures` — SSGP-style [cos, sin] RFF (Gaussian).
 * :class:`RBFCosineFeatures` — cos(Wx + b) RFF variant (Gaussian).
 * :class:`MaternFourierFeatures` — SSGP-style RFF (Student-t).
+* :class:`MaternCosineFeatures` — cos(Wx + b) RFF variant (Student-t).
 * :class:`LaplaceFourierFeatures` — SSGP-style RFF (Cauchy).
+* :class:`LaplaceCosineFeatures` — cos(Wx + b) RFF variant (Cauchy).
 * :class:`ArcCosineFourierFeatures` — arc-cosine / ReLU features.
 * :class:`RandomKitchenSinks` — RFF + learned linear head.
 * :class:`SirenDense` — single sine-activated dense layer (SIREN).
@@ -101,8 +103,10 @@ from pyrox.nn._layers import (
     DenseReparameterization,
     DenseVariational,
     HSGPFeatures,
+    LaplaceCosineFeatures,
     LaplaceFourierFeatures,
     LonLatScale,
+    MaternCosineFeatures,
     MaternFourierFeatures,
     MCDropout,
     NCPContinuousPerturb,
@@ -144,9 +148,11 @@ __all__ = [
     "HyperLinear",
     "HyperSIREN",
     "InteractionFeatures",
+    "LaplaceCosineFeatures",
     "LaplaceFourierFeatures",
     "LonLatScale",
     "MCDropout",
+    "MaternCosineFeatures",
     "MaternFourierFeatures",
     "NCPContinuousPerturb",
     "OrthogonalRandomFeatures",
