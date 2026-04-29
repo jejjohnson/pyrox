@@ -100,8 +100,20 @@ class MaternSDE(SDEKernel):
                 "MaternSDE supports order in {0, 1, 2} (nu = order + 1/2), "
                 f"got {order!r}"
             )
-        self.variance = jnp.asarray(variance)
-        self.lengthscale = jnp.asarray(lengthscale)
+        # Eager positivity checks for concrete (non-traced) Python scalar inputs.
+        # JAX tracer inputs (e.g. inside ``jax.jit``) are skipped — under tracing
+        # we cannot inspect the value; downstream training-time priors handle
+        # constraint enforcement.
+        if isinstance(variance, (int, float)) and variance <= 0:
+            raise ValueError(f"variance must be positive, got {variance!r}")
+        if isinstance(lengthscale, (int, float)) and lengthscale <= 0:
+            raise ValueError(f"lengthscale must be positive, got {lengthscale!r}")
+        # Coerce to a floating dtype so integer inputs (``variance=1``) don't
+        # propagate as integer-typed parameters.
+        self.variance = jnp.asarray(variance, dtype=jnp.result_type(variance, 0.0))
+        self.lengthscale = jnp.asarray(
+            lengthscale, dtype=jnp.result_type(lengthscale, 0.0)
+        )
         self.order = order
 
     @property

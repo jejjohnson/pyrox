@@ -45,6 +45,39 @@ def test_invalid_order_raises() -> None:
         MaternSDE(variance=1.0, lengthscale=1.0, order=3)
 
 
+def test_invalid_variance_raises() -> None:
+    with pytest.raises(ValueError, match="variance must be positive"):
+        MaternSDE(variance=-1.0, lengthscale=1.0, order=1)
+    with pytest.raises(ValueError, match="variance must be positive"):
+        MaternSDE(variance=0.0, lengthscale=1.0, order=1)
+
+
+def test_invalid_lengthscale_raises() -> None:
+    with pytest.raises(ValueError, match="lengthscale must be positive"):
+        MaternSDE(variance=1.0, lengthscale=-0.5, order=1)
+    with pytest.raises(ValueError, match="lengthscale must be positive"):
+        MaternSDE(variance=1.0, lengthscale=0.0, order=1)
+
+
+def test_integer_inputs_coerced_to_float() -> None:
+    """Integer ``variance`` / ``lengthscale`` must not propagate as integer dtype."""
+    sde = MaternSDE(variance=1, lengthscale=1, order=1)
+    assert jnp.issubdtype(sde.variance.dtype, jnp.floating)
+    assert jnp.issubdtype(sde.lengthscale.dtype, jnp.floating)
+    F, _L, _H, _Q_c, P_inf = sde.sde_params()
+    assert jnp.issubdtype(F.dtype, jnp.floating)
+    assert jnp.issubdtype(P_inf.dtype, jnp.floating)
+
+
+def test_discretise_q_is_symmetric() -> None:
+    """``Q_k`` returned from the default ``discretise`` must be symmetric."""
+    sde = MaternSDE(variance=1.0, lengthscale=0.3, order=2)
+    _A, Q = sde.discretise(jnp.array([0.05, 0.1, 0.5, 2.0]))
+    # Each Q[i] should equal its transpose to machine precision.
+    for q in Q:
+        assert jnp.allclose(q, q.T, atol=1e-7)
+
+
 # --- stationary-covariance / Lyapunov consistency ------------------------
 
 

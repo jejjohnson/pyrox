@@ -141,6 +141,10 @@ class SDEKernel(eqx.Module):
         ) -> tuple[Float[Array, "d d"], Float[Array, "d d"]]:
             A = jsl.expm(F * dt_n)
             Q = P_inf - A @ P_inf @ A.T
+            # Symmetrise to absorb roundoff: ``Q`` is theoretically symmetric,
+            # but float arithmetic can leave asymmetric perturbations that
+            # break downstream Cholesky factorisation in Kalman steps.
+            Q = 0.5 * (Q + Q.T)
             return A, Q
 
         return jax.vmap(_step)(jnp.asarray(dt))
