@@ -44,6 +44,7 @@ nav:
   - Home: index.md
   - Examples:
       - Demo: notebooks/example_demo.ipynb
+      - EVT distributions overview: notebooks/evt_distributions_overview.ipynb
       - HPP — from scratch + NumPyro: notebooks/hpp_from_scratch_and_numpyro.ipynb
       - IPP — from scratch + NumPyro: notebooks/ipp_from_scratch_and_numpyro.ipynb
       - Renewal — from scratch + NumPyro: notebooks/renewal_from_scratch_and_numpyro.ipynb
