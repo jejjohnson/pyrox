@@ -73,6 +73,7 @@ nav:
       - "Spatiotemporal Preprocessing — Geo, Time, Pandas": notebooks/spatiotemporal_preprocessing.ipynb
       - "Multi-Output Gaussian Processes — LMC, ICM, OILMM": notebooks/multioutput_gp.ipynb
       - "Markov Gaussian Processes — Matern Kernels in State-Space Form": notebooks/markov_gp_sde_kernels.ipynb
+      - "Markov Gaussian Processes — Kalman Filtering and RTS Smoothing": notebooks/markov_gp_kalman.ipynb
   - Contributing: contributing.md
   - Changelog: CHANGELOG.md
 

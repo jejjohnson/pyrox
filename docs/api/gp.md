@@ -173,8 +173,6 @@ damped = ProductSDE(matern, cos)                  # state dim = 2 * 2 = 4
 qp = QuasiPeriodicSDE(matern, per)                # state dim = 2 * 15 = 30
 ```
 
-The Kalman-based `MarkovGPPrior` arrives in issue #38.
-
 ::: pyrox.gp.SDEKernel
 ::: pyrox.gp.MaternSDE
 ::: pyrox.gp.ConstantSDE
@@ -183,6 +181,58 @@ The Kalman-based `MarkovGPPrior` arrives in issue #38.
 ::: pyrox.gp.SumSDE
 ::: pyrox.gp.ProductSDE
 ::: pyrox.gp.QuasiPeriodicSDE
+
+## Markov GP — Kalman / RTS workflow
+
+`MarkovGPPrior` consumes any [`SDEKernel`][pyrox.gp.SDEKernel] over a sorted
+1-D grid and gives `O(N d^3)` marginal likelihood (forward Kalman filter)
+and posterior smoothing (backward RTS), where `d` is the SDE state
+dimension. Use it for temporal GP regression / forecasting when the
+training grid lives on a single time axis. Predictions at arbitrary
+test times — including forecasting, backcasting, and within-window
+interpolation — re-run the filter+smoother over the merged grid with the
+test points masked out of the update step.
+
+```python
+import jax.numpy as jnp
+from pyrox.gp import MaternSDE, MarkovGPPrior, markov_gp_factor
+
+times = jnp.linspace(0.0, 5.0, 200)
+y     = jnp.sin(times) + 0.05 * jnp.cos(7.0 * times)
+
+prior = MarkovGPPrior(
+    MaternSDE(variance=1.0, lengthscale=0.5, order=1),  # Matern-3/2
+    times,
+)
+log_marg = prior.log_marginal(y, jnp.asarray(0.01))     # Kalman forward
+cond     = prior.condition(y, jnp.asarray(0.01))        # filter + RTS smoother
+mean, var = cond.predict(jnp.linspace(-0.5, 6.0, 50))   # arbitrary test times
+```
+
+Inside a NumPyro model, swap `gp_factor` for `markov_gp_factor`:
+
+```python
+import jax.numpy as jnp
+import numpyro
+from numpyro import distributions as dist
+from pyrox.gp import MarkovGPPrior, MaternSDE, markov_gp_factor
+
+def temporal_model(times, y):
+    sigma2 = numpyro.sample("variance",  dist.LogNormal(0.0, 1.0))
+    ell    = numpyro.sample("lengthscale", dist.LogNormal(0.0, 1.0))
+    sde    = MaternSDE(variance=sigma2, lengthscale=ell, order=1)
+    prior  = MarkovGPPrior(sde, times)
+    markov_gp_factor("obs", prior, y, jnp.array(0.01))
+```
+
+Currently scoped to Gaussian-likelihood regression on a single time axis.
+Non-Gaussian likelihoods on top of the Markov path (CVI, EP) and
+spatio-temporal Markov priors land in later waves.
+
+::: pyrox.gp.MarkovGPPrior
+::: pyrox.gp.ConditionedMarkovGP
+::: pyrox.gp.markov_gp_factor
+::: pyrox.gp.markov_gp_sample
 
 ## Component protocols
 

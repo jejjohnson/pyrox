@@ -18,8 +18,9 @@ truncated :class:`PeriodicSDE`, and the composition rules
 :class:`QuasiPeriodicSDE` is a convenience wrapper for
 ``ProductSDE(MaternSDE, PeriodicSDE)``.
 
-The Kalman-based :class:`MarkovGPPrior` and the temporal inference
-strategies land in issue #38.
+These kernels are consumed by :class:`pyrox.gp.MarkovGPPrior`, which
+turns the SDE representation into linear-time forward filtering and RTS
+smoothing for temporal GP inference.
 """
 
 from __future__ import annotations
