@@ -67,7 +67,7 @@ docs = [
     "mkdocs-material>=9.7.6",
     "mkdocstrings[python]>=1.0.3",
     "mkdocs-jupyter>=0.26.2",
-    "jupytext>=1.16",
+    "jupytext>=1.19.1",
     "ipykernel>=7.2.0",
     # matplotlib + watermark used by the example notebooks during local
     # re-execution. The guarded watermark cell in each notebook no-ops
