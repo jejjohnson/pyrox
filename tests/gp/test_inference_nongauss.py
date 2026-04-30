@@ -43,6 +43,26 @@ def _make_classification_problem(N: int = 12):
     return prior, X, y
 
 
+def test_laplace_smoke_tiny() -> None:
+    """Fast smoke for Laplace fit + predict on a tiny problem.
+
+    Stays un-marked so the default CI run (``pytest -m "not slow"``) still
+    exercises the Laplace inference and prediction surface end-to-end on
+    every PR; the deeper convergence / equivalence tests are slow.
+    """
+    X = jnp.linspace(-1.0, 1.0, 6)[:, None]
+    y = (X[:, 0] > 0.0).astype(jnp.float32)
+    prior = GPPrior(kernel=RBF(init_lengthscale=1.0, init_variance=1.0), X=X)
+    cond = LaplaceInference(max_iter=2).fit(prior, BernoulliLikelihood(), y)
+    assert cond.q_mean.shape == y.shape
+    assert jnp.all(jnp.isfinite(cond.q_mean))
+    assert jnp.all(jnp.isfinite(cond.q_var))
+    assert jnp.all(cond.q_var >= 0.0)
+    m, v = cond.predict(jnp.array([[-0.5], [0.5]]))
+    assert m.shape == (2,) and v.shape == (2,)
+    assert jnp.all(jnp.isfinite(m)) and jnp.all(v >= 0.0)
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "strategy_factory",

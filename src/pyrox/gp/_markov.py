@@ -319,7 +319,7 @@ class MarkovGPPrior(eqx.Module):
         A_seq, Q_seq = self.sde_kernel.discretise(dt_full)
         residual = self._residual(y)
         mask = jnp.ones_like(self.times)
-        R_seq = jnp.full_like(self.times, self._R(noise_var))
+        R_seq = jnp.broadcast_to(self._R(noise_var), self.times.shape)
         return _kalman_filter(F, H, P_inf, A_seq, Q_seq, residual, mask, R_seq)
 
     def log_marginal(
@@ -346,7 +346,7 @@ class MarkovGPPrior(eqx.Module):
         A_seq, Q_seq = self.sde_kernel.discretise(dt_full)
         residual = self._residual(y)
         mask = jnp.ones_like(self.times)
-        R_seq = jnp.full_like(self.times, self._R(noise_var))
+        R_seq = jnp.broadcast_to(self._R(noise_var), self.times.shape)
         m_pred, P_pred, m_filt, P_filt, log_marg = _kalman_filter(
             F, H, P_inf, A_seq, Q_seq, residual, mask, R_seq
         )
