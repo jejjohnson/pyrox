@@ -33,7 +33,7 @@ from typing import Any
 import equinox as eqx
 import jax.numpy as jnp
 import numpyro.distributions as nd
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, Int
 
 from pyrox.gp._protocols import Likelihood
 
@@ -183,7 +183,7 @@ class SoftmaxLikelihood(Likelihood):
     def log_prob(
         self,
         f: Float[Array, "N C"],
-        y: Float[Array, " N"],
+        y: Int[Array, " N"],
     ) -> Float[Array, ""]:
         return nd.Categorical(logits=f).log_prob(y).sum()
 

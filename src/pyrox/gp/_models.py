@@ -15,7 +15,7 @@ in later waves.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Protocol
 
 import equinox as eqx
 import jax
@@ -39,7 +39,22 @@ from jaxtyping import Array, Float
 from numpyro import distributions as dist
 
 from pyrox.gp._context import _kernel_context
-from pyrox.gp._protocols import Kernel
+from pyrox.gp._protocols import Kernel, Likelihood
+
+
+if TYPE_CHECKING:
+    from pyrox.gp._inference_nongauss import NonGaussConditionedGP
+
+
+class _NonGaussStrategy(Protocol):
+    """Structural protocol for non-Gaussian inference strategies."""
+
+    def fit(
+        self,
+        prior: GPPrior,
+        likelihood: Likelihood,
+        y: Float[Array, " N"],
+    ) -> NonGaussConditionedGP: ...
 
 
 def _psd_operator(K: Float[Array, "N N"]) -> lx.AbstractLinearOperator:
@@ -163,11 +178,11 @@ class GPPrior(eqx.Module):
 
     def condition_nongauss(
         self,
-        likelihood: Any,
+        likelihood: Likelihood,
         y: Float[Array, " N"],
         *,
-        strategy: Any,
-    ) -> Any:
+        strategy: _NonGaussStrategy,
+    ) -> NonGaussConditionedGP:
         """Condition on a non-Gaussian likelihood via a site-based strategy.
 
         Convenience that forwards to ``strategy.fit(self, likelihood, y)``.

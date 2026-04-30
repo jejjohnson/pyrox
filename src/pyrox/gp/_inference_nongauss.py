@@ -43,12 +43,6 @@ from typing import TYPE_CHECKING
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import lineax as lx
-from gaussx import (
-    AbstractSolverStrategy,
-    DenseSolver,
-    cholesky,
-)
 from jaxtyping import Array, Float
 
 from pyrox.gp._context import _kernel_context
@@ -75,9 +69,13 @@ class NonGaussConditionedGP(eqx.Module):
     likelihood regression with synthetic per-point noise variance
     :math:`\\sigma_n^2 = 1/\\Lambda_n^{(2)}` and synthetic targets
     :math:`\\tilde y_n = \\lambda_n^{(1)} / \\Lambda_n^{(2)}` (in the
-    zero-mean prior frame). This module precomputes ``alpha`` and
-    ``L`` from those quantities so test predictions are O(M N + N^3)
-    (same as conjugate :class:`ConditionedGP`).
+    zero-mean prior frame). Predictions reconstruct ``K_reg = K +
+    diag(1 / Lambda)`` and Cholesky-factorize it on each call (the
+    full-Cholesky cost is ``O(N^3)`` per ``predict`` invocation; the
+    cross-covariance contributions are ``O(M N)``). Caching the solve
+    on the module would require freezing the kernel hyperparameters at
+    fit time and is intentionally not done here so prior'd-kernel
+    workflows keep resampling correctly.
 
     Attributes:
         prior: The :class:`GPPrior`.
@@ -105,56 +103,58 @@ class NonGaussConditionedGP(eqx.Module):
     n_iter: int = eqx.field(static=True)
     converged: bool = eqx.field(static=True)
 
-    def _solver(self) -> AbstractSolverStrategy:
-        solver = self.prior.solver
-        return solver if solver is not None else DenseSolver()  # ty: ignore[invalid-return-type]
-
-    def _pseudo_solve(
-        self, residual: Float[Array, " N"]
-    ) -> tuple[Float[Array, " N"], Float[Array, "N N"]]:
-        """Compute ``alpha = (K + diag(1/Λ))^-1 residual`` and Cholesky.
-
-        Used by both ``predict_mean`` and ``predict_var``. Residual is
-        already in the centered (zero-mean) frame.
-        """
-        with _kernel_context(self.prior.kernel):
-            K = self.prior.kernel(self.prior.X, self.prior.X)
+    def _pseudo_factor(self) -> Float[Array, "N N"]:
+        """Cholesky of ``K + diag(1/Λ + jitter)`` via :func:`_stable_cholesky`."""
+        K = self.prior.kernel(self.prior.X, self.prior.X)
         N = K.shape[0]
         eye = jnp.eye(N, dtype=K.dtype)
         K_reg = K + (jnp.reciprocal(self.site_nat2) + self.prior.jitter)[:, None] * eye
-        K_reg = 0.5 * (K_reg + K_reg.T)
-        L = jnp.linalg.cholesky(K_reg)
-        alpha = jax.scipy.linalg.cho_solve((L, True), residual)
-        return alpha, L
+        return _stable_cholesky(K_reg)
 
     def predict_mean(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
         r""":math:`\mu_* = \mu(X_*) + K_{*f}\,\alpha` with
         ``alpha`` derived from the site naturals."""
-        # Effective synthetic targets: y_tilde = nat1 / nat2 in the
-        # zero-mean prior frame, plus mu(X) restoring the original mean.
-        y_tilde = self.site_nat1 / self.site_nat2
-        alpha, _ = self._pseudo_solve(y_tilde)
         with _kernel_context(self.prior.kernel):
+            L = self._pseudo_factor()
             K_cross = self.prior.kernel(X_star, self.prior.X)
+            prior_mean_train = self.prior.mean(self.prior.X)
+        # Effective synthetic targets in the centered (zero-mean) frame.
+        y_tilde = self.site_nat1 / self.site_nat2
+        residual = y_tilde - prior_mean_train
+        alpha = jax.scipy.linalg.cho_solve((L, True), residual)
         return self.prior.mean(X_star) + K_cross @ alpha
 
     def predict_var(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
         r""":math:`\Sigma_{**} - K_{*f} (K + \mathrm{diag}(1/\Lambda))^{-1} K_{f*}`."""
-        y_tilde = self.site_nat1 / self.site_nat2
-        _, L = self._pseudo_solve(y_tilde)
         with _kernel_context(self.prior.kernel):
+            L = self._pseudo_factor()
             K_cross = self.prior.kernel(X_star, self.prior.X)
-            K_diag = jax.vmap(
-                lambda x: self.prior.kernel(x[None, :], x[None, :])[0, 0]
-            )(X_star)
+            K_diag = self.prior.kernel.diag(X_star)
         v = jax.scipy.linalg.solve_triangular(L, K_cross.T, lower=True)
         return jnp.maximum(K_diag - jnp.sum(v * v, axis=0), 0.0)
 
     def predict(
         self, X_star: Float[Array, "M D"]
     ) -> tuple[Float[Array, " M"], Float[Array, " M"]]:
-        """Joint mean / marginal-variance prediction at ``X_star``."""
-        return self.predict_mean(X_star), self.predict_var(X_star)
+        """Joint mean / marginal-variance prediction at ``X_star``.
+
+        Both kernel evaluations share a single kernel context so
+        Pattern B / C kernels with prior'd hyperparameters resample
+        once and produce a self-consistent ``(mean, var)`` pair.
+        """
+        with _kernel_context(self.prior.kernel):
+            L = self._pseudo_factor()
+            K_cross = self.prior.kernel(X_star, self.prior.X)
+            K_diag = self.prior.kernel.diag(X_star)
+            prior_mean_train = self.prior.mean(self.prior.X)
+            prior_mean_test = self.prior.mean(X_star)
+        y_tilde = self.site_nat1 / self.site_nat2
+        residual = y_tilde - prior_mean_train
+        alpha = jax.scipy.linalg.cho_solve((L, True), residual)
+        mean = prior_mean_test + K_cross @ alpha
+        v = jax.scipy.linalg.solve_triangular(L, K_cross.T, lower=True)
+        var = jnp.maximum(K_diag - jnp.sum(v * v, axis=0), 0.0)
+        return mean, var
 
 
 # --- helpers -------------------------------------------------------------
@@ -248,11 +248,45 @@ def _stable_cholesky(
     """
     M = 0.5 * (M + M.T)
     L = jnp.linalg.cholesky(M)
-    return jnp.where(
+    return jax.lax.cond(
         jnp.any(jnp.isnan(L)),
-        jnp.linalg.cholesky(M + floor * jnp.eye(M.shape[0], dtype=M.dtype)),
-        L,
+        lambda: jnp.linalg.cholesky(M + floor * jnp.eye(M.shape[0], dtype=M.dtype)),
+        lambda: L,
     )
+
+
+def _ep_tilted_moments(
+    lp_per_n: Callable[[Float[Array, ""], Float[Array, ""]], Float[Array, ""]],
+    y: Float[Array, " N"],
+    cav_mean: Float[Array, " N"],
+    cav_var: Float[Array, " N"],
+    deg: int = 20,
+) -> tuple[Float[Array, " N"], Float[Array, " N"]]:
+    r"""Numerically stable tilted moments for EP.
+
+    Returns ``(tilted_mean, tilted_var)`` per site, where the tilted
+    distribution is :math:`q_{\rm cav}(f) p(y \mid f)`. Computes
+    :math:`\log p` at the cavity-rescaled Gauss-Hermite nodes once,
+    subtracts the per-site max to avoid overflow, then forms moment
+    ratios that are independent of the per-site shift.
+    """
+    from gaussx import gauss_hermite_points
+
+    nodes, weights = gauss_hermite_points(deg, dim=1)
+    x = nodes[:, 0]
+    log_w = jnp.log(weights / jnp.sqrt(2.0 * jnp.pi))
+    std = jnp.sqrt(cav_var)
+    f_grid = cav_mean[None, :] + std[None, :] * x[:, None]
+    log_p = jax.vmap(lambda f_row: jax.vmap(lp_per_n)(f_row, y))(f_grid)
+    log_unnorm = log_p + log_w[:, None]
+    shift = jnp.max(log_unnorm, axis=0, keepdims=True)
+    w_unnorm = jnp.exp(log_unnorm - shift)
+    Z_unnorm = jnp.sum(w_unnorm, axis=0)
+    Z_safe = jnp.maximum(Z_unnorm, 1e-30)
+    tilted_mean = jnp.sum(w_unnorm * f_grid, axis=0) / Z_safe
+    tilted_sq = jnp.sum(w_unnorm * f_grid * f_grid, axis=0) / Z_safe
+    tilted_var = jnp.maximum(tilted_sq - tilted_mean**2, 1e-12)
+    return tilted_mean, tilted_var
 
 
 def _laplace_log_marginal(
@@ -637,31 +671,18 @@ class ExpectationPropagation(eqx.Module):
             cav_var = jnp.reciprocal(cav_prec)
             cav_mean = cav_var * (q_mean / q_var - nat1)
 
-            # Tilted moments: Z = E_{cav}[p(y|f)],
-            # Z_f = E[f p(y|f)], Z_ff = E[f^2 p(y|f)].
-            # Compute via the integrator on ``exp(log p)`` directly is
-            # numerically dangerous; we instead use a stable GH form
-            # with log-sum-exp. With weights w_i' and nodes x_i:
-            #   tilted_n(f) = exp(log p_n(f)),
-            #   E_cav[tilted] = sum_i w_i' tilted(m_n + s_n x_i).
-            # Use the integrator's nodes implicitly via an exp-of-log
-            # callable — accuracy is determined by ``self.integrator``.
-            def likelihood_density(f: Float[Array, " N"]) -> Float[Array, " N"]:
-                return jnp.exp(jax.vmap(lp)(f, y))
-
-            def f_likelihood(f: Float[Array, " N"]) -> Float[Array, " N"]:
-                return f * jnp.exp(jax.vmap(lp)(f, y))
-
-            def f2_likelihood(f: Float[Array, " N"]) -> Float[Array, " N"]:
-                return (f * f) * jnp.exp(jax.vmap(lp)(f, y))
-
-            Z = self.integrator.integrate(likelihood_density, cav_mean, cav_var)
-            Zf = self.integrator.integrate(f_likelihood, cav_mean, cav_var)
-            Zff = self.integrator.integrate(f2_likelihood, cav_mean, cav_var)
-
-            Z_safe = jnp.maximum(Z, 1e-30)
-            tilted_mean = Zf / Z_safe
-            tilted_var = jnp.maximum(Zff / Z_safe - tilted_mean**2, 1e-12)
+            # Tilted moments computed in log-space for numerical
+            # stability. With Gauss-Hermite nodes ``x_i`` and weights
+            # ``w_i' = w_i / sqrt(2*pi)``, the tilted moments per site
+            # are weighted sums of ``exp(log p_n(m_n + s_n x_i))``. We
+            # subtract the per-site max log-density before exponentiating
+            # (the standard log-sum-exp trick) so neither overflow nor
+            # underflow can corrupt the moment ratios. Z itself does not
+            # enter the marginal-likelihood approximation below — only
+            # the moment ratios matter — so the per-site shifts cancel.
+            tilted_mean, tilted_var = _ep_tilted_moments(
+                lp, y, cav_mean, cav_var, deg=getattr(self.integrator, "deg", 20)
+            )
 
             # New site naturals from matched moments minus the cavity.
             new_prec = jnp.reciprocal(tilted_var) - cav_prec
@@ -791,9 +812,3 @@ class QuasiNewtonInference(eqx.Module):
 
 
 # --- module-level conveniences ------------------------------------------
-
-
-# Hush ruff for unused lineax/cholesky imports so the consolidated import
-# block stays in one place even if a future refactor needs them.
-_ = lx
-_ = cholesky
