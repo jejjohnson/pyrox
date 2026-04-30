@@ -216,7 +216,12 @@ class ConstantSDE(SDEKernel):
     variance: Float[Array, ""]
 
     def __init__(self, variance: float | Float[Array, ""] = 1.0) -> None:
-        self.variance = jnp.asarray(variance)
+        # Eager positivity check for concrete (non-traced) Python scalar inputs
+        # — a non-positive variance would yield a non-PSD ``P_inf`` and break
+        # downstream Cholesky / Kalman steps.
+        if isinstance(variance, (int, float)) and variance <= 0:
+            raise ValueError(f"variance must be positive, got {variance!r}")
+        self.variance = jnp.asarray(variance, dtype=jnp.result_type(variance, 0.0))
 
     @property
     def state_dim(self) -> int:
@@ -269,8 +274,13 @@ class CosineSDE(SDEKernel):
         variance: float | Float[Array, ""] = 1.0,
         frequency: float | Float[Array, ""] = 1.0,
     ) -> None:
-        self.variance = jnp.asarray(variance)
-        self.frequency = jnp.asarray(frequency)
+        # Eager positivity check for concrete (non-traced) Python scalar inputs.
+        # ``variance <= 0`` would make ``P_inf`` non-PSD; ``frequency`` may be
+        # any nonzero real, so we don't constrain its sign here.
+        if isinstance(variance, (int, float)) and variance <= 0:
+            raise ValueError(f"variance must be positive, got {variance!r}")
+        self.variance = jnp.asarray(variance, dtype=jnp.result_type(variance, 0.0))
+        self.frequency = jnp.asarray(frequency, dtype=jnp.result_type(frequency, 0.0))
 
     @property
     def state_dim(self) -> int:
@@ -535,9 +545,21 @@ class PeriodicSDE(SDEKernel):
             raise ValueError(
                 f"PeriodicSDE requires n_harmonics >= 1, got {n_harmonics!r}"
             )
-        self.variance = jnp.asarray(variance)
-        self.lengthscale = jnp.asarray(lengthscale)
-        self.period = jnp.asarray(period)
+        # Eager positivity checks for concrete (non-traced) Python scalar
+        # inputs. ``variance``/``lengthscale <= 0`` would corrupt ``P_inf``
+        # (non-PSD or NaN through the Bessel coefficients); ``period <= 0``
+        # would divide-by-zero in ``omega0 = 2*pi/T``.
+        if isinstance(variance, (int, float)) and variance <= 0:
+            raise ValueError(f"variance must be positive, got {variance!r}")
+        if isinstance(lengthscale, (int, float)) and lengthscale <= 0:
+            raise ValueError(f"lengthscale must be positive, got {lengthscale!r}")
+        if isinstance(period, (int, float)) and period <= 0:
+            raise ValueError(f"period must be positive, got {period!r}")
+        self.variance = jnp.asarray(variance, dtype=jnp.result_type(variance, 0.0))
+        self.lengthscale = jnp.asarray(
+            lengthscale, dtype=jnp.result_type(lengthscale, 0.0)
+        )
+        self.period = jnp.asarray(period, dtype=jnp.result_type(period, 0.0))
         self.n_harmonics = n_harmonics
 
     @property

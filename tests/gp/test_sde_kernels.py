@@ -230,6 +230,20 @@ def test_constant_sde_discretise_is_identity() -> None:
     assert jnp.allclose(Q, jnp.zeros((3, 1, 1)))
 
 
+def test_constant_sde_invalid_variance_raises() -> None:
+    with pytest.raises(ValueError, match="variance must be positive"):
+        ConstantSDE(variance=-1.0)
+    with pytest.raises(ValueError, match="variance must be positive"):
+        ConstantSDE(variance=0.0)
+
+
+def test_constant_sde_integer_inputs_coerced_to_float() -> None:
+    sde = ConstantSDE(variance=2)
+    assert jnp.issubdtype(sde.variance.dtype, jnp.floating)
+    _F, _L, _H, _Q_c, P_inf = sde.sde_params()
+    assert jnp.issubdtype(P_inf.dtype, jnp.floating)
+
+
 # --- CosineSDE ------------------------------------------------------------
 
 
@@ -276,6 +290,22 @@ def test_cosine_sde_closed_form_matches_expm() -> None:
     A_closed, _ = sde.discretise(dt)
     A_expm = jax.vmap(lambda t: jsl.expm(F * t))(dt)
     assert jnp.allclose(A_closed, A_expm, atol=1e-5)
+
+
+def test_cosine_sde_invalid_variance_raises() -> None:
+    with pytest.raises(ValueError, match="variance must be positive"):
+        CosineSDE(variance=-0.5, frequency=1.0)
+    with pytest.raises(ValueError, match="variance must be positive"):
+        CosineSDE(variance=0.0, frequency=1.0)
+
+
+def test_cosine_sde_integer_inputs_coerced_to_float() -> None:
+    sde = CosineSDE(variance=1, frequency=2)
+    assert jnp.issubdtype(sde.variance.dtype, jnp.floating)
+    assert jnp.issubdtype(sde.frequency.dtype, jnp.floating)
+    F, _L, _H, _Q_c, P_inf = sde.sde_params()
+    assert jnp.issubdtype(F.dtype, jnp.floating)
+    assert jnp.issubdtype(P_inf.dtype, jnp.floating)
 
 
 # --- SumSDE ---------------------------------------------------------------
@@ -416,6 +446,25 @@ def test_periodic_sde_handles_infinite_lengthscale() -> None:
 def test_periodic_sde_invalid_n_harmonics_raises() -> None:
     with pytest.raises(ValueError, match="n_harmonics"):
         PeriodicSDE(variance=1.0, lengthscale=1.0, period=1.0, n_harmonics=0)
+
+
+def test_periodic_sde_invalid_scalar_inputs_raise() -> None:
+    with pytest.raises(ValueError, match="variance must be positive"):
+        PeriodicSDE(variance=-1.0, lengthscale=1.0, period=1.0)
+    with pytest.raises(ValueError, match="lengthscale must be positive"):
+        PeriodicSDE(variance=1.0, lengthscale=0.0, period=1.0)
+    with pytest.raises(ValueError, match="period must be positive"):
+        PeriodicSDE(variance=1.0, lengthscale=1.0, period=-2.0)
+
+
+def test_periodic_sde_integer_inputs_coerced_to_float() -> None:
+    sde = PeriodicSDE(variance=1, lengthscale=1, period=2, n_harmonics=3)
+    assert jnp.issubdtype(sde.variance.dtype, jnp.floating)
+    assert jnp.issubdtype(sde.lengthscale.dtype, jnp.floating)
+    assert jnp.issubdtype(sde.period.dtype, jnp.floating)
+    F, _L, _H, _Q_c, P_inf = sde.sde_params()
+    assert jnp.issubdtype(F.dtype, jnp.floating)
+    assert jnp.issubdtype(P_inf.dtype, jnp.floating)
 
 
 def test_periodic_sde_no_driving_noise() -> None:
