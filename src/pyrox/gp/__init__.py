@@ -67,6 +67,12 @@ from pyrox.gp._likelihoods import (
     DistLikelihood,
     GaussianLikelihood,
 )
+from pyrox.gp._markov import (
+    ConditionedMarkovGP,
+    MarkovGPPrior,
+    markov_gp_factor,
+    markov_gp_sample,
+)
 from pyrox.gp._models import (
     ConditionedGP,
     GPPrior,
@@ -107,6 +113,7 @@ from pyrox.gp._sparse import SparseGPPrior
 __all__ = [
     "RBF",
     "ConditionedGP",
+    "ConditionedMarkovGP",
     "ConjugateVI",
     "Constant",
     "ConstantSDE",
@@ -129,6 +136,7 @@ __all__ = [
     "LaplacianInducingFeatures",
     "Likelihood",
     "Linear",
+    "MarkovGPPrior",
     "Matern",
     "MaternSDE",
     "MeanFieldGuide",
@@ -153,6 +161,8 @@ __all__ = [
     "funk_hecke_coefficients",
     "gp_factor",
     "gp_sample",
+    "markov_gp_factor",
+    "markov_gp_sample",
     "svgp_elbo",
     "svgp_factor",
 ]

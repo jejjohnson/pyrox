@@ -6,7 +6,9 @@ Wave 2 ships the abstract definitions only for :class:`Guide`,
 land in later waves. :class:`Kernel` already has concrete implementations
 in this wave (:class:`pyrox.gp.RBF`, etc.). :class:`SDEKernel` is the
 state-space face of stationary 1-D kernels — concrete implementations
-(:class:`pyrox.gp.MaternSDE`, ...) land in the temporal-GP waves.
+(:class:`pyrox.gp.MaternSDE`, :class:`pyrox.gp.SumSDE`,
+:class:`pyrox.gp.PeriodicSDE`, ...) feed the Kalman-based
+:class:`pyrox.gp.MarkovGPPrior`.
 
 Solver strategies intentionally live in :mod:`gaussx`, not here. Use
 ``gaussx.AbstractSolverStrategy`` (combined solve + logdet),
