@@ -212,8 +212,10 @@ mean, var = cond.predict(jnp.linspace(-0.5, 6.0, 50))   # arbitrary test times
 Inside a NumPyro model, swap `gp_factor` for `markov_gp_factor`:
 
 ```python
+import jax.numpy as jnp
 import numpyro
 from numpyro import distributions as dist
+from pyrox.gp import MarkovGPPrior, MaternSDE, markov_gp_factor
 
 def temporal_model(times, y):
     sigma2 = numpyro.sample("variance",  dist.LogNormal(0.0, 1.0))

@@ -99,9 +99,10 @@ def _kalman_filter(
 
         m_new = m_pred + K * innov
         I_minus_KH = eye - K[:, None] * H
-        P_new = I_minus_KH @ P_pred @ I_minus_KH.T + (mask_n * R) * (
-            K[:, None] @ K[None, :]
-        )
+        # ``K`` already carries the mask (``K = K_full * mask_n``), so when
+        # ``mask_n = 0`` the outer product ``K K^T`` is zero and ``I - K H``
+        # is the identity — no extra ``mask_n`` factor needed on ``R``.
+        P_new = I_minus_KH @ P_pred @ I_minus_KH.T + R * (K[:, None] @ K[None, :])
         P_new = 0.5 * (P_new + P_new.T)
 
         ll = mask_n * (-0.5 * (log_2pi + jnp.log(S) + innov * innov / S))
@@ -187,10 +188,10 @@ class MarkovGPPrior(eqx.Module):
             via ``sde_params()`` and the discrete transition tuple via
             ``discretise(dt)``.
         times: Sorted, strictly increasing observation times of shape
-            ``(N,)``. Concrete (non-traced) ``times`` are validated for
-            monotonicity at construction; under :func:`jax.jit` validation is
-            skipped (use :meth:`MarkovGPPrior.from_times` if you need a
-            tracer-safe constructor).
+            ``(N,)``. Concrete (non-traced) ``times`` arrays are validated
+            for monotonicity at construction time; under :func:`jax.jit` /
+            SVI / MCMC the input is a tracer and the check is silently
+            skipped — callers must guarantee monotonicity in that case.
         mean_fn: Optional callable mapping ``times -> (N,)`` mean values.
             Defaults to the zero mean. The mean is subtracted from
             observations before filtering and added back at predict time.
@@ -342,11 +343,12 @@ class MarkovGPPrior(eqx.Module):
         r"""Log density of an exact-state path :math:`f(t_n) = H x_n` under the prior.
 
         Evaluates ``log N(f | mu(times), K_NN)`` where ``K_NN`` is the dense
-        Gram of the kernel encoded by ``sde_kernel`` on ``self.times``. This
-        computes the dense covariance via ``H exp(F |t_i - t_j|) P_inf H^T``,
-        so it costs :math:`O(N^2 d^2)` and is intended for sanity checks
-        and small-grid use rather than scalable inference. For training,
-        prefer :meth:`log_marginal`.
+        Gram of the kernel encoded by ``sde_kernel`` on ``self.times``.
+        Computes the dense covariance via ``H exp(F |t_i - t_j|) P_inf H^T``
+        — one ``expm`` per pairwise lag, costing :math:`O(N^2 d^3)` for the
+        Gram plus :math:`O(N^3)` for the Cholesky solve — intended for
+        sanity checks and small-grid use rather than scalable inference.
+        For training, prefer :meth:`log_marginal`.
         """
         F, _L, H, _Qc, P_inf = self.sde_kernel.sde_params()
         diffs = jnp.abs(self.times[:, None] - self.times[None, :])
