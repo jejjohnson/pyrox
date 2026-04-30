@@ -15,6 +15,7 @@ in later waves.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TYPE_CHECKING, Protocol
 
 import equinox as eqx
 import jax
@@ -38,7 +39,22 @@ from jaxtyping import Array, Float
 from numpyro import distributions as dist
 
 from pyrox.gp._context import _kernel_context
-from pyrox.gp._protocols import Kernel
+from pyrox.gp._protocols import Kernel, Likelihood
+
+
+if TYPE_CHECKING:
+    from pyrox.gp._inference_nongauss import NonGaussConditionedGP
+
+
+class _NonGaussStrategy(Protocol):
+    """Structural protocol for non-Gaussian inference strategies."""
+
+    def fit(
+        self,
+        prior: GPPrior,
+        likelihood: Likelihood,
+        y: Float[Array, " N"],
+    ) -> NonGaussConditionedGP: ...
 
 
 def _psd_operator(K: Float[Array, "N N"]) -> lx.AbstractLinearOperator:
@@ -159,6 +175,45 @@ class GPPrior(eqx.Module):
             operator=operator,
             resolved_hyperparams=resolved_hyperparams,
         )
+
+    def condition_nongauss(
+        self,
+        likelihood: Likelihood,
+        y: Float[Array, " N"],
+        *,
+        strategy: _NonGaussStrategy,
+    ) -> NonGaussConditionedGP:
+        """Condition on a non-Gaussian likelihood via a site-based strategy.
+
+        Convenience that forwards to ``strategy.fit(self, likelihood, y)``.
+        Pick any of the site-based strategies in
+        :mod:`pyrox.gp._inference_nongauss`:
+        :class:`pyrox.gp.LaplaceInference`,
+        :class:`pyrox.gp.GaussNewtonInference`,
+        :class:`pyrox.gp.PosteriorLinearization`,
+        :class:`pyrox.gp.ExpectationPropagation`, or
+        :class:`pyrox.gp.QuasiNewtonInference`. Returns a
+        :class:`pyrox.gp.NonGaussConditionedGP` with the same
+        ``predict`` / ``predict_mean`` / ``predict_var`` API as the
+        Gaussian-likelihood :class:`ConditionedGP`.
+
+        Example::
+
+            from pyrox.gp import (
+                BernoulliLikelihood,
+                ExpectationPropagation,
+                GPPrior,
+                RBF,
+            )
+
+            prior = GPPrior(kernel=RBF(), X=X)
+            cond = prior.condition_nongauss(
+                BernoulliLikelihood(), y,
+                strategy=ExpectationPropagation(),
+            )
+            mean, var = cond.predict(X_star)
+        """
+        return strategy.fit(self, likelihood, y)
 
 
 def _resolve_kernel_hyperparams(

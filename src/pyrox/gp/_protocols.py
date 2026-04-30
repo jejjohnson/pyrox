@@ -208,8 +208,17 @@ class Likelihood(eqx.Module):
 
     Implements the conditional ``p(y | f)`` and a default
     :meth:`expected_log_prob` that integrates over a Gaussian latent via an
-    :class:`Integrator`. Concrete likelihoods (Gaussian, Bernoulli, Poisson,
-    StudentT, ...) land in later waves.
+    :class:`Integrator`. Concrete scalar-latent likelihoods
+    (:class:`GaussianLikelihood`, :class:`BernoulliLikelihood`,
+    :class:`PoissonLikelihood`, :class:`StudentTLikelihood`) and
+    multi-latent ones (:class:`SoftmaxLikelihood`,
+    :class:`HeteroscedasticGaussianLikelihood`) live in
+    :mod:`pyrox.gp._likelihoods`.
+
+    Multi-latent likelihoods declare ``latent_dim: int`` as a static
+    field (e.g. ``latent_dim = num_classes`` for softmax). Scalar
+    likelihoods may omit the field; consumers should read
+    ``getattr(lik, "latent_dim", 1)``.
     """
 
     @abstractmethod
