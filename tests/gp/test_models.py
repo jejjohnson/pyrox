@@ -238,6 +238,7 @@ def test_gp_factor_registers_in_trace():
     assert jnp.isfinite(tr["obs"]["fn"].log_prob(jnp.array(0.0)))
 
 
+@pytest.mark.slow
 def test_gp_factor_svi_step_runs():
     X, y = _toy_dataset()
 
@@ -258,6 +259,7 @@ def test_gp_factor_svi_step_runs():
     assert jnp.isfinite(loss)
 
 
+@pytest.mark.slow
 def test_gp_factor_mcmc_round_trip():
     X, y = _toy_dataset(n=5)
 

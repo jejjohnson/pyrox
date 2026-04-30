@@ -24,6 +24,7 @@ path.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TYPE_CHECKING, Protocol
 
 import equinox as eqx
 import jax
@@ -32,7 +33,22 @@ import numpyro
 from jaxtyping import Array, Float
 from numpyro import distributions as dist
 
-from pyrox.gp._protocols import SDEKernel
+from pyrox.gp._protocols import Likelihood, SDEKernel
+
+
+if TYPE_CHECKING:
+    from pyrox.gp._inference_nongauss_markov import NonGaussConditionedMarkovGP
+
+
+class _NonGaussMarkovStrategy(Protocol):
+    """Structural protocol for non-Gaussian Markov inference strategies."""
+
+    def fit(
+        self,
+        prior: MarkovGPPrior,
+        likelihood: Likelihood,
+        y: Float[Array, " N"],
+    ) -> NonGaussConditionedMarkovGP: ...
 
 
 def _kalman_filter(
@@ -43,7 +59,7 @@ def _kalman_filter(
     Q_seq: Float[Array, "N d d"],
     residual: Float[Array, " N"],
     mask: Float[Array, " N"],
-    R: Float[Array, ""],
+    R_seq: Float[Array, " N"],
 ) -> tuple[
     Float[Array, "N d"],
     Float[Array, "N d d"],
@@ -59,6 +75,11 @@ def _kalman_filter(
     enters the state). The masked formulation makes test-time prediction a
     single forward+backward pass over the merged grid.
 
+    ``R_seq`` is the per-step observation variance. For Gaussian-likelihood
+    inference this is a constant ``noise_var`` broadcast to ``(N,)``; for
+    site-based non-Gaussian inference the per-step value is
+    ``1 / Lambda_n`` from the current site precisions.
+
     Returns predicted and filtered ``(mean, cov)`` per step plus the total
     log marginal likelihood (only observed steps contribute).
     """
@@ -73,6 +94,7 @@ def _kalman_filter(
             Float[Array, "d d"],
             Float[Array, ""],
             Float[Array, ""],
+            Float[Array, ""],
         ],
     ) -> tuple[
         tuple[Float[Array, " d"], Float[Array, "d d"]],
@@ -85,14 +107,14 @@ def _kalman_filter(
         ],
     ]:
         m, P = carry
-        A, Q, r_n, mask_n = inputs
+        A, Q, r_n, mask_n, R_n = inputs
 
         m_pred = A @ m
         P_pred = A @ P @ A.T + Q
         P_pred = 0.5 * (P_pred + P_pred.T)
 
         Hp = (H @ P_pred)[0]  # (d,)
-        S = (Hp @ H.T[:, 0]) + R  # scalar variance of innovation
+        S = (Hp @ H.T[:, 0]) + R_n  # scalar variance of innovation
         innov = r_n - (H @ m_pred)[0]
         # NaN-safe division: when ``mask_n = 0`` we discard the result, but
         # ``S`` can still be 0 (noiseless conditioning, deterministic
@@ -109,7 +131,7 @@ def _kalman_filter(
         # ``K`` is exactly zero on masked steps, so ``I - K H`` is the
         # identity and the Joseph term collapses to ``P_pred`` — no extra
         # ``mask_n`` factor needed on ``R``.
-        P_new = I_minus_KH @ P_pred @ I_minus_KH.T + R * (K[:, None] @ K[None, :])
+        P_new = I_minus_KH @ P_pred @ I_minus_KH.T + R_n * (K[:, None] @ K[None, :])
         P_new = 0.5 * (P_new + P_new.T)
 
         ll_term = -0.5 * (log_2pi + jnp.log(S_safe) + innov * innov / S_safe)
@@ -119,7 +141,7 @@ def _kalman_filter(
     m0 = jnp.zeros(d, dtype=F.dtype)
     P0 = P_inf
     _, (m_pred_seq, P_pred_seq, m_filt_seq, P_filt_seq, ll_seq) = jax.lax.scan(
-        step, (m0, P0), (A_seq, Q_seq, residual, mask)
+        step, (m0, P0), (A_seq, Q_seq, residual, mask, R_seq)
     )
     return m_pred_seq, P_pred_seq, m_filt_seq, P_filt_seq, jnp.sum(ll_seq)
 
@@ -297,9 +319,8 @@ class MarkovGPPrior(eqx.Module):
         A_seq, Q_seq = self.sde_kernel.discretise(dt_full)
         residual = self._residual(y)
         mask = jnp.ones_like(self.times)
-        return _kalman_filter(
-            F, H, P_inf, A_seq, Q_seq, residual, mask, self._R(noise_var)
-        )
+        R_seq = jnp.broadcast_to(self._R(noise_var), self.times.shape)
+        return _kalman_filter(F, H, P_inf, A_seq, Q_seq, residual, mask, R_seq)
 
     def log_marginal(
         self,
@@ -325,8 +346,9 @@ class MarkovGPPrior(eqx.Module):
         A_seq, Q_seq = self.sde_kernel.discretise(dt_full)
         residual = self._residual(y)
         mask = jnp.ones_like(self.times)
+        R_seq = jnp.broadcast_to(self._R(noise_var), self.times.shape)
         m_pred, P_pred, m_filt, P_filt, log_marg = _kalman_filter(
-            F, H, P_inf, A_seq, Q_seq, residual, mask, self._R(noise_var)
+            F, H, P_inf, A_seq, Q_seq, residual, mask, R_seq
         )
         m_smooth, P_smooth = _rts_smoother(m_pred, P_pred, m_filt, P_filt, A_seq)
         return m_smooth, P_smooth, log_marg
@@ -346,6 +368,28 @@ class MarkovGPPrior(eqx.Module):
             smoothed_covs=P_smooth,
             log_marginal=log_marg,
         )
+
+    def condition_nongauss(
+        self,
+        likelihood: Likelihood,
+        y: Float[Array, " N"],
+        *,
+        strategy: _NonGaussMarkovStrategy,
+    ) -> NonGaussConditionedMarkovGP:
+        """Condition on a non-Gaussian likelihood via a site-based strategy.
+
+        Convenience that forwards to ``strategy.fit(self, likelihood, y)``.
+        Pick any of the Markov-aware site-based strategies in
+        :mod:`pyrox.gp._inference_nongauss_markov`:
+        :class:`pyrox.gp.LaplaceMarkovInference`,
+        :class:`pyrox.gp.GaussNewtonMarkovInference`,
+        :class:`pyrox.gp.PosteriorLinearizationMarkov`, or
+        :class:`pyrox.gp.ExpectationPropagationMarkov`. Returns a
+        :class:`pyrox.gp.NonGaussConditionedMarkovGP` with the same
+        ``predict`` API as the Gaussian-likelihood
+        :class:`ConditionedMarkovGP`.
+        """
+        return strategy.fit(self, likelihood, y)
 
     def log_prob(self, f: Float[Array, " N"]) -> Float[Array, ""]:
         r"""Log density of an exact-state path :math:`f(t_n) = H x_n` under the prior.
@@ -439,9 +483,9 @@ class ConditionedMarkovGP(eqx.Module):
 
         dt_full = _build_dt_full(merged_sorted)
         A_seq, Q_seq = self.prior.sde_kernel.discretise(dt_full)
-        R = self.prior._R(self.noise_var)
+        R_seq = jnp.broadcast_to(self.prior._R(self.noise_var), merged_sorted.shape)
         m_pred, P_pred, m_filt, P_filt, _ = _kalman_filter(
-            F, H, P_inf, A_seq, Q_seq, residual_full, is_obs, R
+            F, H, P_inf, A_seq, Q_seq, residual_full, is_obs, R_seq
         )
         m_smooth, P_smooth = _rts_smoother(m_pred, P_pred, m_filt, P_filt, A_seq)
 
