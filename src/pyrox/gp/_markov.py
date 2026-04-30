@@ -483,7 +483,7 @@ class ConditionedMarkovGP(eqx.Module):
 
         dt_full = _build_dt_full(merged_sorted)
         A_seq, Q_seq = self.prior.sde_kernel.discretise(dt_full)
-        R_seq = jnp.full_like(merged_sorted, self.prior._R(self.noise_var))
+        R_seq = jnp.broadcast_to(self.prior._R(self.noise_var), merged_sorted.shape)
         m_pred, P_pred, m_filt, P_filt, _ = _kalman_filter(
             F, H, P_inf, A_seq, Q_seq, residual_full, is_obs, R_seq
         )
