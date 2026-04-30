@@ -92,7 +92,15 @@ from pyrox.gp._protocols import (
     Likelihood,
     SDEKernel,
 )
-from pyrox.gp._sde_kernels import MaternSDE
+from pyrox.gp._sde_kernels import (
+    ConstantSDE,
+    CosineSDE,
+    MaternSDE,
+    PeriodicSDE,
+    ProductSDE,
+    QuasiPeriodicSDE,
+    SumSDE,
+)
 from pyrox.gp._sparse import SparseGPPrior
 
 
@@ -101,7 +109,9 @@ __all__ = [
     "ConditionedGP",
     "ConjugateVI",
     "Constant",
+    "ConstantSDE",
     "Cosine",
+    "CosineSDE",
     "DecoupledInducingFeatures",
     "DecoupledPathwiseSampler",
     "DeltaGuide",
@@ -128,12 +138,16 @@ __all__ = [
     "PathwiseFunction",
     "PathwiseSampler",
     "Periodic",
+    "PeriodicSDE",
     "Polynomial",
+    "ProductSDE",
+    "QuasiPeriodicSDE",
     "RationalQuadratic",
     "SDEKernel",
     "SharedInducingPoints",
     "SparseGPPrior",
     "SphericalHarmonicInducingFeatures",
+    "SumSDE",
     "White",
     "WhitenedGuide",
     "funk_hecke_coefficients",

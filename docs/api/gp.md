@@ -152,19 +152,37 @@ for downstream Kalman / RTS use.
 
 ```python
 import jax.numpy as jnp
-from pyrox.gp import MaternSDE
+from pyrox.gp import (
+    ConstantSDE, CosineSDE, MaternSDE, PeriodicSDE,
+    ProductSDE, QuasiPeriodicSDE, SumSDE,
+)
 
-sde = MaternSDE(variance=1.0, lengthscale=0.5, order=1)  # nu = 3/2
-F, L, H, Q_c, P_inf = sde.sde_params()                   # closed form
-A, Q = sde.discretise(jnp.array([0.05, 0.1, 0.2]))       # (3, 2, 2) each
+# Primitive kernels
+matern = MaternSDE(variance=1.0, lengthscale=0.5, order=1)  # nu = 3/2
+cos    = CosineSDE(variance=1.0, frequency=2.0)
+const  = ConstantSDE(variance=0.3)
+per    = PeriodicSDE(variance=1.0, lengthscale=1.0, period=2.0, n_harmonics=7)
+
+# Composition: trend + offset
+trend = SumSDE((matern, const))                   # state dim = 2 + 1 = 3
+
+# Composition: damped oscillation (Matern x Cosine)
+damped = ProductSDE(matern, cos)                  # state dim = 2 * 2 = 4
+
+# Quasi-periodic (Matern x Periodic) — convenience wrapper around ProductSDE
+qp = QuasiPeriodicSDE(matern, per)                # state dim = 2 * 15 = 30
 ```
 
-The composition rules (`SumSDE`, `ProductSDE`), additional kernels
-(`CosineSDE`, `PeriodicSDE`), and the Kalman-based `MarkovGPPrior`
-arrive in subsequent issues (#37 finish, #38).
+The Kalman-based `MarkovGPPrior` arrives in issue #38.
 
 ::: pyrox.gp.SDEKernel
 ::: pyrox.gp.MaternSDE
+::: pyrox.gp.ConstantSDE
+::: pyrox.gp.CosineSDE
+::: pyrox.gp.PeriodicSDE
+::: pyrox.gp.SumSDE
+::: pyrox.gp.ProductSDE
+::: pyrox.gp.QuasiPeriodicSDE
 
 ## Component protocols
 
