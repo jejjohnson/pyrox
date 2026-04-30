@@ -15,6 +15,7 @@ in later waves.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 import equinox as eqx
 import jax
@@ -159,6 +160,45 @@ class GPPrior(eqx.Module):
             operator=operator,
             resolved_hyperparams=resolved_hyperparams,
         )
+
+    def condition_nongauss(
+        self,
+        likelihood: Any,
+        y: Float[Array, " N"],
+        *,
+        strategy: Any,
+    ) -> Any:
+        """Condition on a non-Gaussian likelihood via a site-based strategy.
+
+        Convenience that forwards to ``strategy.fit(self, likelihood, y)``.
+        Pick any of the site-based strategies in
+        :mod:`pyrox.gp._inference_nongauss`:
+        :class:`pyrox.gp.LaplaceInference`,
+        :class:`pyrox.gp.GaussNewtonInference`,
+        :class:`pyrox.gp.PosteriorLinearization`,
+        :class:`pyrox.gp.ExpectationPropagation`, or
+        :class:`pyrox.gp.QuasiNewtonInference`. Returns a
+        :class:`pyrox.gp.NonGaussConditionedGP` with the same
+        ``predict`` / ``predict_mean`` / ``predict_var`` API as the
+        Gaussian-likelihood :class:`ConditionedGP`.
+
+        Example::
+
+            from pyrox.gp import (
+                BernoulliLikelihood,
+                ExpectationPropagation,
+                GPPrior,
+                RBF,
+            )
+
+            prior = GPPrior(kernel=RBF(), X=X)
+            cond = prior.condition_nongauss(
+                BernoulliLikelihood(), y,
+                strategy=ExpectationPropagation(),
+            )
+            mean, var = cond.predict(X_star)
+        """
+        return strategy.fit(self, likelihood, y)
 
 
 def _resolve_kernel_hyperparams(

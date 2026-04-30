@@ -130,7 +130,16 @@ ignore = ["E402", "E721", "E731", "E741"]
 "tests/inference/**" = ["F722"]
 "tests/api/**" = ["F722"]
 "tests/preprocessing/**" = ["F722"]
-"docs/notebooks/**" = ["F722", "B905", "RUF001", "RUF002", "RUF003", "E501"]
+"docs/notebooks/**" = [
+    "F722",
+    "B905",
+    "B007",
+    "E702",
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    "E501",
+]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true
