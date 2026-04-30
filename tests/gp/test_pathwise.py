@@ -66,7 +66,6 @@ def test_dense_pathwise_paths_are_batch_consistent():
     assert jnp.allclose(full, split, atol=1e-6)
 
 
-@pytest.mark.slow
 def test_dense_pathwise_empirical_moments_match_posterior_sanity():
     X, y = _toy_dataset(n=5)
     X_star = jnp.array([[-0.75], [0.0], [0.8]])
@@ -91,7 +90,6 @@ def test_dense_pathwise_empirical_moments_match_posterior_sanity():
     assert jnp.allclose(jnp.diag(empirical_cov), jnp.diag(exact_cov), atol=0.12)
 
 
-@pytest.mark.slow
 def test_dense_pathwise_matern_runs_and_has_sane_moments():
     X, y = _toy_dataset(n=5)
     X_star = jnp.array([[-0.5], [0.3]])
@@ -117,7 +115,6 @@ def test_dense_pathwise_matern_runs_and_has_sane_moments():
     assert jnp.allclose(empirical_var, jnp.diag(exact_cov), atol=0.3)
 
 
-@pytest.mark.slow
 def test_dense_pathwise_handles_d_gt_1():
     key = jax.random.PRNGKey(17)
     X = jax.random.uniform(key, (8, 2), minval=-1.0, maxval=1.0)
@@ -184,7 +181,6 @@ def test_dense_pathwise_jit_and_grad_are_finite():
     assert jnp.isfinite(grad)
 
 
-@pytest.mark.slow
 def test_decoupled_pathwise_paths_are_batch_consistent():
     Z = jnp.linspace(-1.5, 1.5, 4).reshape(-1, 1)
     prior = SparseGPPrior(

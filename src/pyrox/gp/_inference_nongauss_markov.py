@@ -45,6 +45,19 @@ if TYPE_CHECKING:
 # --- core smoother helpers ----------------------------------------------
 
 
+def _prior_marginal_variance(prior: MarkovGPPrior) -> Float[Array, " N"]:
+    r"""Stationary prior marginal variance ``H P_inf H^T`` per training time.
+
+    Stationary 1-D SDE kernels have a constant marginal variance equal to
+    :math:`H P_\infty H^\top` (equivalent to the kernel ``variance``); we
+    broadcast it to ``(N,)`` so it can seed the cavity-update loops in PL
+    and EP without hard-coding ``1.0`` on rescaled kernels.
+    """
+    _F, _L, H, _Qc, P_inf = prior.sde_kernel.sde_params()
+    var0 = (H @ P_inf @ H.T)[0, 0]
+    return jnp.broadcast_to(var0, prior.times.shape)
+
+
 def _markov_smoothed_posterior(
     prior: MarkovGPPrior,
     nat1: Float[Array, " N"],
@@ -350,7 +363,11 @@ class PosteriorLinearizationMarkov(eqx.Module):
         nat1 = jnp.zeros(N, dtype=prior_mean.dtype)
         nat2 = jnp.full((N,), self.precision_floor, dtype=prior_mean.dtype)
         q_mean = jnp.asarray(prior_mean)
-        q_var = jnp.full((N,), 1.0, dtype=prior_mean.dtype)
+        # Seed cavity computation with the prior marginal variance ``H P_inf H^T``
+        # so the first cavity precision ``1/q_var - nat2`` is on the correct
+        # scale for kernels with variance != 1, and so a zero-iteration return
+        # produces a posterior variance that matches the prior.
+        q_var = _prior_marginal_variance(prior).astype(prior_mean.dtype)
 
         converged = False
         n_iter = 0
@@ -437,7 +454,11 @@ class ExpectationPropagationMarkov(eqx.Module):
         nat1 = jnp.zeros(N, dtype=prior_mean.dtype)
         nat2 = jnp.full((N,), self.precision_floor, dtype=prior_mean.dtype)
         q_mean = jnp.asarray(prior_mean)
-        q_var = jnp.full((N,), 1.0, dtype=prior_mean.dtype)
+        # Seed cavity computation with the prior marginal variance ``H P_inf H^T``
+        # so the first cavity precision ``1/q_var - nat2`` is on the correct
+        # scale for kernels with variance != 1, and so a zero-iteration return
+        # produces a posterior variance that matches the prior.
+        q_var = _prior_marginal_variance(prior).astype(prior_mean.dtype)
 
         converged = False
         n_iter = 0

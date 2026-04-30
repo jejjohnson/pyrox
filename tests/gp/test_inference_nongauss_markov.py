@@ -39,6 +39,28 @@ def _make_bernoulli_timeseries(N: int = 16):
     return prior, times, y
 
 
+def test_markov_laplace_smoke_tiny() -> None:
+    """Fast smoke for ``LaplaceMarkovInference`` fit + predict on a tiny grid.
+
+    Stays un-marked so the default CI run (``pytest -m "not slow"``) still
+    exercises the non-Gaussian Markov inference + predict surface on every
+    PR; the deeper convergence / dense-equivalence tests are slow.
+    """
+    times = jnp.linspace(0.0, 1.0, 6)
+    y = (jnp.sin(3.0 * times) > 0.0).astype(jnp.float32)
+    sde = MaternSDE(variance=1.0, lengthscale=0.5, order=1)
+    prior = MarkovGPPrior(sde, times)
+    cond = LaplaceMarkovInference(max_iter=2).fit(prior, BernoulliLikelihood(), y)
+    assert isinstance(cond, NonGaussConditionedMarkovGP)
+    assert cond.q_mean.shape == y.shape
+    assert jnp.all(jnp.isfinite(cond.q_mean))
+    assert jnp.all(jnp.isfinite(cond.q_var))
+    assert jnp.all(cond.q_var >= 0.0)
+    m, v = cond.predict(jnp.array([0.25, 0.75]))
+    assert m.shape == (2,) and v.shape == (2,)
+    assert jnp.all(jnp.isfinite(m)) and jnp.all(v >= 0.0)
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "strategy_factory",
