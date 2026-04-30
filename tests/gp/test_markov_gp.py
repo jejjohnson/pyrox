@@ -279,6 +279,36 @@ def test_predict_jit_compatible() -> None:
     assert jnp.all(v >= -1e-8)
 
 
+# --- NaN-safety on degenerate masked steps -------------------------------
+
+
+def test_filter_stays_finite_when_masked_step_has_degenerate_S() -> None:
+    """Masked steps must not contaminate outputs even when the innovation
+    variance ``S`` is zero on those steps. Earlier the masked update
+    computed ``K_full = ... / S`` and ``log(S)`` unconditionally, so a
+    degenerate ``S`` produced ``inf``/``NaN`` that survived ``0 *`` masking.
+    """
+    from pyrox.gp._markov import _kalman_filter
+
+    d = 2
+    F = jnp.zeros((d, d))
+    H = jnp.array([[1.0, 0.0]])
+    P_inf = jnp.eye(d)
+    A_seq = jnp.broadcast_to(jnp.eye(d), (3, d, d))
+    Q_seq = jnp.zeros((3, d, d))  # deterministic transition → H P H^T = 0
+    residual = jnp.array([0.0, 1.0, 0.0])
+    mask = jnp.array([0.0, 0.0, 0.0])  # all steps masked
+    R = jnp.asarray(0.0)  # forces S = 0
+
+    _m_pred, _P_pred, m_filt, P_filt, ll = _kalman_filter(
+        F, H, P_inf, A_seq, Q_seq, residual, mask, R
+    )
+    assert jnp.all(jnp.isfinite(m_filt))
+    assert jnp.all(jnp.isfinite(P_filt))
+    assert jnp.isfinite(ll)
+    assert ll == 0.0  # no observations contribute
+
+
 # --- numpyro factor hook -------------------------------------------------
 
 

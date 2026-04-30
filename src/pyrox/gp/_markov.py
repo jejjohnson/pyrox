@@ -94,18 +94,26 @@ def _kalman_filter(
         Hp = (H @ P_pred)[0]  # (d,)
         S = (Hp @ H.T[:, 0]) + R  # scalar variance of innovation
         innov = r_n - (H @ m_pred)[0]
-        K_full = (P_pred @ H.T)[:, 0] / S  # (d,)
-        K = K_full * mask_n
+        # NaN-safe division: when ``mask_n = 0`` we discard the result, but
+        # ``S`` can still be 0 (noiseless conditioning, deterministic
+        # segments). Replace ``S`` with 1 on the masked branch so neither
+        # ``... / S`` nor ``log(S)`` produces inf/NaN that ``0 *`` would
+        # propagate via ``0 * inf = NaN``.
+        is_obs = mask_n == 1
+        S_safe = jnp.where(is_obs, S, 1.0)
+        K_full = (P_pred @ H.T)[:, 0] / S_safe  # (d,)
+        K = jnp.where(is_obs, K_full, jnp.zeros_like(K_full))
 
         m_new = m_pred + K * innov
         I_minus_KH = eye - K[:, None] * H
-        # ``K`` already carries the mask (``K = K_full * mask_n``), so when
-        # ``mask_n = 0`` the outer product ``K K^T`` is zero and ``I - K H``
-        # is the identity — no extra ``mask_n`` factor needed on ``R``.
+        # ``K`` is exactly zero on masked steps, so ``I - K H`` is the
+        # identity and the Joseph term collapses to ``P_pred`` — no extra
+        # ``mask_n`` factor needed on ``R``.
         P_new = I_minus_KH @ P_pred @ I_minus_KH.T + R * (K[:, None] @ K[None, :])
         P_new = 0.5 * (P_new + P_new.T)
 
-        ll = mask_n * (-0.5 * (log_2pi + jnp.log(S) + innov * innov / S))
+        ll_term = -0.5 * (log_2pi + jnp.log(S_safe) + innov * innov / S_safe)
+        ll = jnp.where(is_obs, ll_term, 0.0)
         return (m_new, P_new), (m_pred, P_pred, m_new, P_new, ll)
 
     m0 = jnp.zeros(d, dtype=F.dtype)
