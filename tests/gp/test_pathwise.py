@@ -6,6 +6,12 @@ import jax
 import jax.numpy as jnp
 import pytest
 
+
+# All pathwise tests draw samples and run Cholesky / SVGP-like math
+# heavy enough that every individual test sits at multi-second runtime.
+# Mark the whole module slow so CI (-m "not slow") skips it.
+pytestmark = pytest.mark.slow
+
 from pyrox.gp import (
     RBF,
     ConditionedGP,

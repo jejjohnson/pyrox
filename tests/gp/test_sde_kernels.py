@@ -475,6 +475,7 @@ def test_periodic_sde_no_driving_noise() -> None:
     assert jnp.allclose(Q_c, 0.0)
 
 
+@pytest.mark.slow
 def test_periodic_sde_lyapunov_holds() -> None:
     sde = PeriodicSDE(variance=1.0, lengthscale=1.0, period=2.0, n_harmonics=6)
     F, L, _H, Q_c, P_inf = sde.sde_params()
@@ -502,6 +503,7 @@ def test_periodic_sde_closed_form_discretise_is_pure_rotation() -> None:
     assert jnp.allclose(A[0], jnp.eye(d), atol=1e-7)
 
 
+@pytest.mark.slow
 def test_periodic_sde_autocov_matches_dense_periodic_kernel() -> None:
     """Truncated SDE autocov approximates the MacKay periodic kernel."""
     sigma2 = 1.0

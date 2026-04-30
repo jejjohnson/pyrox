@@ -114,6 +114,7 @@ def test_log_marginal_matches_dense_matern(order: int, nu: float) -> None:
     assert jnp.allclose(log_marg_kf, log_marg_dense, atol=1e-8)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(("order", "nu"), [(0, 0.5), (1, 1.5), (2, 2.5)])
 def test_predict_at_training_times_matches_dense(order: int, nu: float) -> None:
     sigma2, ell, noise_var = 0.6, 0.5, 0.04
@@ -135,6 +136,7 @@ def test_predict_at_training_times_matches_dense(order: int, nu: float) -> None:
     assert jnp.allclose(v_kf, v_dense, atol=1e-7)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(("order", "nu"), [(0, 0.5), (1, 1.5), (2, 2.5)])
 def test_predict_off_grid_matches_dense(order: int, nu: float) -> None:
     sigma2, ell, noise_var = 0.8, 0.3, 0.02
@@ -165,6 +167,7 @@ def test_predict_off_grid_matches_dense(order: int, nu: float) -> None:
 # --- filter / smooth consistency -----------------------------------------
 
 
+@pytest.mark.slow
 def test_filter_and_smooth_log_marginal_agree() -> None:
     """``filter`` and ``smooth`` must report the same log marginal.
 
@@ -223,6 +226,7 @@ def test_sum_sde_log_marginal_well_defined() -> None:
 # --- gradients -----------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_log_marginal_gradient_matches_dense() -> None:
     """Autodiff through the Kalman filter must match dense-GP gradients."""
     times = jnp.array([0.0, 0.2, 0.6, 1.1, 1.7, 2.3, 3.0])
@@ -298,10 +302,10 @@ def test_filter_stays_finite_when_masked_step_has_degenerate_S() -> None:
     Q_seq = jnp.zeros((3, d, d))  # deterministic transition → H P H^T = 0
     residual = jnp.array([0.0, 1.0, 0.0])
     mask = jnp.array([0.0, 0.0, 0.0])  # all steps masked
-    R = jnp.asarray(0.0)  # forces S = 0
+    R_seq = jnp.zeros(3)  # forces S = 0 on every step
 
     _m_pred, _P_pred, m_filt, P_filt, ll = _kalman_filter(
-        F, H, P_inf, A_seq, Q_seq, residual, mask, R
+        F, H, P_inf, A_seq, Q_seq, residual, mask, R_seq
     )
     assert jnp.all(jnp.isfinite(m_filt))
     assert jnp.all(jnp.isfinite(P_filt))
@@ -332,6 +336,7 @@ def test_markov_gp_factor_matches_log_marginal() -> None:
 # --- mean function -------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_constant_mean_function_shifts_predictions() -> None:
     times = jnp.linspace(0.0, 3.0, 15)
     t_star = jnp.linspace(0.5, 2.5, 7)

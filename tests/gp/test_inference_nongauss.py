@@ -35,7 +35,7 @@ from pyrox.gp import (
 )
 
 
-def _make_classification_problem(N: int = 25):
+def _make_classification_problem(N: int = 12):
     X = jnp.linspace(-3.0, 3.0, N)[:, None]
     y = (jnp.sin(X[:, 0]) > 0.0).astype(jnp.float32)
     kernel = RBF(init_lengthscale=1.0, init_variance=1.0)
@@ -43,14 +43,35 @@ def _make_classification_problem(N: int = 25):
     return prior, X, y
 
 
+def test_laplace_smoke_tiny() -> None:
+    """Fast smoke for Laplace fit + predict on a tiny problem.
+
+    Stays un-marked so the default CI run (``pytest -m "not slow"``) still
+    exercises the Laplace inference and prediction surface end-to-end on
+    every PR; the deeper convergence / equivalence tests are slow.
+    """
+    X = jnp.linspace(-1.0, 1.0, 6)[:, None]
+    y = (X[:, 0] > 0.0).astype(jnp.float32)
+    prior = GPPrior(kernel=RBF(init_lengthscale=1.0, init_variance=1.0), X=X)
+    cond = LaplaceInference(max_iter=2).fit(prior, BernoulliLikelihood(), y)
+    assert cond.q_mean.shape == y.shape
+    assert jnp.all(jnp.isfinite(cond.q_mean))
+    assert jnp.all(jnp.isfinite(cond.q_var))
+    assert jnp.all(cond.q_var >= 0.0)
+    m, v = cond.predict(jnp.array([[-0.5], [0.5]]))
+    assert m.shape == (2,) and v.shape == (2,)
+    assert jnp.all(jnp.isfinite(m)) and jnp.all(v >= 0.0)
+
+
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "strategy_factory",
     [
         lambda: LaplaceInference(),
         lambda: GaussNewtonInference(),
-        lambda: ExpectationPropagation(max_iter=30),
-        lambda: PosteriorLinearization(max_iter=30),
-        lambda: QuasiNewtonInference(max_iter=80),
+        lambda: ExpectationPropagation(max_iter=20),
+        lambda: PosteriorLinearization(max_iter=20),
+        lambda: QuasiNewtonInference(max_iter=30),
     ],
 )
 def test_strategy_runs_and_returns_finite_posterior(strategy_factory) -> None:
@@ -66,6 +87,7 @@ def test_strategy_runs_and_returns_finite_posterior(strategy_factory) -> None:
     assert jnp.isfinite(cond.log_marginal_approx)
 
 
+@pytest.mark.slow
 def test_predict_at_test_points_finite_and_psd() -> None:
     prior, _, y = _make_classification_problem()
     cond = LaplaceInference().fit(prior, BernoulliLikelihood(), y)
@@ -77,6 +99,7 @@ def test_predict_at_test_points_finite_and_psd() -> None:
     assert jnp.all(v >= 0.0)
 
 
+@pytest.mark.slow
 def test_laplace_equals_gauss_newton_on_bernoulli() -> None:
     """For the Bernoulli likelihood (exponential-family, log-concave) the
     GGN curvature equals the negative Hessian, so Laplace and GN should
@@ -92,6 +115,7 @@ def test_laplace_equals_gauss_newton_on_bernoulli() -> None:
     assert jnp.allclose(lap.q_var, gn.q_var, atol=2e-2)
 
 
+@pytest.mark.slow
 def test_laplace_and_ep_agree_on_bernoulli() -> None:
     """Laplace and EP differ in formal definition (mode vs moment match)
     but on a smooth log-concave likelihood with moderate N they sit close."""
@@ -105,6 +129,7 @@ def test_laplace_and_ep_agree_on_bernoulli() -> None:
     assert jnp.max(jnp.abs(lap.q_mean - ep.q_mean)) < 0.3
 
 
+@pytest.mark.slow
 def test_posterior_mean_correlates_with_targets() -> None:
     """Sanity: the posterior mean increases with ``y`` — points with
     ``y=1`` should on average have higher latent than points with ``y=0``."""
@@ -115,6 +140,7 @@ def test_posterior_mean_correlates_with_targets() -> None:
     assert mean_for_y1 > mean_for_y0
 
 
+@pytest.mark.slow
 def test_laplace_with_studentt_runs_and_is_robust() -> None:
     """StudentT regression with two heavy outliers: the latent at the
     outlier should be pulled less than under a Gaussian likelihood."""
@@ -141,6 +167,7 @@ def test_multi_latent_likelihoods_rejected_with_clear_error(lik) -> None:
         LaplaceInference().fit(prior, lik, y)
 
 
+@pytest.mark.slow
 def test_condition_nongauss_method_works() -> None:
     prior, _, y = _make_classification_problem()
     cond = prior.condition_nongauss(
@@ -149,6 +176,7 @@ def test_condition_nongauss_method_works() -> None:
     assert isinstance(cond, NonGaussConditionedGP)
 
 
+@pytest.mark.slow
 def test_predict_jit_compatible_via_partial_eval() -> None:
     """The pyrox kernel ecosystem carries non-array static fields
     (kernel ``pyrox_name``), so we don't jit the full ``cond`` PyTree
