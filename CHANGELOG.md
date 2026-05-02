@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.0.11](https://github.com/jejjohnson/pyrox/compare/v0.0.10...v0.0.11) (2026-05-02)
+
+
+### Features
+
+* **nn:** DenseDVI — Deterministic Variational Inference dense layer ([#51](https://github.com/jejjohnson/pyrox/issues/51)) ([#134](https://github.com/jejjohnson/pyrox/issues/134)) ([7d79679](https://github.com/jejjohnson/pyrox/commit/7d7967990ee76aa99c9ba1e1ac680ce9cce05034))
+* **nn:** DenseHierarchical — multiplicative shrinkage dense layer ([#51](https://github.com/jejjohnson/pyrox/issues/51)) ([#132](https://github.com/jejjohnson/pyrox/issues/132)) ([265014d](https://github.com/jejjohnson/pyrox/commit/265014d547d06d5868e6409c7f93fdbf34e222bf))
+* **nn:** LayerNormEnsemble — per-member layer normalisation ([#51](https://github.com/jejjohnson/pyrox/issues/51)) ([#133](https://github.com/jejjohnson/pyrox/issues/133)) ([b880d93](https://github.com/jejjohnson/pyrox/commit/b880d9361b0552b149b4fe2e882c566565f4704f))
+* **nn:** MultiHeadAttentionBE — BatchEnsemble multi-head attention ([#51](https://github.com/jejjohnson/pyrox/issues/51)) ([#135](https://github.com/jejjohnson/pyrox/issues/135)) ([8e66cb4](https://github.com/jejjohnson/pyrox/commit/8e66cb492e030070b505589fc6d3c9aba4067020))
+* **nn:** output-side noise-contrastive-prior regulariser ([#51](https://github.com/jejjohnson/pyrox/issues/51)) ([#131](https://github.com/jejjohnson/pyrox/issues/131)) ([649ec9b](https://github.com/jejjohnson/pyrox/commit/649ec9b873a865691542f8f500a6508e49f705ee))
+
 ## [0.0.10](https://github.com/jejjohnson/pyrox/compare/v0.0.9...v0.0.10) (2026-05-02)
 
 
