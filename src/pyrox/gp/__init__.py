@@ -132,6 +132,12 @@ from pyrox.gp._sde_kernels import (
     SumSDE,
 )
 from pyrox.gp._sparse import SparseGPPrior
+from pyrox.gp._sparse_markov import (
+    SparseConditionedMarkovGP,
+    SparseMarkovGPPrior,
+    sparse_markov_elbo,
+    sparse_markov_factor,
+)
 
 
 __all__ = [
@@ -194,7 +200,9 @@ __all__ = [
     "SDEKernel",
     "SharedInducingPoints",
     "SoftmaxLikelihood",
+    "SparseConditionedMarkovGP",
     "SparseGPPrior",
+    "SparseMarkovGPPrior",
     "SphericalHarmonicInducingFeatures",
     "StudentTLikelihood",
     "SumSDE",
@@ -205,6 +213,8 @@ __all__ = [
     "gp_sample",
     "markov_gp_factor",
     "markov_gp_sample",
+    "sparse_markov_elbo",
+    "sparse_markov_factor",
     "svgp_elbo",
     "svgp_factor",
 ]
