@@ -14,6 +14,9 @@ Dense / Bayesian-linear layers (``pyrox.nn._layers``):
   Flipout estimator.
 * :class:`DenseVariational` — user-supplied prior + posterior
   callables for full flexibility.
+* :class:`DenseVariationalDropout` — sparse variational dropout dense
+  layer with per-weight learnable dropout rates (Molchanov et al.,
+  2017).
 * :class:`MCDropout` — always-on dropout for Monte Carlo uncertainty.
 * :class:`DenseNCP` — Noise Contrastive Prior: deterministic backbone
   + scaled stochastic perturbation.
@@ -102,6 +105,7 @@ from pyrox.nn._layers import (
     DenseNCP,
     DenseReparameterization,
     DenseVariational,
+    DenseVariationalDropout,
     HSGPFeatures,
     LaplaceCosineFeatures,
     LaplaceFourierFeatures,
@@ -141,6 +145,7 @@ __all__ = [
     "DenseNCP",
     "DenseReparameterization",
     "DenseVariational",
+    "DenseVariationalDropout",
     "FiLM",
     "FourierFeatures",
     "HSGPFeatures",
