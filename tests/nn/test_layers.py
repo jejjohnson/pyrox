@@ -316,6 +316,31 @@ def test_ncp_normal_output_kl_is_inf_at_zero_noisy_std():
     assert not jnp.isfinite(kl)
 
 
+def test_ncp_normal_output_rejects_1d_inputs():
+    """1D ``(B,)`` inputs would collapse the batch axis under the
+    ``axis=-1`` sum and recreate the broadcast over-counting bug.
+    The layer rejects them with a hint to use ``[:, None]``.
+    """
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=1.0)
+    mu_1d = jnp.zeros((4,))
+    sigma_1d = jnp.ones((4,))
+    with handlers.seed(rng_seed=0), pytest.raises(ValueError, match=r"at least 2 dims"):
+        layer(mu_1d, sigma_1d)
+    # The explicit `(B, 1)` reshape works.
+    with handlers.seed(rng_seed=0):
+        kl = layer(mu_1d[:, None], sigma_1d[:, None])
+    assert jnp.isfinite(kl)
+
+
+def test_ncp_normal_output_rejects_mismatched_shapes():
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=1.0)
+    with (
+        handlers.seed(rng_seed=0),
+        pytest.raises(ValueError, match=r"!= noisy_std shape"),
+    ):
+        layer(jnp.zeros((4, 2)), jnp.ones((4, 3)))
+
+
 def test_ncp_normal_output_log_density_under_subsampled_plate():
     """Under `plate("data", N, subsample_size=B)`, the layer's contribution
     to the model log density is `-(N/B) * sum_{n in batch} kl_n` — the

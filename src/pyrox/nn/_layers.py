@@ -598,6 +598,24 @@ class NCPNormalOutput(PyroxModule):
         # `noisy_var` because doing so asymmetrically (without a matching
         # floor on `prior_var`) would break the `noisy_std == prior_std`
         # → KL = 0 invariant for tiny `prior_std`.
+        if noisy_mean.shape != noisy_std.shape:
+            raise ValueError(
+                f"noisy_mean shape {noisy_mean.shape} != "
+                f"noisy_std shape {noisy_std.shape}."
+            )
+        # Require an explicit feature axis. With a 1-D ``(B,)`` input,
+        # summing along axis=-1 below would collapse the *batch* axis
+        # itself, producing a scalar factor that gets broadcast across
+        # the data plate — exactly the over-counting bug a per-example
+        # factor is designed to avoid. For scalar-regression heads,
+        # reshape to ``(B, 1)``.
+        if noisy_mean.ndim < 2:
+            raise ValueError(
+                "noisy_mean / noisy_std must have at least 2 dims "
+                "(batch + feature). For a scalar regression head, pass "
+                "`noisy_mean[:, None]` and `noisy_std[:, None]`. Got "
+                f"shape {noisy_mean.shape}."
+            )
         prior_var = jnp.asarray(self.prior_std) ** 2
         noisy_var = noisy_std**2
         kl_per_elem = (
