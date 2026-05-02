@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.0.9](https://github.com/jejjohnson/pyrox/compare/v0.0.8...v0.0.9) (2026-05-02)
+
+
+### Features
+
+* **gp:** non-Gaussian inference strategies and likelihoods ([#47](https://github.com/jejjohnson/pyrox/issues/47), [#48](https://github.com/jejjohnson/pyrox/issues/48)) ([#120](https://github.com/jejjohnson/pyrox/issues/120)) ([a365252](https://github.com/jejjohnson/pyrox/commit/a365252de737fd780900a640e905d3d5b6f72280))
+* **nn:** dense variational dropout — sparse variational dropout layer ([#51](https://github.com/jejjohnson/pyrox/issues/51)) ([#126](https://github.com/jejjohnson/pyrox/issues/126)) ([336dbf8](https://github.com/jejjohnson/pyrox/commit/336dbf86f3742755c95244f01086a2068c7a3e61))
+
+
+### Bug Fixes
+
+* **gp:** re-land [#114](https://github.com/jejjohnson/pyrox/issues/114) — SDE composition kernels onto main ([#116](https://github.com/jejjohnson/pyrox/issues/116)) ([5b36b4d](https://github.com/jejjohnson/pyrox/commit/5b36b4dffbd39cf19a5609aaba4d12c80d6d6fb8))
+* **gp:** re-land [#117](https://github.com/jejjohnson/pyrox/issues/117) — MarkovGPPrior onto main (orphaned by stacked-PR squash-merge) ([#119](https://github.com/jejjohnson/pyrox/issues/119)) ([d788dce](https://github.com/jejjohnson/pyrox/commit/d788dce477eb96180d04b22aac04dc153f8b951d))
+
 ## [0.0.8](https://github.com/jejjohnson/pyrox/compare/v0.0.7...v0.0.8) (2026-04-29)
 
 
