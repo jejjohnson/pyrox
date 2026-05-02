@@ -45,6 +45,7 @@ from gaussx import (
     DenseSolver,
     MultivariateNormal,
     gaussian_log_prob,
+    sde_autocovariance,
 )
 from jaxtyping import Array, Float
 
@@ -63,23 +64,16 @@ def _sde_autocov_pairs(
     t1: Float[Array, " A"],
     t2: Float[Array, " B"],
 ) -> Float[Array, "A B"]:
-    r"""Pairwise autocov ``k(\tau) = H A(\tau) P_inf H^T`` for ``\tau = |t1 - t2|``.
+    r"""Pairwise autocov ``k(\tau) = H \exp(F|\tau|) P_\infty H^T``.
 
-    Uses the kernel's own :meth:`SDEKernel.discretise` to obtain
-    :math:`A(\\tau) = \\exp(F\\tau)` rather than calling
-    :func:`jax.scipy.linalg.expm` directly — concrete subclasses
-    (:class:`MaternSDE`, :class:`PeriodicSDE`, ...) override
-    ``discretise`` with closed-form reverse-mode-safe expressions; the
-    generic ``expm`` fallback uses scaling-and-squaring whose
-    dynamic-stop ``fori_loop`` breaks reverse-mode AD.
+    ``\tau = |t1 - t2|``. Thin wrapper around
+    :func:`gaussx.sde_autocovariance` that builds
+    the pairwise-difference grid; gaussx 0.0.11 owns the SDE-kernel
+    primitives so the math itself lives there. Same forward-mode
+    contract as the pre-0.0.11 pyrox helper.
     """
-    _F, _L, H, _Qc, P_inf = sde_kernel.sde_params()
     diffs = jnp.abs(t1[:, None] - t2[None, :])
-    flat = diffs.reshape(-1)
-    A_seq, _Q_seq = sde_kernel.discretise(flat)  # (A*B, d, d)
-    # H A P_inf H^T per pair — vmap over the leading pair axis.
-    K_flat = jax.vmap(lambda A: (H @ A @ P_inf @ H.T)[0, 0])(A_seq)
-    return K_flat.reshape(diffs.shape)
+    return sde_autocovariance(sde_kernel, diffs)
 
 
 class SparseMarkovGPPrior(eqx.Module):
