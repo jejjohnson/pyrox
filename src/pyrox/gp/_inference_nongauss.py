@@ -43,6 +43,8 @@ from typing import TYPE_CHECKING
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import lineax as lx
+from gaussx import safe_cholesky
 from jaxtyping import Array, Float
 
 from pyrox.gp._context import _kernel_context
@@ -104,12 +106,12 @@ class NonGaussConditionedGP(eqx.Module):
     converged: bool = eqx.field(static=True)
 
     def _pseudo_factor(self) -> Float[Array, "N N"]:
-        """Cholesky of ``K + diag(1/Λ + jitter)`` via :func:`_stable_cholesky`."""
+        """Cholesky of ``K + diag(1/Λ + jitter)`` via :func:`_psd_safe_cholesky`."""
         K = self.prior.kernel(self.prior.X, self.prior.X)
         N = K.shape[0]
         eye = jnp.eye(N, dtype=K.dtype)
         K_reg = K + (jnp.reciprocal(self.site_nat2) + self.prior.jitter)[:, None] * eye
-        return _stable_cholesky(K_reg)
+        return _psd_safe_cholesky(K_reg)
 
     def predict_mean(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
         r""":math:`\mu_* = \mu(X_*) + K_{*f}\,\alpha` with
@@ -199,7 +201,7 @@ def _posterior_from_diag_sites(
     eye = jnp.eye(N, dtype=K.dtype)
     sigma2 = jnp.reciprocal(nat2)
     K_reg = K + sigma2[:, None] * eye
-    L = _stable_cholesky(K_reg)
+    L = _psd_safe_cholesky(K_reg)
 
     y_tilde = nat1 / nat2
     residual = y_tilde - prior_mean
@@ -236,23 +238,23 @@ def _per_point_grad_hess(
     return g, h
 
 
-def _stable_cholesky(
-    M: Float[Array, "N N"], floor: float = 1e-3
-) -> Float[Array, "N N"]:
-    """Cholesky with one-shot adaptive jitter fallback.
+def _psd_operator(M: Float[Array, "N N"]) -> lx.AbstractLinearOperator:
+    """Wrap a symmetric PSD array as a tagged ``lineax`` operator."""
+    return lx.MatrixLinearOperator(M, lx.positive_semidefinite_tag)  # ty: ignore[invalid-return-type]
 
-    Try the symmetrized matrix as-is; if any entry of the Cholesky is
-    ``NaN`` (matrix is not numerically PD in the requested precision),
-    retry with ``floor * I`` added. Float32 + densely-packed kernel
+
+def _psd_safe_cholesky(M: Float[Array, "N N"]) -> Float[Array, "N N"]:
+    """Symmetrize ``M`` then call :func:`gaussx.safe_cholesky`.
+
+    ``gaussx.safe_cholesky`` runs an adaptive ``while_loop`` that
+    multiplies a diagonal jitter from ``1e-8`` to ``1e-2`` until the
+    Cholesky succeeds (or returns NaNs after 5 retries). It does not
+    symmetrize its input, so we do that here before wrapping ``M`` as
+    a PSD :mod:`lineax` operator. Float32 + densely-packed kernel
     inputs is the realistic failure case this guards against.
     """
-    M = 0.5 * (M + M.T)
-    L = jnp.linalg.cholesky(M)
-    return jax.lax.cond(
-        jnp.any(jnp.isnan(L)),
-        lambda: jnp.linalg.cholesky(M + floor * jnp.eye(M.shape[0], dtype=M.dtype)),
-        lambda: L,
-    )
+    M_sym = 0.5 * (M + M.T)
+    return safe_cholesky(_psd_operator(M_sym))
 
 
 def _ep_tilted_moments(
@@ -306,17 +308,17 @@ def _laplace_log_marginal(
     - \tfrac12 (\hat f - \mu)^\top K^{-1} (\hat f - \mu)
     - \tfrac12 \log |I + K \Lambda|`
 
-    with both Cholesky factorizations gated through :func:`_stable_cholesky`
+    with both Cholesky factorizations gated through :func:`_psd_safe_cholesky`
     to survive near-singular ``K`` under float32 + dense data.
     """
     ll = log_prob_per_point(f, y).sum()
     residual = f - prior_mean
-    L_K = _stable_cholesky(K)
+    L_K = _psd_safe_cholesky(K)
     alpha = jax.scipy.linalg.cho_solve((L_K, True), residual)
     quad = 0.5 * jnp.dot(residual, alpha)
     sqrt_lam = jnp.sqrt(Lam)
     B = jnp.eye(K.shape[0], dtype=K.dtype) + sqrt_lam[:, None] * K * sqrt_lam[None, :]
-    L_B = _stable_cholesky(B)
+    L_B = _psd_safe_cholesky(B)
     logdet = 2.0 * jnp.sum(jnp.log(jnp.diag(L_B)))
     return ll - quad - 0.5 * logdet
 
@@ -760,7 +762,7 @@ class QuasiNewtonInference(eqx.Module):
         K = _prior_K(prior)
         prior_mean = prior.mean(prior.X)
         log_prob_per_point = _log_prob_per_point_factory(likelihood)
-        L_K = _stable_cholesky(K)
+        L_K = _psd_safe_cholesky(K)
 
         def neg_log_post(f: Float[Array, " N"]) -> Float[Array, ""]:
             ll = log_prob_per_point(f, y).sum()
