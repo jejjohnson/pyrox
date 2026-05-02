@@ -19,6 +19,8 @@ Uncertainty-aware dense / random-feature layers:
   the Flipout estimator (Wen et al., 2018).
 * :class:`DenseVariational` — user-supplied prior + posterior callables
   for full flexibility over the weight distribution.
+* :class:`DenseVariationalDropout` — sparse variational dropout with
+  per-weight learnable dropout rates (Molchanov et al., 2017).
 * :class:`MCDropout` — always-on dropout for Monte Carlo uncertainty at
   inference time (Gal & Ghahramani, 2016).
 * :class:`DenseNCP` — Noise Contrastive Prior layer that decomposes a
@@ -34,12 +36,14 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, cast
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpyro
 import numpyro.distributions as dist
+from jax import Array as JaxArray
 from jaxtyping import Array, Float, Num
 
 from pyrox._basis import fourier_basis, real_spherical_harmonics, spectral_density
@@ -481,6 +485,142 @@ class DenseNCP(PyroxModule):
         stoch = scale * (x @ W_s + b_s)
 
         return det + stoch
+
+
+# --- DenseVariationalDropout ------------------------------------------------
+
+# Constants for the Molchanov et al. (2017) KL approximation between
+# q(W | theta, alpha) = N(theta, alpha * theta^2) and the improper
+# log-uniform prior on log|W|. log_alpha is clamped to a finite interval
+# to keep the approximation numerically well-behaved at extreme values.
+_VD_K1 = 0.63576
+_VD_K2 = 1.87320
+_VD_K3 = 1.48695
+_VD_LOG_ALPHA_MIN = -10.0
+_VD_LOG_ALPHA_MAX = 10.0
+
+
+def _vd_neg_kl(log_alpha: Float[Array, ...]) -> Float[Array, ...]:
+    log_alpha = jnp.clip(log_alpha, _VD_LOG_ALPHA_MIN, _VD_LOG_ALPHA_MAX)
+    alpha = jnp.exp(log_alpha)
+    return (
+        _VD_K1 * jax.nn.sigmoid(_VD_K2 + _VD_K3 * log_alpha)
+        - 0.5 * jnp.log1p(1.0 / alpha)
+        - _VD_K1
+    )
+
+
+class DenseVariationalDropout(PyroxModule):
+    r"""Sparse variational dropout dense layer.
+
+    Implements variational dropout (Kingma et al., 2015) extended by
+    Molchanov et al. (2017) to a log-uniform prior that enables
+    automatic sparsification via per-weight learnable dropout rates.
+    The variational posterior on weights is
+
+    .. math::
+
+        q(W_{ij} \mid \theta_{ij}, \alpha_{ij}) =
+        \mathcal{N}\!\bigl(\theta_{ij},\; \alpha_{ij}\,\theta_{ij}^2\bigr).
+
+    Forward passes use the *local reparameterization trick* — the
+    pre-activation distribution is closed-form and the noise is sampled
+    once per output unit per batch element rather than once per weight:
+
+    .. math::
+
+        \gamma = X\theta, \quad
+        \delta = X^{\circ 2}\,(\alpha \circ \theta^{\circ 2}), \quad
+        Y = \gamma + \sqrt{\delta} \circ \epsilon, \quad
+        \epsilon \sim \mathcal{N}(0, I).
+
+    The KL between the posterior and the log-uniform prior is
+    approximated analytically (Molchanov et al., 2017) and added to the
+    NumPyro trace via :func:`numpyro.factor`. SVI then optimizes
+
+    .. math::
+
+        \mathcal{L} = \mathbb{E}_q[\log p(y \mid f)] - \mathrm{KL}\bigl[q\,\|\,p\bigr].
+
+    Weights with ``log_alpha > threshold`` (default 3.0, dropout rate
+    ~0.95) are effectively pruned; inspect the trained pattern via
+    :meth:`sparsity`.
+
+    Attributes:
+        in_features: Input dimension.
+        out_features: Output dimension.
+        bias: Whether to include a bias term.
+        log_alpha_init: Initial value for ``log_alpha`` (typically a
+            small negative number, e.g., ``-5.0``).
+        threshold: ``log_alpha`` threshold for declaring a weight pruned.
+        pyrox_name: Explicit scope name for NumPyro site registration.
+
+    Example:
+        >>> import jax
+        >>> import jax.numpy as jnp
+        >>> from numpyro import handlers
+        >>> layer = DenseVariationalDropout(
+        ...     in_features=4, out_features=2, pyrox_name="vd"
+        ... )
+        >>> x = jnp.ones((3, 4))
+        >>> with handlers.seed(rng_seed=0):
+        ...     y = layer(x)
+        >>> y.shape
+        (3, 2)
+    """
+
+    in_features: int
+    out_features: int
+    bias: bool = True
+    log_alpha_init: float = -5.0
+    threshold: float = 3.0
+    pyrox_name: str | None = None
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D_out"]:
+        theta = self.pyrox_param(
+            "theta",
+            jnp.zeros((self.in_features, self.out_features)),
+        )
+        log_alpha = self.pyrox_param(
+            "log_alpha",
+            jnp.full(
+                (self.in_features, self.out_features),
+                float(self.log_alpha_init),
+            ),
+        )
+        log_alpha_clamped = jnp.clip(log_alpha, _VD_LOG_ALPHA_MIN, _VD_LOG_ALPHA_MAX)
+        alpha = jnp.exp(log_alpha_clamped)
+
+        gamma = x @ theta
+        delta = (x**2) @ (alpha * theta**2)
+        # Floor to a tiny positive value: keeps the sqrt gradient finite at
+        # delta = 0 without injecting visible noise (sqrt(1e-30) ≈ 1e-15).
+        std = jnp.sqrt(jnp.maximum(delta, 1e-30))
+        # numpyro.prng_key returns Array | None at the type level, but is
+        # always an Array inside a `seed` handler — which is required for
+        # the pyrox_param/factor calls above to succeed in any case.
+        key = cast(JaxArray, numpyro.prng_key())
+        eps = jax.random.normal(key, gamma.shape, dtype=gamma.dtype)
+        out = gamma + std * eps
+
+        if self.bias:
+            b = self.pyrox_param("bias", jnp.zeros(self.out_features))
+            out = out + b
+
+        numpyro.factor(
+            self._pyrox_fullname("kl"),
+            jnp.sum(_vd_neg_kl(log_alpha)),
+        )
+        return out
+
+    def sparsity(self, log_alpha: Float[Array, "D_in D_out"]) -> Float[Array, ""]:
+        """Fraction of weights with ``log_alpha > threshold``.
+
+        Pass the trained ``log_alpha`` parameter, typically retrieved
+        from the SVI param store under ``f"{pyrox_name}.log_alpha"``.
+        """
+        return jnp.mean((log_alpha > self.threshold).astype(log_alpha.dtype))
 
 
 def _rff_forward(

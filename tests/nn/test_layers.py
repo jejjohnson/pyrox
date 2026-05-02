@@ -10,6 +10,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 import jax.random as jr
 import numpyro.distributions as dist
+import pytest
 from numpyro import handlers
 
 from pyrox.nn import (
@@ -18,6 +19,7 @@ from pyrox.nn import (
     DenseNCP,
     DenseReparameterization,
     DenseVariational,
+    DenseVariationalDropout,
     LaplaceCosineFeatures,
     LaplaceFourierFeatures,
     MaternCosineFeatures,
@@ -210,6 +212,114 @@ def test_ncp_stochastic_when_scale_nonzero():
     with handlers.seed(rng_seed=1):
         y2 = layer(x)
     assert not jnp.allclose(y1, y2)
+
+
+# --- DenseVariationalDropout -----------------------------------------------
+
+
+def test_vd_output_shape():
+    layer = DenseVariationalDropout(in_features=3, out_features=5)
+    x = jnp.ones((4, 3))
+    with handlers.seed(rng_seed=0):
+        y = layer(x)
+    assert y.shape == (4, 5)
+
+
+def test_vd_no_bias():
+    layer = DenseVariationalDropout(in_features=3, out_features=5, bias=False)
+    x = jnp.ones((2, 3))
+    with handlers.seed(rng_seed=0):
+        y = layer(x)
+    assert y.shape == (2, 5)
+
+
+def test_vd_registers_param_and_kl_sites():
+    layer = DenseVariationalDropout(in_features=3, out_features=2, pyrox_name="vd")
+    x = jnp.ones((1, 3))
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        layer(x)
+    assert tr["vd.theta"]["type"] == "param"
+    assert tr["vd.log_alpha"]["type"] == "param"
+    assert tr["vd.bias"]["type"] == "param"
+    # numpyro.factor registers as a sample-type site backed by a Unit
+    # distribution whose log_factor carries the value.
+    assert "vd.kl" in tr
+
+
+def test_vd_kl_factor_is_non_positive():
+    layer = DenseVariationalDropout(
+        in_features=3, out_features=2, pyrox_name="vd", log_alpha_init=-5.0
+    )
+    x = jnp.ones((1, 3))
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        layer(x)
+    log_factor = float(tr["vd.kl"]["fn"].log_factor)
+    # Factor adds -KL to the log density; KL >= 0 so log_factor <= 0.
+    assert log_factor <= 0.0
+
+
+def test_vd_stochastic_across_seeds():
+    """With non-zero theta and non-trivial alpha, output is stochastic."""
+    layer = DenseVariationalDropout(
+        in_features=3, out_features=2, pyrox_name="vd", log_alpha_init=0.0
+    )
+    x = jnp.ones((4, 3))
+    theta = jnp.ones((3, 2))
+    with (
+        handlers.substitute(data={"vd.theta": theta}),
+        handlers.seed(rng_seed=0),
+    ):
+        y1 = layer(x)
+    with (
+        handlers.substitute(data={"vd.theta": theta}),
+        handlers.seed(rng_seed=1),
+    ):
+        y2 = layer(x)
+    assert not jnp.allclose(y1, y2)
+
+
+def test_vd_deterministic_limit_at_low_log_alpha():
+    """log_alpha << 0 → alpha → 0 → noise term vanishes; output ≈ x @ theta."""
+    layer = DenseVariationalDropout(
+        in_features=3, out_features=2, pyrox_name="vd", log_alpha_init=-10.0
+    )
+    x = jnp.ones((4, 3))
+    theta = jnp.ones((3, 2))
+    expected = x @ theta
+    with (
+        handlers.substitute(data={"vd.theta": theta}),
+        handlers.seed(rng_seed=0),
+    ):
+        y = layer(x)
+    # alpha = exp(-10) ≈ 4.54e-5; per-output noise std at this clamp is
+    # ~sqrt(in_features * alpha) ≈ 0.012. A few-sigma tolerance is safe.
+    assert jnp.allclose(y, expected, atol=0.1)
+
+
+def test_vd_zero_theta_init_gives_zero_output():
+    """With the default theta=0 init, gamma=0 and delta=0 ⇒ y = bias only."""
+    layer = DenseVariationalDropout(
+        in_features=3, out_features=2, pyrox_name="vd", bias=False
+    )
+    x = jnp.ones((4, 3))
+    with handlers.seed(rng_seed=0):
+        y = layer(x)
+    assert jnp.allclose(y, jnp.zeros_like(y))
+
+
+def test_vd_sparsity_threshold_selects_pruned_weights():
+    layer = DenseVariationalDropout(in_features=3, out_features=2, threshold=3.0)
+    log_alpha = jnp.array([[5.0, 1.0], [4.0, 2.0], [0.0, 3.5]])
+    # Strictly above 3.0: 5.0, 4.0, 3.5 → three of six.
+    s = float(layer.sparsity(log_alpha))
+    assert s == pytest.approx(3.0 / 6.0)
+
+
+def test_vd_is_pyrox_module():
+    from pyrox._core.pyrox_module import PyroxModule
+
+    layer = DenseVariationalDropout(in_features=2, out_features=2)
+    assert isinstance(layer, PyroxModule)
 
 
 # --- RBFFourierFeatures (SSGP-style) ---------------------------------------
