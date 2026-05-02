@@ -524,13 +524,15 @@ class NCPNormalOutput(PyroxModule):
 
     Plate semantics:
         Unlike pyrox's *weight-prior* KL terms, the NCP KL is
-        **data-dependent** — it sums per-example contributions
-        :math:`\mathrm{KL}_n` over the noisy batch. The correct
-        full-dataset estimator under
-        ``numpyro.plate("data", N, subsample_size=B)`` is the per-batch
-        sum scaled by :math:`N/B`, which NumPyro applies automatically
-        to *any* sample-type site (including factors) emitted *inside*
-        the plate. So the canonical pattern is::
+        **data-dependent** — every input row contributes its own
+        :math:`\mathrm{KL}_n` term. Internally the layer emits the
+        :func:`numpyro.factor` site as a *per-example* vector
+        (shape ``(*batch,)``) rather than a pre-summed scalar; that
+        lets NumPyro's plate machinery sum over the batch axis and
+        apply the subsample scaling automatically.
+
+        The canonical training pattern is to emit the layer **inside**
+        ``numpyro.plate("data", N, subsample_size=B)``::
 
             def model(x_clean, y_clean, x_noisy):
                 clean_mean, _clean_std = network(x_clean)
@@ -541,11 +543,13 @@ class NCPNormalOutput(PyroxModule):
                     numpyro.sample("obs",
                         dist.Normal(clean_mean, ...), obs=y_clean)
 
-        Calling the layer outside the plate emits the un-scaled batch
-        sum, which under-regularises by :math:`B/N`. If you need the
-        scaling but want the layer outside the plate (e.g. with a
-        subsample-aware custom loss), wrap it manually with
-        ``numpyro.handlers.scale(scale=N/B)``.
+        Inside the plate, NumPyro sums the per-example log-densities
+        over the batch dim and multiplies by ``scale = N / B``,
+        producing the standard unbiased estimate of the full-dataset
+        NCP KL ``Σ_{n=1}^N KL_n``. Outside any plate the layer's
+        contribution is just ``Σ_{n in batch} KL_n`` (i.e. the raw
+        batch sum), which is the correct full-dataset value when
+        you train on the whole dataset at once.
 
     Attributes:
         prior_mean: Prior predictive mean :math:`\mu_\mathrm{prior}`.
@@ -596,20 +600,26 @@ class NCPNormalOutput(PyroxModule):
         # → KL = 0 invariant for tiny `prior_std`.
         prior_var = jnp.asarray(self.prior_std) ** 2
         noisy_var = noisy_std**2
-        # Analytic Gaussian KL, summed across all batch and output dims.
         kl_per_elem = (
             jnp.log(self.prior_std)
             - 0.5 * jnp.log(noisy_var)
             + (noisy_var + (noisy_mean - self.prior_mean) ** 2) / (2.0 * prior_var)
             - 0.5
         )
-        kl = jnp.sum(kl_per_elem)
-        # Add -KL to the model log density so SVI maximises ELBO - KL.
-        # If this site lives inside `plate("data", N, subsample_size=B)`,
-        # NumPyro's plate scaling will multiply the factor value by N/B,
-        # giving the correct full-dataset estimate.
-        numpyro.factor(self._pyrox_fullname("kl"), -kl)
-        return kl
+        # Sum only over the trailing feature axis. Keeping the leading
+        # batch axis intact is what makes NumPyro's plate machinery do
+        # the right thing under `plate("data", N, subsample_size=B)`:
+        # the plate handler sums log_probs over the batch dim and then
+        # multiplies by `N/B`, giving the unbiased full-dataset estimate
+        # `(N/B) * sum_{n in batch} kl_n`. Emitting an already-summed
+        # scalar instead would let NumPyro broadcast it across the
+        # plate dim and over-count by a factor of B.
+        kl_per_example = jnp.sum(kl_per_elem, axis=-1)
+        # Add -kl_per_example to the model log density site-by-site.
+        # Outside any plate this sums to -total_KL; inside a plate the
+        # plate handler scales it correctly.
+        numpyro.factor(self._pyrox_fullname("kl"), -kl_per_example)
+        return jnp.sum(kl_per_example)
 
 
 # --- DenseVariationalDropout ------------------------------------------------
