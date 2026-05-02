@@ -50,8 +50,31 @@ def test_sde_params_shapes(order: int) -> None:
     assert P_inf.shape == (d, d)
 
 
+# --- pyrox-observable behaviour guards (defense against silent gaussx drift) -
+#
+# Constructor-validation tests for ``MaternSDE(order=...)`` and non-positive
+# scalars are intentionally absent: gaussx 0.0.11 does not raise on those
+# inputs, so there is no current pyrox-observable behaviour to guard. If
+# gaussx adds validation upstream, add the matching ``pytest.raises`` tests
+# here so a regression in gaussx surfaces in pyrox CI.
+
+
+def test_matern_sde_integer_inputs_yield_float_arrays() -> None:
+    """Integer ``variance`` / ``lengthscale`` must promote to floating-point.
+
+    Guards pyrox's public surface against an integer-dtype regression in a
+    future gaussx bump — downstream callers rely on the SDE matrices being
+    floats so that ``jax.scipy.linalg.expm`` and Cholesky-style ops compose
+    without dtype-mismatch errors.
+    """
+    sde = MaternSDE(variance=1, lengthscale=1, order=1)
+    F, _L, _H, _Q_c, P_inf = sde.sde_params()
+    assert jnp.issubdtype(F.dtype, jnp.floating)
+    assert jnp.issubdtype(P_inf.dtype, jnp.floating)
+
+
 def test_discretise_q_is_symmetric() -> None:
-    """``Q_k`` returned from the default ``discretise`` must be symmetric."""
+    """``Q_k`` returned from ``discretise_sequence`` must be symmetric."""
     sde = MaternSDE(variance=1.0, lengthscale=0.3, order=2)
     _A, Q = sde.discretise_sequence(jnp.array([0.05, 0.1, 0.5, 2.0]))
     # Each Q[i] should equal its transpose to machine precision.
@@ -170,7 +193,7 @@ def test_sde_autocov_matches_dense_matern(order: int, nu: float) -> None:
 
 @pytest.mark.parametrize("order", [0, 1, 2])
 def test_sde_kernel_is_jit_compatible(order: int) -> None:
-    """`sde_params` and `discretise` must compile under jit."""
+    """``sde_params`` and ``discretise_sequence`` must compile under jit."""
     sde = MaternSDE(variance=1.0, lengthscale=0.5, order=order)
 
     @jax.jit
