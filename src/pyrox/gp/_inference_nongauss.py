@@ -48,6 +48,7 @@ from gaussx import (
     AbstractIntegrator,
     GaussHermiteIntegrator,
     GaussianState,
+    ep_tilted_moments,
     safe_cholesky,
 )
 from jaxtyping import Array, Float
@@ -294,40 +295,6 @@ def _per_site_expectation(
         return integrator.integrate(fn_lifted, state).state.mean[0]  # ty: ignore[invalid-argument-type]
 
     return jax.vmap(per_site)(mean, var, y)
-
-
-def _ep_tilted_moments(
-    lp_per_n: Callable[[Float[Array, ""], Float[Array, ""]], Float[Array, ""]],
-    y: Float[Array, " N"],
-    cav_mean: Float[Array, " N"],
-    cav_var: Float[Array, " N"],
-    deg: int = 20,
-) -> tuple[Float[Array, " N"], Float[Array, " N"]]:
-    r"""Numerically stable tilted moments for EP.
-
-    Returns ``(tilted_mean, tilted_var)`` per site, where the tilted
-    distribution is :math:`q_{\rm cav}(f) p(y \mid f)`. Computes
-    :math:`\log p` at the cavity-rescaled Gauss-Hermite nodes once,
-    subtracts the per-site max to avoid overflow, then forms moment
-    ratios that are independent of the per-site shift.
-    """
-    from gaussx import gauss_hermite_points
-
-    nodes, weights = gauss_hermite_points(deg, dim=1)
-    x = nodes[:, 0]
-    log_w = jnp.log(weights / jnp.sqrt(2.0 * jnp.pi))
-    std = jnp.sqrt(cav_var)
-    f_grid = cav_mean[None, :] + std[None, :] * x[:, None]
-    log_p = jax.vmap(lambda f_row: jax.vmap(lp_per_n)(f_row, y))(f_grid)
-    log_unnorm = log_p + log_w[:, None]
-    shift = jnp.max(log_unnorm, axis=0, keepdims=True)
-    w_unnorm = jnp.exp(log_unnorm - shift)
-    Z_unnorm = jnp.sum(w_unnorm, axis=0)
-    Z_safe = jnp.maximum(Z_unnorm, 1e-30)
-    tilted_mean = jnp.sum(w_unnorm * f_grid, axis=0) / Z_safe
-    tilted_sq = jnp.sum(w_unnorm * f_grid * f_grid, axis=0) / Z_safe
-    tilted_var = jnp.maximum(tilted_sq - tilted_mean**2, 1e-12)
-    return tilted_mean, tilted_var
 
 
 def _laplace_log_marginal(
@@ -682,8 +649,8 @@ class ExpectationPropagation(eqx.Module):
         integrator: Cavity integrator. Default
             ``gaussx.GaussHermiteIntegrator(order=20)``. EP only reads
             the integrator's ``order`` attribute when delegating to
-            :func:`_ep_tilted_moments`; non-Gauss-Hermite integrators
-            fall back to ``order=20``.
+            :func:`gaussx.ep_tilted_moments`; non-Gauss-Hermite
+            integrators fall back to ``order=20``.
         max_iter: Iterations. Default ``40``.
         damping: Damping in (0, 1]. Default ``0.5``.
         tol: ``inf``-norm convergence on the posterior mean.
@@ -718,6 +685,15 @@ class ExpectationPropagation(eqx.Module):
         def lp(f_n: Float[Array, ""], y_n: Float[Array, ""]) -> Float[Array, ""]:
             return log_prob_per_point(f_n[None], y_n[None])[0]
 
+        order = getattr(self.integrator, "order", 20)
+
+        def _per_site_tilted(
+            m_n: Float[Array, ""],
+            v_n: Float[Array, ""],
+            y_n: Float[Array, ""],
+        ) -> tuple[Float[Array, ""], Float[Array, ""]]:
+            return ep_tilted_moments(lambda f: lp(f, y_n), m_n, v_n, order=order)
+
         converged = False
         n_iter = 0
         for it in range(self.max_iter):
@@ -725,18 +701,11 @@ class ExpectationPropagation(eqx.Module):
             cav_var = jnp.reciprocal(cav_prec)
             cav_mean = cav_var * (q_mean / q_var - nat1)
 
-            # Tilted moments computed in log-space for numerical
-            # stability. With Gauss-Hermite nodes ``x_i`` and weights
-            # ``w_i' = w_i / sqrt(2*pi)``, the tilted moments per site
-            # are weighted sums of ``exp(log p_n(m_n + s_n x_i))``. We
-            # subtract the per-site max log-density before exponentiating
-            # (the standard log-sum-exp trick) so neither overflow nor
-            # underflow can corrupt the moment ratios. Z itself does not
-            # enter the marginal-likelihood approximation below — only
-            # the moment ratios matter — so the per-site shifts cancel.
-            tilted_mean, tilted_var = _ep_tilted_moments(
-                lp, y, cav_mean, cav_var, deg=getattr(self.integrator, "order", 20)
-            )
+            # Tilted moments via :func:`gaussx.ep_tilted_moments`. The
+            # gaussx API expects a ``log_lik_fn(f)`` with the per-site
+            # target baked in, so ``_per_site_tilted`` closes over
+            # ``y_n`` and ``vmap`` recovers the ``(N,)`` shape contract.
+            tilted_mean, tilted_var = jax.vmap(_per_site_tilted)(cav_mean, cav_var, y)
 
             # New site naturals from matched moments minus the cavity.
             new_prec = jnp.reciprocal(tilted_var) - cav_prec
