@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from gaussx import ep_tilted_moments
+from gaussx import damped_natural_update, ep_tilted_moments
 from jaxtyping import Array, Float
 
 from pyrox.gp._inference_nongauss import (
@@ -230,8 +230,10 @@ class LaplaceMarkovInference(eqx.Module):
             g, h = _per_point_grad_hess(log_prob_per_point, f, y)
             Lam = jnp.maximum(-h, self.precision_floor)
             new_nat1 = g + Lam * f
-            nat1 = (1.0 - self.damping) * nat1 + self.damping * new_nat1
-            nat2 = (1.0 - self.damping) * nat2 + self.damping * Lam
+            nat1, nat2 = damped_natural_update(
+                nat1, nat2, new_nat1, Lam, lr=self.damping
+            )
+            assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
             nat2 = jnp.maximum(nat2, self.precision_floor)
             f_new, _, _ = _markov_smoothed_posterior(prior, nat1, nat2)
             delta = jnp.max(jnp.abs(f_new - f))
@@ -385,8 +387,10 @@ class PosteriorLinearizationMarkov(eqx.Module):
 
             new_prec = jnp.maximum(-h_avg, self.precision_floor)
             new_nat1 = g_avg + new_prec * cav_mean
-            nat1 = (1.0 - self.damping) * nat1 + self.damping * new_nat1
-            nat2 = (1.0 - self.damping) * nat2 + self.damping * new_prec
+            nat1, nat2 = damped_natural_update(
+                nat1, nat2, new_nat1, new_prec, lr=self.damping
+            )
+            assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
             nat2 = jnp.maximum(nat2, self.precision_floor)
 
             q_mean_new, q_var, _ = _markov_smoothed_posterior(prior, nat1, nat2)
@@ -484,8 +488,10 @@ class ExpectationPropagationMarkov(eqx.Module):
             new_prec = jnp.reciprocal(tilted_var) - cav_prec
             new_prec = jnp.maximum(new_prec, self.precision_floor)
             new_nat1 = tilted_mean / tilted_var - cav_mean / cav_var
-            nat1 = (1.0 - self.damping) * nat1 + self.damping * new_nat1
-            nat2 = (1.0 - self.damping) * nat2 + self.damping * new_prec
+            nat1, nat2 = damped_natural_update(
+                nat1, nat2, new_nat1, new_prec, lr=self.damping
+            )
+            assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
             nat2 = jnp.maximum(nat2, self.precision_floor)
 
             q_mean_new, q_var, _ = _markov_smoothed_posterior(prior, nat1, nat2)

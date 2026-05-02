@@ -48,6 +48,7 @@ from gaussx import (
     AbstractIntegrator,
     GaussHermiteIntegrator,
     GaussianState,
+    damped_natural_update,
     ep_tilted_moments,
     safe_cholesky,
 )
@@ -599,8 +600,10 @@ class PosteriorLinearization(eqx.Module):
             H = jnp.maximum(-E_hess, self.precision_floor)
             nat1_target = E_grad + H * cav_mean
             nat2_target = H
-            nat1 = (1.0 - self.damping) * nat1 + self.damping * nat1_target
-            nat2 = (1.0 - self.damping) * nat2 + self.damping * nat2_target
+            nat1, nat2 = damped_natural_update(
+                nat1, nat2, nat1_target, nat2_target, lr=self.damping
+            )
+            assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
             nat2 = jnp.maximum(nat2, self.precision_floor)
 
             q_mean_new, _, q_var = _posterior_from_diag_sites(K, nat1, nat2, prior_mean)
@@ -711,9 +714,10 @@ class ExpectationPropagation(eqx.Module):
             new_prec = jnp.reciprocal(tilted_var) - cav_prec
             new_prec = jnp.maximum(new_prec, self.precision_floor)
             new_nat1 = tilted_mean / tilted_var - cav_mean / cav_var
-            # Damping in natural-parameter space.
-            nat1 = (1.0 - self.damping) * nat1 + self.damping * new_nat1
-            nat2 = (1.0 - self.damping) * nat2 + self.damping * new_prec
+            nat1, nat2 = damped_natural_update(
+                nat1, nat2, new_nat1, new_prec, lr=self.damping
+            )
+            assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
             nat2 = jnp.maximum(nat2, self.precision_floor)
 
             q_mean_new, _, q_var = _posterior_from_diag_sites(K, nat1, nat2, prior_mean)
