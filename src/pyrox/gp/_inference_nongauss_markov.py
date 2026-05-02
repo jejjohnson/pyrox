@@ -26,11 +26,11 @@ from typing import TYPE_CHECKING
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+from gaussx import ep_tilted_moments
 from jaxtyping import Array, Float
 
 from pyrox.gp._inference_nongauss import (
     _check_scalar_latent,
-    _ep_tilted_moments,
     _log_prob_per_point_factory,
     _per_point_grad_hess,
 )
@@ -460,6 +460,18 @@ class ExpectationPropagationMarkov(eqx.Module):
         # produces a posterior variance that matches the prior.
         q_var = _prior_marginal_variance(prior).astype(prior_mean.dtype)
 
+        # ``gaussx.ep_tilted_moments`` requires ``log_lik_fn(f)`` with the
+        # per-site target baked in; close over ``y_n`` per site via vmap
+        # to recover the (N,) shape contract.
+        deg = self.deg
+
+        def _per_site_tilted(
+            m_n: Float[Array, ""],
+            v_n: Float[Array, ""],
+            y_n: Float[Array, ""],
+        ) -> tuple[Float[Array, ""], Float[Array, ""]]:
+            return ep_tilted_moments(lambda f: lp(f, y_n), m_n, v_n, order=deg)
+
         converged = False
         n_iter = 0
         for it in range(self.max_iter):
@@ -467,9 +479,7 @@ class ExpectationPropagationMarkov(eqx.Module):
             cav_var = jnp.reciprocal(cav_prec)
             cav_mean = cav_var * (q_mean / q_var - nat1)
 
-            tilted_mean, tilted_var = _ep_tilted_moments(
-                lp, y, cav_mean, cav_var, deg=self.deg
-            )
+            tilted_mean, tilted_var = jax.vmap(_per_site_tilted)(cav_mean, cav_var, y)
 
             new_prec = jnp.reciprocal(tilted_var) - cav_prec
             new_prec = jnp.maximum(new_prec, self.precision_floor)
