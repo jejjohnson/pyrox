@@ -546,6 +546,31 @@ class DenseVariationalDropout(PyroxModule):
     ~0.95) are effectively pruned; inspect the trained pattern via
     :meth:`sparsity`.
 
+    Plate semantics:
+        The KL contribution is registered via :func:`numpyro.factor`,
+        which is itself a sample-type site and therefore subject to
+        ``numpyro.plate`` scaling. To keep the per-layer KL counted
+        once (not scaled by the data-plate's subsample ratio), call
+        the layer **outside** any ``plate("data", ..., subsample_size=...)``
+        block — the standard pyrox / NumPyro convention for global
+        Bayesian parameters. Plate only the observation likelihood.
+
+        Correct (forward outside the data plate)::
+
+            def model(x, y=None):
+                layer = DenseVariationalDropout(in_features=D, out_features=1)
+                f = layer(x).squeeze(-1)               # KL emitted here
+                with numpyro.plate("data", x.shape[0]):
+                    numpyro.sample("obs", dist.Normal(f, 0.5), obs=y)
+
+        Incorrect (forward inside a subsampled data plate scales KL by
+        ``N / subsample_size``)::
+
+            def model(x, y=None):
+                with numpyro.plate("data", N, subsample_size=B) as idx:
+                    f = layer(x[idx]).squeeze(-1)      # ⚠ scales KL
+                    numpyro.sample("obs", ...)
+
     Attributes:
         in_features: Input dimension.
         out_features: Output dimension.

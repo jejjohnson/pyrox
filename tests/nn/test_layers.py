@@ -322,6 +322,48 @@ def test_vd_is_pyrox_module():
     assert isinstance(layer, PyroxModule)
 
 
+def test_vd_svi_elbo_decreases_with_observation_plate():
+    """Canonical SVI pattern: forward outside the data plate, obs inside.
+
+    This is the documented usage convention; the KL contribution is
+    counted exactly once per layer (no plate scaling) and Trace_ELBO
+    must drive the loss down on a tiny linear regression problem.
+
+    Regression test for the plate-scaling concern raised on PR #126:
+    the layer is correct under this canonical pattern.
+    """
+    import numpyro
+    from numpyro.infer import SVI, Trace_ELBO
+    from numpyro.infer.autoguide import AutoDelta
+
+    rng = jr.PRNGKey(0)
+    x = jnp.linspace(-1.0, 1.0, 16)[:, None]
+    y = 2.5 * x.squeeze(-1) + 0.1
+
+    def model(x, y=None):
+        layer = DenseVariationalDropout(
+            in_features=1, out_features=1, pyrox_name="vd", log_alpha_init=-5.0
+        )
+        f = layer(x).squeeze(-1)
+        sigma = numpyro.param(
+            "sigma", jnp.array(0.5), constraint=dist.constraints.positive
+        )
+        with numpyro.plate("data", x.shape[0]):
+            numpyro.sample("obs", dist.Normal(f, sigma), obs=y)
+
+    guide = AutoDelta(model)
+    svi = SVI(model, guide, numpyro.optim.Adam(1e-2), Trace_ELBO())
+    state = svi.init(rng, x, y)
+    losses = []
+    for _ in range(50):
+        state, loss = svi.update(state, x, y)
+        losses.append(float(loss))
+
+    assert all(jnp.isfinite(jnp.asarray(losses)))
+    # Loss should fall meaningfully on this trivial problem.
+    assert losses[-1] < losses[0] - 1.0
+
+
 # --- RBFFourierFeatures (SSGP-style) ---------------------------------------
 
 
