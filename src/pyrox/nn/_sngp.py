@@ -62,20 +62,28 @@ class LaplaceRandomFeatureCovariance(eqx.Module):
     The container is *pure-functional*: :meth:`update` returns a new
     instance with an updated precision rather than mutating ``self``,
     matching how Equinox composes immutable PyTrees with optimisers.
-    A small ridge :math:`\lambda I` initialises and stabilises the
-    precision; choose :math:`\lambda` small relative to the expected
-    feature scale.
+    A small ridge :math:`\lambda` initialises the precision at
+    :math:`\lambda I` and is *also* added at solve-time inside
+    :meth:`covariance` and :meth:`variance_at` so the Cholesky stays
+    numerically well-conditioned even after many EMA steps with low
+    momentum (which would otherwise let the ridge contribution decay
+    geometrically and the precision approach singularity).
+    Equivalently :math:`\hat\Sigma = (\hat\Lambda + \lambda I)^{-1}` —
+    the Bayesian-linear-regression interpretation of SNGP, where
+    :math:`\lambda I` is a Gaussian prior precision on the head weights.
 
     Attributes:
         precision: Current precision matrix :math:`\hat{\Lambda}`.
         momentum: EMA momentum :math:`m \in [0, 1]`. Higher values give
             slower updates; ``0.999`` works well for most settings.
-        ridge: Diagonal ridge :math:`\lambda` for numerical stability.
+        ridge: Diagonal ridge :math:`\lambda`. Used both as the init
+            value of ``precision`` and as a solve-time jitter to keep
+            the Cholesky well-defined.
     """
 
     precision: Float[Array, "D D"]
-    momentum: float = eqx.field(default=0.999)
-    ridge: float = eqx.field(default=1.0)
+    momentum: float = eqx.field(static=True, default=0.999)
+    ridge: float = eqx.field(static=True, default=1.0)
 
     @classmethod
     def init(
@@ -106,9 +114,12 @@ class LaplaceRandomFeatureCovariance(eqx.Module):
         return eqx.tree_at(lambda c: c.precision, self, new_precision)
 
     def _chol(self) -> Float[Array, "D D"]:
-        # Symmetrise to absorb floating-point asymmetry in the EMA.
+        # Symmetrise to absorb floating-point asymmetry in the EMA, then
+        # add ridge jitter so the matrix is guaranteed positive-definite
+        # regardless of how the EMA has evolved.
         sym = 0.5 * (self.precision + self.precision.T)
-        return jnp.linalg.cholesky(sym)
+        D = sym.shape[0]
+        return jnp.linalg.cholesky(sym + self.ridge * jnp.eye(D, dtype=sym.dtype))
 
     def covariance(self) -> Float[Array, "D D"]:
         """Inverse of the precision matrix (one-shot Cholesky inversion)."""
@@ -150,9 +161,13 @@ class RandomFeatureGaussianProcess(PyroxModule):
         \qquad \mu(x) = \phi(x)\, H + b_H.
 
     The frequencies :math:`W` and bias :math:`b` of the RFF map are
-    *frozen at init* (they implicitly define the kernel approximation);
-    the lengthscale :math:`\ell`, the linear head :math:`H, b_H`, and
-    the Laplace precision are the trainable / updated quantities.
+    *frozen* (they implicitly define the kernel approximation): they
+    are registered as ``pyrox_param`` sites for substitution and
+    checkpointing, then guarded with :func:`jax.lax.stop_gradient`
+    inside :meth:`feature_map` so SGD-style optimisers leave them
+    untouched. The lengthscale :math:`\ell`, the linear head
+    :math:`H, b_H`, and the Laplace precision are the trainable /
+    updated quantities.
 
     Predictive variance — when :math:`\hat{\Lambda}` is the current
     precision matrix:
@@ -281,13 +296,14 @@ class RandomFeatureGaussianProcess(PyroxModule):
     def feature_map(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D"]:
         r"""Random Fourier feature map: :math:`\phi(x) = \sqrt{2/D}\,\cos(Wx/\ell + b)`.
 
-        Frequencies and bias are frozen ``pyrox_param`` sites — they
-        are passed through SVI's param store with their init value but
-        rarely move appreciably; the lengthscale is the active
+        Frequencies and bias are registered as ``pyrox_param`` sites for
+        substitution / checkpointing, but :func:`jax.lax.stop_gradient`
+        is applied so SVI's gradient-based optimisers leave them
+        frozen at their init values. The lengthscale is the active
         bandwidth control and is constrained positive.
         """
-        W = self.pyrox_param("W", self.W_init)
-        b = self.pyrox_param("bias", self.bias_init)
+        W = jax.lax.stop_gradient(self.pyrox_param("W", self.W_init))
+        b = jax.lax.stop_gradient(self.pyrox_param("bias", self.bias_init))
         ls = self.pyrox_param(
             "lengthscale",
             jnp.asarray(self.init_lengthscale),

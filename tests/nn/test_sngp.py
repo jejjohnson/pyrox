@@ -33,41 +33,56 @@ def test_lrfc_init_starts_at_ridge_identity():
 
 def test_lrfc_update_is_pure_functional_and_ema():
     cov = LaplaceRandomFeatureCovariance.init(3, momentum=0.9, ridge=1.0)
-    features = jnp.eye(3) * 2.0  # rows are 2 * e_i; outer/3 = (4/3) I_3 ... no
-    # Actually with rows (2,0,0),(0,2,0),(0,0,2): outer = features.T @ features / 3
-    # = diag(4,4,4)/3 = (4/3) I_3
+    # Rows (2,0,0), (0,2,0), (0,0,2) → features.T @ features / 3 = (4/3) I_3.
+    features = jnp.eye(3) * 2.0
     new_cov = cov.update(features)
     # Original is unchanged.
     assert jnp.allclose(cov.precision, jnp.eye(3))
-    # EMA: 0.9 * I + 0.1 * (4/3) I = (0.9 + 4/30) I.
+    # EMA: 0.9 * I + 0.1 * (4/3) I.
     expected_diag = 0.9 + (1.0 - 0.9) * 4.0 / 3.0
     assert jnp.allclose(new_cov.precision, expected_diag * jnp.eye(3), atol=1e-6)
 
 
-def test_lrfc_covariance_inverts_precision():
-    """covariance() ≈ inv(precision) up to symmetrisation."""
+def test_lrfc_covariance_inverts_precision_plus_ridge():
+    """covariance() ≈ inv(precision + ridge * I) — matches the
+    Bayesian-linear-regression interpretation where ``ridge * I`` is
+    the head's prior precision."""
     key = jr.PRNGKey(0)
     A = jr.normal(key, (5, 5))
     sym = A @ A.T + jnp.eye(5)  # symmetric positive definite
-    cov = LaplaceRandomFeatureCovariance(precision=sym, momentum=0.999, ridge=1.0)
+    ridge = 0.5
+    cov = LaplaceRandomFeatureCovariance(precision=sym, momentum=0.999, ridge=ridge)
     Sigma = cov.covariance()
-    assert jnp.allclose(sym @ Sigma, jnp.eye(5), atol=1e-4)
+    expected_left = sym + ridge * jnp.eye(5)
+    assert jnp.allclose(expected_left @ Sigma, jnp.eye(5), atol=1e-4)
 
 
 def test_lrfc_variance_at_matches_explicit_quadratic_form():
     key = jr.PRNGKey(1)
     A = jr.normal(key, (4, 4))
     sym = A @ A.T + jnp.eye(4)
-    cov = LaplaceRandomFeatureCovariance(precision=sym, momentum=0.999, ridge=1.0)
+    ridge = 0.5
+    cov = LaplaceRandomFeatureCovariance(precision=sym, momentum=0.999, ridge=ridge)
 
     features = jr.normal(jr.PRNGKey(2), (3, 4))
     var = cov.variance_at(features)
 
-    Sigma = jnp.linalg.inv(sym)
+    Sigma = jnp.linalg.inv(sym + ridge * jnp.eye(4))
     expected = jnp.einsum("nd,de,ne->n", features, Sigma, features)
     assert jnp.allclose(var, expected, atol=1e-4)
     # Quadratic form on a positive-definite matrix is non-negative.
     assert jnp.all(var >= 0.0)
+
+
+def test_lrfc_chol_stays_well_conditioned_at_low_momentum():
+    """Even with momentum=0 (no carry-over of init ridge), `_chol` succeeds
+    because ``ridge * I`` is added at solve time."""
+    cov = LaplaceRandomFeatureCovariance.init(6, momentum=0.0, ridge=1.0)
+    # Rank-1 update — singular without ridge.
+    features = jnp.zeros((1, 6)).at[0, 0].set(1.0)
+    cov = cov.update(features)  # precision is rank-1 only
+    Sigma = cov.covariance()  # would crash without solve-time jitter
+    assert jnp.all(jnp.isfinite(Sigma))
 
 
 # --- RandomFeatureGaussianProcess -----------------------------------------
@@ -249,22 +264,22 @@ def test_sngp_is_pyrox_module():
 
 def test_sngp_layer_is_jax_pytree_with_covariance_leaf():
     """The covariance container must be a leaf in the JAX PyTree so
-    `update_precision`'s `eqx.tree_at` works correctly."""
+    ``update_precision``'s ``eqx.tree_at`` works correctly."""
+    import jax
+
     layer = RandomFeatureGaussianProcess.init(
         jr.PRNGKey(0),
         in_features=2,
         num_features=4,
         out_features=1,
+        ridge=1.0,
     )
-    leaves = eqx.filter(layer, eqx.is_array)
-    # At least precision is in there.
+    # Pull just the floating-point array leaves; static / non-array
+    # fields become None under eqx.partition's array filter and would
+    # otherwise show up in tree_leaves.
+    arrays = eqx.filter(layer, eqx.is_inexact_array)
+    leaves = jax.tree_util.tree_leaves(arrays)
+    # The (4, 4) precision initialised at ridge*I = I_4 must be present.
     assert any(
-        leaf.shape == (4, 4) and jnp.allclose(leaf, jnp.eye(4))
-        for leaf in jax_tree_leaves(leaves)
+        leaf.shape == (4, 4) and jnp.allclose(leaf, jnp.eye(4)) for leaf in leaves
     )
-
-
-def jax_tree_leaves(tree):
-    import jax
-
-    return jax.tree_util.tree_leaves(tree)
