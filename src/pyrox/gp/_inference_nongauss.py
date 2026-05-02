@@ -603,7 +603,8 @@ class PosteriorLinearization(eqx.Module):
             nat1, nat2 = damped_natural_update(
                 nat1, nat2, nat1_target, nat2_target, lr=self.damping
             )
-            nat2 = jnp.maximum(nat2, self.precision_floor)  # ty: ignore[invalid-argument-type]
+            assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
+            nat2 = jnp.maximum(nat2, self.precision_floor)
 
             q_mean_new, _, q_var = _posterior_from_diag_sites(K, nat1, nat2, prior_mean)
             delta = jnp.max(jnp.abs(q_mean_new - q_mean))
@@ -716,7 +717,8 @@ class ExpectationPropagation(eqx.Module):
             nat1, nat2 = damped_natural_update(
                 nat1, nat2, new_nat1, new_prec, lr=self.damping
             )
-            nat2 = jnp.maximum(nat2, self.precision_floor)  # ty: ignore[invalid-argument-type]
+            assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
+            nat2 = jnp.maximum(nat2, self.precision_floor)
 
             q_mean_new, _, q_var = _posterior_from_diag_sites(K, nat1, nat2, prior_mean)
             delta = jnp.max(jnp.abs(q_mean_new - q_mean))

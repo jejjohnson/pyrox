@@ -233,7 +233,8 @@ class LaplaceMarkovInference(eqx.Module):
             nat1, nat2 = damped_natural_update(
                 nat1, nat2, new_nat1, Lam, lr=self.damping
             )
-            nat2 = jnp.maximum(nat2, self.precision_floor)  # ty: ignore[invalid-argument-type]
+            assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
+            nat2 = jnp.maximum(nat2, self.precision_floor)
             f_new, _, _ = _markov_smoothed_posterior(prior, nat1, nat2)
             delta = jnp.max(jnp.abs(f_new - f))
             f = f_new
@@ -389,7 +390,8 @@ class PosteriorLinearizationMarkov(eqx.Module):
             nat1, nat2 = damped_natural_update(
                 nat1, nat2, new_nat1, new_prec, lr=self.damping
             )
-            nat2 = jnp.maximum(nat2, self.precision_floor)  # ty: ignore[invalid-argument-type]
+            assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
+            nat2 = jnp.maximum(nat2, self.precision_floor)
 
             q_mean_new, q_var, _ = _markov_smoothed_posterior(prior, nat1, nat2)
             delta = jnp.max(jnp.abs(q_mean_new - q_mean))
@@ -489,7 +491,8 @@ class ExpectationPropagationMarkov(eqx.Module):
             nat1, nat2 = damped_natural_update(
                 nat1, nat2, new_nat1, new_prec, lr=self.damping
             )
-            nat2 = jnp.maximum(nat2, self.precision_floor)  # ty: ignore[invalid-argument-type]
+            assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
+            nat2 = jnp.maximum(nat2, self.precision_floor)
 
             q_mean_new, q_var, _ = _markov_smoothed_posterior(prior, nat1, nat2)
             delta = jnp.max(jnp.abs(q_mean_new - q_mean))
