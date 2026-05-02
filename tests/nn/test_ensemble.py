@@ -12,7 +12,7 @@ from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 
 from pyrox._core.pyrox_module import PyroxModule
-from pyrox.nn import DenseRank1, LayerNormEnsemble
+from pyrox.nn import DenseRank1, LayerNormEnsemble, MultiHeadAttentionBE
 
 
 # --- forward shape & init ---------------------------------------------------
@@ -389,3 +389,269 @@ def test_layer_norm_ensemble_composes_with_dense_rank1():
 def test_layer_norm_ensemble_is_pyrox_module():
     ln = LayerNormEnsemble(ensemble_size=2, feature_dim=4)
     assert isinstance(ln, PyroxModule)
+
+
+# --- MultiHeadAttentionBE -------------------------------------------------
+
+
+def test_mha_be_self_attention_output_shape():
+    mha = MultiHeadAttentionBE.init(
+        jr.PRNGKey(0), embed_dim=8, num_heads=2, ensemble_size=3
+    )
+    x = jnp.ones((5, 8))
+    with handlers.seed(rng_seed=0):
+        y = mha(x, x, x)
+    assert y.shape == (3, 5, 8)
+
+
+def test_mha_be_handles_seq_len_equal_to_ensemble_size():
+    """Regression: a shape-based ``has_ensemble`` heuristic would
+    mis-classify the un-ensembled query / key / value when the
+    sequence length happens to equal the ensemble size, breaking
+    self-attention for short sequences.
+    """
+    M = 4
+    mha = MultiHeadAttentionBE.init(
+        jr.PRNGKey(0), embed_dim=8, num_heads=2, ensemble_size=M
+    )
+    # T = M, S = M — the failure mode Codex flagged.
+    x = jnp.ones((M, 8))
+    with handlers.seed(rng_seed=0):
+        y = mha(x, x, x)
+    assert y.shape == (M, M, 8)
+    # Cross-attention with S = M but T ≠ M.
+    q = jnp.ones((3, 8))
+    kv = jnp.ones((M, 8))
+    with handlers.seed(rng_seed=0):
+        y_cross = mha(q, kv, kv)
+    assert y_cross.shape == (M, 3, 8)
+
+
+def test_mha_be_cross_attention_output_shape():
+    """T (query) ≠ S (key/value) is supported for cross-attention."""
+    mha = MultiHeadAttentionBE.init(
+        jr.PRNGKey(0), embed_dim=8, num_heads=2, ensemble_size=3
+    )
+    q = jnp.ones((4, 8))
+    kv = jnp.ones((6, 8))
+    with handlers.seed(rng_seed=0):
+        y = mha(q, kv, kv)
+    assert y.shape == (3, 4, 8)
+
+
+def test_mha_be_init_validates_embed_dim_divisibility():
+    with pytest.raises(ValueError, match=r"divisible by num_heads"):
+        MultiHeadAttentionBE.init(
+            jr.PRNGKey(0), embed_dim=7, num_heads=2, ensemble_size=2
+        )
+
+
+def test_mha_be_init_validates_positive_dims():
+    with pytest.raises(ValueError, match=r"must all be > 0"):
+        MultiHeadAttentionBE.init(
+            jr.PRNGKey(0), embed_dim=0, num_heads=2, ensemble_size=2
+        )
+    with pytest.raises(ValueError, match=r"must all be > 0"):
+        MultiHeadAttentionBE.init(
+            jr.PRNGKey(0), embed_dim=8, num_heads=2, ensemble_size=0
+        )
+
+
+def test_mha_be_requires_inits():
+    with pytest.raises(ValueError, match=r"\.init\(key"):
+        MultiHeadAttentionBE(embed_dim=4, num_heads=2, ensemble_size=2)
+
+
+def test_mha_be_registers_all_four_projection_param_sites():
+    mha = MultiHeadAttentionBE.init(
+        jr.PRNGKey(0),
+        embed_dim=4,
+        num_heads=2,
+        ensemble_size=3,
+        pyrox_name="mha",
+    )
+    x = jnp.ones((2, 4))
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        mha(x, x, x)
+    # With bias=True (default): 4 projections × {W, r, s, b} = 16 sites.
+    for proj in ("q", "k", "v", "o"):
+        for name in ("W", "r", "s", "b"):
+            key = f"mha.{proj}_{name}"
+            assert tr[key]["type"] == "param", f"{key} should be a param site"
+
+
+def test_mha_be_no_bias_skips_bias_param_sites():
+    """``bias=False`` should not leak unused ``_b`` params into the store."""
+    mha = MultiHeadAttentionBE.init(
+        jr.PRNGKey(0),
+        embed_dim=4,
+        num_heads=2,
+        ensemble_size=3,
+        bias=False,
+        pyrox_name="mha_nobias",
+    )
+    x = jnp.ones((2, 4))
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        y = mha(x, x, x)
+    assert y.shape == (3, 2, 4)
+    for proj in ("q", "k", "v", "o"):
+        for name in ("W", "r", "s"):
+            assert f"mha_nobias.{proj}_{name}" in tr
+        # No bias site emitted for any projection.
+        assert f"mha_nobias.{proj}_b" not in tr
+
+
+def test_mha_be_post_init_validates_positive_dims():
+    """Direct construction must reject non-positive dims with a clear error,
+    not raise ``ZeroDivisionError`` from the embed_dim % num_heads check.
+    """
+    from pyrox.nn._ensemble import _Rank1ProjInit
+
+    good = _Rank1ProjInit(
+        W=jnp.zeros((4, 4)),
+        r=jnp.ones((2, 4)),
+        s=jnp.ones((2, 4)),
+        b=jnp.zeros((2, 4)),
+    )
+    with pytest.raises(ValueError, match=r"must all be > 0"):
+        MultiHeadAttentionBE(
+            embed_dim=4,
+            num_heads=0,  # would crash modulo before this fix
+            ensemble_size=2,
+            q_init=good,
+            k_init=good,
+            v_init=good,
+            o_init=good,
+        )
+    with pytest.raises(ValueError, match=r"must all be > 0"):
+        MultiHeadAttentionBE(
+            embed_dim=0,
+            num_heads=2,
+            ensemble_size=2,
+            q_init=good,
+            k_init=good,
+            v_init=good,
+            o_init=good,
+        )
+
+
+def test_mha_be_post_init_validates_init_array_shapes():
+    """Bypassing ``.init`` with mis-sized projection arrays must fail loudly."""
+    from pyrox.nn._ensemble import _Rank1ProjInit
+
+    good = _Rank1ProjInit(
+        W=jnp.zeros((4, 4)),
+        r=jnp.ones((2, 4)),
+        s=jnp.ones((2, 4)),
+        b=jnp.zeros((2, 4)),
+    )
+    bad_W = _Rank1ProjInit(
+        W=jnp.zeros((3, 4)),  # wrong: should be (4, 4)
+        r=jnp.ones((2, 4)),
+        s=jnp.ones((2, 4)),
+        b=jnp.zeros((2, 4)),
+    )
+    with pytest.raises(ValueError, match=r"q_init\.W shape"):
+        MultiHeadAttentionBE(
+            embed_dim=4,
+            num_heads=2,
+            ensemble_size=2,
+            q_init=bad_W,
+            k_init=good,
+            v_init=good,
+            o_init=good,
+        )
+
+
+def test_mha_be_members_are_distinct_with_nonzero_init_scale():
+    mha = MultiHeadAttentionBE.init(
+        jr.PRNGKey(0),
+        embed_dim=8,
+        num_heads=2,
+        ensemble_size=3,
+        init_scale=0.5,
+    )
+    x = jr.normal(jr.PRNGKey(7), (5, 8))
+    with handlers.seed(rng_seed=0):
+        y = mha(x, x, x)
+    assert not jnp.allclose(y[0], y[1])
+    assert not jnp.allclose(y[1], y[2])
+
+
+def test_mha_be_members_collapse_at_zero_init_scale():
+    """init_scale=0 ⇒ all per-member r_i = s_i = 1, all biases = 0,
+    so every member is identical to the shared kernel."""
+    mha = MultiHeadAttentionBE.init(
+        jr.PRNGKey(0),
+        embed_dim=8,
+        num_heads=2,
+        ensemble_size=3,
+        init_scale=0.0,
+        bias=False,
+    )
+    x = jr.normal(jr.PRNGKey(7), (5, 8))
+    with handlers.seed(rng_seed=0):
+        y = mha(x, x, x)
+    assert jnp.allclose(y[0], y[1], atol=1e-5)
+    assert jnp.allclose(y[1], y[2], atol=1e-5)
+
+
+def test_mha_be_attention_reduces_to_value_at_uniform_keys():
+    """When all keys are zero, softmax gives uniform weights — the
+    per-position output is the mean over the key/value sequence."""
+    mha = MultiHeadAttentionBE.init(
+        jr.PRNGKey(0),
+        embed_dim=4,
+        num_heads=2,
+        ensemble_size=2,
+        bias=False,
+        init_scale=0.0,  # collapse members so output is deterministic
+    )
+    # Substitute K and V projection kernels to identity so we get exactly
+    # the input keys/values back out, and Q to zero so all attention
+    # weights are uniform.
+    M = 2
+    D = 4
+    eye = jnp.eye(D, dtype=jnp.float32)
+    ones_M_D = jnp.ones((M, D), dtype=jnp.float32)
+    zeros_M_D = jnp.zeros((M, D), dtype=jnp.float32)
+    x = jr.normal(jr.PRNGKey(7), (5, D))
+    subst = {}
+    for proj in ("q", "k", "v", "o"):
+        # Zero out Q (so scores=0 → uniform softmax).
+        # Identity for K/V/O.
+        subst[f"MultiHeadAttentionBE_{id(mha):x}.{proj}_W"] = (
+            jnp.zeros((D, D)) if proj == "q" else eye
+        )
+        subst[f"MultiHeadAttentionBE_{id(mha):x}.{proj}_r"] = ones_M_D
+        subst[f"MultiHeadAttentionBE_{id(mha):x}.{proj}_s"] = ones_M_D
+        subst[f"MultiHeadAttentionBE_{id(mha):x}.{proj}_b"] = zeros_M_D
+    with handlers.substitute(data=subst), handlers.seed(rng_seed=0):
+        y = mha(x, x, x)
+    expected_per_position = jnp.mean(x, axis=0)
+    # Output is (M, T, D); each position equals the mean of x.
+    for m in range(M):
+        for t in range(x.shape[0]):
+            assert jnp.allclose(y[m, t], expected_per_position, atol=1e-5)
+
+
+def test_mha_be_validates_input_shapes():
+    mha = MultiHeadAttentionBE.init(
+        jr.PRNGKey(0), embed_dim=8, num_heads=2, ensemble_size=2
+    )
+    with handlers.seed(rng_seed=0), pytest.raises(ValueError, match=r"query must be"):
+        mha(jnp.ones((4, 5)), jnp.ones((4, 8)), jnp.ones((4, 8)))
+    with handlers.seed(rng_seed=0), pytest.raises(ValueError, match=r"key must be"):
+        mha(jnp.ones((4, 8)), jnp.ones((4, 5)), jnp.ones((4, 5)))
+    with (
+        handlers.seed(rng_seed=0),
+        pytest.raises(ValueError, match=r"key and value must share shape"),
+    ):
+        mha(jnp.ones((4, 8)), jnp.ones((6, 8)), jnp.ones((5, 8)))
+
+
+def test_mha_be_is_pyrox_module():
+    mha = MultiHeadAttentionBE.init(
+        jr.PRNGKey(0), embed_dim=4, num_heads=2, ensemble_size=2
+    )
+    assert isinstance(mha, PyroxModule)
