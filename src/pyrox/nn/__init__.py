@@ -40,6 +40,11 @@ Dense / Bayesian-linear layers (``pyrox.nn._layers``):
 * :class:`BayesianSIREN` — SIREN with regime-scaled Normal priors.
 * :class:`DeepVSSGP` — deep random feature expansion for variational
   SSGP (Cutajar et al. 2017).
+* :class:`RandomFeatureGaussianProcess` — SNGP output head with RFF
+  feature map and Laplace covariance over linear weights (Liu et al.,
+  2020).
+* :class:`LaplaceRandomFeatureCovariance` — pure-functional precision
+  container used by SNGP.
 
 Bayesian Neural Field stack (``pyrox.nn._bnf``):
 
@@ -130,6 +135,10 @@ from pyrox.nn._layers import (
     SphericalHarmonicEncoder,
     VariationalFourierFeatures,
 )
+from pyrox.nn._sngp import (
+    LaplaceRandomFeatureCovariance,
+    RandomFeatureGaussianProcess,
+)
 
 
 __all__ = [
@@ -164,6 +173,7 @@ __all__ = [
     "InteractionFeatures",
     "LaplaceCosineFeatures",
     "LaplaceFourierFeatures",
+    "LaplaceRandomFeatureCovariance",
     "LonLatScale",
     "MCDropout",
     "MCSigmoidDenseFA",
@@ -174,6 +184,7 @@ __all__ = [
     "OrthogonalRandomFeatures",
     "RBFCosineFeatures",
     "RBFFourierFeatures",
+    "RandomFeatureGaussianProcess",
     "RandomKitchenSinks",
     "SeasonalFeatures",
     "SirenDense",
