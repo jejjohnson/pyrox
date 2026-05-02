@@ -112,9 +112,15 @@ def test_sigmoid_fa_registers_param_sites():
     x = jnp.ones((1, 4))
     with handlers.trace() as tr, handlers.seed(rng_seed=0):
         layer(x)
-    assert tr["hs.W_loc"]["type"] == "param"
-    assert tr["hs.W_scale"]["type"] == "param"
-    assert tr["hs.W_diag"]["type"] == "param"
+    for k in (
+        "hs.W_loc",
+        "hs.b_loc",
+        "hs.W_scale",
+        "hs.b_scale",
+        "hs.W_diag",
+        "hs.b_diag",
+    ):
+        assert tr[k]["type"] == "param", f"{k} should be a param site"
 
 
 # --- stochasticity ----------------------------------------------------------

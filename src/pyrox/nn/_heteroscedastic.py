@@ -22,7 +22,7 @@ samples.
 from __future__ import annotations
 
 import math
-from typing import cast
+from typing import Self, cast
 
 import equinox as eqx
 import jax
@@ -91,11 +91,11 @@ class _HeteroscedasticBase(PyroxModule):
     num_classes: int = eqx.field(static=True)
     rank: int = eqx.field(static=True)
     num_mc_samples: int = eqx.field(static=True, default=10)
-    diag_init_bias: float = -3.0
-    pyrox_name: str | None = None
-    W_loc_init: Float[Array, "D_in C"] = eqx.field(default=None)
-    W_scale_init: Float[Array, "D_in Cr"] = eqx.field(default=None)
-    W_diag_init: Float[Array, "D_in C"] = eqx.field(default=None)
+    diag_init_bias: float = eqx.field(static=True, default=-3.0)
+    pyrox_name: str | None = eqx.field(static=True, default=None)
+    W_loc_init: Float[Array, "D_in C"] | None = eqx.field(default=None)
+    W_scale_init: Float[Array, "D_in Cr"] | None = eqx.field(default=None)
+    W_diag_init: Float[Array, "D_in C"] | None = eqx.field(default=None)
 
     @classmethod
     def init(
@@ -109,7 +109,7 @@ class _HeteroscedasticBase(PyroxModule):
         diag_init_bias: float = -3.0,
         scale_init_factor: float = 0.1,
         pyrox_name: str | None = None,
-    ):
+    ) -> Self:
         """Construct the layer with Glorot-init linear factors."""
         if in_features <= 0 or num_classes <= 0 or rank <= 0:
             raise ValueError(
