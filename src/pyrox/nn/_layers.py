@@ -495,25 +495,23 @@ class NCPNormalOutput(PyroxModule):
 
     Completes the NCP pattern in ``pyrox.nn``: pair with
     :class:`NCPContinuousPerturb` at the input and a heteroscedastic
-    network (e.g. an MLP terminating in two heads for mean and log-std)
-    so the network produces predictions for both the *clean* batch and
-    the input-perturbed *noisy* batch. Given the noisy batch's
-    predictive distribution :math:`\mathcal{N}(\hat{y}_n, \hat{\sigma}_n^2)`,
+    network (e.g. an MLP terminating in a mean head and a positive-std
+    head — a softplus or ``exp`` of a learned log-scale) so the
+    network produces predictions for both the *clean* batch and the
+    input-perturbed *noisy* batch. Given the noisy batch's predictive
+    distribution :math:`\mathcal{N}(\hat{y}_n, \hat{\sigma}_n^2)`,
     this layer adds the analytic NCP regulariser
 
     .. math::
 
         \mathcal{L}_\mathrm{NCP} =
-        \mathrm{KL}\!\bigl[\mathcal{N}(\hat{y}_n, \hat{\sigma}_n^2)
+        \sum_{n} \mathrm{KL}\!\bigl[\mathcal{N}(\hat{y}_n, \hat{\sigma}_n^2)
             \;\big\|\; \mathcal{N}(\mu_\mathrm{prior}, \sigma_\mathrm{prior}^2)\bigr]
 
-    to the model log density via :func:`numpyro.factor`. The KL is
-    summed across the batch / output dimensions before being added.
-    Pulling :math:`\hat{y}_n` toward :math:`\mu_\mathrm{prior}` and
-    :math:`\hat{\sigma}_n` toward :math:`\sigma_\mathrm{prior}` away
+    to the model log density via :func:`numpyro.factor`. Pulling the
+    noisy-input predictive distribution toward the fixed prior away
     from the training distribution gives the network calibrated
-    predictive uncertainty out-of-distribution, which is the central
-    claim of NCP.
+    out-of-distribution uncertainty, which is the central claim of NCP.
 
     The closed-form Gaussian KL used here is
 
@@ -525,11 +523,29 @@ class NCPNormalOutput(PyroxModule):
           \frac{\sigma^2 + (\mu - \mu_p)^2}{2\sigma_p^2} - \tfrac{1}{2}.
 
     Plate semantics:
-        Like other ``pyrox.nn`` Bayesian layers, call this layer
-        **outside** ``numpyro.plate("data", ..., subsample_size=...)``.
-        The factor is a single per-layer regulariser, not a per-example
-        likelihood term, so plating it would scale the KL by the
-        subsample ratio and over-regularise the network.
+        Unlike pyrox's *weight-prior* KL terms, the NCP KL is
+        **data-dependent** — it sums per-example contributions
+        :math:`\mathrm{KL}_n` over the noisy batch. The correct
+        full-dataset estimator under
+        ``numpyro.plate("data", N, subsample_size=B)`` is the per-batch
+        sum scaled by :math:`N/B`, which NumPyro applies automatically
+        to *any* sample-type site (including factors) emitted *inside*
+        the plate. So the canonical pattern is::
+
+            def model(x_clean, y_clean, x_noisy):
+                clean_mean, _clean_std = network(x_clean)
+                noisy_mean, noisy_std = network(x_noisy)
+                ncp_out = NCPNormalOutput(prior_std=1.0)
+                with numpyro.plate("data", N, subsample_size=B):
+                    ncp_out(noisy_mean, noisy_std)              # scaled to N
+                    numpyro.sample("obs",
+                        dist.Normal(clean_mean, ...), obs=y_clean)
+
+        Calling the layer outside the plate emits the un-scaled batch
+        sum, which under-regularises by :math:`B/N`. If you need the
+        scaling but want the layer outside the plate (e.g. with a
+        subsample-aware custom loss), wrap it manually with
+        ``numpyro.handlers.scale(scale=N/B)``.
 
     Attributes:
         prior_mean: Prior predictive mean :math:`\mu_\mathrm{prior}`.
@@ -570,8 +586,16 @@ class NCPNormalOutput(PyroxModule):
         noisy_mean: Float[Array, "*batch D"],
         noisy_std: Float[Array, "*batch D"],
     ) -> Float[Array, ""]:
+        # `noisy_std` is a *standard deviation* — the caller is responsible
+        # for ensuring it is non-negative (e.g. via softplus/exp on a
+        # learned log-scale head). Negative inputs would silently give a
+        # finite-but-wrong KL after squaring; an explicit zero produces
+        # `+inf` from `log(0)` which surfaces the bug. We do not floor
+        # `noisy_var` because doing so asymmetrically (without a matching
+        # floor on `prior_var`) would break the `noisy_std == prior_std`
+        # → KL = 0 invariant for tiny `prior_std`.
         prior_var = jnp.asarray(self.prior_std) ** 2
-        noisy_var = jnp.maximum(noisy_std**2, 1e-12)
+        noisy_var = noisy_std**2
         # Analytic Gaussian KL, summed across all batch and output dims.
         kl_per_elem = (
             jnp.log(self.prior_std)
@@ -581,6 +605,9 @@ class NCPNormalOutput(PyroxModule):
         )
         kl = jnp.sum(kl_per_elem)
         # Add -KL to the model log density so SVI maximises ELBO - KL.
+        # If this site lives inside `plate("data", N, subsample_size=B)`,
+        # NumPyro's plate scaling will multiply the factor value by N/B,
+        # giving the correct full-dataset estimate.
         numpyro.factor(self._pyrox_fullname("kl"), -kl)
         return kl
 

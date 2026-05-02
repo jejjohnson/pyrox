@@ -272,7 +272,7 @@ def test_ncp_normal_output_validates_prior_std():
 
 
 def test_ncp_normal_output_kl_aggregates_across_batch():
-    """KL sums across batch and feature dims (single per-layer regulariser)."""
+    """KL sums across batch and feature dims (per-example contributions)."""
     layer = NCPNormalOutput(prior_mean=0.0, prior_std=1.0)
     mu = jnp.full((4, 3), 1.0)
     sigma = jnp.full((4, 3), 0.5)
@@ -283,6 +283,57 @@ def test_ncp_normal_output_kl_aggregates_across_batch():
     with handlers.seed(rng_seed=1):
         kl_single = layer_single(mu[:1, :1], sigma[:1, :1])
     assert jnp.allclose(kl_total, 12.0 * kl_single, atol=1e-5)
+
+
+def test_ncp_normal_output_zero_kl_at_tiny_prior_std():
+    """noisy_std == prior_std ⇒ KL = 0 even for very small prior_std.
+
+    Regression for the asymmetric variance-floor bug: previously
+    `noisy_var` was floored at 1e-12 while `prior_var` was not, so
+    `prior_std < 1e-6` broke the zero-KL-at-the-prior invariant.
+    """
+    tiny = 1e-7
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=tiny, pyrox_name="ncp_out")
+    mu = jnp.zeros((3, 2))
+    sigma = jnp.full((3, 2), tiny)
+    with handlers.seed(rng_seed=0):
+        kl = layer(mu, sigma)
+    assert jnp.allclose(kl, 0.0, atol=1e-5)
+
+
+def test_ncp_normal_output_kl_is_inf_at_zero_noisy_std():
+    """noisy_std = 0 surfaces a model bug rather than silently clamping."""
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=1.0, pyrox_name="ncp_out")
+    mu = jnp.zeros((1, 1))
+    sigma = jnp.zeros((1, 1))
+    with handlers.seed(rng_seed=0):
+        kl = layer(mu, sigma)
+    assert not jnp.isfinite(kl)
+
+
+def test_ncp_normal_output_scales_correctly_under_subsampled_plate():
+    """Inside `plate(..., subsample_size=B)` NumPyro multiplies the
+    factor by N/B — the full-dataset NCP estimator the layer is
+    designed for. Pin the documented training pattern.
+    """
+    import numpyro
+
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=1.0, pyrox_name="ncp_out")
+    full_dataset_size = 8
+    batch_size = 2
+    expected_scale = full_dataset_size / batch_size
+
+    def model_inside_plate(noisy_mean, noisy_std):
+        with numpyro.plate("data", full_dataset_size, subsample_size=batch_size) as idx:
+            layer(noisy_mean[idx], noisy_std[idx])
+
+    noisy_mean = jnp.full((full_dataset_size, 1), 1.0)
+    noisy_std = jnp.full((full_dataset_size, 1), 0.5)
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        model_inside_plate(noisy_mean, noisy_std)
+    site = tr["ncp_out.kl"]
+    # Plate's subsample scaling is recorded on the site under "scale".
+    assert site["scale"] == pytest.approx(expected_scale)
 
 
 # --- DenseVariationalDropout -----------------------------------------------
