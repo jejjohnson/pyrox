@@ -238,6 +238,11 @@ def _per_point_grad_hess(
     return g, h
 
 
+def _psd_operator(M: Float[Array, "N N"]) -> lx.AbstractLinearOperator:
+    """Wrap a symmetric PSD array as a tagged ``lineax`` operator."""
+    return lx.MatrixLinearOperator(M, lx.positive_semidefinite_tag)  # ty: ignore[invalid-return-type]
+
+
 def _psd_safe_cholesky(M: Float[Array, "N N"]) -> Float[Array, "N N"]:
     """Symmetrize ``M`` then call :func:`gaussx.safe_cholesky`.
 
@@ -249,7 +254,7 @@ def _psd_safe_cholesky(M: Float[Array, "N N"]) -> Float[Array, "N N"]:
     inputs is the realistic failure case this guards against.
     """
     M_sym = 0.5 * (M + M.T)
-    return safe_cholesky(lx.MatrixLinearOperator(M_sym, lx.positive_semidefinite_tag))  # ty: ignore[invalid-argument-type]
+    return safe_cholesky(_psd_operator(M_sym))
 
 
 def _ep_tilted_moments(
