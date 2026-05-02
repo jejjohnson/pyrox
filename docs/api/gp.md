@@ -237,13 +237,14 @@ spatio-temporal Markov priors land in later waves.
 ## Component protocols
 
 Abstract pyrox-local bases for the orthogonal component stack. Wave 2
-ships only the contracts for `Guide`, `Integrator`, and `Likelihood` —
-concrete implementations land in later waves. Solver strategies live in
+ships only the contracts for `Guide` and `Likelihood` — concrete
+implementations land in later waves. Cubature integrators (Gauss-Hermite,
+Monte Carlo) come from `gaussx.AbstractIntegrator` and its concrete
+subclasses; solver strategies live in
 [`gaussx._strategies`](https://github.com/jejjohnson/gaussx).
 
 ::: pyrox.gp.Kernel
 ::: pyrox.gp.Guide
-::: pyrox.gp.Integrator
 ::: pyrox.gp.Likelihood
 
 ## Math primitives

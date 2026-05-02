@@ -10,7 +10,7 @@
   :class:`OILMMKernel`, and shared inducing-point helpers for explicit
   cross-output structure without monolithic model classes.
 * Abstract protocols (:class:`Kernel`, :class:`Guide`,
-  :class:`Integrator`, :class:`Likelihood`) plus five concrete sparse
+  :class:`Likelihood`) plus five concrete sparse
   variational guides — :class:`FullRankGuide`, :class:`MeanFieldGuide`,
   :class:`WhitenedGuide`, :class:`NaturalGuide`, :class:`DeltaGuide`.
   Natural-parameter conversion and damped-update primitives live in
@@ -31,6 +31,20 @@ CG / BBMM / LSMR, etc. — live in ``gaussx``. pyrox model entry points
 accept any ``gaussx.AbstractSolverStrategy``; the default is
 ``gaussx.DenseSolver()``.
 """
+
+# State-space (SDE) kernels live in :mod:`gaussx._ssm` since gaussx
+# 0.0.11; re-export the public names here so ``pyrox.gp.MaternSDE`` etc.
+# keep resolving for downstream callers.
+from gaussx import (
+    ConstantSDE,
+    CosineSDE,
+    MaternSDE,
+    PeriodicSDE,
+    ProductSDE,
+    QuasiPeriodicSDE,
+    SDEParams,
+    SumSDE,
+)
 
 from pyrox.gp._guides import (
     DeltaGuide,
@@ -66,10 +80,6 @@ from pyrox.gp._inference_nongauss_markov import (
     LaplaceMarkovInference,
     NonGaussConditionedMarkovGP,
     PosteriorLinearizationMarkov,
-)
-from pyrox.gp._integrators import (
-    GaussHermite,
-    MonteCarlo,
 )
 from pyrox.gp._kernels import (
     RBF,
@@ -117,19 +127,9 @@ from pyrox.gp._pathwise import (
 )
 from pyrox.gp._protocols import (
     Guide,
-    Integrator,
     Kernel,
     Likelihood,
     SDEKernel,
-)
-from pyrox.gp._sde_kernels import (
-    ConstantSDE,
-    CosineSDE,
-    MaternSDE,
-    PeriodicSDE,
-    ProductSDE,
-    QuasiPeriodicSDE,
-    SumSDE,
 )
 from pyrox.gp._sparse import SparseGPPrior
 from pyrox.gp._sparse_markov import (
@@ -159,7 +159,6 @@ __all__ = [
     "FourierInducingFeatures",
     "FullRankGuide",
     "GPPrior",
-    "GaussHermite",
     "GaussNewtonInference",
     "GaussNewtonMarkovInference",
     "GaussianLikelihood",
@@ -167,7 +166,6 @@ __all__ = [
     "HeteroscedasticGaussianLikelihood",
     "ICMKernel",
     "InducingFeatures",
-    "Integrator",
     "Kernel",
     "LMCKernel",
     "LaplaceInference",
@@ -179,7 +177,6 @@ __all__ = [
     "Matern",
     "MaternSDE",
     "MeanFieldGuide",
-    "MonteCarlo",
     "MultiOutputInducingVariables",
     "NaturalGuide",
     "NonGaussConditionedGP",
@@ -198,6 +195,7 @@ __all__ = [
     "QuasiPeriodicSDE",
     "RationalQuadratic",
     "SDEKernel",
+    "SDEParams",
     "SharedInducingPoints",
     "SoftmaxLikelihood",
     "SparseConditionedMarkovGP",

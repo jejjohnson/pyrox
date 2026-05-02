@@ -215,8 +215,8 @@ class MarkovGPPrior(eqx.Module):
 
     Attributes:
         sde_kernel: Any :class:`SDEKernel`. Provides ``(F, L, H, Q_c, P_inf)``
-            via ``sde_params()`` and the discrete transition tuple via
-            ``discretise(dt)``.
+            via ``sde_params()`` and the discrete transition sequence via
+            ``discretise_sequence(dt)``.
         times: Sorted, strictly increasing observation times of shape
             ``(N,)``. Concrete (non-traced) ``times`` arrays are validated
             for monotonicity at construction time; under :func:`jax.jit` /
@@ -316,7 +316,7 @@ class MarkovGPPrior(eqx.Module):
         """
         F, _L, H, _Qc, P_inf = self.sde_kernel.sde_params()
         dt_full = _build_dt_full(self.times)
-        A_seq, Q_seq = self.sde_kernel.discretise(dt_full)
+        A_seq, Q_seq = self.sde_kernel.discretise_sequence(dt_full)
         residual = self._residual(y)
         mask = jnp.ones_like(self.times)
         R_seq = jnp.broadcast_to(self._R(noise_var), self.times.shape)
@@ -343,7 +343,7 @@ class MarkovGPPrior(eqx.Module):
         """
         F, _L, H, _Qc, P_inf = self.sde_kernel.sde_params()
         dt_full = _build_dt_full(self.times)
-        A_seq, Q_seq = self.sde_kernel.discretise(dt_full)
+        A_seq, Q_seq = self.sde_kernel.discretise_sequence(dt_full)
         residual = self._residual(y)
         mask = jnp.ones_like(self.times)
         R_seq = jnp.broadcast_to(self._R(noise_var), self.times.shape)
@@ -482,7 +482,7 @@ class ConditionedMarkovGP(eqx.Module):
         )[order]
 
         dt_full = _build_dt_full(merged_sorted)
-        A_seq, Q_seq = self.prior.sde_kernel.discretise(dt_full)
+        A_seq, Q_seq = self.prior.sde_kernel.discretise_sequence(dt_full)
         R_seq = jnp.broadcast_to(self.prior._R(self.noise_var), merged_sorted.shape)
         m_pred, P_pred, m_filt, P_filt, _ = _kalman_filter(
             F, H, P_inf, A_seq, Q_seq, residual_full, is_obs, R_seq

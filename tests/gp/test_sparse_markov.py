@@ -47,7 +47,7 @@ def _make_problem(n: int = 12, m: int = 6):
 
 
 def test_sparse_markov_invalid_z_raises() -> None:
-    sde = MaternSDE(order=1)
+    sde = MaternSDE(variance=1.0, lengthscale=1.0, order=1)
     with pytest.raises(ValueError, match="strictly increasing"):
         SparseMarkovGPPrior(sde, jnp.array([0.0, 0.5, 0.5]))
     with pytest.raises(ValueError, match="must be 1-D"):
