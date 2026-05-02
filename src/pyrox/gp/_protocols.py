@@ -1,11 +1,9 @@
 """Layer 1 — abstract protocol classes for GP components.
 
-Five orthogonal pyrox-local protocols that compose into a GP model.
-Wave 2 ships the abstract definitions only for :class:`Guide`,
-:class:`Integrator`, and :class:`Likelihood`; concrete implementations
-land in later waves. :class:`Kernel` already has concrete implementations
-in this wave (:class:`pyrox.gp.RBF`, etc.). :class:`SDEKernel` is the
-state-space face of stationary 1-D kernels — concrete implementations
+Four orthogonal pyrox-local protocols that compose into a GP model.
+:class:`Kernel` has concrete implementations in :mod:`pyrox.gp._kernels`
+(:class:`pyrox.gp.RBF`, etc.). :class:`SDEKernel` is the state-space
+face of stationary 1-D kernels — concrete implementations
 (:class:`pyrox.gp.MaternSDE`, :class:`pyrox.gp.SumSDE`,
 :class:`pyrox.gp.PeriodicSDE`, ...) feed the Kalman-based
 :class:`pyrox.gp.MarkovGPPrior`.
@@ -17,18 +15,22 @@ like ``gaussx.DenseSolver``, ``gaussx.CGSolver``, ``gaussx.BBMMSolver``,
 and ``gaussx.ComposedSolver``. The pyrox model entry points
 (``GPPrior``, ``gp_factor``, ``gp_sample``) accept any solver strategy.
 
+Gaussian-expectation integrators live in :mod:`gaussx` too — use
+``gaussx.AbstractIntegrator`` (and its concretes
+``GaussHermiteIntegrator``, ``MonteCarloIntegrator``,
+``UnscentedIntegrator``, ``TaylorIntegrator``) wherever pyrox needs to
+take expectations against a ``GaussianState``.
+
 * :class:`Kernel` — covariance structure, ``(X1, X2) -> Gram``.
 * :class:`SDEKernel` — state-space representation of a stationary 1-D
   kernel for linear-time temporal GP inference.
 * :class:`Guide` — variational posterior structure.
-* :class:`Integrator` — expectations under a Gaussian.
 * :class:`Likelihood` — observation model.
 """
 
 from __future__ import annotations
 
 from abc import abstractmethod
-from collections.abc import Callable
 from typing import Any
 
 import equinox as eqx
@@ -184,31 +186,13 @@ class Guide(eqx.Module):
         raise NotImplementedError
 
 
-class Integrator(eqx.Module):
-    """Abstract base for Gaussian-expectation integrators.
-
-    Computes :math:`\\mathbb{E}_{q(f)}[g(f)]` where ``q(f) = N(mean, var)``.
-    Concrete integrators (Gauss-Hermite, sigma-points, cubature, Taylor,
-    Monte Carlo) land in later waves and may delegate to ``gaussx``'s
-    quadrature primitives.
-    """
-
-    @abstractmethod
-    def integrate(
-        self,
-        fn: Callable[[Float[Array, " ..."]], Float[Array, " ..."]],
-        mean: Float[Array, " ..."],
-        var: Float[Array, " ..."],
-    ) -> Float[Array, " ..."]:
-        raise NotImplementedError
-
-
 class Likelihood(eqx.Module):
     """Abstract base for observation models.
 
-    Implements the conditional ``p(y | f)`` and a default
-    :meth:`expected_log_prob` that integrates over a Gaussian latent via an
-    :class:`Integrator`. Concrete scalar-latent likelihoods
+    Implements the conditional ``p(y | f)``. The advanced inference
+    strategies in :mod:`pyrox.gp._inference_nongauss` integrate
+    ``log p(y | f)`` against a Gaussian cavity via any
+    :class:`gaussx.AbstractIntegrator`. Concrete scalar-latent likelihoods
     (:class:`GaussianLikelihood`, :class:`BernoulliLikelihood`,
     :class:`PoissonLikelihood`, :class:`StudentTLikelihood`) and
     multi-latent ones (:class:`SoftmaxLikelihood`,
