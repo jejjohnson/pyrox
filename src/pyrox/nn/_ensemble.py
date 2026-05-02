@@ -1,4 +1,4 @@
-"""Ensemble-style dense layers for ``pyrox.nn``.
+"""Ensemble-style layers for ``pyrox.nn``.
 
 * :class:`DenseRank1` — rank-1 ensemble dense layer (Wen et al., 2020;
   Dusenberry et al., 2020). A shared full-rank kernel :math:`W` plus
@@ -6,6 +6,9 @@
   :math:`s_i`. Available in two modes via the ``bayesian`` flag:
   deterministic BatchEnsemble (point-estimate :math:`r, s`) and rank-1
   BNN (Gaussian priors on :math:`r, s` centered at per-member inits).
+* :class:`LayerNormEnsemble` — per-ensemble-member LayerNorm. Required
+  drop-in replacement for ``LayerNorm`` inside BatchEnsemble / Rank1
+  architectures.
 """
 
 from __future__ import annotations
@@ -13,6 +16,7 @@ from __future__ import annotations
 import math
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpyro.distributions as dist
@@ -252,3 +256,102 @@ class DenseRank1(PyroxModule):
             )
             out = out + b_b
         return out
+
+
+class LayerNormEnsemble(PyroxModule):
+    r"""Per-ensemble-member LayerNorm.
+
+    Drop-in replacement for ``LayerNorm`` inside BatchEnsemble / Rank1
+    architectures. Computes the standard LayerNorm normalisation over
+    the trailing feature dimension and applies a *per-member* affine
+    transform — each ensemble member :math:`i \in \{1, \ldots, M\}`
+    gets its own learnable scale :math:`\gamma_i \in \mathbb{R}^D`
+    and bias :math:`\beta_i \in \mathbb{R}^D`:
+
+    .. math::
+
+        \hat{x}_i = \frac{x_i - \mu(x_i)}{\sqrt{\sigma^2(x_i) + \epsilon}},
+        \qquad
+        y_i = \gamma_i \odot \hat{x}_i + \beta_i,
+
+    where :math:`\mu` and :math:`\sigma^2` are the empirical mean and
+    variance over the trailing feature axis (computed independently
+    for each member-batch slice). Without per-member scale/bias,
+    sharing a single LayerNorm across the ensemble would couple all
+    members and erase the diversity introduced by :class:`DenseRank1`
+    or any other BatchEnsemble layer upstream.
+
+    Input is expected to carry a leading ensemble axis of size
+    ``ensemble_size`` and a trailing feature axis of size
+    ``feature_dim``. Any number of intermediate batch / time axes
+    are supported and pass through unchanged.
+
+    Attributes:
+        ensemble_size: Number of ensemble members :math:`M`.
+        feature_dim: Trailing feature dimension :math:`D` over which
+            the normalisation is computed.
+        eps: Small positive constant added to the variance for
+            numerical stability.
+        pyrox_name: Explicit scope name for NumPyro site registration.
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> from numpyro import handlers
+        >>> ln = LayerNormEnsemble(
+        ...     ensemble_size=3, feature_dim=4, pyrox_name="ln"
+        ... )
+        >>> x = jnp.ones((3, 5, 4))  # (M, batch, D)
+        >>> with handlers.seed(rng_seed=0):
+        ...     y = ln(x)
+        >>> y.shape
+        (3, 5, 4)
+    """
+
+    ensemble_size: int = eqx.field(static=True)
+    feature_dim: int = eqx.field(static=True)
+    eps: float = eqx.field(static=True, default=1e-5)
+    pyrox_name: str | None = eqx.field(static=True, default=None)
+
+    def __post_init__(self) -> None:
+        if self.ensemble_size <= 0:
+            raise ValueError(f"ensemble_size must be > 0; got {self.ensemble_size}.")
+        if self.feature_dim <= 0:
+            raise ValueError(f"feature_dim must be > 0; got {self.feature_dim}.")
+        if self.eps <= 0:
+            raise ValueError(f"eps must be > 0; got {self.eps}.")
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, "M *batch D"]) -> Float[Array, "M *batch D"]:
+        if x.ndim < 2:
+            raise ValueError(
+                f"x must have at least 2 dims (M and D); got shape {x.shape}."
+            )
+        if x.shape[0] != self.ensemble_size:
+            raise ValueError(
+                f"x.shape[0] = {x.shape[0]} does not match "
+                f"ensemble_size = {self.ensemble_size}."
+            )
+        if x.shape[-1] != self.feature_dim:
+            raise ValueError(
+                f"x.shape[-1] = {x.shape[-1]} does not match "
+                f"feature_dim = {self.feature_dim}."
+            )
+
+        scales = self.pyrox_param(
+            "scales", jnp.ones((self.ensemble_size, self.feature_dim))
+        )
+        biases = self.pyrox_param(
+            "biases", jnp.zeros((self.ensemble_size, self.feature_dim))
+        )
+
+        # Per-slice mean/var over the trailing feature axis.
+        mean = jnp.mean(x, axis=-1, keepdims=True)
+        var = jnp.var(x, axis=-1, keepdims=True)
+        x_hat = (x - mean) * jax.lax.rsqrt(var + self.eps)
+
+        # Broadcast (M, D) scale/bias over the *batch axes between them.
+        batch_ndim = x.ndim - 2
+        broadcast_shape = (
+            (self.ensemble_size,) + (1,) * batch_ndim + (self.feature_dim,)
+        )
+        return scales.reshape(broadcast_shape) * x_hat + biases.reshape(broadcast_shape)

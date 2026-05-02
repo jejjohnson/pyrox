@@ -28,6 +28,8 @@ Dense / Bayesian-linear layers (``pyrox.nn._layers``):
   for multi-label classification.
 * :class:`DenseRank1` — rank-1 ensemble dense layer (BatchEnsemble /
   rank-1 BNN, Wen et al. 2020 / Dusenberry et al. 2020).
+* :class:`LayerNormEnsemble` — per-ensemble-member LayerNorm (drop-in
+  replacement for ``LayerNorm`` inside BatchEnsemble / Rank1 stacks).
 * :class:`NCPContinuousPerturb` — input perturbation for NCP.
 * :class:`NCPNormalOutput` — output-side NCP KL regulariser
   (Hafner et al. 2018).
@@ -93,7 +95,7 @@ from pyrox.nn._conditioning import (
     HyperLinear,
     HyperSIREN,
 )
-from pyrox.nn._ensemble import DenseRank1
+from pyrox.nn._ensemble import DenseRank1, LayerNormEnsemble
 from pyrox.nn._features import (
     fourier_features,
     interaction_features,
@@ -181,6 +183,7 @@ __all__ = [
     "LaplaceCosineFeatures",
     "LaplaceFourierFeatures",
     "LaplaceRandomFeatureCovariance",
+    "LayerNormEnsemble",
     "LonLatScale",
     "MCDropout",
     "MCSigmoidDenseFA",
