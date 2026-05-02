@@ -25,6 +25,7 @@ from pyrox.nn import (
     MaternCosineFeatures,
     MaternFourierFeatures,
     MCDropout,
+    NCPNormalOutput,
     RandomKitchenSinks,
     RBFCosineFeatures,
     RBFFourierFeatures,
@@ -212,6 +213,76 @@ def test_ncp_stochastic_when_scale_nonzero():
     with handlers.seed(rng_seed=1):
         y2 = layer(x)
     assert not jnp.allclose(y1, y2)
+
+
+# --- NCPNormalOutput -------------------------------------------------------
+
+
+def test_ncp_normal_output_kl_zero_at_prior():
+    """KL is exactly zero when the predictive matches the prior."""
+    layer = NCPNormalOutput(prior_mean=0.5, prior_std=2.0, pyrox_name="ncp_out")
+    noisy_mean = jnp.full((4, 1), 0.5)
+    noisy_std = jnp.full((4, 1), 2.0)
+    with handlers.seed(rng_seed=0):
+        kl = layer(noisy_mean, noisy_std)
+    assert jnp.allclose(kl, 0.0, atol=1e-5)
+
+
+def test_ncp_normal_output_kl_is_non_negative():
+    """KL is non-negative for any valid Gaussian pair."""
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=1.0, pyrox_name="ncp_out")
+    noisy_mean = jnp.array([[1.0], [-2.0], [0.0]])
+    noisy_std = jnp.array([[0.5], [1.5], [0.1]])
+    with handlers.seed(rng_seed=0):
+        kl = layer(noisy_mean, noisy_std)
+    assert float(kl) >= 0.0
+
+
+def test_ncp_normal_output_kl_matches_closed_form():
+    """KL[N(μ, σ²) || N(μ_p, σ_p²)] matches the standard formula."""
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=1.0, pyrox_name="ncp_out")
+    mu = jnp.array([[2.0]])
+    sigma = jnp.array([[0.5]])
+    with handlers.seed(rng_seed=0):
+        kl = layer(mu, sigma)
+    expected = (
+        jnp.log(1.0) - jnp.log(0.5) + (0.5**2 + (2.0 - 0.0) ** 2) / (2.0 * 1.0**2) - 0.5
+    )
+    assert jnp.allclose(kl, expected, atol=1e-6)
+
+
+def test_ncp_normal_output_registers_factor_with_neg_kl():
+    """The factor value is -KL (added to the model log density)."""
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=1.0, pyrox_name="ncp_out")
+    noisy_mean = jnp.full((2, 3), 1.0)
+    noisy_std = jnp.full((2, 3), 0.5)
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        kl = layer(noisy_mean, noisy_std)
+    assert "ncp_out.kl" in tr
+    log_factor = float(tr["ncp_out.kl"]["fn"].log_factor)
+    # log_factor == -kl (factor is added; we register -KL).
+    assert jnp.allclose(log_factor, -float(kl), atol=1e-5)
+
+
+def test_ncp_normal_output_validates_prior_std():
+    with pytest.raises(ValueError, match="prior_std"):
+        NCPNormalOutput(prior_mean=0.0, prior_std=0.0)
+    with pytest.raises(ValueError, match="prior_std"):
+        NCPNormalOutput(prior_mean=0.0, prior_std=-1.0)
+
+
+def test_ncp_normal_output_kl_aggregates_across_batch():
+    """KL sums across batch and feature dims (single per-layer regulariser)."""
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=1.0)
+    mu = jnp.full((4, 3), 1.0)
+    sigma = jnp.full((4, 3), 0.5)
+    with handlers.seed(rng_seed=0):
+        kl_total = layer(mu, sigma)
+    # Per-element KL is constant; total = 12 * per-element.
+    layer_single = NCPNormalOutput(prior_mean=0.0, prior_std=1.0)
+    with handlers.seed(rng_seed=1):
+        kl_single = layer_single(mu[:1, :1], sigma[:1, :1])
+    assert jnp.allclose(kl_total, 12.0 * kl_single, atol=1e-5)
 
 
 # --- DenseVariationalDropout -----------------------------------------------
