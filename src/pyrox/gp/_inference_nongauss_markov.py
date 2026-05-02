@@ -75,7 +75,7 @@ def _markov_smoothed_posterior(
     F, _L, H, _Qc, P_inf = prior.sde_kernel.sde_params()
     times = prior.times
     dt_full = _build_dt_full(times)
-    A_seq, Q_seq = prior.sde_kernel.discretise(dt_full)
+    A_seq, Q_seq = prior.sde_kernel.discretise_sequence(dt_full)
     R_seq = jnp.reciprocal(nat2)
     pseudo_targets = nat1 / nat2
     residual = pseudo_targets - prior.mean(times)
@@ -167,7 +167,7 @@ class NonGaussConditionedMarkovGP(eqx.Module):
         R_full = jnp.concatenate([R_train, jnp.ones(M, dtype=self.y.dtype)])[order]
 
         dt_full = _build_dt_full(merged_sorted)
-        A_seq, Q_seq = self.prior.sde_kernel.discretise(dt_full)
+        A_seq, Q_seq = self.prior.sde_kernel.discretise_sequence(dt_full)
         m_pred, P_pred, m_filt, P_filt, _ = _kalman_filter(
             F, H, P_inf, A_seq, Q_seq, residual_full, is_obs, R_full
         )

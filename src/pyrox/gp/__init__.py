@@ -32,6 +32,20 @@ accept any ``gaussx.AbstractSolverStrategy``; the default is
 ``gaussx.DenseSolver()``.
 """
 
+# State-space (SDE) kernels live in :mod:`gaussx._ssm` since gaussx
+# 0.0.11; re-export the public names here so ``pyrox.gp.MaternSDE`` etc.
+# keep resolving for downstream callers.
+from gaussx import (
+    ConstantSDE,
+    CosineSDE,
+    MaternSDE,
+    PeriodicSDE,
+    ProductSDE,
+    QuasiPeriodicSDE,
+    SDEParams,
+    SumSDE,
+)
+
 from pyrox.gp._guides import (
     DeltaGuide,
     FullRankGuide,
@@ -117,15 +131,6 @@ from pyrox.gp._protocols import (
     Likelihood,
     SDEKernel,
 )
-from pyrox.gp._sde_kernels import (
-    ConstantSDE,
-    CosineSDE,
-    MaternSDE,
-    PeriodicSDE,
-    ProductSDE,
-    QuasiPeriodicSDE,
-    SumSDE,
-)
 from pyrox.gp._sparse import SparseGPPrior
 from pyrox.gp._sparse_markov import (
     SparseConditionedMarkovGP,
@@ -190,6 +195,7 @@ __all__ = [
     "QuasiPeriodicSDE",
     "RationalQuadratic",
     "SDEKernel",
+    "SDEParams",
     "SharedInducingPoints",
     "SoftmaxLikelihood",
     "SparseConditionedMarkovGP",

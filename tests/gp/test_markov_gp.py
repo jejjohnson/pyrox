@@ -75,7 +75,7 @@ def test_markov_gp_state_dim_inherits_from_kernel() -> None:
 
 
 def test_invalid_times_raises() -> None:
-    sde = MaternSDE(order=1)
+    sde = MaternSDE(variance=1.0, lengthscale=1.0, order=1)
     with pytest.raises(ValueError, match="strictly increasing"):
         MarkovGPPrior(sde, jnp.array([0.0, 0.5, 0.5, 1.0]))
     with pytest.raises(ValueError, match="strictly increasing"):
@@ -87,7 +87,9 @@ def test_invalid_times_raises() -> None:
 def test_invalid_obs_noise_floor_raises() -> None:
     with pytest.raises(ValueError, match="non-negative"):
         MarkovGPPrior(
-            MaternSDE(order=1), jnp.linspace(0.0, 1.0, 3), obs_noise_floor=-0.1
+            MaternSDE(variance=1.0, lengthscale=1.0, order=1),
+            jnp.linspace(0.0, 1.0, 3),
+            obs_noise_floor=-0.1,
         )
 
 
@@ -262,7 +264,7 @@ def test_log_marginal_jit_compatible() -> None:
     def go(prior, y, nv):
         return prior.log_marginal(y, nv)
 
-    prior = MarkovGPPrior(MaternSDE(order=1), times)
+    prior = MarkovGPPrior(MaternSDE(variance=1.0, lengthscale=1.0, order=1), times)
     out = go(prior, y, jnp.asarray(0.05))
     assert jnp.isfinite(out)
 
@@ -277,7 +279,7 @@ def test_predict_jit_compatible() -> None:
         cond = prior.condition(y, nv)
         return cond.predict(t_star)
 
-    prior = MarkovGPPrior(MaternSDE(order=2), times)
+    prior = MarkovGPPrior(MaternSDE(variance=1.0, lengthscale=1.0, order=2), times)
     m, v = go(prior, y, jnp.asarray(0.05), t_star)
     assert m.shape == (25,) and v.shape == (25,)
     assert jnp.all(v >= -1e-8)
@@ -364,7 +366,7 @@ def test_constant_mean_function_shifts_predictions() -> None:
 def test_conditioned_object_carries_log_marginal() -> None:
     times = jnp.linspace(0.0, 1.0, 8)
     y = jnp.sin(times)
-    prior = MarkovGPPrior(MaternSDE(order=1), times)
+    prior = MarkovGPPrior(MaternSDE(variance=1.0, lengthscale=1.0, order=1), times)
     cond = prior.condition(y, jnp.asarray(0.01))
     assert isinstance(cond, ConditionedMarkovGP)
     assert jnp.allclose(cond.log_marginal, prior.log_marginal(y, jnp.asarray(0.01)))
