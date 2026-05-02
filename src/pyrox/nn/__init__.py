@@ -17,6 +17,8 @@ Dense / Bayesian-linear layers (``pyrox.nn._layers``):
 * :class:`MCDropout` — always-on dropout for Monte Carlo uncertainty.
 * :class:`DenseNCP` — Noise Contrastive Prior: deterministic backbone
   + scaled stochastic perturbation.
+* :class:`DenseRank1` — rank-1 ensemble dense layer (BatchEnsemble /
+  rank-1 BNN, Wen et al. 2020 / Dusenberry et al. 2020).
 * :class:`NCPContinuousPerturb` — input perturbation for NCP.
 * :class:`RBFFourierFeatures` — SSGP-style [cos, sin] RFF (Gaussian).
 * :class:`RBFCosineFeatures` — cos(Wx + b) RFF variant (Gaussian).
@@ -75,6 +77,7 @@ from pyrox.nn._conditioning import (
     HyperLinear,
     HyperSIREN,
 )
+from pyrox.nn._ensemble import DenseRank1
 from pyrox.nn._features import (
     fourier_features,
     interaction_features,
@@ -139,6 +142,7 @@ __all__ = [
     "Deg2Rad",
     "DenseFlipout",
     "DenseNCP",
+    "DenseRank1",
     "DenseReparameterization",
     "DenseVariational",
     "FiLM",
