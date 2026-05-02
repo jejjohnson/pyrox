@@ -9,11 +9,15 @@
 * :class:`LayerNormEnsemble` — per-ensemble-member LayerNorm. Required
   drop-in replacement for ``LayerNorm`` inside BatchEnsemble / Rank1
   architectures.
+* :class:`MultiHeadAttentionBE` — multi-head attention with
+  BatchEnsemble per-member rank-1 perturbations on each of the four
+  Q / K / V / O projections. Output gains a leading ensemble axis.
 """
 
 from __future__ import annotations
 
 import math
+from typing import NamedTuple
 
 import equinox as eqx
 import jax
@@ -355,3 +359,320 @@ class LayerNormEnsemble(PyroxModule):
             (self.ensemble_size,) + (1,) * batch_ndim + (self.feature_dim,)
         )
         return scales.reshape(broadcast_shape) * x_hat + biases.reshape(broadcast_shape)
+
+
+class _Rank1ProjInit(NamedTuple):
+    """Per-projection BatchEnsemble inits used by :class:`MultiHeadAttentionBE`.
+
+    Bundles the four arrays needed for one rank-1 projection
+    (:math:`W` shared, :math:`r, s, b` per-member) into a single
+    PyTree leaf so the parent module can carry one such NamedTuple
+    per Q/K/V/O projection.
+    """
+
+    W: Float[Array, "D_in D_out"]
+    r: Float[Array, "M D_out"]
+    s: Float[Array, "M D_in"]
+    b: Float[Array, "M D_out"]
+
+
+def _init_rank1_proj(
+    key: PRNGKeyArray,
+    in_features: int,
+    out_features: int,
+    ensemble_size: int,
+    init_scale: float,
+) -> _Rank1ProjInit:
+    """Glorot-init shared kernel + per-member rank-1 vectors + zero bias."""
+    kw, kr, ks = jr.split(key, 3)
+    return _Rank1ProjInit(
+        W=_glorot_uniform(kw, in_features, out_features),
+        r=_rs_init(kr, ensemble_size, out_features, init_scale),
+        s=_rs_init(ks, ensemble_size, in_features, init_scale),
+        b=jnp.zeros((ensemble_size, out_features)),
+    )
+
+
+def _apply_rank1_proj(
+    x: Float[Array, ...],
+    proj: _Rank1ProjInit,
+    ensemble_size: int,
+    bias: bool,
+    *,
+    has_ensemble: bool,
+) -> Float[Array, ...]:
+    r"""Apply ``y_i = ((x ⊙ s_i) @ W) ⊙ r_i + b_i`` per ensemble member.
+
+    Two modes selected by the *explicit* ``has_ensemble`` flag rather
+    than a shape heuristic — heuristics on ``x.shape[0] == ensemble_size``
+    silently mis-classify inputs whose sequence length happens to equal
+    the ensemble size (e.g. self-attention with ``T = M``):
+
+    * ``has_ensemble=False``: ``x`` has shape ``(*batch, D_in)`` and the
+      output gains a leading ``M`` axis: ``(M, *batch, D_out)``. Use
+      this for the Q/K/V projections, whose inputs are un-ensembled.
+    * ``has_ensemble=True``: ``x`` already carries an ``M`` leading
+      axis (``(M, *batch, D_in)``); the per-member projection flows
+      through unchanged. Use this for the O projection after attention
+      has already added the ensemble axis.
+    """
+    if has_ensemble:
+        if x.ndim < 2 or x.shape[0] != ensemble_size:
+            raise ValueError(
+                f"Expected x.shape[0] == ensemble_size ({ensemble_size}) when "
+                f"has_ensemble=True; got x.shape = {x.shape}."
+            )
+        x_scaled = x * proj.s.reshape((ensemble_size,) + (1,) * (x.ndim - 2) + (-1,))
+    else:
+        x_scaled = jnp.einsum("...d,md->m...d", x, proj.s)
+    h = jnp.einsum("m...d,do->m...o", x_scaled, proj.W)
+    out = h * proj.r.reshape((ensemble_size,) + (1,) * (h.ndim - 2) + (-1,))
+    if bias:
+        out = out + proj.b.reshape((ensemble_size,) + (1,) * (out.ndim - 2) + (-1,))
+    return out
+
+
+class MultiHeadAttentionBE(PyroxModule):
+    r"""Multi-head attention with BatchEnsemble rank-1 projections.
+
+    Standard scaled-dot-product multi-head attention where each of the
+    four linear projections — query, key, value, and output — uses a
+    BatchEnsemble parameterisation: a shared full-rank kernel plus
+    per-ensemble-member rank-1 multiplicative perturbations. So for
+    member :math:`i \in \{1, \ldots, M\}` and projection
+    :math:`P \in \{Q, K, V, O\}`,
+
+    .. math::
+
+        W_i^{(P)} = (s_i^{(P)} \otimes r_i^{(P)}) \circ W^{(P)},
+
+    and the attention itself is the usual
+
+    .. math::
+
+        \mathrm{Attn}(Q, K, V) = \mathrm{softmax}\!
+            \Bigl(\frac{Q K^\top}{\sqrt{d_k}}\Bigr) V.
+
+    The forward consumes un-ensembled inputs (``query``, ``key``,
+    ``value`` of shape ``(T, D)`` / ``(S, D)``), adds the ensemble
+    axis when projecting to ``Q``, ``K``, ``V``, runs per-member
+    attention in parallel, and returns the per-member output of
+    shape ``(M, T, D)``. Equivalent to running ``M`` independent
+    attention heads with rank-1 weight perturbations and stacking
+    their outputs.
+
+    Plate semantics:
+        Same convention as :class:`DenseRank1` and the rest of the
+        ``pyrox.nn`` ensemble / Bayesian dense family — call this
+        layer **outside** ``numpyro.plate("data", ..., subsample_size=...)``
+        and only plate the observation likelihood. All four projections
+        register their parameters as ``pyrox_param`` sites; nothing
+        about the layer is data-dependent so plate-scaling does not
+        come into play unless the user puts the call inside a
+        subsampled plate.
+
+    Attributes:
+        embed_dim: Total feature dimension :math:`D` of query / key /
+            value (must be divisible by ``num_heads``).
+        num_heads: Number of attention heads :math:`H`. Each head sees
+            ``embed_dim // num_heads`` features.
+        ensemble_size: Number of ensemble members :math:`M`.
+        bias: Whether each of the four projections includes a
+            per-member bias. When ``False``, no bias param sites are
+            registered for any of Q / K / V / O.
+        q_init / k_init / v_init / o_init: Per-projection
+            BatchEnsemble init arrays. Build via :meth:`init`.
+        pyrox_name: Explicit scope name for NumPyro site registration.
+
+    Example:
+        >>> import jax.random as jr
+        >>> import jax.numpy as jnp
+        >>> from numpyro import handlers
+        >>> mha = MultiHeadAttentionBE.init(
+        ...     jr.PRNGKey(0),
+        ...     embed_dim=8, num_heads=2, ensemble_size=3,
+        ... )
+        >>> x = jnp.ones((5, 8))
+        >>> with handlers.seed(rng_seed=0):
+        ...     y = mha(x, x, x)         # self-attention
+        >>> y.shape
+        (3, 5, 8)
+    """
+
+    embed_dim: int = eqx.field(static=True)
+    num_heads: int = eqx.field(static=True)
+    ensemble_size: int = eqx.field(static=True)
+    bias: bool = eqx.field(static=True, default=True)
+    pyrox_name: str | None = eqx.field(static=True, default=None)
+    q_init: _Rank1ProjInit | None = eqx.field(default=None)
+    k_init: _Rank1ProjInit | None = eqx.field(default=None)
+    v_init: _Rank1ProjInit | None = eqx.field(default=None)
+    o_init: _Rank1ProjInit | None = eqx.field(default=None)
+
+    @classmethod
+    def init(
+        cls,
+        key: PRNGKeyArray,
+        embed_dim: int,
+        num_heads: int,
+        ensemble_size: int,
+        *,
+        bias: bool = True,
+        init_scale: float = 0.5,
+        pyrox_name: str | None = None,
+    ) -> MultiHeadAttentionBE:
+        """Construct an MHA-BE layer with random Q/K/V/O projection inits."""
+        if embed_dim <= 0 or num_heads <= 0 or ensemble_size <= 0:
+            raise ValueError(
+                "embed_dim, num_heads, ensemble_size must all be > 0; "
+                f"got {embed_dim=}, {num_heads=}, {ensemble_size=}."
+            )
+        if embed_dim % num_heads != 0:
+            raise ValueError(
+                f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})."
+            )
+        if init_scale < 0:
+            raise ValueError(f"init_scale must be >= 0; got {init_scale}.")
+        kq, kk, kv, ko = jr.split(key, 4)
+        return cls(
+            embed_dim=embed_dim,
+            num_heads=num_heads,
+            ensemble_size=ensemble_size,
+            bias=bias,
+            pyrox_name=pyrox_name,
+            q_init=_init_rank1_proj(
+                kq, embed_dim, embed_dim, ensemble_size, init_scale
+            ),
+            k_init=_init_rank1_proj(
+                kk, embed_dim, embed_dim, ensemble_size, init_scale
+            ),
+            v_init=_init_rank1_proj(
+                kv, embed_dim, embed_dim, ensemble_size, init_scale
+            ),
+            o_init=_init_rank1_proj(
+                ko, embed_dim, embed_dim, ensemble_size, init_scale
+            ),
+        )
+
+    def __post_init__(self) -> None:
+        # Validate positive dims first so the divisibility check below can't
+        # ZeroDivisionError on `num_heads = 0` (and so manual-construction
+        # users bypassing `.init` get the same clear error message as that
+        # classmethod's callers).
+        if self.embed_dim <= 0 or self.num_heads <= 0 or self.ensemble_size <= 0:
+            raise ValueError(
+                "embed_dim, num_heads, ensemble_size must all be > 0; "
+                f"got {self.embed_dim=}, {self.num_heads=}, "
+                f"{self.ensemble_size=}."
+            )
+        if self.embed_dim % self.num_heads != 0:
+            raise ValueError(
+                f"embed_dim ({self.embed_dim}) must be divisible by "
+                f"num_heads ({self.num_heads})."
+            )
+        # Defensive shape checks: the dataclass init lets a user pass raw
+        # _Rank1ProjInit tuples bypassing .init(), so validate per-array
+        # shapes once at construction time. Mirrors DenseRank1.__post_init__.
+        D, M = self.embed_dim, self.ensemble_size
+        expected = {"W": (D, D), "r": (M, D), "s": (M, D), "b": (M, D)}
+        for proj_name, attr in (
+            ("q_init", self.q_init),
+            ("k_init", self.k_init),
+            ("v_init", self.v_init),
+            ("o_init", self.o_init),
+        ):
+            if attr is None:
+                raise ValueError(
+                    f"{type(self).__name__} requires {proj_name}. Use "
+                    f"{type(self).__name__}.init(key, ...) to construct."
+                )
+            for arr_name, want in expected.items():
+                got = getattr(attr, arr_name).shape
+                if got != want:
+                    raise ValueError(
+                        f"{proj_name}.{arr_name} shape {got} != expected {want}."
+                    )
+
+    @property
+    def head_dim(self) -> int:
+        return self.embed_dim // self.num_heads
+
+    def _register_proj(self, name: str, init: _Rank1ProjInit) -> _Rank1ProjInit:
+        """Register a projection's arrays as ``pyrox_param`` sites.
+
+        Skips the ``b`` site when ``self.bias`` is ``False`` so disabled
+        biases don't leak unused params into the SVI parameter store.
+        """
+        b = (
+            self.pyrox_param(f"{name}_b", init.b)
+            if self.bias
+            else jnp.zeros_like(init.b)
+        )
+        return _Rank1ProjInit(
+            W=self.pyrox_param(f"{name}_W", init.W),
+            r=self.pyrox_param(f"{name}_r", init.r),
+            s=self.pyrox_param(f"{name}_s", init.s),
+            b=b,
+        )
+
+    @pyrox_method
+    def __call__(
+        self,
+        query: Float[Array, "T D"],
+        key: Float[Array, "S D"],
+        value: Float[Array, "S D"],
+    ) -> Float[Array, "M T D"]:
+        if query.ndim != 2 or query.shape[-1] != self.embed_dim:
+            raise ValueError(
+                f"query must be (T, embed_dim={self.embed_dim}); got {query.shape}."
+            )
+        if key.ndim != 2 or key.shape[-1] != self.embed_dim:
+            raise ValueError(
+                f"key must be (S, embed_dim={self.embed_dim}); got {key.shape}."
+            )
+        if value.shape != key.shape:
+            raise ValueError(
+                f"key and value must share shape; got {key.shape} vs {value.shape}."
+            )
+
+        # Register the four projections.
+        assert self.q_init is not None  # __post_init__ guarantees
+        assert self.k_init is not None
+        assert self.v_init is not None
+        assert self.o_init is not None
+        q_proj = self._register_proj("q", self.q_init)
+        k_proj = self._register_proj("k", self.k_init)
+        v_proj = self._register_proj("v", self.v_init)
+        o_proj = self._register_proj("o", self.o_init)
+
+        M = self.ensemble_size
+        H = self.num_heads
+        d = self.head_dim
+        T = query.shape[0]
+        S = key.shape[0]
+
+        # Project inputs (no ensemble axis on input → M added on output).
+        Q = _apply_rank1_proj(
+            query, q_proj, M, self.bias, has_ensemble=False
+        )  # (M, T, D)
+        K = _apply_rank1_proj(
+            key, k_proj, M, self.bias, has_ensemble=False
+        )  # (M, S, D)
+        V = _apply_rank1_proj(
+            value, v_proj, M, self.bias, has_ensemble=False
+        )  # (M, S, D)
+
+        # Per-head reshape: (M, *, D) → (M, num_heads, *, head_dim).
+        Q = Q.reshape(M, T, H, d).transpose(0, 2, 1, 3)  # (M, H, T, d)
+        K = K.reshape(M, S, H, d).transpose(0, 2, 1, 3)  # (M, H, S, d)
+        V = V.reshape(M, S, H, d).transpose(0, 2, 1, 3)  # (M, H, S, d)
+
+        scores = jnp.einsum("mhtd,mhsd->mhts", Q, K) / math.sqrt(d)
+        weights = jax.nn.softmax(scores, axis=-1)
+        attn = jnp.einsum("mhts,mhsd->mhtd", weights, V)  # (M, H, T, d)
+
+        # Concatenate heads back to (M, T, embed_dim).
+        attn = attn.transpose(0, 2, 1, 3).reshape(M, T, self.embed_dim)
+
+        # Output projection: input already has the M axis.
+        return _apply_rank1_proj(attn, o_proj, M, self.bias, has_ensemble=True)
