@@ -12,7 +12,7 @@ from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 
 from pyrox._core.pyrox_module import PyroxModule
-from pyrox.nn import DenseRank1
+from pyrox.nn import DenseRank1, LayerNormEnsemble
 
 
 # --- forward shape & init ---------------------------------------------------
@@ -282,3 +282,110 @@ def test_dense_rank1_is_pyrox_module():
         jr.PRNGKey(0), in_features=2, out_features=2, ensemble_size=2
     )
     assert isinstance(layer, PyroxModule)
+
+
+# --- LayerNormEnsemble ----------------------------------------------------
+
+
+def test_layer_norm_ensemble_output_shape_3d():
+    ln = LayerNormEnsemble(ensemble_size=3, feature_dim=4)
+    x = jnp.ones((3, 5, 4))
+    with handlers.seed(rng_seed=0):
+        y = ln(x)
+    assert y.shape == (3, 5, 4)
+
+
+def test_layer_norm_ensemble_supports_4d_input():
+    """Arbitrary intermediate batch / time axes pass through."""
+    ln = LayerNormEnsemble(ensemble_size=3, feature_dim=4)
+    x = jnp.ones((3, 6, 5, 4))  # (M, batch, time, D)
+    with handlers.seed(rng_seed=0):
+        y = ln(x)
+    assert y.shape == (3, 6, 5, 4)
+
+
+def test_layer_norm_ensemble_default_init_normalises_to_zero_mean_unit_var():
+    """With default scale=1, bias=0 the output has zero mean and unit
+    variance per (M, *batch) slice along the feature axis."""
+    ln = LayerNormEnsemble(ensemble_size=2, feature_dim=8)
+    x = jr.normal(jr.PRNGKey(7), (2, 4, 8)) * 3.0 + 1.5
+    with handlers.seed(rng_seed=0):
+        y = ln(x)
+    means = jnp.mean(y, axis=-1)
+    variances = jnp.var(y, axis=-1)
+    assert jnp.allclose(means, 0.0, atol=1e-5)
+    assert jnp.allclose(variances, 1.0, atol=1e-3)
+
+
+def test_layer_norm_ensemble_registers_param_sites():
+    ln = LayerNormEnsemble(ensemble_size=3, feature_dim=4, pyrox_name="ln")
+    x = jnp.ones((3, 2, 4))
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        ln(x)
+    assert tr["ln.scales"]["type"] == "param"
+    assert tr["ln.biases"]["type"] == "param"
+    assert tr["ln.scales"]["value"].shape == (3, 4)
+    assert tr["ln.biases"]["value"].shape == (3, 4)
+
+
+def test_layer_norm_ensemble_per_member_scale_and_bias():
+    """Substituting different scales/biases per member produces different outputs."""
+    ln = LayerNormEnsemble(ensemble_size=2, feature_dim=4, pyrox_name="ln")
+    scales = jnp.array([[1.0, 1.0, 1.0, 1.0], [3.0, 3.0, 3.0, 3.0]])
+    biases = jnp.array([[0.0, 0.0, 0.0, 0.0], [10.0, 10.0, 10.0, 10.0]])
+    x = jnp.broadcast_to(jr.normal(jr.PRNGKey(7), (4, 4)), (2, 4, 4))
+    with (
+        handlers.substitute(data={"ln.scales": scales, "ln.biases": biases}),
+        handlers.seed(rng_seed=0),
+    ):
+        y = ln(x)
+    # Member 0: vanilla layer-norm; member 1: 3 * x_hat + 10.
+    assert not jnp.allclose(y[0], y[1])
+    # Member 1 is the affine transform of member 0's vanilla normalisation.
+    assert jnp.allclose(y[1], 3.0 * y[0] + 10.0, atol=1e-5)
+
+
+def test_layer_norm_ensemble_validates_input_shape():
+    ln = LayerNormEnsemble(ensemble_size=3, feature_dim=4)
+    with (
+        pytest.raises(ValueError, match="ensemble_size"),
+        handlers.seed(rng_seed=0),
+    ):
+        ln(jnp.ones((2, 5, 4)))  # ensemble_size mismatch
+    with (
+        pytest.raises(ValueError, match="feature_dim"),
+        handlers.seed(rng_seed=0),
+    ):
+        ln(jnp.ones((3, 5, 8)))  # feature_dim mismatch
+    with (
+        pytest.raises(ValueError, match="at least 2 dims"),
+        handlers.seed(rng_seed=0),
+    ):
+        ln(jnp.ones((4,)))
+
+
+def test_layer_norm_ensemble_validates_constructor_args():
+    with pytest.raises(ValueError, match="ensemble_size"):
+        LayerNormEnsemble(ensemble_size=0, feature_dim=4)
+    with pytest.raises(ValueError, match="feature_dim"):
+        LayerNormEnsemble(ensemble_size=3, feature_dim=0)
+    with pytest.raises(ValueError, match="eps"):
+        LayerNormEnsemble(ensemble_size=3, feature_dim=4, eps=0.0)
+
+
+def test_layer_norm_ensemble_composes_with_dense_rank1():
+    """LayerNormEnsemble accepts DenseRank1 output without reshape."""
+    rank1 = DenseRank1.init(
+        jr.PRNGKey(0), in_features=4, out_features=6, ensemble_size=3
+    )
+    ln = LayerNormEnsemble(ensemble_size=3, feature_dim=6)
+    x = jnp.ones((5, 4))
+    with handlers.seed(rng_seed=0):
+        h = rank1(x)  # shape (3, 5, 6)
+        y = ln(h)
+    assert y.shape == (3, 5, 6)
+
+
+def test_layer_norm_ensemble_is_pyrox_module():
+    ln = LayerNormEnsemble(ensemble_size=2, feature_dim=4)
+    assert isinstance(ln, PyroxModule)
