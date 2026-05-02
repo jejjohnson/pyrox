@@ -27,6 +27,8 @@ Dense / Bayesian-linear layers (``pyrox.nn._layers``):
 * :class:`DenseRank1` — rank-1 ensemble dense layer (BatchEnsemble /
   rank-1 BNN, Wen et al. 2020 / Dusenberry et al. 2020).
 * :class:`NCPContinuousPerturb` — input perturbation for NCP.
+* :class:`NCPNormalOutput` — output-side NCP KL regulariser
+  (Hafner et al. 2018).
 * :class:`RBFFourierFeatures` — SSGP-style [cos, sin] RFF (Gaussian).
 * :class:`RBFCosineFeatures` — cos(Wx + b) RFF variant (Gaussian).
 * :class:`MaternFourierFeatures` — SSGP-style RFF (Student-t).
@@ -127,6 +129,7 @@ from pyrox.nn._layers import (
     MaternFourierFeatures,
     MCDropout,
     NCPContinuousPerturb,
+    NCPNormalOutput,
     OrthogonalRandomFeatures,
     RandomKitchenSinks,
     RBFCosineFeatures,
@@ -181,6 +184,7 @@ __all__ = [
     "MaternCosineFeatures",
     "MaternFourierFeatures",
     "NCPContinuousPerturb",
+    "NCPNormalOutput",
     "OrthogonalRandomFeatures",
     "RBFCosineFeatures",
     "RBFFourierFeatures",

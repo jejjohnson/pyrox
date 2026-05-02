@@ -25,6 +25,7 @@ from pyrox.nn import (
     MaternCosineFeatures,
     MaternFourierFeatures,
     MCDropout,
+    NCPNormalOutput,
     RandomKitchenSinks,
     RBFCosineFeatures,
     RBFFourierFeatures,
@@ -212,6 +213,179 @@ def test_ncp_stochastic_when_scale_nonzero():
     with handlers.seed(rng_seed=1):
         y2 = layer(x)
     assert not jnp.allclose(y1, y2)
+
+
+# --- NCPNormalOutput -------------------------------------------------------
+
+
+def test_ncp_normal_output_kl_zero_at_prior():
+    """KL is exactly zero when the predictive matches the prior."""
+    layer = NCPNormalOutput(prior_mean=0.5, prior_std=2.0, pyrox_name="ncp_out")
+    noisy_mean = jnp.full((4, 1), 0.5)
+    noisy_std = jnp.full((4, 1), 2.0)
+    with handlers.seed(rng_seed=0):
+        kl = layer(noisy_mean, noisy_std)
+    assert jnp.allclose(kl, 0.0, atol=1e-5)
+
+
+def test_ncp_normal_output_kl_is_non_negative():
+    """KL is non-negative for any valid Gaussian pair."""
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=1.0, pyrox_name="ncp_out")
+    noisy_mean = jnp.array([[1.0], [-2.0], [0.0]])
+    noisy_std = jnp.array([[0.5], [1.5], [0.1]])
+    with handlers.seed(rng_seed=0):
+        kl = layer(noisy_mean, noisy_std)
+    assert float(kl) >= 0.0
+
+
+def test_ncp_normal_output_kl_matches_closed_form():
+    """KL[N(μ, σ²) || N(μ_p, σ_p²)] matches the standard formula."""
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=1.0, pyrox_name="ncp_out")
+    mu = jnp.array([[2.0]])
+    sigma = jnp.array([[0.5]])
+    with handlers.seed(rng_seed=0):
+        kl = layer(mu, sigma)
+    expected = (
+        jnp.log(1.0) - jnp.log(0.5) + (0.5**2 + (2.0 - 0.0) ** 2) / (2.0 * 1.0**2) - 0.5
+    )
+    assert jnp.allclose(kl, expected, atol=1e-6)
+
+
+def test_ncp_normal_output_registers_per_example_factor_with_neg_kl():
+    """Factor value is `-kl_per_example` (a vector with one entry per
+    input row) so that NumPyro's plate machinery can sum + scale it.
+    Sum over the factor's value equals minus the returned scalar KL.
+    """
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=1.0, pyrox_name="ncp_out")
+    noisy_mean = jnp.full((4, 3), 1.0)
+    noisy_std = jnp.full((4, 3), 0.5)
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        kl = layer(noisy_mean, noisy_std)
+    assert "ncp_out.kl" in tr
+    factor_value = tr["ncp_out.kl"]["fn"].log_factor
+    # Per-example shape (one entry per noisy-batch row).
+    assert factor_value.shape == (4,)
+    # Sum equals -KL (the scalar returned by __call__).
+    assert jnp.allclose(jnp.sum(factor_value), -float(kl), atol=1e-5)
+
+
+def test_ncp_normal_output_validates_prior_std():
+    with pytest.raises(ValueError, match="prior_std"):
+        NCPNormalOutput(prior_mean=0.0, prior_std=0.0)
+    with pytest.raises(ValueError, match="prior_std"):
+        NCPNormalOutput(prior_mean=0.0, prior_std=-1.0)
+
+
+def test_ncp_normal_output_kl_aggregates_across_batch():
+    """KL sums across batch and feature dims (per-example contributions)."""
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=1.0)
+    mu = jnp.full((4, 3), 1.0)
+    sigma = jnp.full((4, 3), 0.5)
+    with handlers.seed(rng_seed=0):
+        kl_total = layer(mu, sigma)
+    # Per-element KL is constant; total = 12 * per-element.
+    layer_single = NCPNormalOutput(prior_mean=0.0, prior_std=1.0)
+    with handlers.seed(rng_seed=1):
+        kl_single = layer_single(mu[:1, :1], sigma[:1, :1])
+    assert jnp.allclose(kl_total, 12.0 * kl_single, atol=1e-5)
+
+
+def test_ncp_normal_output_zero_kl_at_tiny_prior_std():
+    """noisy_std == prior_std ⇒ KL = 0 even for very small prior_std.
+
+    Regression for the asymmetric variance-floor bug: previously
+    `noisy_var` was floored at 1e-12 while `prior_var` was not, so
+    `prior_std < 1e-6` broke the zero-KL-at-the-prior invariant.
+    """
+    tiny = 1e-7
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=tiny, pyrox_name="ncp_out")
+    mu = jnp.zeros((3, 2))
+    sigma = jnp.full((3, 2), tiny)
+    with handlers.seed(rng_seed=0):
+        kl = layer(mu, sigma)
+    assert jnp.allclose(kl, 0.0, atol=1e-5)
+
+
+def test_ncp_normal_output_kl_is_inf_at_zero_noisy_std():
+    """noisy_std = 0 surfaces a model bug rather than silently clamping."""
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=1.0, pyrox_name="ncp_out")
+    mu = jnp.zeros((1, 1))
+    sigma = jnp.zeros((1, 1))
+    with handlers.seed(rng_seed=0):
+        kl = layer(mu, sigma)
+    assert not jnp.isfinite(kl)
+
+
+def test_ncp_normal_output_rejects_1d_inputs():
+    """1D ``(B,)`` inputs would collapse the batch axis under the
+    ``axis=-1`` sum and recreate the broadcast over-counting bug.
+    The layer rejects them with a hint to use ``[:, None]``.
+    """
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=1.0)
+    mu_1d = jnp.zeros((4,))
+    sigma_1d = jnp.ones((4,))
+    with handlers.seed(rng_seed=0), pytest.raises(ValueError, match=r"at least 2 dims"):
+        layer(mu_1d, sigma_1d)
+    # The explicit `(B, 1)` reshape works.
+    with handlers.seed(rng_seed=0):
+        kl = layer(mu_1d[:, None], sigma_1d[:, None])
+    assert jnp.isfinite(kl)
+
+
+def test_ncp_normal_output_rejects_mismatched_shapes():
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=1.0)
+    with (
+        handlers.seed(rng_seed=0),
+        pytest.raises(ValueError, match=r"!= noisy_std shape"),
+    ):
+        layer(jnp.zeros((4, 2)), jnp.ones((4, 3)))
+
+
+def test_ncp_normal_output_log_density_under_subsampled_plate():
+    """Under `plate("data", N, subsample_size=B)`, the layer's contribution
+    to the model log density is `-(N/B) * sum_{n in batch} kl_n` — the
+    standard unbiased estimator of the full-dataset NCP KL.
+
+    Regression for the original factor-broadcast bug: a scalar factor
+    inside a plate would be expanded over the plate dim and over-count
+    by a factor of B. Emitting `-kl_per_example` (shape `(B,)`) lets
+    NumPyro sum across the plate dim and apply `scale=N/B` correctly.
+    """
+    import numpyro
+    from numpyro.infer.util import log_density
+
+    layer = NCPNormalOutput(prior_mean=0.0, prior_std=1.0, pyrox_name="ncp_out")
+    full_dataset_size = 8
+    batch_size = 2
+    noisy_mean = jnp.full((full_dataset_size, 1), 1.0)
+    noisy_std = jnp.full((full_dataset_size, 1), 0.5)
+
+    def model_inside_plate(noisy_mean, noisy_std):
+        with numpyro.plate("data", full_dataset_size, subsample_size=batch_size) as idx:
+            layer(noisy_mean[idx], noisy_std[idx])
+
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        model_inside_plate(noisy_mean, noisy_std)
+    site = tr["ncp_out.kl"]
+    # The plate scales the factor's log_prob by N/B.
+    assert site["scale"] == pytest.approx(full_dataset_size / batch_size)
+    # Per-example shape matches the subsample size.
+    factor_value = site["fn"].log_factor
+    assert factor_value.shape == (batch_size,)
+
+    # Empirically, the model's total log density should match minus the
+    # full-dataset KL (the per-example KL is constant here, so the unbiased
+    # estimate from a subsample equals N * per-example_kl exactly).
+    seeded = handlers.seed(model_inside_plate, rng_seed=0)
+    ld, _ = log_density(seeded, (noisy_mean, noisy_std), {}, {})
+    # Compute the reference full-dataset KL by calling the layer outside
+    # any plate on all N examples.
+    layer_ref = NCPNormalOutput(
+        prior_mean=0.0, prior_std=1.0, pyrox_name="ncp_out_full"
+    )
+    with handlers.seed(rng_seed=0):
+        full_kl = float(layer_ref(noisy_mean, noisy_std))
+    assert jnp.allclose(ld, -full_kl, atol=1e-4)
 
 
 # --- DenseVariationalDropout -----------------------------------------------
