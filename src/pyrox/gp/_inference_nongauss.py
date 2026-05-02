@@ -44,12 +44,16 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import lineax as lx
-from gaussx import safe_cholesky
+from gaussx import (
+    AbstractIntegrator,
+    GaussHermiteIntegrator,
+    GaussianState,
+    safe_cholesky,
+)
 from jaxtyping import Array, Float
 
 from pyrox.gp._context import _kernel_context
-from pyrox.gp._integrators import GaussHermite
-from pyrox.gp._protocols import Integrator, Likelihood
+from pyrox.gp._protocols import Likelihood
 
 
 if TYPE_CHECKING:
@@ -255,6 +259,41 @@ def _psd_safe_cholesky(M: Float[Array, "N N"]) -> Float[Array, "N N"]:
     """
     M_sym = 0.5 * (M + M.T)
     return safe_cholesky(_psd_operator(M_sym))
+
+
+def _per_site_expectation(
+    integrator: AbstractIntegrator,
+    fn_scalar: Callable[[Float[Array, ""], Float[Array, ""]], Float[Array, ""]],
+    mean: Float[Array, " N"],
+    var: Float[Array, " N"],
+    y: Float[Array, " N"],
+) -> Float[Array, " N"]:
+    r"""Per-site Gaussian expectation via :mod:`gaussx`'s integrator API.
+
+    For each site :math:`n`, evaluates
+    :math:`\mathbb{E}_{f_n \sim \mathcal{N}(\text{mean}_n, \text{var}_n)}
+    [\text{fn\_scalar}(f_n, y_n)]` by lifting ``(mean[n], var[n])`` into a
+    1-D :class:`gaussx.GaussianState` and delegating to
+    ``integrator.integrate(fn_lifted, state).state.mean[0]``. Uses
+    :func:`jax.vmap` over the site axis to recover the per-site
+    ``(N,) -> (N,)`` shape contract that :class:`PosteriorLinearization`
+    needs. This sits on top of ``gaussx.AbstractIntegrator`` so users
+    can swap in :class:`gaussx.MonteCarloIntegrator`,
+    :class:`gaussx.UnscentedIntegrator`, etc., without changing pyrox.
+    """
+
+    def per_site(
+        m_n: Float[Array, ""], v_n: Float[Array, ""], y_n: Float[Array, ""]
+    ) -> Float[Array, ""]:
+        cov_op = lx.MatrixLinearOperator(v_n[None, None], lx.positive_semidefinite_tag)
+        state = GaussianState(mean=m_n[None], cov=cov_op)
+
+        def fn_lifted(f_arr: Float[Array, " 1"]) -> Float[Array, " 1"]:
+            return fn_scalar(f_arr[0], y_n)[None]
+
+        return integrator.integrate(fn_lifted, state).state.mean[0]  # ty: ignore[invalid-argument-type]
+
+    return jax.vmap(per_site)(mean, var, y)
 
 
 def _ep_tilted_moments(
@@ -528,14 +567,17 @@ class PosteriorLinearization(eqx.Module):
     derivative expectations instead of moment matching.
 
     Args:
-        integrator: Cavity integrator. Default ``GaussHermite(deg=20)``.
+        integrator: Cavity integrator. Default
+            ``gaussx.GaussHermiteIntegrator(order=20)``.
         max_iter: Iterations. Default ``20``.
         damping: Step size in (0, 1]. Default ``0.5``.
         tol: ``inf``-norm convergence on the posterior mean.
         precision_floor: Lower bound on the diagonal precision.
     """
 
-    integrator: Integrator = eqx.field(default_factory=lambda: GaussHermite(deg=20))
+    integrator: AbstractIntegrator = eqx.field(
+        default_factory=lambda: GaussHermiteIntegrator(order=20)
+    )
     max_iter: int = eqx.field(static=True, default=20)
     damping: float = eqx.field(static=True, default=0.5)
     tol: float = eqx.field(static=True, default=1e-6)
@@ -575,11 +617,15 @@ class PosteriorLinearization(eqx.Module):
             cav_var = jnp.reciprocal(cav_prec)
             cav_mean = cav_var * (q_mean / q_var - nat1)
 
-            # Statistical-linearization moments under the cavity.
-            grad_per = lambda f: jax.vmap(grad_at)(f, y)
-            hess_per = lambda f: jax.vmap(hess_at)(f, y)
-            E_grad = self.integrator.integrate(grad_per, cav_mean, cav_var)
-            E_hess = self.integrator.integrate(hess_per, cav_mean, cav_var)
+            # Statistical-linearization moments under the cavity. Each
+            # site gets its own 1-D ``GaussianState`` and the integrator
+            # returns the propagated mean per site.
+            E_grad = _per_site_expectation(
+                self.integrator, grad_at, cav_mean, cav_var, y
+            )
+            E_hess = _per_site_expectation(
+                self.integrator, hess_at, cav_mean, cav_var, y
+            )
 
             # Site update via BLR (diag): nat1_new = grad - H mu, nat2_new = -H,
             # damped.
@@ -633,14 +679,20 @@ class ExpectationPropagation(eqx.Module):
     log-concave likelihoods; for problematic models reduce ``damping``.
 
     Args:
-        integrator: Cavity integrator. Default ``GaussHermite(deg=20)``.
+        integrator: Cavity integrator. Default
+            ``gaussx.GaussHermiteIntegrator(order=20)``. EP only reads
+            the integrator's ``order`` attribute when delegating to
+            :func:`_ep_tilted_moments`; non-Gauss-Hermite integrators
+            fall back to ``order=20``.
         max_iter: Iterations. Default ``40``.
         damping: Damping in (0, 1]. Default ``0.5``.
         tol: ``inf``-norm convergence on the posterior mean.
         precision_floor: Lower bound on the diagonal precision.
     """
 
-    integrator: Integrator = eqx.field(default_factory=lambda: GaussHermite(deg=20))
+    integrator: AbstractIntegrator = eqx.field(
+        default_factory=lambda: GaussHermiteIntegrator(order=20)
+    )
     max_iter: int = eqx.field(static=True, default=40)
     damping: float = eqx.field(static=True, default=0.5)
     tol: float = eqx.field(static=True, default=1e-6)
@@ -683,7 +735,7 @@ class ExpectationPropagation(eqx.Module):
             # enter the marginal-likelihood approximation below — only
             # the moment ratios matter — so the per-site shifts cancel.
             tilted_mean, tilted_var = _ep_tilted_moments(
-                lp, y, cav_mean, cav_var, deg=getattr(self.integrator, "deg", 20)
+                lp, y, cav_mean, cav_var, deg=getattr(self.integrator, "order", 20)
             )
 
             # New site naturals from matched moments minus the cavity.

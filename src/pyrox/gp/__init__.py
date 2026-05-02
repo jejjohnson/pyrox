@@ -10,7 +10,7 @@
   :class:`OILMMKernel`, and shared inducing-point helpers for explicit
   cross-output structure without monolithic model classes.
 * Abstract protocols (:class:`Kernel`, :class:`Guide`,
-  :class:`Integrator`, :class:`Likelihood`) plus five concrete sparse
+  :class:`Likelihood`) plus five concrete sparse
   variational guides — :class:`FullRankGuide`, :class:`MeanFieldGuide`,
   :class:`WhitenedGuide`, :class:`NaturalGuide`, :class:`DeltaGuide`.
   Natural-parameter conversion and damped-update primitives live in
@@ -67,10 +67,6 @@ from pyrox.gp._inference_nongauss_markov import (
     NonGaussConditionedMarkovGP,
     PosteriorLinearizationMarkov,
 )
-from pyrox.gp._integrators import (
-    GaussHermite,
-    MonteCarlo,
-)
 from pyrox.gp._kernels import (
     RBF,
     Constant,
@@ -117,7 +113,6 @@ from pyrox.gp._pathwise import (
 )
 from pyrox.gp._protocols import (
     Guide,
-    Integrator,
     Kernel,
     Likelihood,
     SDEKernel,
@@ -159,7 +154,6 @@ __all__ = [
     "FourierInducingFeatures",
     "FullRankGuide",
     "GPPrior",
-    "GaussHermite",
     "GaussNewtonInference",
     "GaussNewtonMarkovInference",
     "GaussianLikelihood",
@@ -167,7 +161,6 @@ __all__ = [
     "HeteroscedasticGaussianLikelihood",
     "ICMKernel",
     "InducingFeatures",
-    "Integrator",
     "Kernel",
     "LMCKernel",
     "LaplaceInference",
@@ -179,7 +172,6 @@ __all__ = [
     "Matern",
     "MaternSDE",
     "MeanFieldGuide",
-    "MonteCarlo",
     "MultiOutputInducingVariables",
     "NaturalGuide",
     "NonGaussConditionedGP",
