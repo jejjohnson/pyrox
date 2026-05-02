@@ -535,7 +535,7 @@ class NaturalGuide(Guide):
         ``y = L^{-T} \epsilon``, ``u = m + y``. No moment-space
         Cholesky and no ``\Sigma`` materialization.
         """
-        return self._mvn().sample(key)  # ty: ignore[invalid-return-type, invalid-argument-type]
+        return self._mvn().sample(key)  # ty: ignore[invalid-argument-type]
 
     def log_prob(self, u: Float[Array, " ..."]) -> Float[Array, ""]:  # ty: ignore[invalid-method-override]
         r"""Variational log density ``\log q(u)`` via the precision MVN.

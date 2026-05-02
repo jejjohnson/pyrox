@@ -565,8 +565,8 @@ wheels = [
 
 [[package]]
 name = "gaussx"
-version = "0.0.10"
-source = { git = "https://github.com/jejjohnson/gaussx.git?branch=main#d340a0d3fe0735abae06f0cce2207837c486d0f6" }
+version = "0.0.11"
+source = { git = "https://github.com/jejjohnson/gaussx.git?branch=main#456f00c2285a85503984714cc79570e3d4e4f146" }
 dependencies = [
     { name = "einops" },
     { name = "equinox" },
@@ -1832,7 +1832,7 @@ wheels = [
 
 [[package]]
 name = "pyrox"
-version = "0.0.10"
+version = "0.0.12"
 source = { editable = "." }
 dependencies = [
     { name = "einops" },
