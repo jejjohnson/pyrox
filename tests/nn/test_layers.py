@@ -15,6 +15,7 @@ from numpyro import handlers
 
 from pyrox.nn import (
     ArcCosineFourierFeatures,
+    DenseDVI,
     DenseFlipout,
     DenseHierarchical,
     DenseNCP,
@@ -633,6 +634,159 @@ def test_hier_is_pyrox_module():
     from pyrox._core.pyrox_module import PyroxModule
 
     layer = DenseHierarchical(in_features=2, out_features=2)
+    assert isinstance(layer, PyroxModule)
+
+
+# --- DenseDVI -------------------------------------------------------------
+
+
+def test_dvi_output_shapes_match_input():
+    layer = DenseDVI(in_features=3, out_features=2)
+    mean = jnp.ones((4, 3))
+    var = 0.1 * jnp.ones((4, 3))
+    with handlers.seed(rng_seed=0):
+        out_mean, out_var = layer(mean, var)
+    assert out_mean.shape == (4, 2)
+    assert out_var.shape == (4, 2)
+
+
+def test_dvi_no_bias_path():
+    layer = DenseDVI(in_features=3, out_features=2, bias=False)
+    mean = jnp.ones((4, 3))
+    var = 0.1 * jnp.ones((4, 3))
+    with handlers.seed(rng_seed=0):
+        out_mean, out_var = layer(mean, var)
+    assert out_mean.shape == (4, 2)
+    assert out_var.shape == (4, 2)
+
+
+def test_dvi_registers_param_and_kl_sites():
+    layer = DenseDVI(in_features=3, out_features=2, pyrox_name="dvi")
+    mean = jnp.ones((1, 3))
+    var = jnp.ones((1, 3))
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        layer(mean, var)
+    for k in (
+        "dvi.weight_mean",
+        "dvi.weight_log_var",
+        "dvi.bias_mean",
+        "dvi.bias_log_var",
+    ):
+        assert tr[k]["type"] == "param", f"{k} should be a param site"
+    assert "dvi.kl" in tr  # numpyro.factor site
+
+
+def test_dvi_zero_input_var_with_zero_weight_var_is_deterministic():
+    """When the input is a delta (var=0) and the posterior is a delta
+    (log_var → -inf), the output is x @ M and has zero variance."""
+    layer = DenseDVI(
+        in_features=3,
+        out_features=2,
+        bias=False,
+        init_log_var=-30.0,  # exp(-30) ≈ 9e-14 ≈ 0
+        pyrox_name="dvi",
+    )
+    mean = jnp.array([[1.0, 2.0, -1.0]])
+    var = jnp.zeros_like(mean)
+    M = jnp.arange(6, dtype=jnp.float32).reshape(3, 2)
+    with (
+        handlers.substitute(
+            data={
+                "dvi.weight_mean": M,
+                "dvi.weight_log_var": jnp.full(M.shape, -30.0),
+            }
+        ),
+        handlers.seed(rng_seed=0),
+    ):
+        out_mean, out_var = layer(mean, var)
+    assert jnp.allclose(out_mean, mean @ M, atol=1e-5)
+    assert jnp.allclose(out_var, 0.0, atol=1e-5)
+
+
+def test_dvi_output_var_matches_closed_form():
+    """σ_y² = σ_x² @ M² + (μ_x² + σ_x²) @ S (+ bias variance)."""
+    layer = DenseDVI(in_features=2, out_features=3, pyrox_name="dvi")
+    mean = jnp.array([[1.0, -2.0]])
+    var = jnp.array([[0.25, 0.5]])
+    M = jnp.array([[1.0, 0.0, -1.0], [0.5, 0.5, 0.5]])
+    log_S = jnp.full(M.shape, -2.0)
+    b_mean = jnp.array([0.1, -0.2, 0.0])
+    log_b_var = jnp.full((3,), -3.0)
+    with (
+        handlers.substitute(
+            data={
+                "dvi.weight_mean": M,
+                "dvi.weight_log_var": log_S,
+                "dvi.bias_mean": b_mean,
+                "dvi.bias_log_var": log_b_var,
+            }
+        ),
+        handlers.seed(rng_seed=0),
+    ):
+        out_mean, out_var = layer(mean, var)
+    S = jnp.exp(log_S)
+    expected_mean = mean @ M + b_mean
+    expected_var = var @ (M**2) + (mean**2 + var) @ S + jnp.exp(log_b_var)
+    assert jnp.allclose(out_mean, expected_mean, atol=1e-5)
+    assert jnp.allclose(out_var, expected_var, atol=1e-5)
+
+
+def test_dvi_kl_factor_is_non_positive():
+    """The factor value is -KL ≤ 0 (KL between two Gaussians is non-negative)."""
+    layer = DenseDVI(in_features=3, out_features=2, pyrox_name="dvi")
+    mean = jnp.ones((1, 3))
+    var = jnp.ones((1, 3))
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        layer(mean, var)
+    log_factor = float(tr["dvi.kl"]["fn"].log_factor)
+    assert log_factor <= 0.0
+
+
+def test_dvi_kl_zero_when_posterior_matches_prior():
+    """KL[N(0, π²) || N(0, π²)] = 0; the layer's KL site reports it."""
+    prior_scale = 0.7
+    layer = DenseDVI(
+        in_features=2,
+        out_features=2,
+        bias=False,  # avoid the bias contribution
+        prior_scale=prior_scale,
+        pyrox_name="dvi",
+    )
+    mean = jnp.zeros((1, 2))
+    var = jnp.zeros((1, 2))
+    M_zero = jnp.zeros((2, 2))
+    log_var_at_prior = jnp.full((2, 2), 2.0 * float(jnp.log(prior_scale)))
+    with (
+        handlers.trace() as tr,
+        handlers.seed(rng_seed=0),
+        handlers.substitute(
+            data={"dvi.weight_mean": M_zero, "dvi.weight_log_var": log_var_at_prior}
+        ),
+    ):
+        layer(mean, var)
+    log_factor = float(tr["dvi.kl"]["fn"].log_factor)
+    assert jnp.allclose(log_factor, 0.0, atol=1e-5)
+
+
+def test_dvi_validates_input_shape():
+    layer = DenseDVI(in_features=3, out_features=2)
+    with handlers.seed(rng_seed=0), pytest.raises(ValueError, match="in_features"):
+        layer(jnp.ones((4, 5)), jnp.ones((4, 5)))
+    with handlers.seed(rng_seed=0), pytest.raises(ValueError, match=r"!= var\.shape"):
+        layer(jnp.ones((4, 3)), jnp.ones((4, 5)))
+
+
+def test_dvi_validates_constructor_args():
+    with pytest.raises(ValueError, match="must be > 0"):
+        DenseDVI(in_features=0, out_features=2)
+    with pytest.raises(ValueError, match="prior_scale"):
+        DenseDVI(in_features=3, out_features=2, prior_scale=0.0)
+
+
+def test_dvi_is_pyrox_module():
+    from pyrox._core.pyrox_module import PyroxModule
+
+    layer = DenseDVI(in_features=2, out_features=2)
     assert isinstance(layer, PyroxModule)
 
 

@@ -21,6 +21,8 @@ Uncertainty-aware dense / random-feature layers:
   for full flexibility over the weight distribution.
 * :class:`DenseVariationalDropout` — sparse variational dropout with
   per-weight learnable dropout rates (Molchanov et al., 2017).
+* :class:`DenseDVI` — Deterministic Variational Inference dense layer
+  that propagates Gaussian moments analytically (Wu et al., 2018).
 * :class:`DenseHierarchical` — hierarchical Bayesian dense layer with
   multiplicative local + global shrinkage (Louizos et al., 2017).
 * :class:`MCDropout` — always-on dropout for Monte Carlo uncertainty at
@@ -905,6 +907,174 @@ class DenseHierarchical(PyroxModule):
             b = self.pyrox_param("b", jnp.zeros(self.out_features))
             out = out + b
         return out
+
+
+class DenseDVI(PyroxModule):
+    r"""Deterministic Variational Inference dense layer (Wu et al., 2018).
+
+    Propagates a *Gaussian distribution* through the linear layer
+    analytically — there is no Monte Carlo sampling. The input is a
+    diagonal-covariance Gaussian :math:`(\mu_x, \sigma_x^2)`, the
+    output is the (still-diagonal) Gaussian :math:`(\mu_y, \sigma_y^2)`
+    induced by an independent-Gaussian variational posterior
+    :math:`q(W) = \mathcal{N}(M, S)` over the weights and a separate
+    diagonal posterior on the bias.
+
+    With weight posterior mean :math:`M`
+    (shape :math:`D_\mathrm{in}\times D_\mathrm{out}`) and per-element
+    posterior variance :math:`S` (same shape):
+
+    .. math::
+
+        \mu_y = \mu_x M, \qquad
+        \sigma_y^2 = \sigma_x^2 (M \circ M)
+                   + (\mu_x^{\circ 2} + \sigma_x^2)\,S,
+
+    plus the bias mean / variance if enabled. Compared to MC
+    estimators, DVI gives zero-variance gradients of the ELBO at the
+    cost of propagating second-order statistics layer by layer (so it
+    only really pays off when *all* dense layers in a block are DVI;
+    a single DVI layer in a sampling stack just adds bookkeeping).
+
+    The KL between the diagonal-Gaussian variational posterior and a
+    fixed isotropic Gaussian prior :math:`p(W) = \mathcal{N}(0, \pi^2)`
+    is closed-form and is registered with :func:`numpyro.factor` so
+    SVI's ``Trace_ELBO`` picks it up:
+
+    .. math::
+
+        \mathrm{KL}\!\bigl[\mathcal{N}(M, S) \,\big\|\, \mathcal{N}(0, \pi^2)\bigr]
+        = \sum_{ij}\Bigl[
+            \log \pi - \tfrac12\log S_{ij}
+            + \frac{S_{ij} + M_{ij}^2}{2\pi^2} - \tfrac12
+          \Bigr].
+
+    Plate semantics:
+        Same as the rest of the pyrox Bayesian dense family — call
+        this layer **outside** ``numpyro.plate("data", ..., subsample_size=...)``.
+        The KL is a *weight-prior* term: it sums over the weight and
+        bias matrices, not over the batch, so it's a single scalar
+        per layer. ``numpyro.factor`` is still a sample-type site,
+        though, and putting it inside a subsampled plate would broadcast
+        the scalar to the plate dim and apply ``scale = N/B`` — the
+        same over-counting trap that affects every per-layer
+        ``numpyro.factor``. Keep this layer at the top of the model
+        (or outside any data plate) and only plate the observation
+        likelihood::
+
+            def model(x, y=None):
+                mean, var = dvi(x_mean, x_var)        # KL emitted here
+                with numpyro.plate("data", x.shape[0]):
+                    numpyro.sample("obs",
+                        dist.Normal(mean, jnp.sqrt(var)), obs=y)
+
+    Attributes:
+        in_features: Input dimension :math:`D_\mathrm{in}`.
+        out_features: Output dimension :math:`D_\mathrm{out}`.
+        bias: Whether to include a diagonal-Gaussian bias.
+        prior_scale: Std :math:`\pi` of the isotropic Gaussian prior.
+        init_log_var: Initial value for the log posterior variance
+            (a small negative number keeps initial draws tight).
+        pyrox_name: Explicit scope name for NumPyro site registration.
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> from numpyro import handlers
+        >>> dvi = DenseDVI(in_features=3, out_features=2, pyrox_name="dvi")
+        >>> mean = jnp.ones((4, 3))
+        >>> var = 0.1 * jnp.ones((4, 3))
+        >>> with handlers.seed(rng_seed=0):
+        ...     out_mean, out_var = dvi(mean, var)
+        >>> out_mean.shape, out_var.shape
+        ((4, 2), (4, 2))
+
+    References:
+        Wu, A., Nowozin, S., Meeds, E., Turner, R. E., Hernández-Lobato,
+        J. M., & Gaunt, A. L. (2018). *Deterministic Variational
+        Inference for Robust Bayesian Neural Networks.* ICLR.
+    """
+
+    in_features: int = eqx.field(static=True)
+    out_features: int = eqx.field(static=True)
+    bias: bool = eqx.field(static=True, default=True)
+    prior_scale: float = eqx.field(static=True, default=1.0)
+    init_log_var: float = eqx.field(static=True, default=-3.0)
+    pyrox_name: str | None = eqx.field(static=True, default=None)
+
+    def __post_init__(self) -> None:
+        if self.in_features <= 0 or self.out_features <= 0:
+            raise ValueError(
+                "in_features and out_features must be > 0; "
+                f"got {self.in_features=}, {self.out_features=}."
+            )
+        if self.prior_scale <= 0:
+            raise ValueError(f"prior_scale must be > 0; got {self.prior_scale}.")
+
+    @pyrox_method
+    def __call__(
+        self,
+        mean: Float[Array, "*batch D_in"],
+        var: Float[Array, "*batch D_in"],
+    ) -> tuple[Float[Array, "*batch D_out"], Float[Array, "*batch D_out"]]:
+        if mean.shape != var.shape:
+            raise ValueError(f"mean.shape {mean.shape} != var.shape {var.shape}.")
+        if mean.shape[-1] != self.in_features:
+            raise ValueError(
+                f"mean.shape[-1] = {mean.shape[-1]} does not match "
+                f"in_features = {self.in_features}."
+            )
+
+        W_mean = self.pyrox_param(
+            "weight_mean", jnp.zeros((self.in_features, self.out_features))
+        )
+        W_log_var = self.pyrox_param(
+            "weight_log_var",
+            jnp.full(
+                (self.in_features, self.out_features),
+                float(self.init_log_var),
+            ),
+        )
+        W_var = jnp.exp(W_log_var)
+
+        out_mean = mean @ W_mean
+        out_var = (var) @ (W_mean**2) + (mean**2 + var) @ W_var
+
+        if self.bias:
+            b_mean = self.pyrox_param("bias_mean", jnp.zeros(self.out_features))
+            b_log_var = self.pyrox_param(
+                "bias_log_var",
+                jnp.full((self.out_features,), float(self.init_log_var)),
+            )
+            out_mean = out_mean + b_mean
+            out_var = out_var + jnp.exp(b_log_var)
+
+        # Closed-form KL[N(M, S) || N(0, prior_scale^2)] over weights and bias.
+        # Use math.log + jnp.asarray cast so prior constants pick up the
+        # same dtype as the params (avoid silent float64 promotion under
+        # jax_enable_x64 + float32 params).
+        log_prior_scale = jnp.asarray(math.log(self.prior_scale), dtype=W_mean.dtype)
+        prior_var = jnp.asarray(self.prior_scale**2, dtype=W_mean.dtype)
+        kl_w = jnp.sum(
+            log_prior_scale
+            - 0.5 * W_log_var
+            + (W_var + W_mean**2) / (2.0 * prior_var)
+            - 0.5
+        )
+        kl = kl_w
+        if self.bias:
+            b_var = jnp.exp(b_log_var)
+            kl_b = jnp.sum(
+                log_prior_scale
+                - 0.5 * b_log_var
+                + (b_var + b_mean**2) / (2.0 * prior_var)
+                - 0.5
+            )
+            kl = kl + kl_b
+        # Add -KL to the model log density. This is a per-layer scalar
+        # (sums over the weight / bias matrices, not the batch) — its
+        # emission is independent of any data plate the layer lives in.
+        numpyro.factor(self._pyrox_fullname("kl"), -kl)
+        return out_mean, out_var
 
 
 def _rff_forward(
