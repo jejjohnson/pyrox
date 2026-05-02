@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.10](https://github.com/jejjohnson/pyrox/compare/v0.0.9...v0.0.10) (2026-05-02)
+
+
+### Features
+
+* **nn:** heteroscedastic FA-noise output layers ([#51](https://github.com/jejjohnson/pyrox/issues/51)) ([#128](https://github.com/jejjohnson/pyrox/issues/128)) ([dcf8511](https://github.com/jejjohnson/pyrox/commit/dcf8511fdbf908d162367ce779fca014100933b0))
+* **nn:** rank-1 ensemble dense layer ([#51](https://github.com/jejjohnson/pyrox/issues/51)) ([#127](https://github.com/jejjohnson/pyrox/issues/127)) ([180d82b](https://github.com/jejjohnson/pyrox/commit/180d82b3d1a01134e011432f557b05880c304728))
+* **nn:** sngp output head with laplace random-feature covariance ([#51](https://github.com/jejjohnson/pyrox/issues/51)) ([#129](https://github.com/jejjohnson/pyrox/issues/129)) ([32a5198](https://github.com/jejjohnson/pyrox/commit/32a51985c9eca817edbf8bf821ee6ec769ffa7b6))
+
 ## [0.0.9](https://github.com/jejjohnson/pyrox/compare/v0.0.8...v0.0.9) (2026-05-02)
 
 
