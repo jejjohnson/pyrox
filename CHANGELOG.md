@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.12](https://github.com/jejjohnson/pyrox/compare/v0.0.11...v0.0.12) (2026-05-02)
+
+
+### Features
+
+* **gp:** sparse variational markov GP — SparseMarkovGPPrior + SVGP ELBO ([#123](https://github.com/jejjohnson/pyrox/issues/123)) ([91678ee](https://github.com/jejjohnson/pyrox/commit/91678ee56df99b792a3cf244c5cbc94fd2e6ce25))
+
 ## [0.0.11](https://github.com/jejjohnson/pyrox/compare/v0.0.10...v0.0.11) (2026-05-02)
 
 
