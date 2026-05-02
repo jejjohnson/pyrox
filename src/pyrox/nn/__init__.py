@@ -17,6 +17,8 @@ Dense / Bayesian-linear layers (``pyrox.nn._layers``):
 * :class:`DenseVariationalDropout` — sparse variational dropout dense
   layer with per-weight learnable dropout rates (Molchanov et al.,
   2017).
+* :class:`DenseDVI` — Deterministic Variational Inference dense layer
+  that propagates Gaussian moments analytically (Wu et al., 2018).
 * :class:`DenseHierarchical` — hierarchical Bayesian dense layer with
   multiplicative local + global shrinkage (Louizos et al., 2017).
 * :class:`MCDropout` — always-on dropout for Monte Carlo uncertainty.
@@ -120,6 +122,7 @@ from pyrox.nn._layers import (
     CyclicEncoder,
     DeepVSSGP,
     Deg2Rad,
+    DenseDVI,
     DenseFlipout,
     DenseHierarchical,
     DenseNCP,
@@ -166,6 +169,7 @@ __all__ = [
     "CyclicEncoder",
     "DeepVSSGP",
     "Deg2Rad",
+    "DenseDVI",
     "DenseFlipout",
     "DenseHierarchical",
     "DenseNCP",
