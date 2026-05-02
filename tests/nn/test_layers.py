@@ -16,6 +16,7 @@ from numpyro import handlers
 from pyrox.nn import (
     ArcCosineFourierFeatures,
     DenseFlipout,
+    DenseHierarchical,
     DenseNCP,
     DenseReparameterization,
     DenseVariational,
@@ -362,6 +363,103 @@ def test_vd_svi_elbo_decreases_with_observation_plate():
     assert all(jnp.isfinite(jnp.asarray(losses)))
     # Loss should fall meaningfully on this trivial problem.
     assert losses[-1] < losses[0] - 1.0
+
+
+# --- DenseHierarchical -----------------------------------------------------
+
+
+def test_hier_output_shape():
+    layer = DenseHierarchical(in_features=4, out_features=3)
+    x = jnp.ones((5, 4))
+    with handlers.seed(rng_seed=0):
+        y = layer(x)
+    assert y.shape == (5, 3)
+
+
+def test_hier_no_bias_output_shape():
+    layer = DenseHierarchical(in_features=4, out_features=3, bias=False)
+    x = jnp.ones((5, 4))
+    with handlers.seed(rng_seed=0):
+        y = layer(x)
+    assert y.shape == (5, 3)
+
+
+def test_hier_registers_param_and_sample_sites():
+    layer = DenseHierarchical(in_features=4, out_features=2, pyrox_name="hier")
+    x = jnp.ones((1, 4))
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        layer(x)
+    assert tr["hier.theta"]["type"] == "param"
+    assert tr["hier.b"]["type"] == "param"
+    assert tr["hier.z_local"]["type"] == "sample"
+    assert tr["hier.z_global"]["type"] == "sample"
+
+
+def test_hier_local_scale_dim_matches_in_features():
+    layer = DenseHierarchical(in_features=5, out_features=2, pyrox_name="hier")
+    x = jnp.ones((1, 5))
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        layer(x)
+    assert tr["hier.z_local"]["value"].shape == (5,)
+    assert tr["hier.z_global"]["value"].shape == ()
+
+
+def test_hier_stochastic_across_seeds_with_nonzero_theta():
+    """With non-zero theta and finite priors, output is stochastic."""
+    layer = DenseHierarchical(
+        in_features=4,
+        out_features=2,
+        prior_local_scale=0.5,
+        prior_global_scale=0.5,
+        pyrox_name="hier",
+    )
+    x = jnp.ones((3, 4))
+    theta = jnp.ones((4, 2))
+    with (
+        handlers.substitute(data={"hier.theta": theta}),
+        handlers.seed(rng_seed=0),
+    ):
+        y1 = layer(x)
+    with (
+        handlers.substitute(data={"hier.theta": theta}),
+        handlers.seed(rng_seed=1),
+    ):
+        y2 = layer(x)
+    assert not jnp.allclose(y1, y2)
+
+
+def test_hier_deterministic_limit_when_priors_concentrate_at_one():
+    """With z_local and z_global substituted to 1, output is exactly x @ theta."""
+    layer = DenseHierarchical(in_features=4, out_features=2, pyrox_name="hier")
+    x = jnp.ones((3, 4))
+    theta = jnp.arange(8, dtype=jnp.float32).reshape(4, 2)
+    with (
+        handlers.substitute(
+            data={
+                "hier.theta": theta,
+                "hier.z_local": jnp.ones(4),
+                "hier.z_global": jnp.array(1.0),
+                "hier.b": jnp.zeros(2),
+            }
+        ),
+        handlers.seed(rng_seed=0),
+    ):
+        y = layer(x)
+    assert jnp.allclose(y, x @ theta)
+
+
+def test_hier_validates_prior_scales():
+    with pytest.raises(ValueError, match="prior_local_scale"):
+        DenseHierarchical(in_features=2, out_features=2, prior_local_scale=0.0)
+    with pytest.raises(ValueError, match="prior_global_scale"):
+        DenseHierarchical(in_features=2, out_features=2, prior_global_scale=-1.0)
+
+
+def test_hier_is_pyrox_module():
+    from pyrox._core.pyrox_module import PyroxModule
+
+    layer = DenseHierarchical(in_features=2, out_features=2)
+    assert isinstance(layer, PyroxModule)
 
 
 # --- RBFFourierFeatures (SSGP-style) ---------------------------------------

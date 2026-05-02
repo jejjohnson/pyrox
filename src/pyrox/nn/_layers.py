@@ -21,6 +21,8 @@ Uncertainty-aware dense / random-feature layers:
   for full flexibility over the weight distribution.
 * :class:`DenseVariationalDropout` — sparse variational dropout with
   per-weight learnable dropout rates (Molchanov et al., 2017).
+* :class:`DenseHierarchical` — hierarchical Bayesian dense layer with
+  multiplicative local + global shrinkage (Louizos et al., 2017).
 * :class:`MCDropout` — always-on dropout for Monte Carlo uncertainty at
   inference time (Gal & Ghahramani, 2016).
 * :class:`DenseNCP` — Noise Contrastive Prior layer that decomposes a
@@ -646,6 +648,110 @@ class DenseVariationalDropout(PyroxModule):
         from the SVI param store under ``f"{pyrox_name}.log_alpha"``.
         """
         return jnp.mean((log_alpha > self.threshold).astype(log_alpha.dtype))
+
+
+class DenseHierarchical(PyroxModule):
+    r"""Hierarchical Bayesian dense layer with multiplicative shrinkage.
+
+    Decomposes the effective weight matrix into a deterministic base
+    :math:`\theta \in \mathbb{R}^{D_\mathrm{in} \times D_\mathrm{out}}`
+    multiplied row-wise by a per-input-unit local scale
+    :math:`z^{(\mathrm{loc})} \in \mathbb{R}^{D_\mathrm{in}}` and an
+    overall global scale :math:`z^{(\mathrm{glob})} \in \mathbb{R}`,
+
+    .. math::
+
+        W_{ij} = \theta_{ij} \cdot z_i^{(\mathrm{loc})}
+                 \cdot z^{(\mathrm{glob})},
+
+    with isotropic Gaussian priors centred at one,
+
+    .. math::
+
+        z_i^{(\mathrm{loc})} \sim \mathcal{N}(1, \sigma_\mathrm{loc}^2),
+        \qquad
+        z^{(\mathrm{glob})} \sim \mathcal{N}(1, \sigma_\mathrm{glob}^2).
+
+    The local scale prunes individual input units (a column of
+    :math:`\theta` whose ``z_loc`` posterior concentrates near zero is
+    effectively switched off) while the global scale modulates the
+    overall layer activation — the same hierarchical-shrinkage
+    structure used by horseshoe-style BNNs (Louizos et al., 2017).
+    Both scales are ``pyrox_sample`` sites so any standard NumPyro
+    guide (``AutoNormal``, etc.) drives the variational posterior; the
+    deterministic base :math:`\theta` and bias are ``pyrox_param``.
+
+    Plate semantics:
+        Same as the rest of ``pyrox.nn``'s Bayesian dense layers — call
+        outside ``numpyro.plate("data", ..., subsample_size=...)`` and
+        only plate the observation likelihood, otherwise the
+        per-layer prior log-probabilities of ``z_loc`` and ``z_glob``
+        get scaled by the subsample ratio.
+
+    Attributes:
+        in_features: Input dimension :math:`D_\mathrm{in}`.
+        out_features: Output dimension :math:`D_\mathrm{out}`.
+        bias: Whether to include a deterministic bias term.
+        prior_local_scale: Std :math:`\sigma_\mathrm{loc}` of the local
+            scale prior.
+        prior_global_scale: Std :math:`\sigma_\mathrm{glob}` of the
+            global scale prior.
+        pyrox_name: Explicit scope name for NumPyro site registration.
+
+    Example:
+        >>> import jax.numpy as jnp
+        >>> from numpyro import handlers
+        >>> layer = DenseHierarchical(
+        ...     in_features=4, out_features=2, pyrox_name="hier"
+        ... )
+        >>> x = jnp.ones((3, 4))
+        >>> with handlers.seed(rng_seed=0):
+        ...     y = layer(x)
+        >>> y.shape
+        (3, 2)
+
+    References:
+        Louizos, C., Ullrich, K., & Welling, M. (2017). *Bayesian
+        Compression for Deep Learning.* NeurIPS.
+    """
+
+    in_features: int = eqx.field(static=True)
+    out_features: int = eqx.field(static=True)
+    bias: bool = eqx.field(static=True, default=True)
+    prior_local_scale: float = 0.1
+    prior_global_scale: float = 0.1
+    pyrox_name: str | None = eqx.field(static=True, default=None)
+
+    def __post_init__(self) -> None:
+        if self.prior_local_scale <= 0:
+            raise ValueError(
+                f"prior_local_scale must be > 0; got {self.prior_local_scale}."
+            )
+        if self.prior_global_scale <= 0:
+            raise ValueError(
+                f"prior_global_scale must be > 0; got {self.prior_global_scale}."
+            )
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D_out"]:
+        theta = self.pyrox_param(
+            "theta", jnp.zeros((self.in_features, self.out_features))
+        )
+        z_loc = self.pyrox_sample(
+            "z_local",
+            dist.Normal(jnp.ones(self.in_features), self.prior_local_scale).to_event(1),
+        )
+        z_glob = self.pyrox_sample(
+            "z_global", dist.Normal(1.0, self.prior_global_scale)
+        )
+        # Effective weight uses the broadcasted multiplicative scaling.
+        # Equivalent (and slightly cheaper) to scaling x first then matmul:
+        #   y = ((x * z_loc) @ theta) * z_glob.
+        out = ((x * z_loc) @ theta) * z_glob
+        if self.bias:
+            b = self.pyrox_param("b", jnp.zeros(self.out_features))
+            out = out + b
+        return out
 
 
 def _rff_forward(
