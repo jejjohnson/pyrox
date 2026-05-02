@@ -40,6 +40,7 @@ import jax.numpy as jnp
 import lineax as lx
 import numpyro
 from gaussx import (
+    AbstractIntegrator,
     AbstractSolverStrategy,
     DenseSolver,
     MultivariateNormal,
@@ -179,12 +180,18 @@ class SparseMarkovGPPrior(eqx.Module):
     ]:
         r"""Return ``(K_zz_op, K_xz, K_xx_diag)`` for the SVGP predictive math.
 
-        Mirrors :meth:`SparseGPPrior.predictive_blocks`. Computes the
-        inducing prior covariance, the cross-covariance with ``times``,
-        and the prior marginal variance under one shared SDE-params
-        evaluation — three calls to ``sde_kernel.sde_params()`` would
-        be redundant since the parameters are deterministic for a given
-        kernel.
+        Mirrors :meth:`SparseGPPrior.predictive_blocks`. Delegates to the
+        three independent accessors:
+
+        * :meth:`inducing_operator` — ``K_{ZZ} + \\text{jitter}\\,I``
+          wrapped as a PSD :mod:`lineax` operator.
+        * :meth:`cross_covariance` — pairwise SDE autocov ``K_{XZ}``.
+        * :meth:`kernel_diag` — prior marginal variance, constant for
+          stationary SDE kernels.
+
+        Each accessor calls :meth:`SDEKernel.sde_params` independently;
+        these calls are cheap (parameter unpacking, not a kernel build)
+        so no shared-state caching is performed.
         """
         K_zz_op = self.inducing_operator()
         K_xz = self.cross_covariance(times)
@@ -254,15 +261,26 @@ def sparse_markov_elbo(
     times: Float[Array, " N"],
     y: Float[Array, " N"],
     *,
-    integrator: object | None = None,
+    integrator: AbstractIntegrator | None = None,
 ) -> Float[Array, ""]:
     r"""Sparse variational ELBO for :class:`SparseMarkovGPPrior`.
 
-    Forwards to :func:`pyrox.gp.svgp_elbo` after wrapping ``times``
-    into the ``(N, 1)`` shape that the dense SVGP path expects. The
-    SDE-derived :meth:`SparseMarkovGPPrior.predictive_blocks` contract
-    is identical to the dense :class:`SparseGPPrior`, so the same KL +
-    expected-log-likelihood machinery applies.
+    Mirrors :func:`pyrox.gp.svgp_elbo` for the SDE-derived sparse
+    Markov prior. Builds the SVGP predictive blocks
+    :math:`(K_{ZZ}, K_{XZ}, \mathrm{diag}\,K_{XX})` from the prior, asks
+    the guide for the predictive marginals
+    :math:`(\mu_n, \sigma_n^2) = q(f_n)`, and combines them with a closed-form
+    Gaussian or quadrature-based expected log-likelihood and the
+    inducing KL term:
+
+    .. math::
+
+        \mathcal{L} = \sum_n \mathbb{E}_{q(f_n)}[\log p(y_n \mid f_n)]
+                    - \mathrm{KL}[q(u) \\| p(u)].
+
+    Unlike :func:`pyrox.gp.svgp_elbo`, ``times`` stays as a 1-D vector
+    of shape ``(N,)`` — the SDE-pair autocov works on raw 1-D times and
+    has no need for a feature dimension.
 
     Args:
         prior: :class:`SparseMarkovGPPrior` over an SDE kernel and
@@ -277,6 +295,10 @@ def sparse_markov_elbo(
 
     Returns:
         Scalar ELBO value (higher is better).
+
+    Raises:
+        ValueError: If a non-conjugate likelihood is used without an
+            integrator.
     """
     from gaussx import variational_elbo_gaussian
 
@@ -301,7 +323,7 @@ def sparse_markov_elbo(
             "(e.g. gaussx.GaussHermiteIntegrator). "
             "Pass integrator=GaussHermiteIntegrator(order=20)."
         )
-    ell = _ell_numerical(likelihood, y, f_loc, f_var, integrator)  # ty: ignore[invalid-argument-type]
+    ell = _ell_numerical(likelihood, y, f_loc, f_var, integrator)
     return ell - kl
 
 
@@ -313,7 +335,7 @@ def sparse_markov_factor(
     times: Float[Array, " N"],
     y: Float[Array, " N"],
     *,
-    integrator: object | None = None,
+    integrator: AbstractIntegrator | None = None,
 ) -> None:
     """Register :func:`sparse_markov_elbo` as a NumPyro factor site."""
     numpyro.factor(

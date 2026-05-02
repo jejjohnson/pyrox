@@ -2,16 +2,22 @@
 
 Coverage strategy:
 
+* construction guards: rejects non-monotone or non-1-D inducing grids.
 * shape / finiteness / PSD on the inducing prior and the SVGP
-  predictive blocks
-* equivalence: SVGP-Markov with ``Z = times`` and well-fit guide
-  matches the dense :class:`MarkovGPPrior.condition(...).predict(...)`
-  on the same Matern data — the SDE autocovariance and the dense Matern
-  Gram are the same kernel
-* ELBO sanity: Gaussian-likelihood ELBO is finite and improves under a
-  closed-form update (SVI step on a tiny problem)
-* prediction surface: ``SparseConditionedMarkovGP.predict`` returns
-  finite mean / non-negative variance
+  predictive blocks (``predictive_blocks``).
+* sampling + log-density on the inducing prior are finite and
+  shape-correct.
+* ELBO sanity: Gaussian-likelihood ELBO is finite; non-Gaussian
+  likelihoods without an integrator raise.
+* NumPyro hook: :func:`sparse_markov_factor` registers a finite factor
+  site under :func:`numpyro.handlers.trace`.
+* prediction surface: :class:`SparseConditionedMarkovGP.predict`
+  returns finite mean / non-negative variance.
+
+A direct SVGP-Markov ↔ dense ``MarkovGPPrior`` equivalence test and a
+gradient-based ELBO-improvement test are exercised via the demo
+notebook (the latter requires the JIT plumbing documented near
+``test_elbo_non_gaussian_without_integrator_raises``).
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ from pyrox.gp import (
     SparseConditionedMarkovGP,
     SparseMarkovGPPrior,
     sparse_markov_elbo,
+    sparse_markov_factor,
 )
 
 
@@ -90,6 +97,32 @@ def test_elbo_non_gaussian_without_integrator_raises() -> None:
         sparse_markov_elbo(
             prior, guide, BernoulliLikelihood(), times, (y > 0).astype(jnp.float32)
         )
+
+
+def test_sparse_markov_factor_registers_finite_factor_site() -> None:
+    """``sparse_markov_factor`` must register one NumPyro factor site
+    whose value equals :func:`sparse_markov_elbo` and is finite."""
+    from numpyro import handlers
+
+    prior, times, y = _make_problem()
+    guide = FullRankGuide.init(prior.num_inducing, scale=0.3)
+    likelihood = GaussianLikelihood(0.05)
+
+    def model() -> None:
+        sparse_markov_factor("svgp_markov", prior, guide, likelihood, times, y)
+
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        model()
+
+    assert "svgp_markov" in tr
+    site = tr["svgp_markov"]
+    # ``numpyro.factor`` registers as a ``sample`` site backed by a
+    # ``Unit`` distribution whose ``log_factor`` carries the ELBO value.
+    assert site["type"] == "sample"
+    log_factor = site["fn"].log_factor
+    assert jnp.isfinite(log_factor)
+    expected = sparse_markov_elbo(prior, guide, likelihood, times, y)
+    assert jnp.allclose(log_factor, expected)
 
 
 # Note: SVI training of `sparse_markov_elbo` is exercised via the demo
