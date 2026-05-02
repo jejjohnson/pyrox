@@ -20,6 +20,10 @@ Dense / Bayesian-linear layers (``pyrox.nn._layers``):
 * :class:`MCDropout` — always-on dropout for Monte Carlo uncertainty.
 * :class:`DenseNCP` — Noise Contrastive Prior: deterministic backbone
   + scaled stochastic perturbation.
+* :class:`MCSoftmaxDenseFA` — heteroscedastic multi-class output head
+  with input-dependent low-rank+diag logit noise (Collier et al. 2021).
+* :class:`MCSigmoidDenseFA` — same noise model with sigmoid output
+  for multi-label classification.
 * :class:`NCPContinuousPerturb` — input perturbation for NCP.
 * :class:`RBFFourierFeatures` — SSGP-style [cos, sin] RFF (Gaussian).
 * :class:`RBFCosineFeatures` — cos(Wx + b) RFF variant (Gaussian).
@@ -93,6 +97,7 @@ from pyrox.nn._geo import (
     lonlat_to_cartesian3d,
     spherical_harmonic_encode,
 )
+from pyrox.nn._heteroscedastic import MCSigmoidDenseFA, MCSoftmaxDenseFA
 from pyrox.nn._layers import (
     SIREN,
     ArcCosineFourierFeatures,
@@ -157,6 +162,8 @@ __all__ = [
     "LaplaceFourierFeatures",
     "LonLatScale",
     "MCDropout",
+    "MCSigmoidDenseFA",
+    "MCSoftmaxDenseFA",
     "MaternCosineFeatures",
     "MaternFourierFeatures",
     "NCPContinuousPerturb",
