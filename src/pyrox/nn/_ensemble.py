@@ -134,9 +134,9 @@ class DenseRank1(PyroxModule):
     bias: bool = eqx.field(static=True, default=True)
     bayesian: bool = eqx.field(static=True, default=False)
     prior_scale: float = 0.5
-    W_init: Float[Array, "D_in D_out"] = eqx.field(default=None)
-    r_init: Float[Array, "M D_out"] = eqx.field(default=None)
-    s_init: Float[Array, "M D_in"] = eqx.field(default=None)
+    W_init: Float[Array, "D_in D_out"] | None = eqx.field(default=None)
+    r_init: Float[Array, "M D_out"] | None = eqx.field(default=None)
+    s_init: Float[Array, "M D_in"] | None = eqx.field(default=None)
     pyrox_name: str | None = None
 
     @classmethod
@@ -161,8 +161,12 @@ class DenseRank1(PyroxModule):
             )
         if init_scale < 0:
             raise ValueError(f"init_scale must be >= 0; got {init_scale}.")
-        if prior_scale <= 0:
-            raise ValueError(f"prior_scale must be > 0; got {prior_scale}.")
+        # `prior_scale` is only consulted in Bayesian mode — don't reject
+        # configs that pass through a sentinel default in deterministic mode.
+        if bayesian and prior_scale <= 0:
+            raise ValueError(
+                f"prior_scale must be > 0 when bayesian=True; got {prior_scale}."
+            )
         kw, kr, ks = jr.split(key, 3)
         W_init = _glorot_uniform(kw, in_features, out_features)
         r_init = _rs_init(kr, ensemble_size, out_features, init_scale)
@@ -206,7 +210,9 @@ class DenseRank1(PyroxModule):
             )
 
     @pyrox_method
-    def __call__(self, x: Float[Array, "N D_in"]) -> Float[Array, "M N D_out"]:
+    def __call__(
+        self, x: Float[Array, "*batch D_in"]
+    ) -> Float[Array, "M *batch D_out"]:
         W = self.pyrox_param("W", self.W_init)
 
         if self.bayesian:
@@ -222,17 +228,27 @@ class DenseRank1(PyroxModule):
             r = self.pyrox_param("r", self.r_init)
             s = self.pyrox_param("s", self.s_init)
 
-        # y_i = ((x * s_i) @ W) * r_i + b_i. einsum keeps the ensemble
-        # axis as the leading dim and avoids materialising the per-
-        # member effective kernel W_i = (s_i ⊗ r_i) ∘ W.
-        x_scaled = jnp.einsum("nd,md->mnd", x, s)
-        h = jnp.einsum("mnd,do->mno", x_scaled, W)
-        out = h * r[:, None, :]
+        # y_i = ((x ∘ s_i) @ W) ∘ r_i + b_i. einsum's `...` lets us keep
+        # arbitrary leading batch dims while broadcasting s_i, r_i over
+        # them. Avoids materialising the per-member effective kernel
+        # W_i = (s_i ⊗ r_i) ∘ W.
+        x_scaled = jnp.einsum("...d,md->m...d", x, s)
+        h = jnp.einsum("m...d,do->m...o", x_scaled, W)
+        # Broadcast r_i over the *batch dims by expanding to (M, *(1,)*B, D_out)
+        # where B is the number of batch dims (h.ndim - 2 to drop M and D_out).
+        batch_ndim = h.ndim - 2
+        r_b = r.reshape(
+            (self.ensemble_size,) + (1,) * batch_ndim + (self.out_features,)
+        )
+        out = h * r_b
 
         if self.bias:
             b = self.pyrox_param(
                 "b",
                 jnp.zeros((self.ensemble_size, self.out_features)),
             )
-            out = out + b[:, None, :]
+            b_b = b.reshape(
+                (self.ensemble_size,) + (1,) * batch_ndim + (self.out_features,)
+            )
+            out = out + b_b
         return out

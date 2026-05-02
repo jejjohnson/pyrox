@@ -45,6 +45,47 @@ def test_dense_rank1_init_validates_positive_dims():
         DenseRank1.init(jr.PRNGKey(0), in_features=4, out_features=2, ensemble_size=0)
 
 
+def test_dense_rank1_prior_scale_only_validated_in_bayesian_mode():
+    """Deterministic configs may carry a sentinel ``prior_scale`` that's unused."""
+    # bayesian=False ⇒ prior_scale=0.0 is fine (just unused).
+    layer = DenseRank1.init(
+        jr.PRNGKey(0),
+        in_features=3,
+        out_features=2,
+        ensemble_size=2,
+        bayesian=False,
+        prior_scale=0.0,
+    )
+    assert layer.bayesian is False
+    # bayesian=True ⇒ prior_scale must be positive.
+    with pytest.raises(ValueError, match="prior_scale must be > 0"):
+        DenseRank1.init(
+            jr.PRNGKey(0),
+            in_features=3,
+            out_features=2,
+            ensemble_size=2,
+            bayesian=True,
+            prior_scale=0.0,
+        )
+
+
+def test_dense_rank1_supports_arbitrary_batch_dims():
+    """Forward accepts ``(*batch, D_in)`` and returns ``(M, *batch, D_out)``."""
+    layer = DenseRank1.init(
+        jr.PRNGKey(0), in_features=4, out_features=2, ensemble_size=3
+    )
+    x_3d = jnp.ones((6, 5, 4))  # e.g. (batch, time, D_in)
+    with handlers.seed(rng_seed=0):
+        y_3d = layer(x_3d)
+    assert y_3d.shape == (3, 6, 5, 2)
+
+    # Unbatched single example: (D_in,) → (M, D_out).
+    x_1d = jnp.ones((4,))
+    with handlers.seed(rng_seed=0):
+        y_1d = layer(x_1d)
+    assert y_1d.shape == (3, 2)
+
+
 def test_dense_rank1_validates_init_arrays_shape():
     """Bypassing ``init`` with mis-sized arrays must fail loudly."""
     with pytest.raises(ValueError, match="W_init shape"):
