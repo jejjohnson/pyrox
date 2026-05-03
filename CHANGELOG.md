@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.13](https://github.com/jejjohnson/pyrox/compare/v0.0.12...v0.0.13) (2026-05-03)
+
+
+### Features
+
+* **gp:** port to gaussx 0.0.14 — delegate Kalman/RTS, drop autocov shim ([#146](https://github.com/jejjohnson/pyrox/issues/146)) ([046f056](https://github.com/jejjohnson/pyrox/commit/046f056686172aa0969b770176892df2a9a47051))
+
 ## [0.0.12](https://github.com/jejjohnson/pyrox/compare/v0.0.11...v0.0.12) (2026-05-02)
 
 

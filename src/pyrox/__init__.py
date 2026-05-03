@@ -3,7 +3,7 @@
 from pyrox import _core, gp, inference, nn
 
 
-__version__ = "0.0.12"
+__version__ = "0.0.13"
 __all__ = [
     "__version__",
     "_core",
