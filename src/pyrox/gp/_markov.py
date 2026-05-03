@@ -31,7 +31,7 @@ import gaussx
 import jax
 import jax.numpy as jnp
 import numpyro
-from gaussx._ssm._kalman import FilterState
+from gaussx import FilterState
 from jaxtyping import Array, Float
 from numpyro import distributions as dist
 
