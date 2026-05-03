@@ -27,9 +27,11 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
 import equinox as eqx
+import gaussx
 import jax
 import jax.numpy as jnp
 import numpyro
+from gaussx import FilterState
 from jaxtyping import Array, Float
 from numpyro import distributions as dist
 
@@ -72,78 +74,36 @@ def _kalman_filter(
     Operates in zero-mean residual space: ``residual = y - mean_fn(times)``.
     ``mask[k] = 1`` performs the standard observation update at step ``k``;
     ``mask[k] = 0`` skips the update (no information from ``residual[k]``
-    enters the state). The masked formulation makes test-time prediction a
-    single forward+backward pass over the merged grid.
+    enters the state). ``R_seq`` is the per-step observation variance.
 
-    ``R_seq`` is the per-step observation variance. For Gaussian-likelihood
-    inference this is a constant ``noise_var`` broadcast to ``(N,)``; for
-    site-based non-Gaussian inference the per-step value is
-    ``1 / Lambda_n`` from the current site precisions.
-
-    Returns predicted and filtered ``(mean, cov)`` per step plus the total
-    log marginal likelihood (only observed steps contribute).
+    Delegates to :func:`gaussx.kalman_filter` (gaussx 0.0.13 added the
+    time-varying / mask generalisation that pyrox needs). ``F`` is unused
+    by the gaussx call — it's accepted for API symmetry with the prior
+    pyrox implementation, which constructed the predict step from
+    ``F`` rather than from the discretised ``A_seq``. Kept so downstream
+    call sites and the existing test signature don't shift.
     """
-    d = F.shape[0]
-    eye = jnp.eye(d, dtype=F.dtype)
-    log_2pi = jnp.log(2.0 * jnp.pi).astype(F.dtype)
-
-    def step(
-        carry: tuple[Float[Array, " d"], Float[Array, "d d"]],
-        inputs: tuple[
-            Float[Array, "d d"],
-            Float[Array, "d d"],
-            Float[Array, ""],
-            Float[Array, ""],
-            Float[Array, ""],
-        ],
-    ) -> tuple[
-        tuple[Float[Array, " d"], Float[Array, "d d"]],
-        tuple[
-            Float[Array, " d"],
-            Float[Array, "d d"],
-            Float[Array, " d"],
-            Float[Array, "d d"],
-            Float[Array, ""],
-        ],
-    ]:
-        m, P = carry
-        A, Q, r_n, mask_n, R_n = inputs
-
-        m_pred = A @ m
-        P_pred = A @ P @ A.T + Q
-        P_pred = 0.5 * (P_pred + P_pred.T)
-
-        Hp = (H @ P_pred)[0]  # (d,)
-        S = (Hp @ H.T[:, 0]) + R_n  # scalar variance of innovation
-        innov = r_n - (H @ m_pred)[0]
-        # NaN-safe division: when ``mask_n = 0`` we discard the result, but
-        # ``S`` can still be 0 (noiseless conditioning, deterministic
-        # segments). Replace ``S`` with 1 on the masked branch so neither
-        # ``... / S`` nor ``log(S)`` produces inf/NaN that ``0 *`` would
-        # propagate via ``0 * inf = NaN``.
-        is_obs = mask_n == 1
-        S_safe = jnp.where(is_obs, S, 1.0)
-        K_full = (P_pred @ H.T)[:, 0] / S_safe  # (d,)
-        K = jnp.where(is_obs, K_full, jnp.zeros_like(K_full))
-
-        m_new = m_pred + K * innov
-        I_minus_KH = eye - K[:, None] * H
-        # ``K`` is exactly zero on masked steps, so ``I - K H`` is the
-        # identity and the Joseph term collapses to ``P_pred`` — no extra
-        # ``mask_n`` factor needed on ``R``.
-        P_new = I_minus_KH @ P_pred @ I_minus_KH.T + R_n * (K[:, None] @ K[None, :])
-        P_new = 0.5 * (P_new + P_new.T)
-
-        ll_term = -0.5 * (log_2pi + jnp.log(S_safe) + innov * innov / S_safe)
-        ll = jnp.where(is_obs, ll_term, 0.0)
-        return (m_new, P_new), (m_pred, P_pred, m_new, P_new, ll)
-
-    m0 = jnp.zeros(d, dtype=F.dtype)
-    P0 = P_inf
-    _, (m_pred_seq, P_pred_seq, m_filt_seq, P_filt_seq, ll_seq) = jax.lax.scan(
-        step, (m0, P0), (A_seq, Q_seq, residual, mask, R_seq)
+    del F  # gaussx derives the predict from A_seq directly
+    obs = residual[:, None]
+    R_3d = R_seq[:, None, None]
+    init_mean = jnp.zeros(P_inf.shape[0], dtype=P_inf.dtype)
+    state = gaussx.kalman_filter(
+        transition=A_seq,
+        obs_model=H,
+        process_noise=Q_seq,
+        obs_noise=R_3d,
+        observations=obs,
+        init_mean=init_mean,
+        init_cov=P_inf,
+        mask=mask.astype(bool),
     )
-    return m_pred_seq, P_pred_seq, m_filt_seq, P_filt_seq, jnp.sum(ll_seq)
+    return (
+        state.predicted_means,
+        state.predicted_covs,
+        state.filtered_means,
+        state.filtered_covs,
+        state.log_likelihood,
+    )
 
 
 def _rts_smoother(
@@ -155,47 +115,22 @@ def _rts_smoother(
 ) -> tuple[Float[Array, "N d"], Float[Array, "N d d"]]:
     """Backward Rauch-Tung-Striebel smoother.
 
-    ``A_seq[k]`` is the transition matrix used to predict step ``k`` from
-    step ``k - 1``; the smoother walks backward from the last filtered state.
+    Delegates to :func:`gaussx.rts_smoother`. Reconstructs a
+    :class:`gaussx.FilterState` from the unpacked per-step arrays so call
+    sites that wire the filter and smoother together (passing tuples)
+    don't have to change shape.
     """
-
-    def step(
-        carry: tuple[Float[Array, " d"], Float[Array, "d d"]],
-        inputs: tuple[
-            Float[Array, " d"],
-            Float[Array, "d d"],
-            Float[Array, " d"],
-            Float[Array, "d d"],
-            Float[Array, "d d"],
-        ],
-    ) -> tuple[
-        tuple[Float[Array, " d"], Float[Array, "d d"]],
-        tuple[Float[Array, " d"], Float[Array, "d d"]],
-    ]:
-        m_next_smooth, P_next_smooth = carry
-        m_filt, P_filt, m_pred_next, P_pred_next, A_next = inputs
-        # J = P_filt @ A_next^T @ P_pred_next^{-1}
-        J = jnp.linalg.solve(P_pred_next.T, A_next @ P_filt.T).T
-        m_smooth = m_filt + J @ (m_next_smooth - m_pred_next)
-        P_smooth = P_filt + J @ (P_next_smooth - P_pred_next) @ J.T
-        P_smooth = 0.5 * (P_smooth + P_smooth.T)
-        return (m_smooth, P_smooth), (m_smooth, P_smooth)
-
-    m_T = m_filt_seq[-1]
-    P_T = P_filt_seq[-1]
-    inputs = (
-        m_filt_seq[:-1],
-        P_filt_seq[:-1],
-        m_pred_seq[1:],
-        P_pred_seq[1:],
-        A_seq[1:],
+    filter_state: FilterState = FilterState(  # ty: ignore[invalid-assignment]
+        filtered_means=m_filt_seq,
+        filtered_covs=P_filt_seq,
+        predicted_means=m_pred_seq,
+        predicted_covs=P_pred_seq,
+        log_likelihood=jnp.zeros((), dtype=m_filt_seq.dtype),
     )
-    _, (m_smooth_seq, P_smooth_seq) = jax.lax.scan(
-        step, (m_T, P_T), inputs, reverse=True
-    )
-    m_smooth_full = jnp.concatenate([m_smooth_seq, m_T[None]], axis=0)
-    P_smooth_full = jnp.concatenate([P_smooth_seq, P_T[None]], axis=0)
-    return m_smooth_full, P_smooth_full
+    # process_noise is unused by gaussx.rts_smoother (kept for API
+    # symmetry with the time-varying filter); pass a zero placeholder.
+    Q_dummy = jnp.zeros_like(P_filt_seq[0])
+    return gaussx.rts_smoother(filter_state, A_seq, Q_dummy)
 
 
 def _build_dt_full(times: Float[Array, " N"]) -> Float[Array, " N"]:

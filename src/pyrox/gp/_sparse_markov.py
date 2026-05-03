@@ -59,23 +59,6 @@ def _psd_operator(K: Float[Array, "M M"]) -> lx.AbstractLinearOperator:
     return lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)  # ty: ignore[invalid-return-type]
 
 
-def _sde_autocov_pairs(
-    sde_kernel: SDEKernel,
-    t1: Float[Array, " A"],
-    t2: Float[Array, " B"],
-) -> Float[Array, "A B"]:
-    r"""Pairwise autocov ``k(\tau) = H \exp(F|\tau|) P_\infty H^T``.
-
-    ``\tau = |t1 - t2|``. Thin wrapper around
-    :func:`gaussx.sde_autocovariance` that builds
-    the pairwise-difference grid; gaussx 0.0.11 owns the SDE-kernel
-    primitives so the math itself lives there. Same forward-mode
-    contract as the pre-0.0.11 pyrox helper.
-    """
-    diffs = jnp.abs(t1[:, None] - t2[None, :])
-    return sde_autocovariance(sde_kernel, diffs)
-
-
 class SparseMarkovGPPrior(eqx.Module):
     r"""Sparse variational GP prior over an SDE kernel and inducing time grid.
 
@@ -148,14 +131,17 @@ class SparseMarkovGPPrior(eqx.Module):
 
     def inducing_operator(self) -> lx.AbstractLinearOperator:
         r"""Return ``K_{ZZ} + \text{jitter}\,I`` as a PSD ``lineax`` operator."""
-        K_zz = _sde_autocov_pairs(self.sde_kernel, self.Z, self.Z)
+        diffs = jnp.abs(self.Z[:, None] - self.Z[None, :])
+        K_zz = sde_autocovariance(self.sde_kernel, diffs)
         K_zz = 0.5 * (K_zz + K_zz.T)
         K_zz = K_zz + self.jitter * jnp.eye(K_zz.shape[0], dtype=K_zz.dtype)
         return _psd_operator(K_zz)
 
     def cross_covariance(self, times: Float[Array, " N"]) -> Float[Array, "N M"]:
         """``K_{XZ}`` — pairwise SDE autocov between training and inducing times."""
-        return _sde_autocov_pairs(self.sde_kernel, jnp.asarray(times), self.Z)
+        t = jnp.asarray(times)
+        diffs = jnp.abs(t[:, None] - self.Z[None, :])
+        return sde_autocovariance(self.sde_kernel, diffs)
 
     def kernel_diag(self, times: Float[Array, " N"]) -> Float[Array, " N"]:
         r"""Prior diagonal :math:`\mathrm{diag}\,K(X, X)`.

@@ -1,6 +1,6 @@
 [project]
 name = "pyrox"
-version = "0.0.12"
+version = "0.0.13"
 description = "Probabilistic modeling with Equinox and NumPyro: Bayesian neural networks, Gaussian processes, and composable GP building blocks."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
@@ -23,7 +23,7 @@ dependencies = [
     "jax>=0.4",
     "equinox>=0.11",
     "numpyro>=0.20.1",
-    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@main",
+    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.0.14",
     "lineax>=0.0.5",
     "einops>=0.8.2",
 ]
@@ -89,7 +89,7 @@ examples = [
 
 [tool.uv.sources]
 # gaussx is not yet on PyPI; resolve from GitHub until the first release.
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", branch = "main" }
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.0.14" }
 
 [build-system]
 requires = ["hatchling"]
