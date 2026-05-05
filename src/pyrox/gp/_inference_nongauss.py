@@ -246,7 +246,7 @@ def _per_point_grad_hess(
 
 def _psd_operator(M: Float[Array, "N N"]) -> lx.AbstractLinearOperator:
     """Wrap a symmetric PSD array as a tagged ``lineax`` operator."""
-    return lx.MatrixLinearOperator(M, lx.positive_semidefinite_tag)  # ty: ignore[invalid-return-type]
+    return lx.MatrixLinearOperator(M, lx.positive_semidefinite_tag)
 
 
 def _psd_safe_cholesky(M: Float[Array, "N N"]) -> Float[Array, "N N"]:
@@ -293,7 +293,7 @@ def _per_site_expectation(
         def fn_lifted(f_arr: Float[Array, " 1"]) -> Float[Array, " 1"]:
             return fn_scalar(f_arr[0], y_n)[None]
 
-        return integrator.integrate(fn_lifted, state).state.mean[0]  # ty: ignore[invalid-argument-type]
+        return integrator.integrate(fn_lifted, state).state.mean[0]
 
     return jax.vmap(per_site)(mean, var, y)
 
@@ -421,7 +421,7 @@ class LaplaceInference(eqx.Module):
 
         log_marg = _laplace_log_marginal(log_prob_per_point, f, y, prior_mean, K, Lam)
 
-        return NonGaussConditionedGP(  # ty: ignore[invalid-return-type]
+        return NonGaussConditionedGP(
             prior=prior,
             y=y,
             site_nat1=nat1,
@@ -504,7 +504,7 @@ class GaussNewtonInference(eqx.Module):
 
         log_marg = _laplace_log_marginal(log_prob_per_point, f, y, prior_mean, K, Lam)
 
-        return NonGaussConditionedGP(  # ty: ignore[invalid-return-type]
+        return NonGaussConditionedGP(
             prior=prior,
             y=y,
             site_nat1=nat1,
@@ -622,7 +622,7 @@ class PosteriorLinearization(eqx.Module):
             log_prob_per_point, q_mean, y, prior_mean, K, nat2
         )
 
-        return NonGaussConditionedGP(  # ty: ignore[invalid-return-type]
+        return NonGaussConditionedGP(
             prior=prior,
             y=y,
             site_nat1=nat1,
@@ -733,7 +733,7 @@ class ExpectationPropagation(eqx.Module):
             log_prob_per_point, q_mean, y, prior_mean, K, nat2
         )
 
-        return NonGaussConditionedGP(  # ty: ignore[invalid-return-type]
+        return NonGaussConditionedGP(
             prior=prior,
             y=y,
             site_nat1=nat1,
@@ -825,7 +825,7 @@ class QuasiNewtonInference(eqx.Module):
             log_prob_per_point, f_opt, y, prior_mean, K, Lam
         )
 
-        return NonGaussConditionedGP(  # ty: ignore[invalid-return-type]
+        return NonGaussConditionedGP(
             prior=prior,
             y=y,
             site_nat1=nat1,

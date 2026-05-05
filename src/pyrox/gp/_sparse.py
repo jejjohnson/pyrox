@@ -47,7 +47,7 @@ from pyrox.gp._protocols import Kernel
 
 def _psd_operator(K: Float[Array, "M M"]) -> lx.AbstractLinearOperator:
     """Wrap a Gram matrix as a PSD ``lineax`` operator."""
-    return lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)  # ty: ignore[invalid-return-type]
+    return lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)
 
 
 class SparseGPPrior(eqx.Module):
@@ -219,7 +219,7 @@ class SparseGPPrior(eqx.Module):
         return K_zz_op, K_xz, K_xx_diag
 
     def _resolved_solver(self) -> AbstractSolverStrategy:
-        return DenseSolver() if self.solver is None else self.solver  # ty: ignore[invalid-return-type]
+        return DenseSolver() if self.solver is None else self.solver
 
     def log_prob(self, u: Float[Array, " M"]) -> Float[Array, ""]:
         r"""Log-density under :math:`p(u) = \mathcal{N}(0, K_{ZZ} + \text{jitter}\,I)`.

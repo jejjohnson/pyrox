@@ -260,7 +260,7 @@ class LaplaceMarkovInference(eqx.Module):
         )
         log_marg_corrected = log_marg + ll_data - ll_pseudo
 
-        return NonGaussConditionedMarkovGP(  # ty: ignore[invalid-return-type]
+        return NonGaussConditionedMarkovGP(
             prior=prior,
             y=y,
             site_nat1=nat1,
@@ -309,7 +309,7 @@ class GaussNewtonMarkovInference(eqx.Module):
             damping=self.damping,
             precision_floor=self.precision_floor,
         )
-        return inner.fit(prior, likelihood, y)  # ty: ignore[unresolved-attribute]
+        return inner.fit(prior, likelihood, y)
 
 
 # --- Posterior Linearization --------------------------------------------
@@ -403,7 +403,7 @@ class PosteriorLinearizationMarkov(eqx.Module):
 
         _, _, log_marg = _markov_smoothed_posterior(prior, nat1, nat2)
 
-        return NonGaussConditionedMarkovGP(  # ty: ignore[invalid-return-type]
+        return NonGaussConditionedMarkovGP(
             prior=prior,
             y=y,
             site_nat1=nat1,
@@ -504,7 +504,7 @@ class ExpectationPropagationMarkov(eqx.Module):
 
         _, _, log_marg = _markov_smoothed_posterior(prior, nat1, nat2)
 
-        return NonGaussConditionedMarkovGP(  # ty: ignore[invalid-return-type]
+        return NonGaussConditionedMarkovGP(
             prior=prior,
             y=y,
             site_nat1=nat1,

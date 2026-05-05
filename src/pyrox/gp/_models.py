@@ -63,7 +63,7 @@ def _psd_operator(K: Float[Array, "N N"]) -> lx.AbstractLinearOperator:
     The positive-semidefinite tag lets gaussx route the matrix to
     Cholesky-based solvers / logdets when using ``AutoSolver``.
     """
-    return lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)  # ty: ignore[invalid-return-type]
+    return lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)
 
 
 class GPPrior(eqx.Module):
@@ -108,7 +108,7 @@ class GPPrior(eqx.Module):
         return _psd_operator(K + reg)
 
     def _resolved_solver(self) -> AbstractSolverStrategy:
-        return DenseSolver() if self.solver is None else self.solver  # ty: ignore[invalid-return-type]
+        return DenseSolver() if self.solver is None else self.solver
 
     def log_prob(self, f: Float[Array, " N"]) -> Float[Array, ""]:
         r"""Marginal log-density of ``f`` under the GP prior.
@@ -167,7 +167,7 @@ class GPPrior(eqx.Module):
         cache = build_prediction_cache(
             operator, residual, solver=self._resolved_solver()
         )
-        return ConditionedGP(  # ty: ignore[invalid-return-type]
+        return ConditionedGP(
             prior=self,
             y=y,
             noise_var=noise_var,

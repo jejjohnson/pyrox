@@ -76,7 +76,7 @@ def _df_to_design(
 def _build_bnf(fit: SpatiotemporalFit, width: int, depth: int) -> BayesianNeuralField:
     """Construct the :class:`BayesianNeuralField` layer from a fit bundle."""
     d_in = len(fit.feature_cols)
-    return BayesianNeuralField(  # ty: ignore[invalid-return-type]
+    return BayesianNeuralField(
         input_scales=tuple([1.0] * d_in),  # already standardized
         fourier_degrees=fit.fourier_layer.degrees,
         interactions=fit.interaction_layer.pairs,
@@ -276,7 +276,7 @@ class BNFEstimator(EstimatorBase):
             )
         else:
             raise ValueError(f"Unknown inference_kind {self.inference_kind!r}")
-        return FittedBNF(  # ty: ignore[invalid-return-type]
+        return FittedBNF(
             config=self,
             fit_bundle=fit_bundle,
             params=params,

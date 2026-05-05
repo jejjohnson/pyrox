@@ -153,7 +153,7 @@ def _check_nonnegative_concrete(arr: Float[Array, " ..."], *, name: str) -> None
 
 def _psd_matrix_op(M: Float[Array, "R R"]) -> lx.MatrixLinearOperator:
     """Wrap a square PSD matrix as a tagged lineax operator."""
-    return lx.MatrixLinearOperator(M, tags=lx.positive_semidefinite_tag)  # ty: ignore[invalid-return-type]
+    return lx.MatrixLinearOperator(M, tags=lx.positive_semidefinite_tag)
 
 
 def _matrix_op(M: Float[Array, "R C"]) -> lx.MatrixLinearOperator:
@@ -163,7 +163,7 @@ def _matrix_op(M: Float[Array, "R C"]) -> lx.MatrixLinearOperator:
     tag would be wrong and trigger a ``lineax`` shape check against
     symmetry.
     """
-    return lx.MatrixLinearOperator(M)  # ty: ignore[invalid-return-type]
+    return lx.MatrixLinearOperator(M)
 
 
 def _kron_block_op(
@@ -264,7 +264,7 @@ class LMCKernel(eqx.Module):
         ]
         if len(terms) == 1:
             return terms[0]
-        return SumOperator(*terms)  # ty: ignore[invalid-return-type]
+        return SumOperator(*terms)
 
     def cross_covariance(
         self,
@@ -517,7 +517,7 @@ class OILMMKernel(eqx.Module):
         ]
         if len(terms) == 1:
             return terms[0]
-        return SumOperator(*terms)  # ty: ignore[invalid-return-type]
+        return SumOperator(*terms)
 
     def signal_covariance(
         self,
@@ -595,7 +595,7 @@ class SharedInducingPoints(eqx.Module):
                 _psd_matrix_op(kernel(self.locations, self.locations))
                 for kernel in kernels
             )
-        return BlockDiag(*blocks)  # ty: ignore[invalid-return-type]
+        return BlockDiag(*blocks)
 
     def K_uu(self, kernels: tuple[Kernel, ...]) -> Float[Array, "QM QM"]:
         """Materialize the block-diagonal inducing covariance over all latents."""
@@ -754,7 +754,7 @@ class MultiOutputInducingVariables(eqx.Module):
         K_uu_blocks, K_uf_blocks = self.inducing.inducing_blocks(X, kernels)
         K_uu_op = BlockDiag(*(_psd_matrix_op(B) for B in K_uu_blocks))
         K_uf = self._assemble_K_uf(K_uf_blocks)
-        return K_uu_op, K_uf  # ty: ignore[invalid-return-type]
+        return K_uu_op, K_uf
 
 
 __all__ = [
