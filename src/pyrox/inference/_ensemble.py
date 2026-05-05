@@ -594,7 +594,7 @@ def ensemble_map(
         ensemble_size=ensemble_size,
         prior_weight=prior_weight,
     )
-    result = runner.run(seed, num_epochs, *data, batch_size=batch_size)  # ty: ignore[unresolved-attribute]
+    result = runner.run(seed, num_epochs, *data, batch_size=batch_size)
     return result.params, result.losses
 
 
@@ -641,7 +641,7 @@ def ensemble_vi(
         kl_weight=kl_weight,
         num_particles=num_particles,
     )
-    result = runner.run(seed, num_epochs, *data)  # ty: ignore[unresolved-attribute]
+    result = runner.run(seed, num_epochs, *data)
     return result.params, result.losses
 
 

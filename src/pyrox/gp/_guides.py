@@ -94,29 +94,29 @@ def _resolve_solver(
     solver: AbstractSolverStrategy | None,
 ) -> AbstractSolverStrategy:
     """Default solver pattern shared by all guides — see :class:`SparseGPPrior`."""
-    return DenseSolver() if solver is None else solver  # ty: ignore[invalid-return-type]
+    return DenseSolver() if solver is None else solver
 
 
 def _negsemi_cov_operator(M: Float[Array, "M M"]) -> lx.AbstractLinearOperator:
     """Wrap a symmetric negative-(semi)definite array as a tagged operator."""
-    return lx.MatrixLinearOperator(M, lx.negative_semidefinite_tag)  # ty: ignore[invalid-return-type]
+    return lx.MatrixLinearOperator(M, lx.negative_semidefinite_tag)
 
 
 def _possemi_cov_operator(M: Float[Array, "M M"]) -> lx.AbstractLinearOperator:
     """Wrap a symmetric positive-(semi)definite array as a tagged operator."""
-    return lx.MatrixLinearOperator(M, lx.positive_semidefinite_tag)  # ty: ignore[invalid-return-type]
+    return lx.MatrixLinearOperator(M, lx.positive_semidefinite_tag)
 
 
 def _full_cov_operator(scale_tril: Float[Array, "M M"]) -> lx.AbstractLinearOperator:
     """Wrap ``L L^T`` as a PSD lineax operator from a Cholesky factor."""
     cov = scale_tril @ scale_tril.T
-    return lx.MatrixLinearOperator(cov, lx.positive_semidefinite_tag)  # ty: ignore[invalid-return-type]
+    return lx.MatrixLinearOperator(cov, lx.positive_semidefinite_tag)
 
 
 def _diag_cov_operator(scale: Float[Array, " M"]) -> lx.AbstractLinearOperator:
     """Wrap ``diag(s^2)`` as a PSD lineax operator from a vector of scales."""
     cov = jnp.diag(scale**2)
-    return lx.MatrixLinearOperator(cov, lx.positive_semidefinite_tag)  # ty: ignore[invalid-return-type]
+    return lx.MatrixLinearOperator(cov, lx.positive_semidefinite_tag)
 
 
 def _svgp_predict_unwhitened(
@@ -535,7 +535,7 @@ class NaturalGuide(Guide):
         ``y = L^{-T} \epsilon``, ``u = m + y``. No moment-space
         Cholesky and no ``\Sigma`` materialization.
         """
-        return self._mvn().sample(key)  # ty: ignore[invalid-argument-type]
+        return self._mvn().sample(key)
 
     def log_prob(self, u: Float[Array, " ..."]) -> Float[Array, ""]:  # ty: ignore[invalid-method-override]
         r"""Variational log density ``\log q(u)`` via the precision MVN.
@@ -600,7 +600,10 @@ class NaturalGuide(Guide):
             nat2_hat,
             lr=rho,  # ty: ignore[invalid-argument-type]
         )
-        return NaturalGuide(nat1=new_nat1, nat2=new_nat2)  # ty: ignore[invalid-return-type]
+        # gaussx returns Array | AbstractLinearOperator; we always pass Arrays
+        # in, so the runtime type is Array.
+        assert not isinstance(new_nat2, lx.AbstractLinearOperator)
+        return NaturalGuide(nat1=new_nat1, nat2=new_nat2)
 
 
 class DeltaGuide(Guide):

@@ -81,7 +81,7 @@ def fit_standardization(
     mu = jnp.asarray(sub.mean().to_numpy(), dtype=jnp.float32)
     std = jnp.asarray(sub.std(ddof=0).to_numpy(), dtype=jnp.float32)
     std = jnp.maximum(std, eps)
-    return Standardization(mu=mu, std=std)  # ty: ignore[invalid-return-type]
+    return Standardization(mu=mu, std=std)
 
 
 def encode_time_column(
@@ -310,7 +310,7 @@ def fit_spatiotemporal(
         df[feature_cols[time_col]], timetype=timetype, freq=freq
     )
 
-    return SpatiotemporalFit(  # ty: ignore[invalid-return-type]
+    return SpatiotemporalFit(
         standardize_layer=standardize_layer,
         fourier_layer=fourier_layer,
         seasonal_layer=seasonal_layer,

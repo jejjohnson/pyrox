@@ -120,7 +120,7 @@ def _rts_smoother(
     sites that wire the filter and smoother together (passing tuples)
     don't have to change shape.
     """
-    filter_state: FilterState = FilterState(  # ty: ignore[invalid-assignment]
+    filter_state: FilterState = FilterState(
         filtered_means=m_filt_seq,
         filtered_covs=P_filt_seq,
         predicted_means=m_pred_seq,
@@ -295,7 +295,7 @@ class MarkovGPPrior(eqx.Module):
     ) -> ConditionedMarkovGP:
         """Condition on Gaussian-likelihood observations via filter + smoother."""
         m_smooth, P_smooth, log_marg = self.smooth(y, noise_var)
-        return ConditionedMarkovGP(  # ty: ignore[invalid-return-type]
+        return ConditionedMarkovGP(
             prior=self,
             y=y,
             noise_var=jnp.asarray(noise_var),

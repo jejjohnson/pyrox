@@ -265,7 +265,7 @@ class PathwiseSampler(eqx.Module):
         correction_weights = _solve_with_cholesky(
             cholesky(self.conditioned_gp.operator), residual
         )
-        return PathwiseFunction(  # ty: ignore[invalid-return-type]
+        return PathwiseFunction(
             kernel_fn=_frozen_kernel_fn(kernel, variance, lengthscale),
             correction_points=X,
             correction_weights=correction_weights,
@@ -384,7 +384,7 @@ class DecoupledPathwiseSampler(eqx.Module):
             inducing_chol,
             inducing_samples - prior_inducing,
         )
-        return PathwiseFunction(  # ty: ignore[invalid-return-type]
+        return PathwiseFunction(
             kernel_fn=_frozen_kernel_fn(self.prior.kernel, variance, lengthscale),
             correction_points=Z,
             correction_weights=correction_weights,

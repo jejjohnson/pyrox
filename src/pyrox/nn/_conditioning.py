@@ -301,12 +301,13 @@ class AffineModulation(AbstractConditioner):
                 f"got {gamma_activation!r}."
             )
         generator = eqx.nn.Linear(cond_dim, 2 * num_features, key=key)
+        assert generator.bias is not None
         # Bias-only zero-init: with bias=0 and "one_plus_tanh", γ=1 and β=0
         # → the layer is identity at init (Perez et al. 2018 default).
         generator = eqx.tree_at(
             lambda m: m.bias,
             generator,
-            jnp.zeros_like(generator.bias),  # ty: ignore[unresolved-attribute]
+            jnp.zeros_like(generator.bias),
         )
         return cls(
             num_features=num_features,
@@ -477,7 +478,7 @@ class HyperLinear(AbstractConditioner):
         gen = eqx.tree_at(
             lambda m: m.weight,
             gen,
-            gen.weight * init_scale,  # ty: ignore[unresolved-attribute]
+            gen.weight * init_scale,
         )
         gen = eqx.tree_at(
             lambda m: m.bias,
@@ -1197,7 +1198,7 @@ def HyperSIREN(
                 pyrox_name=f"hyper_{i}",
             )
         )
-    return _GeneratedSiren(  # ty: ignore[invalid-return-type]
+    return _GeneratedSiren(
         parameter_net=parameter_net,
         siren=siren,
         hyper_layers=hyper_layers,

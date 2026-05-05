@@ -115,7 +115,7 @@ def _diagonal_with_jitter(
     O(M^3) fallback. Folding into the diagonal vector keeps dispatch in
     the elementwise-divide short-circuit.
     """
-    return lx.DiagonalLinearOperator(diag + jitter)  # ty: ignore[invalid-return-type]
+    return lx.DiagonalLinearOperator(diag + jitter)
 
 
 # ---------------------------------------------------------------------------

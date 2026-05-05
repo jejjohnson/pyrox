@@ -64,7 +64,7 @@ def _ell_numerical(
         )
         return log_likelihood_expectation(
             lambda f: lik.log_prob(f, y_n[None]),
-            state,  # ty: ignore[invalid-argument-type]
+            state,
             integrator,
         )
 
@@ -353,7 +353,7 @@ class ConjugateVI:
             )
             return log_likelihood_expectation(
                 lambda f: lik.log_prob(f, y_n[None]),
-                state,  # ty: ignore[invalid-argument-type]
+                state,
                 self.integrator,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
             )
 
