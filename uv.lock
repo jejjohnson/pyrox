@@ -581,7 +581,7 @@ wheels = [
 [[package]]
 name = "gaussx"
 version = "0.0.14"
-source = { git = "https://github.com/jejjohnson/gaussx.git?branch=main#926be4f48f692dcfd0be25c3ec8200818ca7276b" }
+source = { git = "https://github.com/jejjohnson/gaussx.git?rev=926be4f48f692dcfd0be25c3ec8200818ca7276b#926be4f48f692dcfd0be25c3ec8200818ca7276b" }
 dependencies = [
     { name = "einops" },
     { name = "equinox" },
@@ -1906,7 +1906,7 @@ typecheck = [
 requires-dist = [
     { name = "einops", specifier = ">=0.8.2" },
     { name = "equinox", specifier = ">=0.13.8" },
-    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?branch=main" },
+    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=926be4f48f692dcfd0be25c3ec8200818ca7276b" },
     { name = "jax", specifier = ">=0.10" },
     { name = "lineax", specifier = ">=0.1.1" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
