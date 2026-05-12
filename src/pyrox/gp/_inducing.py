@@ -45,10 +45,13 @@ import lineax as lx
 from jaxtyping import Array, Float, Int
 
 from pyrox._basis import (
+    SlepianCapBasis,
     fourier_basis,
     fourier_eigenvalues,
     graph_laplacian_eigpairs,
+    harmonic_degrees,
     real_spherical_harmonics,
+    slepian_cap_basis,
     spectral_density,
 )
 from pyrox.gp._context import _kernel_context
@@ -339,6 +342,107 @@ class SphericalHarmonicInducingFeatures(eqx.Module):
         return Y * a_per_feature[None, :]
 
 
+class SlepianInducingFeatures(eqx.Module):
+    r"""Region-localized Slepian inducing features on :math:`S^2`.
+
+    The retained Slepian functions are linear combinations ``G = Y C`` of the
+    real spherical-harmonic basis. For a zonal kernel with Funk-Hecke
+    coefficients ``a_l``, this gives dense inducing covariance
+    ``K_uu = C.T diag(a_l) C`` and cross-covariance
+    ``K_ux = Y(X) diag(a_l) C``.
+    """
+
+    l_max: int = eqx.field(static=True)
+    cap_radius_deg: float = eqx.field(static=True)
+    cap_centre_lonlat_deg: tuple[float, float] = eqx.field(static=True)
+    eig_threshold: float = eqx.field(static=True, default=0.05)
+    n_modes: int | None = eqx.field(static=True, default=None)
+    num_quadrature: int = eqx.field(static=True, default=256)
+    basis_num_quadrature: int | None = eqx.field(static=True, default=None)
+
+    @classmethod
+    def init(
+        cls,
+        *,
+        l_max: int,
+        cap_radius_deg: float,
+        cap_centre_lonlat_deg: tuple[float, float],
+        eig_threshold: float = 0.05,
+        n_modes: int | None = None,
+        num_quadrature: int = 256,
+        basis_num_quadrature: int | None = None,
+    ) -> SlepianInducingFeatures:
+        if l_max < 0:
+            raise ValueError(f"l_max must be >= 0; got {l_max}.")
+        if cap_radius_deg <= 0.0 or cap_radius_deg > 180.0:
+            raise ValueError(
+                f"cap_radius_deg must lie in (0, 180]; got {cap_radius_deg}."
+            )
+        if num_quadrature < 1:
+            raise ValueError(f"num_quadrature must be >= 1; got {num_quadrature}.")
+        if n_modes is not None and n_modes < 1:
+            raise ValueError(f"n_modes must be >= 1; got {n_modes}.")
+        if len(cap_centre_lonlat_deg) != 2:
+            raise ValueError(
+                "cap_centre_lonlat_deg must contain (lon, lat); "
+                f"got {cap_centre_lonlat_deg}."
+            )
+        lon, lat = cap_centre_lonlat_deg
+        return cls(
+            l_max=l_max,
+            cap_radius_deg=float(cap_radius_deg),
+            cap_centre_lonlat_deg=(float(lon), float(lat)),
+            eig_threshold=float(eig_threshold),
+            n_modes=n_modes,
+            num_quadrature=num_quadrature,
+            basis_num_quadrature=basis_num_quadrature,
+        )
+
+    @property
+    def basis(self) -> SlepianCapBasis:
+        """Precomputed Slepian basis for this cap."""
+        return slepian_cap_basis(
+            self.l_max,
+            jnp.deg2rad(self.cap_radius_deg),
+            n_modes=self.n_modes,
+            eig_threshold=self.eig_threshold,
+            lonlat_centre=jnp.deg2rad(jnp.asarray(self.cap_centre_lonlat_deg)),
+            num_quadrature=self.basis_num_quadrature,
+        )
+
+    @property
+    def num_features(self) -> int:
+        return self.basis.num_modes
+
+    def _per_feature_coeffs(self, kernel: Kernel) -> Float[Array, " M"]:
+        a = funk_hecke_coefficients(
+            kernel, self.l_max, num_quadrature=self.num_quadrature
+        )
+        return a[jnp.asarray(harmonic_degrees(self.l_max))]
+
+    def K_uu(self, kernel: Kernel, *, jitter: float = 1e-6) -> lx.MatrixLinearOperator:
+        """Dense Slepian inducing covariance with diagonal jitter."""
+        basis = self.basis
+        a_per_feature = self._per_feature_coeffs(kernel)
+        weighted_coeffs = basis.coeffs * a_per_feature[:, None]
+        K = basis.coeffs.T @ weighted_coeffs
+        K = K + jitter * jnp.eye(basis.num_modes, dtype=K.dtype)
+        return lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)
+
+    def k_ux(
+        self,
+        unit_xyz: Float[Array, "N 3"],
+        kernel: Kernel,
+    ) -> Float[Array, "N K"]:
+        """Cross-covariance between unit-sphere inputs and Slepian features."""
+        if unit_xyz.ndim != 2 or unit_xyz.shape[-1] != 3:
+            raise ValueError(f"unit_xyz must be (N, 3); got {unit_xyz.shape}.")
+        basis = self.basis
+        Y = real_spherical_harmonics(unit_xyz, self.l_max)
+        a_per_feature = self._per_feature_coeffs(kernel)
+        return (Y * a_per_feature[None, :]) @ basis.coeffs
+
+
 # ---------------------------------------------------------------------------
 # Graph Laplacian inducing features
 # ---------------------------------------------------------------------------
@@ -468,6 +572,7 @@ __all__ = [
     "FourierInducingFeatures",
     "InducingFeatures",
     "LaplacianInducingFeatures",
+    "SlepianInducingFeatures",
     "SphericalHarmonicInducingFeatures",
     "funk_hecke_coefficients",
 ]

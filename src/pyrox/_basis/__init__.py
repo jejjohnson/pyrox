@@ -26,11 +26,19 @@ from pyrox._basis._fourier import (
 )
 from pyrox._basis._laplacian import graph_laplacian_eigpairs
 from pyrox._basis._rff import draw_rff_cosine_basis, evaluate_rff_cosine_paths
+from pyrox._basis._slepian import (
+    SlepianCapBasis,
+    shannon_number,
+    slepian_cap_basis,
+    slepian_cap_eigh_per_m,
+    slepian_concentration_matrix,
+)
 from pyrox._basis._spectral_density import spectral_density
 from pyrox._basis._spherical import harmonic_degrees, real_spherical_harmonics
 
 
 __all__ = [
+    "SlepianCapBasis",
     "draw_rff_cosine_basis",
     "evaluate_rff_cosine_paths",
     "fourier_basis",
@@ -40,5 +48,9 @@ __all__ = [
     "graph_laplacian_eigpairs",
     "harmonic_degrees",
     "real_spherical_harmonics",
+    "shannon_number",
+    "slepian_cap_basis",
+    "slepian_cap_eigh_per_m",
+    "slepian_concentration_matrix",
     "spectral_density",
 ]

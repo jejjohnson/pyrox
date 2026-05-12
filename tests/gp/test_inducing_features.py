@@ -24,6 +24,7 @@ from pyrox.gp import (
     LaplacianInducingFeatures,
     Matern,
     Periodic,
+    SlepianInducingFeatures,
     SparseGPPrior,
     SphericalHarmonicInducingFeatures,
     funk_hecke_coefficients,
@@ -174,6 +175,36 @@ def test_vish_k_ux_shape():
 def test_vish_rejects_negative_l_max():
     with pytest.raises(ValueError, match="l_max"):
         SphericalHarmonicInducingFeatures.init(l_max=-1)
+
+
+def test_slepian_inducing_features_shape_and_finite():
+    kernel = RBF(init_lengthscale=1.0, init_variance=1.0)
+    features = SlepianInducingFeatures.init(
+        l_max=3,
+        cap_radius_deg=50.0,
+        cap_centre_lonlat_deg=(0.0, 0.0),
+        n_modes=4,
+    )
+    rng = np.random.default_rng(3)
+    xyz = rng.standard_normal((5, 3))
+    xyz /= np.linalg.norm(xyz, axis=1, keepdims=True)
+
+    op = features.K_uu(kernel)
+    K_ux = features.k_ux(jnp.asarray(xyz), kernel)
+
+    assert isinstance(op, lx.MatrixLinearOperator)
+    assert op.as_matrix().shape == (4, 4)
+    assert K_ux.shape == (5, 4)
+    assert jnp.all(jnp.isfinite(K_ux))
+
+
+def test_slepian_inducing_rejects_bad_radius():
+    with pytest.raises(ValueError, match="cap_radius_deg"):
+        SlepianInducingFeatures.init(
+            l_max=3,
+            cap_radius_deg=0.0,
+            cap_centre_lonlat_deg=(0.0, 0.0),
+        )
 
 
 # ---------------------------------------------------------------------------
