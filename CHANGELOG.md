@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.14](https://github.com/jejjohnson/pyrox/compare/v0.0.13...v0.0.14) (2026-05-12)
+
+
+### Features
+
+* **nn,gp:** add Slepian spherical encoders and inducing features ([#152](https://github.com/jejjohnson/pyrox/issues/152)) ([83998a6](https://github.com/jejjohnson/pyrox/commit/83998a6be031ed7e7f0de3b05c014e95cd701919))
+* **nn:** add Multiplicative Filter Networks (FourierNet, GaborNet) ([#97](https://github.com/jejjohnson/pyrox/issues/97)) ([e7b70f1](https://github.com/jejjohnson/pyrox/commit/e7b70f1af538260cdbd03a816f598491a49c1150))
+
 ## [0.0.13](https://github.com/jejjohnson/pyrox/compare/v0.0.12...v0.0.13) (2026-05-03)
 
 
