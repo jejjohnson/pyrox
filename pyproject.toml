@@ -43,7 +43,7 @@ bnf = [
 # explicit version readout at the top of each notebook.
 colab = [
     "matplotlib>=3.10.9",
-    "watermark>=2.4",
+    "watermark>=2.6.0",
     "pandas>=2.0",
 ]
 
@@ -74,7 +74,7 @@ docs = [
     # if the package is missing, but installing it here lets the version
     # readout actually print under `nbconvert --execute`.
     "matplotlib>=3.10.9",
-    "watermark>=2.4",
+    "watermark>=2.6.0",
     # pygments 2.20.0 dropped the None -> '' coercion for HtmlFormatter(filename=...),
     # but pymdownx.highlight 10.21.x still passes the untitled-code-block title
     # through as None. Pin to the last 2.19.x until a fixed pymdown-extensions
