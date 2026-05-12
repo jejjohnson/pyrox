@@ -56,6 +56,16 @@ Dense / Bayesian-linear layers (``pyrox.nn._layers``):
 * :class:`LaplaceRandomFeatureCovariance` — pure-functional precision
   container used by SNGP.
 
+Multiplicative Filter Networks (``pyrox.nn._layers``):
+
+* :class:`FourierFilter` — single Fourier filter primitive.
+* :class:`GaborFilter` — single Gabor filter primitive.
+* :class:`FourierNet` — multiplicative Fourier filter network.
+* :class:`GaborNet` — multiplicative Gabor filter network.
+* :class:`BayesianFourierNet` — FourierNet with NumPyro priors.
+* :class:`BayesianGaborNet` — GaborNet with NumPyro priors.
+* :func:`mfn_forward` — pure-JAX MFN forward helper.
+
 Bayesian Neural Field stack (``pyrox.nn._bnf``):
 
 * :class:`Standardization` — affine normalization with fixed mean/std.
@@ -119,6 +129,8 @@ from pyrox.nn._heteroscedastic import MCSigmoidDenseFA, MCSoftmaxDenseFA
 from pyrox.nn._layers import (
     SIREN,
     ArcCosineFourierFeatures,
+    BayesianFourierNet,
+    BayesianGaborNet,
     BayesianSIREN,
     Cartesian3DEncoder,
     CyclicEncoder,
@@ -131,6 +143,10 @@ from pyrox.nn._layers import (
     DenseReparameterization,
     DenseVariational,
     DenseVariationalDropout,
+    FourierFilter,
+    FourierNet,
+    GaborFilter,
+    GaborNet,
     HSGPFeatures,
     LaplaceCosineFeatures,
     LaplaceFourierFeatures,
@@ -147,6 +163,7 @@ from pyrox.nn._layers import (
     SirenDense,
     SphericalHarmonicEncoder,
     VariationalFourierFeatures,
+    mfn_forward,
 )
 from pyrox.nn._sngp import (
     LaplaceRandomFeatureCovariance,
@@ -161,6 +178,8 @@ __all__ = [
     "ArcCosineFourierFeatures",
     "BayesianAffineModulation",
     "BayesianConcatConditioner",
+    "BayesianFourierNet",
+    "BayesianGaborNet",
     "BayesianHyperLinear",
     "BayesianNeuralField",
     "BayesianSIREN",
@@ -181,6 +200,10 @@ __all__ = [
     "DenseVariationalDropout",
     "FiLM",
     "FourierFeatures",
+    "FourierFilter",
+    "FourierNet",
+    "GaborFilter",
+    "GaborNet",
     "HSGPFeatures",
     "HyperFourierFeatures",
     "HyperLinear",
@@ -215,6 +238,7 @@ __all__ = [
     "interaction_features",
     "lonlat_scale",
     "lonlat_to_cartesian3d",
+    "mfn_forward",
     "seasonal_features",
     "seasonal_frequencies",
     "spherical_harmonic_encode",
