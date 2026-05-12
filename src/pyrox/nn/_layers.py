@@ -2507,15 +2507,16 @@ class FourierFilter(PyroxModule):
         phi: Phase vector of shape ``(out_features,)``.
         in_features: Input dimension.
         out_features: Output (filter) dimension.
-        pyrox_name: Optional explicit scope name for NumPyro site
-            registration (used only in :class:`BayesianFourierNet`).
+        pyrox_name: Optional scope name (passed through to the parent
+            :class:`pyrox.PyroxModule`; filters do not register sites
+            directly — sampling happens in :class:`BayesianFourierNet`).
     """
 
     Omega: Float[Array, "out in"]
     phi: Float[Array, " out"]
     in_features: int = eqx.field(static=True)
     out_features: int = eqx.field(static=True)
-    pyrox_name: str | None = None
+    pyrox_name: str | None = eqx.field(static=True, default=None)
 
     @classmethod
     def init(
@@ -2539,7 +2540,16 @@ class FourierFilter(PyroxModule):
 
         Returns:
             Initialised :class:`FourierFilter`.
+
+        Raises:
+            ValueError: If ``in_features``, ``out_features``, or
+                ``freq_scale`` is non-positive.
         """
+        _require_positive(
+            in_features=in_features,
+            out_features=out_features,
+            freq_scale=freq_scale,
+        )
         k_omega, k_phi = jax.random.split(key)
         # Per-element std: sigma_f / sqrt(D)  (Fathony et al. 2021 Sec 4.1)
         omega_std = freq_scale / math.sqrt(in_features)
@@ -2601,7 +2611,9 @@ class GaborFilter(PyroxModule):
         in_features: Input dimension.
         out_features: Output (filter) dimension.
         domain: ``(low, high)`` used for :math:`\mu` initialization (static).
-        pyrox_name: Optional scope name for NumPyro sites.
+        pyrox_name: Optional scope name (passed through to the parent
+            :class:`pyrox.PyroxModule`; filters do not register sites
+            directly — sampling happens in :class:`BayesianGaborNet`).
     """
 
     Omega: Float[Array, "out in"]
@@ -2611,7 +2623,7 @@ class GaborFilter(PyroxModule):
     in_features: int = eqx.field(static=True)
     out_features: int = eqx.field(static=True)
     domain: tuple[float, float] = eqx.field(static=True)
-    pyrox_name: str | None = None
+    pyrox_name: str | None = eqx.field(static=True, default=None)
 
     @classmethod
     def init(
@@ -2640,7 +2652,20 @@ class GaborFilter(PyroxModule):
 
         Returns:
             Initialised :class:`GaborFilter`.
+
+        Raises:
+            ValueError: If ``in_features``, ``out_features``,
+                ``gamma_alpha``, or ``gamma_beta`` is non-positive, or if
+                ``domain[0] >= domain[1]``.
         """
+        _require_positive(
+            in_features=in_features,
+            out_features=out_features,
+            gamma_alpha=gamma_alpha,
+            gamma_beta=gamma_beta,
+        )
+        if domain[0] >= domain[1]:
+            raise ValueError(f"domain must satisfy low < high; got domain={domain}.")
         k_gamma, k_mu, k_omega, k_phi = jax.random.split(key, 4)
         # gamma ~ Gamma(alpha, rate=beta): jax.random.gamma samples Gamma(alpha, 1),
         # dividing by beta converts to Gamma(alpha, rate=beta).
@@ -2678,9 +2703,14 @@ class GaborFilter(PyroxModule):
         """
         x2d = jnp.atleast_2d(x)
         gamma = jnp.exp(self.log_gamma)  # (H,)
-        # squared distance: (N, H)
-        diff = x2d[:, None, :] - self.mu[None, :, :]  # (N, H, D)
-        sq_dist = jnp.sum(diff**2, axis=-1)  # (N, H)
+        # ||x - mu||^2 = ||x||^2 + ||mu||^2 - 2 x·mu  — avoids the (N, H, D)
+        # intermediate that pairwise broadcasting would materialise.
+        x_norm_sq = jnp.sum(x2d**2, axis=-1, keepdims=True)  # (N, 1)
+        mu_norm_sq = jnp.sum(self.mu**2, axis=-1)[None, :]  # (1, H)
+        cross = x2d @ self.mu.T  # (N, H)
+        sq_dist = x_norm_sq + mu_norm_sq - 2.0 * cross  # (N, H)
+        # Clip in case of float roundoff producing tiny negative values.
+        sq_dist = jnp.maximum(sq_dist, 0.0)
         envelope = jnp.exp(-0.5 * gamma[None, :] * sq_dist)  # (N, H)
         sinusoidal = jnp.sin(x2d @ self.Omega.T + self.phi)  # (N, H)
         return sinusoidal * envelope
@@ -2719,7 +2749,21 @@ def mfn_forward(
 
     Returns:
         Output array of shape ``(N, O)``.
+
+    Raises:
+        ValueError: If ``filters`` or ``linears`` is empty, or if their
+            lengths differ.
     """
+    if len(filters) == 0 or len(linears) == 0:
+        raise ValueError(
+            f"filters and linears must be non-empty; got lengths "
+            f"{len(filters)} and {len(linears)}."
+        )
+    if len(filters) != len(linears):
+        raise ValueError(
+            f"filters and linears must have equal length; got "
+            f"{len(filters)} and {len(linears)}."
+        )
     x = jnp.atleast_2d(x)
     z = filters[0](x)
     for f, lin in zip(filters[1:], linears[:-1], strict=True):
@@ -2767,7 +2811,7 @@ class FourierNet(PyroxModule):
     hidden_features: int = eqx.field(static=True)
     out_features: int = eqx.field(static=True)
     depth: int = eqx.field(static=True)
-    pyrox_name: str | None = None
+    pyrox_name: str | None = eqx.field(static=True, default=None)
 
     @classmethod
     def init(
@@ -2891,7 +2935,7 @@ class GaborNet(PyroxModule):
     domain: tuple[float, float] = eqx.field(static=True)
     gamma_alpha: float = eqx.field(static=True)
     gamma_beta: float = eqx.field(static=True)
-    pyrox_name: str | None = None
+    pyrox_name: str | None = eqx.field(static=True, default=None)
 
     @classmethod
     def init(
@@ -3002,7 +3046,53 @@ class BayesianFourierNet(FourierNet):
             :math:`\mathrm{Uniform}(-\pi, \pi)`.
     """
 
-    prior_std: float = 1.0
+    prior_std: float = eqx.field(static=True, default=1.0)
+
+    @classmethod
+    def init(
+        cls,
+        in_features: int,
+        hidden_features: int,
+        out_features: int,
+        *,
+        depth: int,
+        key: PRNGKeyArray,
+        freq_scale: float = 256.0,
+        prior_std: float = 1.0,
+        pyrox_name: str | None = None,
+    ) -> BayesianFourierNet:
+        """Construct a :class:`BayesianFourierNet`.
+
+        Args mirror :meth:`FourierNet.init`, plus:
+
+        Args:
+            prior_std: Prior standard deviation for Gaussian sites
+                (default 1.0).
+
+        Raises:
+            ValueError: If ``prior_std`` is non-positive or any
+                :meth:`FourierNet.init` validation fails.
+        """
+        _require_positive(prior_std=prior_std)
+        base = FourierNet.init(
+            in_features,
+            hidden_features,
+            out_features,
+            depth=depth,
+            key=key,
+            freq_scale=freq_scale,
+            pyrox_name=pyrox_name,
+        )
+        return cls(
+            filters=base.filters,
+            linears=base.linears,
+            in_features=base.in_features,
+            hidden_features=base.hidden_features,
+            out_features=base.out_features,
+            depth=base.depth,
+            pyrox_name=base.pyrox_name,
+            prior_std=prior_std,
+        )
 
     @pyrox_method
     def __call__(self, x: Float[Array, "N D"]) -> Float[Array, "N O"]:
@@ -3079,7 +3169,60 @@ class BayesianGaborNet(GaborNet):
             and log-gamma sites (default 1.0).
     """
 
-    prior_std: float = 1.0
+    prior_std: float = eqx.field(static=True, default=1.0)
+
+    @classmethod
+    def init(
+        cls,
+        in_features: int,
+        hidden_features: int,
+        out_features: int,
+        *,
+        depth: int,
+        key: PRNGKeyArray,
+        domain: tuple[float, float] = (-1.0, 1.0),
+        gamma_alpha: float = 6.0,
+        gamma_beta: float = 1.0,
+        prior_std: float = 1.0,
+        pyrox_name: str | None = None,
+    ) -> BayesianGaborNet:
+        """Construct a :class:`BayesianGaborNet`.
+
+        Args mirror :meth:`GaborNet.init`, plus:
+
+        Args:
+            prior_std: Prior standard deviation for Gaussian and
+                log-gamma sites (default 1.0).
+
+        Raises:
+            ValueError: If ``prior_std`` is non-positive or any
+                :meth:`GaborNet.init` validation fails.
+        """
+        _require_positive(prior_std=prior_std)
+        base = GaborNet.init(
+            in_features,
+            hidden_features,
+            out_features,
+            depth=depth,
+            key=key,
+            domain=domain,
+            gamma_alpha=gamma_alpha,
+            gamma_beta=gamma_beta,
+            pyrox_name=pyrox_name,
+        )
+        return cls(
+            filters=base.filters,
+            linears=base.linears,
+            in_features=base.in_features,
+            hidden_features=base.hidden_features,
+            out_features=base.out_features,
+            depth=base.depth,
+            domain=base.domain,
+            gamma_alpha=base.gamma_alpha,
+            gamma_beta=base.gamma_beta,
+            pyrox_name=base.pyrox_name,
+            prior_std=prior_std,
+        )
 
     @pyrox_method
     def __call__(self, x: Float[Array, "N D"]) -> Float[Array, "N O"]:

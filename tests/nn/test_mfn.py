@@ -84,7 +84,8 @@ def test_gabor_filter_envelope_decays():
     # Far from mu, envelope should be very small.
     x_far = jnp.ones((1, 2)) * 10.0
     g_far = f_known(x_far)
-    # envelope = exp(-0.5 * gamma * ||10 - 0.5||^2 * D) = exp(-0.5 * 9.5^2 * 2) ~= 0
+    # ||x - mu||^2 = 2 * 9.5^2 = 180.5 (sum across the D=2 dims);
+    # envelope = exp(-0.5 * gamma * 180.5) ≈ 1e-39 with gamma=1.
     assert float(jnp.max(jnp.abs(g_far))) < 1e-10
 
 
@@ -371,3 +372,83 @@ def test_gabor_net_rejects_zero_depth():
         GaborNet.init(
             in_features=2, hidden_features=8, out_features=1, depth=0, key=key
         )
+
+
+# ---------------------------------------------------------------------------
+# Init validation
+# ---------------------------------------------------------------------------
+
+
+def test_fourier_filter_rejects_zero_in_features():
+    """FourierFilter.init raises ValueError instead of dividing by sqrt(0)."""
+    key = jr.PRNGKey(19)
+    with pytest.raises(ValueError, match="in_features"):
+        FourierFilter.init(in_features=0, out_features=4, key=key)
+
+
+def test_fourier_filter_rejects_nonpositive_freq_scale():
+    key = jr.PRNGKey(20)
+    with pytest.raises(ValueError, match="freq_scale"):
+        FourierFilter.init(in_features=2, out_features=4, key=key, freq_scale=0.0)
+
+
+def test_gabor_filter_rejects_bad_domain():
+    """domain[0] >= domain[1] is rejected at init time."""
+    key = jr.PRNGKey(21)
+    with pytest.raises(ValueError, match="domain"):
+        GaborFilter.init(in_features=2, out_features=4, key=key, domain=(1.0, 1.0))
+
+
+def test_gabor_filter_rejects_nonpositive_gamma():
+    key = jr.PRNGKey(22)
+    with pytest.raises(ValueError, match="gamma_beta"):
+        GaborFilter.init(in_features=2, out_features=4, key=key, gamma_beta=0.0)
+
+
+def test_mfn_forward_rejects_empty_sequences():
+    """mfn_forward with empty filters/linears raises ValueError, not IndexError."""
+    x = jnp.ones((3, 2))
+    with pytest.raises(ValueError, match="non-empty"):
+        mfn_forward(x, [], [])
+
+
+def test_mfn_forward_rejects_mismatched_lengths():
+    """Length mismatch between filters and linears is rejected up-front."""
+    key = jr.PRNGKey(23)
+    net = FourierNet.init(
+        in_features=2, hidden_features=4, out_features=1, depth=2, key=key
+    )
+    x = jnp.ones((3, 2))
+    with pytest.raises(ValueError, match="equal length"):
+        mfn_forward(x, net.filters, net.linears[:1])
+
+
+# ---------------------------------------------------------------------------
+# Bayesian variants — init accepts prior_std
+# ---------------------------------------------------------------------------
+
+
+def test_bayesian_fourier_net_init_accepts_prior_std():
+    """BayesianFourierNet.init(prior_std=...) plumbs through to __call__."""
+    net = BayesianFourierNet.init(
+        in_features=2,
+        hidden_features=4,
+        out_features=1,
+        depth=2,
+        key=jr.PRNGKey(24),
+        prior_std=2.5,
+    )
+    assert net.prior_std == 2.5
+
+
+def test_bayesian_gabor_net_init_accepts_prior_std():
+    """BayesianGaborNet.init(prior_std=...) plumbs through to __call__."""
+    net = BayesianGaborNet.init(
+        in_features=2,
+        hidden_features=4,
+        out_features=1,
+        depth=2,
+        key=jr.PRNGKey(25),
+        prior_std=0.5,
+    )
+    assert net.prior_std == 0.5
