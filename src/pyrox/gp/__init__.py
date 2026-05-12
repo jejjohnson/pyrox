@@ -58,6 +58,7 @@ from pyrox.gp._inducing import (
     FourierInducingFeatures,
     InducingFeatures,
     LaplacianInducingFeatures,
+    SlepianInducingFeatures,
     SphericalHarmonicInducingFeatures,
     funk_hecke_coefficients,
 )
@@ -197,6 +198,7 @@ __all__ = [
     "SDEKernel",
     "SDEParams",
     "SharedInducingPoints",
+    "SlepianInducingFeatures",
     "SoftmaxLikelihood",
     "SparseConditionedMarkovGP",
     "SparseGPPrior",

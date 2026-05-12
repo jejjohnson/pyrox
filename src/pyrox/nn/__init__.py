@@ -165,6 +165,11 @@ from pyrox.nn._layers import (
     VariationalFourierFeatures,
     mfn_forward,
 )
+from pyrox.nn._slepian import (
+    BayesianSlepianEncoder,
+    HybridSphericalSlepianEncoder,
+    SlepianEncoder,
+)
 from pyrox.nn._sngp import (
     LaplaceRandomFeatureCovariance,
     RandomFeatureGaussianProcess,
@@ -183,6 +188,7 @@ __all__ = [
     "BayesianHyperLinear",
     "BayesianNeuralField",
     "BayesianSIREN",
+    "BayesianSlepianEncoder",
     "Cartesian3DEncoder",
     "ConcatConditioner",
     "ConditionedINR",
@@ -205,6 +211,7 @@ __all__ = [
     "GaborFilter",
     "GaborNet",
     "HSGPFeatures",
+    "HybridSphericalSlepianEncoder",
     "HyperFourierFeatures",
     "HyperLinear",
     "HyperSIREN",
@@ -229,6 +236,7 @@ __all__ = [
     "RandomKitchenSinks",
     "SeasonalFeatures",
     "SirenDense",
+    "SlepianEncoder",
     "SphericalHarmonicEncoder",
     "Standardization",
     "VariationalFourierFeatures",
