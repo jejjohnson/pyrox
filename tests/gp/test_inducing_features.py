@@ -207,6 +207,48 @@ def test_slepian_inducing_rejects_bad_radius():
         )
 
 
+def test_slepian_inducing_k_ux_respects_cap_centre():
+    """k_ux must depend on cap_centre_lonlat_deg; both centres should
+    not produce the same cross-covariance (regression guard against the
+    cap-centre being ignored in the harmonic evaluation)."""
+    kernel = RBF(init_lengthscale=1.0, init_variance=1.0)
+    features_a = SlepianInducingFeatures.init(
+        l_max=3,
+        cap_radius_deg=40.0,
+        cap_centre_lonlat_deg=(0.0, 0.0),
+        n_modes=4,
+    )
+    features_b = SlepianInducingFeatures.init(
+        l_max=3,
+        cap_radius_deg=40.0,
+        cap_centre_lonlat_deg=(90.0, 30.0),
+        n_modes=4,
+    )
+    rng = np.random.default_rng(7)
+    xyz = rng.standard_normal((4, 3))
+    xyz /= np.linalg.norm(xyz, axis=1, keepdims=True)
+    xyz_j = jnp.asarray(xyz)
+
+    K_a = features_a.k_ux(xyz_j, kernel)
+    K_b = features_b.k_ux(xyz_j, kernel)
+    assert not np.allclose(np.asarray(K_a), np.asarray(K_b), atol=1e-5)
+
+    # K_ux must agree with a direct evaluation that uses the cap-centred
+    # frame, matching SlepianCapBasis.evaluate's convention.
+    from pyrox._basis import real_spherical_harmonics
+
+    a = funk_hecke_coefficients(kernel, l_max=3, num_quadrature=256)
+    a_per_feature = a[
+        jnp.asarray([ell for ell in range(4) for _ in range(2 * ell + 1)])
+    ]
+    centred = features_b.basis.centred_coordinates(xyz_j)
+    Y = real_spherical_harmonics(centred, 3)
+    expected = (Y * a_per_feature[None, :]) @ features_b.basis.coeffs
+    np.testing.assert_allclose(
+        np.asarray(K_b), np.asarray(expected), rtol=1e-5, atol=1e-6
+    )
+
+
 # ---------------------------------------------------------------------------
 # LaplacianInducingFeatures
 # ---------------------------------------------------------------------------

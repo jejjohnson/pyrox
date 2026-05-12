@@ -72,6 +72,10 @@ def _associated_legendre_values(
 def _cap_quadrature(
     cap_radius: float | Float[Array, ""], num_quadrature: int
 ) -> tuple[Float[Array, " Q"], Float[Array, " Q"]]:
+    # Gauss-Legendre nodes/weights come from NumPy on the host: this is a
+    # one-shot setup constant for the cap eigenproblem and is identical for
+    # every call with the same ``num_quadrature``. Everything downstream
+    # (cap_radius scaling, Legendre recurrence, eigensolve) stays in JAX.
     import numpy as np
 
     nodes, weights = np.polynomial.legendre.leggauss(num_quadrature)
@@ -182,14 +186,14 @@ def slepian_cap_eigh_per_m(
     return jnp.clip(vals[order], 0.0, 1.0), coeffs[:, order]
 
 
-def _lonlat_to_unit(lonlat: Float[Array, 2]) -> Float[Array, 3]:
+def _lonlat_to_unit(lonlat: Float[Array, " 2"]) -> Float[Array, " 3"]:
     lon, lat = lonlat[0], lonlat[1]
     cos_lat = jnp.cos(lat)
     return jnp.asarray([cos_lat * jnp.cos(lon), cos_lat * jnp.sin(lon), jnp.sin(lat)])
 
 
 def _centered_coordinates(
-    unit_xyz: Float[Array, "N 3"], lonlat_centre: Float[Array, 2]
+    unit_xyz: Float[Array, "N 3"], lonlat_centre: Float[Array, " 2"]
 ) -> Float[Array, "N 3"]:
     lon, lat = lonlat_centre[0], lonlat_centre[1]
     centre = _lonlat_to_unit(lonlat_centre)
@@ -210,22 +214,33 @@ class SlepianCapBasis(eqx.Module):
     coeffs: Float[Array, "M K"]
     eigenvalues: Float[Array, " K"]
     cap_radius: Float[Array, ""]
-    lonlat_centre: Float[Array, 2]
+    lonlat_centre: Float[Array, " 2"]
 
     @property
     def num_modes(self) -> int:
         """Number of retained Slepian modes."""
         return int(self.eigenvalues.shape[0])
 
-    def evaluate(self, unit_xyz: Float[Array, "N 3"]) -> Float[Array, "N K"]:
-        """Evaluate retained Slepian functions at unit Cartesian locations."""
+    def centred_coordinates(self, unit_xyz: Float[Array, "N 3"]) -> Float[Array, "N 3"]:
+        """Rotate inputs into the frame where the cap centre is the north pole.
+
+        Downstream consumers that need to evaluate the same real spherical
+        harmonics in the cap frame (e.g.
+        :class:`pyrox.gp.SlepianInducingFeatures`) should call this and feed
+        the result into :func:`pyrox._basis.real_spherical_harmonics` to keep
+        their evaluation consistent with :meth:`evaluate`.
+        """
         if unit_xyz.ndim != 2 or unit_xyz.shape[-1] != 3:
             raise ValueError(f"unit_xyz must be (N, 3); got shape {unit_xyz.shape}.")
-        centered = _centered_coordinates(unit_xyz, self.lonlat_centre)
+        return _centered_coordinates(unit_xyz, self.lonlat_centre)
+
+    def evaluate(self, unit_xyz: Float[Array, "N 3"]) -> Float[Array, "N K"]:
+        """Evaluate retained Slepian functions at unit Cartesian locations."""
+        centered = self.centred_coordinates(unit_xyz)
         harmonics = real_spherical_harmonics(centered, self.l_max)
         return harmonics @ self.coeffs
 
-    def rotate_to(self, lonlat_centre: Float[Array, 2]) -> SlepianCapBasis:
+    def rotate_to(self, lonlat_centre: Float[Array, " 2"]) -> SlepianCapBasis:
         """Return an equivalent cap basis evaluated around ``lonlat_centre``."""
         centre = jnp.asarray(lonlat_centre)
         if centre.shape != (2,):
@@ -239,7 +254,7 @@ def slepian_cap_basis(
     *,
     n_modes: int | None = None,
     eig_threshold: float | None = None,
-    lonlat_centre: Float[Array, 2] | None = None,
+    lonlat_centre: Float[Array, " 2"] | None = None,
     num_quadrature: int | None = None,
 ) -> SlepianCapBasis:
     """Construct a Slepian basis for an axisymmetric spherical cap.
@@ -247,7 +262,13 @@ def slepian_cap_basis(
     Args:
         l_max: Maximum spherical-harmonic degree.
         cap_radius: Cap half-angle in radians.
-        n_modes: Optional maximum number of retained modes.
+        n_modes: Optional maximum number of retained modes. Takes precedence
+            over ``eig_threshold``: if both are given, the basis is first
+            trimmed by threshold and then truncated to at most ``n_modes``
+            (after sorting by concentration). A :class:`ValueError` is
+            raised when ``eig_threshold`` would leave fewer than ``n_modes``
+            modes — silent shape contraction would break JIT / static
+            shape expectations in downstream code.
         eig_threshold: Optional concentration-ratio threshold.
         lonlat_centre: Optional cap centre in radians. Defaults to the north pole.
         num_quadrature: Optional Gauss-Legendre quadrature order.
@@ -256,17 +277,23 @@ def slepian_cap_basis(
         A :class:`SlepianCapBasis` with coefficient columns sorted by decreasing
         concentration ratio.
     """
+    if n_modes is not None and n_modes < 1:
+        raise ValueError(f"n_modes must be >= 1, got {n_modes}.")
     vals, coeffs = slepian_cap_eigh_per_m(
         l_max, cap_radius, num_quadrature=num_quadrature
     )
     if eig_threshold is not None:
         keep = jnp.nonzero(vals > eig_threshold, size=vals.shape[0], fill_value=-1)[0]
         keep = keep[keep >= 0]
+        if n_modes is not None and int(keep.shape[0]) < n_modes:
+            raise ValueError(
+                f"eig_threshold={eig_threshold} retains only {int(keep.shape[0])} "
+                f"modes but n_modes={n_modes} was requested; lower the threshold "
+                f"or reduce n_modes to break the conflict."
+            )
         vals = vals[keep]
         coeffs = coeffs[:, keep]
     if n_modes is not None:
-        if n_modes < 1:
-            raise ValueError(f"n_modes must be >= 1, got {n_modes}.")
         vals = vals[:n_modes]
         coeffs = coeffs[:, :n_modes]
 

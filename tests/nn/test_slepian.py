@@ -70,7 +70,6 @@ def test_bayesian_slepian_encoder_registers_cap_sites():
         l_max=2,
         init_cap_radius_deg=45.0,
         init_cap_centre_lonlat_deg=(0.0, 0.0),
-        eig_threshold=0.0,
         n_modes=3,
     )
     lonlat = jnp.array([[0.0, 0.0]])

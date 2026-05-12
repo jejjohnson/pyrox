@@ -132,12 +132,17 @@ class HybridSphericalSlepianEncoder(eqx.Module):
 
 
 class BayesianSlepianEncoder(Parameterized):
-    """Slepian encoder with NumPyro sites for cap radius and centre."""
+    """Slepian encoder with NumPyro sites for cap radius and centre.
+
+    Truncation is controlled by ``n_modes`` only. ``eig_threshold`` is not
+    exposed because filtering by concentration ratio under tracing would
+    require a data-dependent output size (``jnp.nonzero`` needs a static
+    ``size``), which breaks JIT and downstream shape contracts.
+    """
 
     l_max: int = eqx.field(static=True)
     init_cap_radius_deg: float = eqx.field(static=True)
     init_cap_centre_lonlat_deg: tuple[float, float] = eqx.field(static=True)
-    eig_threshold: float = eqx.field(static=True, default=0.05)
     n_modes: int | None = eqx.field(static=True, default=None)
     input_mode: Literal["cartesian", "lonlat"] = eqx.field(
         static=True, default="lonlat"
