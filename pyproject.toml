@@ -83,7 +83,7 @@ docs = [
 ]
 examples = [
     "matplotlib>=3.10.9",
-    "numpy>=1.26",
+    "numpy>=2.4.6",
     "scikit-learn>=1.8.0",
 ]
 
