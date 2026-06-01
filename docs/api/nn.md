@@ -2,8 +2,8 @@
 
 The `pyrox.nn` subpackage ships uncertainty-aware neural network layers in four families:
 
-1. **Geographic / spherical encoders** (`pyrox.nn._geo` plus deterministic wrappers in `pyrox.nn._layers`) — degree/radian, lon/lat, cyclic, and spherical-harmonic preprocessing for geophysical inputs.
-2. **Dense / Bayesian-linear layers** (`pyrox.nn._layers`) — twelve layers covering reparameterization, Flipout, NCP, MC-Dropout, and several random-feature variants.
+1. **Geographic / spherical encoders** (re-exported from `geonnax` via `pyrox.nn._geonnax`) — degree/radian, lon/lat, cyclic, and spherical-harmonic preprocessing for geophysical inputs.
+2. **Dense / Bayesian-linear layers** (`pyrox.nn._dense`) — reparameterization, Flipout, hierarchical, NCP, DVI, and variational-dropout variants of `Wx + b`.
 3. **Bayesian Neural Field stack** (`pyrox.nn._bnf`) — five layers that together implement the BNF architecture (Saad et al., Nat. Comms. 2024).
 4. **Pure-JAX feature helpers** (`pyrox.nn._features`) — pandas-free building blocks the BNF layers wrap.
 
@@ -16,8 +16,6 @@ See also: [Geo encoders](nn/geo_encoders.md) for the longitude/latitude and sphe
 ::: pyrox.nn.DenseFlipout
 
 ::: pyrox.nn.DenseVariational
-
-::: pyrox.nn.MCDropout
 
 ::: pyrox.nn.DenseNCP
 
