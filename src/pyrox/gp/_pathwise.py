@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -174,7 +175,9 @@ class PathwiseFunction(eqx.Module):
             weights=self.feature_weights,
         )
         K_cross = self.kernel_fn(X_star, self.correction_points)
-        update = jnp.einsum("nr,sr->sn", K_cross, self.correction_weights)
+        # Matheron correction: contract the correction-point axis r,
+        # broadcasting over sample paths s → (S, N).
+        update = einx.dot("n r, s r -> s n", K_cross, self.correction_weights)
         mean = _broadcast_mean(self.mean_fn, X_star)
         return prior + update + mean[None, :]
 

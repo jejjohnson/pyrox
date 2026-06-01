@@ -8,6 +8,7 @@ to keep the dependency surface small.
 
 from __future__ import annotations
 
+import einx
 import jax.numpy as jnp
 import numpy as np
 from jaxtyping import Array, Float
@@ -46,16 +47,18 @@ def graph_laplacian_eigpairs(
         raise ValueError(f"num_basis must be in [1, {V}]; got {num_basis}.")
     if np.any(A < 0):
         raise ValueError("adjacency must have non-negative entries.")
-    A = 0.5 * (A + A.T)
+    A = 0.5 * (A + einx.id("i j -> j i", A))
     np.fill_diagonal(A, 0.0)
 
     deg = A.sum(axis=1)
     if normalized:
         d_inv_sqrt = np.where(deg > 0, deg ** (-0.5), 0.0)
-        L = np.eye(V) - (d_inv_sqrt[:, None] * A) * d_inv_sqrt[None, :]
+        # Symmetric normalisation D^{-1/2} A D^{-1/2} via a two-sided
+        # diagonal scaling expressed as a named outer product.
+        L = np.eye(V) - einx.multiply("i, i j, j -> i j", d_inv_sqrt, A, d_inv_sqrt)
     else:
         L = np.diag(deg) - A
-    L = 0.5 * (L + L.T)
+    L = 0.5 * (L + einx.id("i j -> j i", L))
 
     eigvals, eigvecs = np.linalg.eigh(L)
     eigvals = eigvals[:num_basis]

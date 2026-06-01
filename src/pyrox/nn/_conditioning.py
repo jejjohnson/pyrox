@@ -40,7 +40,7 @@ import math
 from collections.abc import Callable
 from typing import Literal
 
-import einops
+import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -76,7 +76,7 @@ def _apply_gamma(raw: Array, kind: str) -> Array:
 def _broadcast_z(z: Array, n_rows: int) -> Array:
     """Broadcast a single context ``(K,)`` to ``(N, K)``; pass-through otherwise."""
     if z.ndim == 1:
-        return einops.repeat(z, "k -> n k", n=n_rows)
+        return einx.id("k -> n k", z, n=n_rows)
     return z
 
 
@@ -100,7 +100,7 @@ def _atleast_2d_pair(h: Array, z: Array) -> tuple[Array, Array, bool]:
         )
     squeeze = h.ndim == 1
     if squeeze:
-        h = einops.rearrange(h, "c -> 1 c")
+        h = einx.id("c -> 1 c", h)
     z = _broadcast_z(z, h.shape[0])
     return h, z, squeeze
 
@@ -231,7 +231,7 @@ class AffineModulation(AbstractConditioner):
     A single ``eqx.nn.Linear`` of output size ``2 * num_features``
     produces the concatenated ``(raw_β, raw_γ)`` from the context vector.
     The two halves are split on the feature axis via
-    :func:`einops.rearrange` (no raw ``jnp.split``), then ``γ`` is passed
+    :func:`einx.id` (no raw ``jnp.split``), then ``γ`` is passed
     through the chosen activation:
 
     * ``"one_plus_tanh"`` (default): ``γ = 1 + tanh(raw_γ)`` — identity at
@@ -321,8 +321,8 @@ class AffineModulation(AbstractConditioner):
         """Compute ``(raw_γ, γ, β)`` from a context array of shape ``(N, K)``."""
         raw = jax.vmap(self.generator)(z)  # (N, 2C)
         # Split on the feature axis: first half = β, second half = raw_γ.
-        # einops.rearrange keeps the (two, c) split explicit and avoids jnp.split.
-        split = einops.rearrange(raw, "n (two c) -> two n c", two=2)
+        # einx.id keeps the (two, c) split explicit and avoids jnp.split.
+        split = einx.id("n (two c) -> two n c", raw, two=2)
         beta, raw_gamma = split[0], split[1]
         gamma = _apply_gamma(raw_gamma, self.gamma_activation)
         return raw_gamma, gamma, beta
@@ -375,9 +375,9 @@ class AffineModulation(AbstractConditioner):
                 "bijection wrappers."
             )
         squeeze = z.ndim == 1
-        z2d = einops.rearrange(z, "k -> 1 k") if squeeze else z
+        z2d = einx.id("k -> 1 k", z) if squeeze else z
         raw_gamma, _gamma, _beta = self._gamma_beta(z2d)
-        ldj = einops.reduce(raw_gamma, "n c -> n", "sum")
+        ldj = einx.sum("n [c]", raw_gamma)
         return ldj[0] if squeeze else ldj
 
 
@@ -397,14 +397,14 @@ class HyperLinear(AbstractConditioner):
 
     A single ``eqx.nn.Linear`` of output size ``target_out * target_in +
     target_out`` produces the flat parameter vector for an ad-hoc linear
-    layer; ``W`` and ``b`` are split out via :func:`einops.rearrange`.
+    layer; ``W`` and ``b`` are split out via :func:`einx.id`.
     The forward dispatches on ``z.ndim``:
 
     * ``z.shape == (K,)`` — *shared* path: one ``(W, b)`` generated and
       reused across every row of ``x``. Cheap (one small affine + one
       matmul).
     * ``z.shape == (N, K)`` — *per-sample* path: ``(W, b)`` generated for
-      each row, applied via ``einops.einsum``. Costs ``N * C * C_in``
+      each row, applied via ``einx.dot``. Costs ``N * C * C_in``
       flops per call.
 
     The generator weight scale is multiplied by ``init_scale`` so the
@@ -498,8 +498,8 @@ class HyperLinear(AbstractConditioner):
         """Split flat ``(out * in + out,)`` into ``W: (out, in)`` and ``b: (out,)``."""
         w_size = self.target_out * self.target_in
         flat_W, flat_b = flat[:w_size], flat[w_size:]
-        W = einops.rearrange(
-            flat_W, "(c c_in) -> c c_in", c=self.target_out, c_in=self.target_in
+        W = einx.id(
+            "(c c_in) -> c c_in", flat_W, c=self.target_out, c_in=self.target_in
         )
         return W, flat_b
 
@@ -519,26 +519,26 @@ class HyperLinear(AbstractConditioner):
             )
         squeeze = x.ndim == 1
         if squeeze:
-            x = einops.rearrange(x, "c -> 1 c")
+            x = einx.id("c -> 1 c", x)
 
         if z.ndim == 1:
             # Shared (W, b): generate once, reuse across all rows.
             flat = self.generator(z)
             W, b = self._split_params(flat)
-            out = einops.einsum(W, x, "c c_in, n c_in -> n c") + b
+            out = einx.dot("c c_in, n c_in -> n c", W, x) + b
         else:
-            # Per-sample (W, b): generate per row of z, einsum per row.
+            # Per-sample (W, b): generate per row of z, contract per row.
             flats = jax.vmap(self.generator)(z)  # (N, out*in + out)
             w_size = self.target_out * self.target_in
             flat_W = flats[:, :w_size]
             flat_b = flats[:, w_size:]
-            W = einops.rearrange(
-                flat_W,
+            W = einx.id(
                 "n (c c_in) -> n c c_in",
+                flat_W,
                 c=self.target_out,
                 c_in=self.target_in,
             )
-            out = einops.einsum(W, x, "n c c_in, n c_in -> n c") + flat_b
+            out = einx.dot("n c c_in, n c_in -> n c", W, x) + flat_b
 
         return out[0] if squeeze else out
 
@@ -625,7 +625,7 @@ class BayesianConcatConditioner(AbstractConditioner):
         )
         h2d, z2d, squeeze = _atleast_2d_pair(h, z)
         cat = jnp.concatenate([h2d, z2d], axis=-1)
-        out = cat @ W + b
+        out = einx.dot("n in, in c -> n c", cat, W) + b
         return out[0] if squeeze else out
 
 
@@ -707,8 +707,8 @@ class BayesianAffineModulation(AbstractConditioner):
             dist.Normal(0.0, self.prior_std).expand([out_dim]).to_event(1),
         )
         h2d, z2d, squeeze = _atleast_2d_pair(h, z)
-        raw = z2d @ W + b  # (N, 2C)
-        split = einops.rearrange(raw, "n (two c) -> two n c", two=2)
+        raw = einx.dot("n k, k c -> n c", z2d, W) + b  # (N, 2C)
+        split = einx.id("n (two c) -> two n c", raw, two=2)
         beta, raw_gamma = split[0], split[1]
         gamma = _apply_gamma(raw_gamma, self.gamma_activation)
         out = gamma * h2d + beta
@@ -794,27 +794,27 @@ class BayesianHyperLinear(AbstractConditioner):
         )
         squeeze = x.ndim == 1
         if squeeze:
-            x = einops.rearrange(x, "c -> 1 c")
+            x = einx.id("c -> 1 c", x)
         w_size = self.target_out * self.target_in
 
         if z.ndim == 1:
-            flat = z @ W_gen + b_gen  # (flat_size,)
+            flat = einx.dot("k, k f -> f", z, W_gen) + b_gen  # (flat_size,)
             flat_W, flat_b = flat[:w_size], flat[w_size:]
-            W = einops.rearrange(
-                flat_W, "(c c_in) -> c c_in", c=self.target_out, c_in=self.target_in
+            W = einx.id(
+                "(c c_in) -> c c_in", flat_W, c=self.target_out, c_in=self.target_in
             )
-            out = einops.einsum(W, x, "c c_in, n c_in -> n c") + flat_b
+            out = einx.dot("c c_in, n c_in -> n c", W, x) + flat_b
         else:
-            flats = z @ W_gen + b_gen  # (N, flat_size)
+            flats = einx.dot("n k, k f -> n f", z, W_gen) + b_gen  # (N, flat_size)
             flat_W = flats[:, :w_size]
             flat_b = flats[:, w_size:]
-            W = einops.rearrange(
-                flat_W,
+            W = einx.id(
                 "n (c c_in) -> n c c_in",
+                flat_W,
                 c=self.target_out,
                 c_in=self.target_in,
             )
-            out = einops.einsum(W, x, "n c c_in, n c_in -> n c") + flat_b
+            out = einx.dot("n c c_in, n c_in -> n c", W, x) + flat_b
 
         return out[0] if squeeze else out
 
@@ -1091,7 +1091,7 @@ class _GeneratedSiren(eqx.Module):
         z = self.parameter_net(mu)  # ty: ignore[call-non-callable]
         squeeze = x.ndim == 1
         if squeeze:
-            x = einops.rearrange(x, "c -> 1 c")
+            x = einx.id("c -> 1 c", x)
         h = x
         for siren_layer, hyper in zip(
             self.siren.layers, self.hyper_layers, strict=True
@@ -1255,7 +1255,7 @@ class HyperFourierFeatures(PyroxModule):
       — same efficiency trick as :class:`HyperLinear`'s shared path.
     * **Per-sample mode** (``z.ndim == 2``): a distinct
       ``(W, b, log_lengthscale)`` is generated per row of ``z`` via
-      ``jax.vmap`` and applied with ``einops.einsum``. This is
+      ``jax.vmap`` and applied with ``einx.dot``. This is
       substantially more expensive in compute and memory because the
       Fourier parameters are no longer shared across rows of ``x``,
       but it is required when each ``x`` row needs its own context.
@@ -1335,9 +1335,9 @@ class HyperFourierFeatures(PyroxModule):
         flat_W = flat[:w_size]
         b = flat[w_size : w_size + self.n_features]
         log_l = flat[-1]
-        W = einops.rearrange(
-            flat_W,
+        W = einx.id(
             "(d n) -> d n",
+            flat_W,
             d=self.in_features,
             n=self.n_features,
         )
@@ -1360,20 +1360,20 @@ class HyperFourierFeatures(PyroxModule):
             )
         squeeze = x.ndim == 1
         if squeeze:
-            x = einops.rearrange(x, "d -> 1 d")
+            x = einx.id("d -> 1 d", x)
 
         if z.ndim == 1:
             W, b, log_l = self._unpack(z)
-            # (N, D) @ (D, n) / scalar  -> (N, n)
+            # (N, D) · (D, n) / scalar  -> (N, n)
             inv_l = jnp.exp(-log_l)
-            proj = (x @ W) * inv_l + b
+            proj = einx.dot("n d, d k -> n k", x, W) * inv_l + b
         else:
             # Per-sample features. Vectorise the unpack across the N axis.
             W_all, b_all, log_l_all = jax.vmap(self._unpack)(z)
             inv_l = jnp.exp(-log_l_all)  # (N,)
-            # (N, D) and (N, D, n) -> (N, n)
-            proj = einops.einsum(W_all, x, "n d k, n d -> n k") * inv_l[:, None]
-            proj = proj + b_all
+            # (N, D) and (N, D, n) -> (N, n), then scale each row by 1/ℓ_n.
+            proj = einx.dot("n d k, n d -> n k", W_all, x)
+            proj = einx.multiply("n k, n -> n k", proj, inv_l) + b_all
 
         scale = jnp.sqrt(1.0 / self.n_features)
         out = scale * jnp.concatenate([jnp.cos(proj), jnp.sin(proj)], axis=-1)
@@ -1444,6 +1444,6 @@ class ConditionedRFFNet(PyroxModule):
         phi = self.feat(x, z)
         squeeze = phi.ndim == 1
         if squeeze:
-            phi = einops.rearrange(phi, "d -> 1 d")
+            phi = einx.id("d -> 1 d", phi)
         out = jax.vmap(self.readout)(phi)
         return out[0] if squeeze else out

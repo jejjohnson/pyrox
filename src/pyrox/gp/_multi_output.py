@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import functools
 
+import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -215,7 +216,7 @@ class LMCKernel(eqx.Module):
         if not 0 <= q < self.num_latents:
             raise IndexError(f"latent index out of range: {q}")
         column = self.mixing[:, q]
-        return jnp.outer(column, column)
+        return einx.dot("i, j -> i j", column, column)
 
     def kronecker_factors(
         self,
@@ -240,8 +241,9 @@ class LMCKernel(eqx.Module):
         X2: Float[Array, "N2 D"],
     ) -> Float[Array, "P P N1 N2"]:
         """Return output-pair covariance blocks with shape ``(P, P, N1, N2)``."""
+        # Per-latent outer product B_q ⊗ K_q → (P, P, N1, N2).
         terms = [
-            B_q[:, :, None, None] * K_q[None, None, :, :]
+            einx.multiply("p1 p2, n1 n2 -> p1 p2 n1 n2", B_q, K_q)
             for B_q, K_q in self.kronecker_factors(X1, X2)
         ]
         return functools.reduce(jnp.add, terms)
@@ -287,8 +289,11 @@ class LMCKernel(eqx.Module):
     def diag(self, X: Float[Array, "N D"]) -> Float[Array, "N P"]:
         """Return per-input, per-output marginal variances with shape ``(N, P)``."""
         with _kernel_contexts(self.kernels):
+            # Per-latent variance kₙ ⊗ wₚ² → (N, P), summed over latents.
             terms = [
-                kernel.diag(X)[:, None] * jnp.square(self.mixing[:, q])[None, :]
+                einx.multiply(
+                    "n, p -> n p", kernel.diag(X), jnp.square(self.mixing[:, q])
+                )
                 for q, kernel in enumerate(self.kernels)
             ]
         return functools.reduce(jnp.add, terms)
@@ -335,7 +340,8 @@ class ICMKernel(eqx.Module):
 
     def coregionalization_matrix(self) -> Float[Array, "P P"]:
         """Return ``B = W W^T + diag(kappa)``."""
-        B = self.mixing @ self.mixing.T
+        # B = W Wᵀ: contract the shared latent axis q.
+        B = einx.dot("p q, r q -> p r", self.mixing, self.mixing)
         if self.kappa is None:
             return B
         return B + jnp.diag(self.kappa)
@@ -356,7 +362,8 @@ class ICMKernel(eqx.Module):
     ) -> Float[Array, "P P N1 N2"]:
         """Return output-pair covariance blocks with shape ``(P, P, N1, N2)``."""
         B, K = self.kronecker_factors(X1, X2)
-        return B[:, :, None, None] * K[None, None, :, :]
+        # Outer product B ⊗ K → (P, P, N1, N2).
+        return einx.multiply("p1 p2, n1 n2 -> p1 p2 n1 n2", B, K)
 
     def cross_covariance_operator(
         self,
@@ -391,9 +398,11 @@ class ICMKernel(eqx.Module):
     def diag(self, X: Float[Array, "N D"]) -> Float[Array, "N P"]:
         """Return per-input, per-output marginal variances with shape ``(N, P)``."""
         with _kernel_context(self.kernel):
-            return (
-                self.kernel.diag(X)[:, None]
-                * jnp.diag(self.coregionalization_matrix())[None, :]
+            # kₙ ⊗ diag(B)ₚ → (N, P) marginal variances.
+            return einx.multiply(
+                "n, p -> n p",
+                self.kernel.diag(X),
+                jnp.diag(self.coregionalization_matrix()),
             )
 
 
@@ -449,7 +458,8 @@ class OILMMKernel(eqx.Module):
         Returns a Python ``bool`` via a host sync; not usable inside
         ``jax.jit`` / ``jax.vmap``.
         """
-        gram = self.mixing.T @ self.mixing
+        # Wᵀ W: contract the shared output axis p.
+        gram = einx.dot("p q, p r -> q r", self.mixing, self.mixing)
         eye = jnp.eye(self.num_latents, dtype=self.mixing.dtype)
         return bool(jnp.allclose(gram, eye, atol=atol, rtol=rtol))
 
@@ -498,7 +508,7 @@ class OILMMKernel(eqx.Module):
         with _kernel_contexts(self.kernels):
             return tuple(
                 (
-                    jnp.outer(self.mixing[:, q], self.mixing[:, q]),
+                    einx.dot("i, j -> i j", self.mixing[:, q], self.mixing[:, q]),
                     kernel(X1, X2),
                 )
                 for q, kernel in enumerate(self.kernels)
@@ -546,8 +556,11 @@ class OILMMKernel(eqx.Module):
     def diag(self, X: Float[Array, "N D"]) -> Float[Array, "N P"]:
         """Return per-input, per-output marginal signal variances."""
         with _kernel_contexts(self.kernels):
+            # Per-latent variance kₙ ⊗ wₚ² → (N, P), summed over latents.
             terms = [
-                kernel.diag(X)[:, None] * jnp.square(self.mixing[:, q])[None, :]
+                einx.multiply(
+                    "n, p -> n p", kernel.diag(X), jnp.square(self.mixing[:, q])
+                )
                 for q, kernel in enumerate(self.kernels)
             ]
         return functools.reduce(jnp.add, terms)
@@ -727,8 +740,10 @@ class MultiOutputInducingVariables(eqx.Module):
         """Stack per-latent ``K(Z, X)`` blocks into the ``(Q*M, P*N)`` ``K_uf``."""
         rows = []
         for q, K_zx in enumerate(latent_blocks):
-            scaled = self.mixing[:, q][:, None, None] * K_zx[None, :, :]
-            row = jnp.transpose(scaled, (1, 0, 2)).reshape(K_zx.shape[0], -1)
+            # Scale K(Z, X) by each output weight, then interleave the output
+            # axis into the columns: (P,) ⊙ (M, N) → (M, P·N).
+            scaled = einx.multiply("p, m n -> p m n", self.mixing[:, q], K_zx)
+            row = einx.id("p m n -> m (p n)", scaled)
             rows.append(row)
         return jnp.concatenate(rows, axis=0)
 

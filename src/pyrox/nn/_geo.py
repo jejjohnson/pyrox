@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+import einx
 import jax.numpy as jnp
 from jaxtyping import Array, Float, Num
 
@@ -189,7 +190,7 @@ def cyclic_encode(
         (3, 4)
     """
     if angles.ndim == 1:
-        promoted = angles[:, None]
+        promoted = einx.id("n -> n 1", angles)
     elif angles.ndim == 2:
         promoted = angles
     else:

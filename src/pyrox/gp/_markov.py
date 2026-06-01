@@ -26,6 +26,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
+import einx
 import equinox as eqx
 import gaussx
 import jax
@@ -84,8 +85,10 @@ def _kalman_filter(
     call sites and the existing test signature don't shift.
     """
     del F  # gaussx derives the predict from A_seq directly
-    obs = residual[:, None]
-    R_3d = R_seq[:, None, None]
+    # Lift the per-step residual / noise to the (N, 1) / (N, 1, 1) shapes the
+    # gaussx Kalman filter expects for a scalar observation model.
+    obs = einx.id("n -> n 1", residual)
+    R_3d = einx.id("n -> n 1 1", R_seq)
     init_mean = jnp.zeros(P_inf.shape[0], dtype=P_inf.dtype)
     state = gaussx.kalman_filter(
         transition=A_seq,
@@ -338,7 +341,8 @@ class MarkovGPPrior(eqx.Module):
         For training, prefer :meth:`log_marginal`.
         """
         F, _L, H, _Qc, P_inf = self.sde_kernel.sde_params()
-        diffs = jnp.abs(self.times[:, None] - self.times[None, :])
+        # Pairwise absolute time lags |tᵢ - tⱼ| as an (N, N) grid.
+        diffs = jnp.abs(einx.subtract("i, j -> i j", self.times, self.times))
         # Vectorise H exp(F |dt|) P_inf H^T over the (N, N) lag grid.
         flat_dt = diffs.reshape(-1)
 
@@ -347,7 +351,7 @@ class MarkovGPPrior(eqx.Module):
 
         K_flat = jax.vmap(_k)(flat_dt)
         K = K_flat.reshape(diffs.shape)
-        K = 0.5 * (K + K.T)
+        K = 0.5 * (K + einx.id("i j -> j i", K))
         n = self.times.shape[0]
         K = K + 1e-8 * jnp.eye(n, dtype=K.dtype)
         residual = f - self.mean(self.times)
@@ -466,14 +470,15 @@ def markov_gp_sample(
     """
     F, _L, H, _Qc, P_inf = prior.sde_kernel.sde_params()
     times = prior.times
-    diffs = jnp.abs(times[:, None] - times[None, :])
+    # Pairwise absolute time lags |tᵢ - tⱼ| as an (N, N) grid.
+    diffs = jnp.abs(einx.subtract("i, j -> i j", times, times))
     flat_dt = diffs.reshape(-1)
 
     def _k(tau: Float[Array, ""]) -> Float[Array, ""]:
         return (H @ jax.scipy.linalg.expm(F * tau) @ P_inf @ H.T)[0, 0]
 
     K = jax.vmap(_k)(flat_dt).reshape(diffs.shape)
-    K = 0.5 * (K + K.T)
+    K = 0.5 * (K + einx.id("i j -> j i", K))
     n = times.shape[0]
     K = K + 1e-8 * jnp.eye(n, dtype=K.dtype)
     mu = prior.mean(times)

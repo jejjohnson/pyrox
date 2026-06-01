@@ -18,6 +18,7 @@ All Gaussian linear algebra delegates to ``gaussx``.
 
 from __future__ import annotations
 
+import einx
 import jax
 import jax.numpy as jnp
 import lineax as lx
@@ -269,11 +270,12 @@ class ConjugateVI:
         # B = K_zz^{-1} K_zx, shape (M, N)
         # Via two triangular solves: A = L^{-1} K_zx, B = L^{-T} A.
         L_zz = cholesky(K_zz_op)
+        K_zx = einx.id("n m -> m n", K_xz)  # (N, M) → (M, N)
         A = jax.vmap(
             lambda col: lx.linear_solve(L_zz, col).value,
             in_axes=1,
             out_axes=1,
-        )(K_xz.T)
+        )(K_zx)
         B = jax.vmap(
             lambda col: lx.linear_solve(L_zz.T, col).value,
             in_axes=1,
@@ -297,7 +299,7 @@ class ConjugateVI:
                 out_axes=1,
             )(eye)
         )
-        K_zz_inv = 0.5 * (K_zz_inv + K_zz_inv.T)
+        K_zz_inv = 0.5 * (K_zz_inv + einx.id("i j -> j i", K_zz_inv))
         nat2_prior = -0.5 * K_zz_inv
 
         # Project per-point site natural parameters into inducing
@@ -305,8 +307,12 @@ class ConjugateVI:
         # omitting the f_loc correction makes the update depend on the
         # current guide mean instead of being a fixed-point update.
         site_lambda1 = grad1 - f_loc * grad2
-        nat1_hat = nat1_prior + B @ site_lambda1
-        nat2_hat = nat2_prior + B @ (0.5 * grad2[:, None] * B.T)
+        # η̂₁ = η₁ᵖʳⁱᵒʳ + B λ⁽¹⁾,  with B: (M, N), λ⁽¹⁾: (N,) → (M,).
+        nat1_hat = nat1_prior + einx.dot("m n, n -> m", B, site_lambda1)
+        # η̂₂ = η₂ᵖʳⁱᵒʳ + B diag(½ grad2) Bᵀ. Fold the per-point scale into
+        # B then contract the shared n axis: (M, N)·(K, N) → (M, K).
+        scaled_B = einx.multiply("n, m n -> m n", 0.5 * grad2, B)
+        nat2_hat = nat2_prior + einx.dot("m n, k n -> m k", scaled_B, B)
 
         return guide.natural_update(nat1_hat, nat2_hat, rho=self.damping)
 

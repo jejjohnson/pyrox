@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 
+import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -109,7 +110,8 @@ class LaplaceRandomFeatureCovariance(eqx.Module):
     def update(self, features: Float[Array, "B D"]) -> LaplaceRandomFeatureCovariance:
         """Return a new container with EMA-updated precision."""
         B = features.shape[0]
-        outer = (features.T @ features) / B
+        # Feature Gram ΦᵀΦ / B: contract the batch axis b → (D, D).
+        outer = einx.dot("b d, b e -> d e", features, features) / B
         new_precision = self.momentum * self.precision + (1.0 - self.momentum) * outer
         return eqx.tree_at(lambda c: c.precision, self, new_precision)
 
@@ -117,7 +119,7 @@ class LaplaceRandomFeatureCovariance(eqx.Module):
         # Symmetrise to absorb floating-point asymmetry in the EMA, then
         # add ridge jitter so the matrix is guaranteed positive-definite
         # regardless of how the EMA has evolved.
-        sym = 0.5 * (self.precision + self.precision.T)
+        sym = 0.5 * (self.precision + einx.id("i j -> j i", self.precision))
         D = sym.shape[0]
         return jnp.linalg.cholesky(sym + self.ridge * jnp.eye(D, dtype=sym.dtype))
 
@@ -140,8 +142,10 @@ class LaplaceRandomFeatureCovariance(eqx.Module):
             = \phi(x_n)^\top (L L^\top)^{-1} \phi(x_n).
         """
         L = self._chol()
-        y = jax.scipy.linalg.solve_triangular(L, features.T, lower=True)
-        return jnp.sum(y * y, axis=0)
+        y = jax.scipy.linalg.solve_triangular(
+            L, einx.id("n d -> d n", features), lower=True
+        )
+        return einx.sum("[d] n", y * y)
 
 
 class RandomFeatureGaussianProcess(PyroxModule):
@@ -309,7 +313,7 @@ class RandomFeatureGaussianProcess(PyroxModule):
             jnp.asarray(self.init_lengthscale),
             constraint=dist.constraints.positive,
         )
-        z = x @ W / ls + b
+        z = einx.dot("... d, d f -> ... f", x, W) / ls + b
         return jnp.sqrt(2.0 / self.num_features) * jnp.cos(z)
 
     @pyrox_method
@@ -327,7 +331,7 @@ class RandomFeatureGaussianProcess(PyroxModule):
         b_out = self.pyrox_param(
             "output_bias", jnp.zeros(self.out_features, dtype=x.dtype)
         )
-        mean = features @ H + b_out
+        mean = einx.dot("... f, f o -> ... o", features, H) + b_out
         if return_cov:
             # variance_at expects a 2-D (N, D) features matrix; flatten any
             # leading batch dims, compute the per-row variance, then restore.

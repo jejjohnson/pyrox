@@ -19,16 +19,17 @@ Provides:
 * :func:`standardize` / :func:`unstandardize` — affine transform with a
   precomputed mean and std.
 
-Implementation uses ``einops.rearrange`` / ``einops.repeat`` for any
-non-trivial reshaping, per the project convention.
+Implementation uses :mod:`einx` (``einx.id`` for broadcasts/reshapes,
+``einx.prod`` for axis reductions) for any non-trivial reshaping, per the
+project convention.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
+import einx
 import jax.numpy as jnp
-from einops import rearrange, repeat
 from jaxtyping import Array, Float, Int
 
 
@@ -63,8 +64,8 @@ def fourier_features(
         Array of shape ``(N, 2 * max_degree)``.
     """
     degrees = jnp.arange(max_degree)
-    # `repeat` builds (N, D) frequencies without an explicit reshape.
-    z = repeat(x, "n -> n d", d=max_degree) * (2.0 * jnp.pi * 2.0**degrees)
+    # Broadcast x to (N, D) frequencies without an explicit reshape.
+    z = einx.id("n -> n d", x, d=max_degree) * (2.0 * jnp.pi * 2.0**degrees)
     feats = jnp.concatenate([jnp.cos(z), jnp.sin(z)], axis=-1)
     if rescale:
         denom = jnp.concatenate([degrees + 1, degrees + 1])
@@ -143,7 +144,7 @@ def seasonal_features(
     if not freq_list:
         return jnp.zeros((x.shape[0], 0), dtype=x.dtype)
     freqs = jnp.asarray(freq_list, dtype=jnp.float32)
-    z = repeat(x, "n -> n f", f=freqs.shape[0]) * (2.0 * jnp.pi * freqs)
+    z = einx.id("n -> n f", x, f=freqs.shape[0]) * (2.0 * jnp.pi * freqs)
     feats = jnp.concatenate([jnp.cos(z), jnp.sin(z)], axis=-1)
     if rescale:
         # Rescale by within-period harmonic index (1, 2, ..., H_p).
@@ -175,9 +176,9 @@ def interaction_features(
     """
     if pairs.shape[0] == 0:
         return jnp.zeros((x.shape[0], 0), dtype=x.dtype)
-    # x[:, pairs] has shape (N, K, 2); reduce the last axis with prod.
+    # x[:, pairs] has shape (N, K, 2); reduce the paired axis with prod.
     selected = x[:, pairs]
-    return jnp.prod(selected, axis=-1)
+    return einx.prod("n k [two]", selected)
 
 
 def standardize(
@@ -201,8 +202,3 @@ def unstandardize(
 ) -> Float[Array, "*shape"]:
     """Inverse of :func:`standardize`: ``z * std + mu``."""
     return z * std + mu
-
-
-# Mark the einops imports as used (the ``rearrange`` import is held
-# in case downstream extensions need it without forcing a re-import).
-_ = rearrange

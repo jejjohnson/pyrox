@@ -26,6 +26,7 @@ dependencies = [
     "gaussx @ git+https://github.com/jejjohnson/gaussx.git@926be4f48f692dcfd0be25c3ec8200818ca7276b",
     "lineax>=0.1.1",
     "einops>=0.8.2",
+    "einx>=0.4.3",
 ]
 
 [project.optional-dependencies]
@@ -115,12 +116,13 @@ ignore = ["E402", "E721", "E731", "E741"]
 # F722 clashes with jaxtyping's string-based shape annotations (Array, "N D").
 # Scope the suppression to the jaxtyping-using GP layer, its tests, and the
 # example notebooks that demonstrate the same patterns.
-"src/pyrox/_basis/**" = ["F722"]
-"src/pyrox/gp/**" = ["F722"]
+# RUF001/002/003 flag Greek letters, sub/superscripts, primes, and the
+# multiplication sign in strings/docstrings/comments. These are intentional
+# math notation throughout the array-heavy modules (einx specs, shape
+# annotations, and Unicode equations), so suppress them there.
+"src/pyrox/_basis/**" = ["F722", "RUF001", "RUF002", "RUF003"]
+"src/pyrox/gp/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "src/pyrox/nn/**" = ["F722", "RUF001", "RUF002", "RUF003"]
-# RUF001/002/003 flag Greek letters and the multiplication sign in
-# strings/docstrings/comments. These are intentional math notation in
-# the inference module and the example notebooks, so suppress them.
 "src/pyrox/inference/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "src/pyrox/api/**" = ["F722"]
 "src/pyrox/preprocessing/**" = ["F722"]

@@ -70,6 +70,7 @@ training inputs, integrate the per-point log-likelihood under
 
 from __future__ import annotations
 
+import einx
 import jax
 import jax.numpy as jnp
 import lineax as lx
@@ -109,7 +110,8 @@ def _possemi_cov_operator(M: Float[Array, "M M"]) -> lx.AbstractLinearOperator:
 
 def _full_cov_operator(scale_tril: Float[Array, "M M"]) -> lx.AbstractLinearOperator:
     """Wrap ``L L^T`` as a PSD lineax operator from a Cholesky factor."""
-    cov = scale_tril @ scale_tril.T
+    # S = L Lᵀ: contract the shared (lower-triangular column) axis.
+    cov = einx.dot("i j, k j -> i k", scale_tril, scale_tril)
     return lx.MatrixLinearOperator(cov, lx.positive_semidefinite_tag)
 
 
@@ -152,13 +154,16 @@ def _svgp_predict_unwhitened(
     Sv_left = jax.vmap(
         lambda col: lx.linear_solve(L_zz, col).value, in_axes=1, out_axes=1
     )(u_cov)  # L_zz^{-1} S, shape (M, M)
-    Sv = jax.vmap(lambda col: lx.linear_solve(L_zz, col).value, in_axes=1, out_axes=1)(
-        Sv_left.T
-    ).T  # L_zz^{-1} S L_zz^{-T}, shape (M, M)
+    Sv = einx.id(
+        "i j -> j i",
+        jax.vmap(lambda col: lx.linear_solve(L_zz, col).value, in_axes=1, out_axes=1)(
+            einx.id("i j -> j i", Sv_left)
+        ),
+    )  # L_zz^{-1} S L_zz^{-T}, shape (M, M)
     # Cholesky via gaussx.safe_cholesky — adaptive jitter handles the
     # near-singular S=0 case (DeltaGuide) and the float32 paths where a
     # hard-coded jitter rounds to zero. Symmetrize first for numerics.
-    Sv = 0.5 * (Sv + Sv.T)
+    Sv = 0.5 * (Sv + einx.id("i j -> j i", Sv))
     Lv = safe_cholesky(_possemi_cov_operator(Sv))
     return whitened_svgp_predict(K_zz_op, K_xz, m_v, Lv, K_xx_diag)
 
@@ -211,7 +216,7 @@ class FullRankGuide(Guide):
     def sample(self, key: Array) -> Float[Array, " M"]:
         r"""Draw ``u = m + L_S \epsilon`` with ``\epsilon ~ N(0, I)``."""
         eps = jax.random.normal(key, self.mean.shape, dtype=self.mean.dtype)
-        return self.mean + self.scale_tril @ eps
+        return self.mean + einx.dot("i j, j -> i", self.scale_tril, eps)
 
     def log_prob(self, u: Float[Array, " ..."]) -> Float[Array, ""]:  # ty: ignore[invalid-method-override]
         r"""Variational log density ``\log q(u)`` via :func:`gaussx.gaussian_log_prob`.
@@ -253,7 +258,7 @@ class FullRankGuide(Guide):
         currently accept an explicit solver — the :attr:`solver` field
         is exposed for downstream consumers.
         """
-        u_cov = self.scale_tril @ self.scale_tril.T
+        u_cov = einx.dot("i j, k j -> i k", self.scale_tril, self.scale_tril)
         return _svgp_predict_unwhitened(K_xz, K_zz_op, K_xx_diag, self.mean, u_cov)
 
 
@@ -372,7 +377,7 @@ class WhitenedGuide(Guide):
     def sample(self, key: Array) -> Float[Array, " M"]:
         """Draw a single whitened sample ``v = m_v + L_v \\epsilon``."""
         eps = jax.random.normal(key, self.mean.shape, dtype=self.mean.dtype)
-        return self.mean + self.scale_tril @ eps
+        return self.mean + einx.dot("i j, j -> i", self.scale_tril, eps)
 
     def log_prob(self, v: Float[Array, " ..."]) -> Float[Array, ""]:  # ty: ignore[invalid-method-override]
         r"""Whitened ``\log q(v)`` via :func:`gaussx.gaussian_log_prob`.
@@ -502,7 +507,7 @@ class NaturalGuide(Guide):
             self.nat1, nat2_op, solver=_resolve_solver(self.solver)
         )
         cov = cov_op.as_matrix()
-        cov = 0.5 * (cov + cov.T)
+        cov = 0.5 * (cov + einx.id("i j -> j i", cov))
         return m, cov
 
     def _mvn(self) -> MultivariateNormalPrecision:

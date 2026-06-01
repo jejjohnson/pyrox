@@ -39,6 +39,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -372,7 +373,7 @@ class EnsembleMAP(eqx.Module):
         )
         final_params = eqx.combine(arrays_final, static)
         # losses is (T, E) from scan; transpose to (E, T) per the public contract.
-        return EnsembleResult(params=final_params, losses=losses.T)
+        return EnsembleResult(params=final_params, losses=einx.id("t e -> e t", losses))
 
 
 class EnsembleVI(eqx.Module):

@@ -17,12 +17,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol
 
+import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import lineax as lx
 import numpyro
-from einops import einsum
 from gaussx import (
     AbstractSolverStrategy,
     DenseSolver,
@@ -314,7 +314,8 @@ class ConditionedGP(eqx.Module):
             var = self.predict_var(X_star)
         std = jnp.sqrt(jnp.clip(var, min=0.0))
         eps = jax.random.normal(key, (n_samples, X_star.shape[0]), dtype=mean.dtype)
-        return einsum(std, eps, "m, s m -> s m") + mean
+        # Scale per-point std across the S sample rows: (M,) ⊙ (S, M) → (S, M).
+        return einx.multiply("m, s m -> s m", std, eps) + mean
 
 
 def gp_factor(
