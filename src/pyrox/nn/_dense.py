@@ -63,11 +63,11 @@ class DenseReparameterization(PyroxModule):
         pyrox_name: Explicit scope name for NumPyro site registration.
     """
 
-    in_features: int
-    out_features: int
-    bias: bool = True
-    prior_scale: float = 1.0
-    pyrox_name: str | None = None
+    in_features: int = eqx.field(static=True)
+    out_features: int = eqx.field(static=True)
+    bias: bool = eqx.field(static=True, default=True)
+    prior_scale: float = eqx.field(static=True, default=1.0)
+    pyrox_name: str | None = eqx.field(static=True, default=None)
 
     @pyrox_method
     def __call__(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D_out"]:
@@ -107,11 +107,11 @@ class DenseFlipout(PyroxModule):
         pyrox_name: Explicit scope name for NumPyro site registration.
     """
 
-    in_features: int
-    out_features: int
-    bias: bool = True
-    prior_scale: float = 1.0
-    pyrox_name: str | None = None
+    in_features: int = eqx.field(static=True)
+    out_features: int = eqx.field(static=True)
+    bias: bool = eqx.field(static=True, default=True)
+    prior_scale: float = eqx.field(static=True, default=1.0)
+    pyrox_name: str | None = eqx.field(static=True, default=None)
 
     @pyrox_method
     def __call__(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D_out"]:
@@ -147,11 +147,11 @@ class DenseVariational(PyroxModule):
         pyrox_name: Explicit scope name for NumPyro site registration.
     """
 
-    in_features: int
-    out_features: int
+    in_features: int = eqx.field(static=True)
+    out_features: int = eqx.field(static=True)
     make_prior: Callable[..., Any] = eqx.field(static=True)
-    bias: bool = True
-    pyrox_name: str | None = None
+    bias: bool = eqx.field(static=True, default=True)
+    pyrox_name: str | None = eqx.field(static=True, default=None)
 
     @pyrox_method
     def __call__(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D_out"]:
@@ -191,10 +191,10 @@ class DenseNCP(PyroxModule):
         pyrox_name: Explicit scope name for NumPyro site registration.
     """
 
-    in_features: int
-    out_features: int
-    init_scale: float = 1.0
-    pyrox_name: str | None = None
+    in_features: int = eqx.field(static=True)
+    out_features: int = eqx.field(static=True)
+    init_scale: float = eqx.field(static=True, default=1.0)
+    pyrox_name: str | None = eqx.field(static=True, default=None)
 
     @pyrox_method
     def __call__(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D_out"]:
@@ -486,12 +486,12 @@ class DenseVariationalDropout(PyroxModule):
         (3, 2)
     """
 
-    in_features: int
-    out_features: int
-    bias: bool = True
-    log_alpha_init: float = -5.0
-    threshold: float = 3.0
-    pyrox_name: str | None = None
+    in_features: int = eqx.field(static=True)
+    out_features: int = eqx.field(static=True)
+    bias: bool = eqx.field(static=True, default=True)
+    log_alpha_init: float = eqx.field(static=True, default=-5.0)
+    threshold: float = eqx.field(static=True, default=3.0)
+    pyrox_name: str | None = eqx.field(static=True, default=None)
 
     @pyrox_method
     def __call__(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D_out"]:

@@ -502,19 +502,25 @@ class HyperFourierFeatures(PyroxModule):
             raise ValueError(
                 f"z.shape[-1]={z.shape[-1]} does not match cond_dim={self.cond_dim}."
             )
-        squeeze = x.ndim == 1
-        if squeeze:
-            x = x[None, :]
+        # Flatten arbitrary leading batch dims of x (and z, if per-sample) to
+        # (B, D_in) / (B, K), vmap the single-example forward, then restore.
+        D_in = x.shape[-1]
+        batch_shape = x.shape[:-1]
+        x_flat = x.reshape(-1, D_in)
 
         if z.ndim == 1:
             W, b, log_l = self._unpack(z)
-            out = jax.vmap(lambda xi: self._single_example(xi, W, b, log_l))(x)
+            out_flat = jax.vmap(lambda xi: self._single_example(xi, W, b, log_l))(
+                x_flat
+            )
         else:
-            # Per-sample features. Vectorise the unpack across the N axis.
-            W_all, b_all, log_l_all = jax.vmap(self._unpack)(z)
-            out = jax.vmap(self._single_example)(x, W_all, b_all, log_l_all)
+            z_flat = z.reshape(-1, z.shape[-1])
+            W_all, b_all, log_l_all = jax.vmap(self._unpack)(z_flat)
+            out_flat = jax.vmap(self._single_example)(x_flat, W_all, b_all, log_l_all)
 
-        return out[0] if squeeze else out
+        if batch_shape == ():
+            return out_flat[0]
+        return out_flat.reshape((*batch_shape, out_flat.shape[-1]))
 
 
 class ConditionedRFFNet(PyroxModule):
@@ -579,11 +585,15 @@ class ConditionedRFFNet(PyroxModule):
         z: Float[Array, "*batch K"] | Float[Array, " K"],
     ) -> Float[Array, "*batch D_out"]:
         phi = self.feat(x, z)
-        squeeze = phi.ndim == 1
-        if squeeze:
-            phi = phi[None, :]
-        out = jax.vmap(self.readout)(phi)
-        return out[0] if squeeze else out
+        # Flatten arbitrary leading batch dims to (B, D_feat), vmap the
+        # single-example linear readout, then restore.
+        D_feat = phi.shape[-1]
+        batch_shape = phi.shape[:-1]
+        flat = phi.reshape(-1, D_feat)
+        out_flat = jax.vmap(self.readout)(flat)
+        if batch_shape == ():
+            return out_flat[0]
+        return out_flat.reshape((*batch_shape, out_flat.shape[-1]))
 
 
 __all__ = [

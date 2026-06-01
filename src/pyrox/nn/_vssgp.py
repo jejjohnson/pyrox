@@ -228,7 +228,13 @@ class DeepVSSGP(PyroxModule):
                 jnp.stack(sampled_lengthscales),
             ),
         )
-        return jax.vmap(sampled_core)(x)
+        # Flatten arbitrary leading batch dims to (B, D_in), vmap the
+        # single-example geonnax core, then restore the batch shape.
+        D_in = x.shape[-1]
+        batch_shape = x.shape[:-1]
+        flat = x.reshape(-1, D_in)
+        out_flat = jax.vmap(sampled_core)(flat)
+        return out_flat.reshape((*batch_shape, out_flat.shape[-1]))
 
 
 __all__ = ["DeepVSSGP"]

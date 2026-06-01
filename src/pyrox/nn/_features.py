@@ -240,10 +240,17 @@ def _vmap_rff_forward(
     """Vmap ``geonnax.rff_forward`` over the leading batch axis of ``x``.
 
     The geonnax core is single-example ``(D_in,) -> (D_rff,)``; here we
-    vmap with ``W``, ``lengthscale``, ``n_features`` closed over so the
-    Bayesian site-registration happens exactly once outside the vmap.
+    flatten arbitrary leading batch dims to ``(B, D_in)``, vmap, then
+    restore the batch shape. This preserves the documented support for
+    both unbatched ``(D_in,)`` and batched ``(*batch, D_in)`` callers.
     """
-    return jax.vmap(lambda xi: geonnax.rff_forward(W, lengthscale, n_features, xi))(x)
+    D_in = x.shape[-1]
+    batch_shape = x.shape[:-1]
+    flat = x.reshape(-1, D_in)
+    out_flat = jax.vmap(lambda xi: geonnax.rff_forward(W, lengthscale, n_features, xi))(
+        flat
+    )
+    return out_flat.reshape((*batch_shape, out_flat.shape[-1]))
 
 
 def _vmap_rff_cosine_forward(
@@ -253,10 +260,15 @@ def _vmap_rff_cosine_forward(
     n_features: int,
     x: Float[Array, "*batch D_in"],
 ) -> Float[Array, "*batch n_features"]:
-    """Vmap ``geonnax.rff_cosine_forward`` over the leading batch axis of ``x``."""
-    return jax.vmap(
+    """Vmap ``geonnax.rff_cosine_forward`` with the same flatten/restore
+    pattern as :func:`_vmap_rff_forward`."""
+    D_in = x.shape[-1]
+    batch_shape = x.shape[:-1]
+    flat = x.reshape(-1, D_in)
+    out_flat = jax.vmap(
         lambda xi: geonnax.rff_cosine_forward(W, b, lengthscale, n_features, xi)
-    )(x)
+    )(flat)
+    return out_flat.reshape((*batch_shape, out_flat.shape[-1]))
 
 
 class RBFFourierFeatures(PyroxModule):
@@ -395,6 +407,8 @@ class LaplaceFourierFeatures(PyroxModule):
         *,
         lengthscale: float = 1.0,
     ) -> LaplaceFourierFeatures:
+        if lengthscale <= 0:
+            raise ValueError(f"lengthscale must be > 0, got {lengthscale}.")
         return cls(
             in_features=in_features,
             n_features=n_features,
@@ -505,6 +519,8 @@ class RBFCosineFeatures(PyroxModule):
         *,
         lengthscale: float = 1.0,
     ) -> RBFCosineFeatures:
+        if lengthscale <= 0:
+            raise ValueError(f"lengthscale must be > 0, got {lengthscale}.")
         return cls(
             in_features=in_features,
             n_features=n_features,
