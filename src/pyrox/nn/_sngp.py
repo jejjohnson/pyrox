@@ -1,11 +1,13 @@
 """Spectral-Normalized Gaussian Process (SNGP) output layer.
 
-* :class:`LaplaceRandomFeatureCovariance` — pure-functional container
-  for the Laplace-approximation precision matrix used at SNGP test
-  time. Updated via the EMA of feature outer products during training.
 * :class:`RandomFeatureGaussianProcess` — SNGP output head (Liu et al.,
   2020). RFF feature map :math:`\\phi(x)` plus a linear mean head and
   a Laplace covariance over the linear weights.
+
+The Laplace-approximation covariance container
+(``LaplaceRandomFeatureCovariance``) lives in ``geonnax`` and is
+re-exported from :mod:`pyrox.nn._geonnax` for backwards-compatible
+imports.
 
 This module implements *just the SNGP head* — spectral normalisation
 of upstream dense layers is a separate concern (the design doc's
@@ -14,138 +16,14 @@ Tier 2 ``spectral_norm`` gap) and the user is responsible for that.
 
 from __future__ import annotations
 
-import math
-
-import einx
 import equinox as eqx
+import geonnax
 import jax
 import jax.numpy as jnp
-import jax.random as jr
 import numpyro.distributions as dist
 from jaxtyping import Array, Float, PRNGKeyArray
 
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
-
-
-def _glorot_normal(
-    key: PRNGKeyArray,
-    fan_in: int,
-    fan_out: int,
-    scale: float = 1.0,
-) -> Float[Array, "F_in F_out"]:
-    std = scale * math.sqrt(2.0 / (fan_in + fan_out))
-    return std * jr.normal(key, (fan_in, fan_out))
-
-
-class LaplaceRandomFeatureCovariance(eqx.Module):
-    r"""Laplace-approximation precision for an SNGP output head.
-
-    Stores the precision matrix :math:`\hat{\Lambda} \in \mathbb{R}^{D \times D}`
-    over the linear weights of the output layer. Updated as an
-    exponential moving average of feature outer products during
-    training:
-
-    .. math::
-
-        \hat{\Lambda}_{t+1} \leftarrow m\,\hat{\Lambda}_t
-        + (1 - m)\,\frac{1}{B} \sum_{b=1}^{B} \phi(x_b)\,\phi(x_b)^\top.
-
-    At test time the predictive variance for a feature vector
-    :math:`\phi(x_*)` is
-
-    .. math::
-
-        \sigma^2(x_*) = \phi(x_*)^\top \hat{\Sigma}\, \phi(x_*),
-        \qquad \hat{\Sigma} = \hat{\Lambda}^{-1},
-
-    computed stably via a Cholesky solve.
-
-    The container is *pure-functional*: :meth:`update` returns a new
-    instance with an updated precision rather than mutating ``self``,
-    matching how Equinox composes immutable PyTrees with optimisers.
-    A small ridge :math:`\lambda` initialises the precision at
-    :math:`\lambda I` and is *also* added at solve-time inside
-    :meth:`covariance` and :meth:`variance_at` so the Cholesky stays
-    numerically well-conditioned even after many EMA steps with low
-    momentum (which would otherwise let the ridge contribution decay
-    geometrically and the precision approach singularity).
-    Equivalently :math:`\hat\Sigma = (\hat\Lambda + \lambda I)^{-1}` —
-    the Bayesian-linear-regression interpretation of SNGP, where
-    :math:`\lambda I` is a Gaussian prior precision on the head weights.
-
-    Attributes:
-        precision: Current precision matrix :math:`\hat{\Lambda}`.
-        momentum: EMA momentum :math:`m \in [0, 1]`. Higher values give
-            slower updates; ``0.999`` works well for most settings.
-        ridge: Diagonal ridge :math:`\lambda`. Used both as the init
-            value of ``precision`` and as a solve-time jitter to keep
-            the Cholesky well-defined.
-    """
-
-    precision: Float[Array, "D D"]
-    momentum: float = eqx.field(static=True, default=0.999)
-    ridge: float = eqx.field(static=True, default=1.0)
-
-    @classmethod
-    def init(
-        cls,
-        num_features: int,
-        *,
-        momentum: float = 0.999,
-        ridge: float = 1.0,
-    ) -> LaplaceRandomFeatureCovariance:
-        """Construct a fresh covariance container with ``ridge * I`` precision."""
-        if num_features <= 0:
-            raise ValueError(f"num_features must be > 0; got {num_features}.")
-        if not 0.0 <= momentum <= 1.0:
-            raise ValueError(f"momentum must lie in [0, 1]; got {momentum}.")
-        if ridge <= 0:
-            raise ValueError(f"ridge must be > 0; got {ridge}.")
-        return cls(
-            precision=ridge * jnp.eye(num_features),
-            momentum=momentum,
-            ridge=ridge,
-        )
-
-    def update(self, features: Float[Array, "B D"]) -> LaplaceRandomFeatureCovariance:
-        """Return a new container with EMA-updated precision."""
-        B = features.shape[0]
-        # Feature Gram ΦᵀΦ / B: contract the batch axis b → (D, D).
-        outer = einx.dot("b d, b e -> d e", features, features) / B
-        new_precision = self.momentum * self.precision + (1.0 - self.momentum) * outer
-        return eqx.tree_at(lambda c: c.precision, self, new_precision)
-
-    def _chol(self) -> Float[Array, "D D"]:
-        # Symmetrise to absorb floating-point asymmetry in the EMA, then
-        # add ridge jitter so the matrix is guaranteed positive-definite
-        # regardless of how the EMA has evolved.
-        sym = 0.5 * (self.precision + einx.id("i j -> j i", self.precision))
-        D = sym.shape[0]
-        return jnp.linalg.cholesky(sym + self.ridge * jnp.eye(D, dtype=sym.dtype))
-
-    def covariance(self) -> Float[Array, "D D"]:
-        """Inverse of the precision matrix (one-shot Cholesky inversion)."""
-        L = self._chol()
-        D = self.precision.shape[0]
-        return jax.scipy.linalg.cho_solve((L, True), jnp.eye(D))
-
-    def variance_at(self, features: Float[Array, "N D"]) -> Float[Array, " N"]:
-        r"""Per-row predictive variance :math:`\phi(x_n)^\top \hat{\Sigma}\,\phi(x_n)`.
-
-        Computed via a triangular solve to avoid materialising the full
-        :math:`D \times D` covariance:
-
-        .. math::
-
-            y = L^{-1} \phi(x_n)^\top, \qquad
-            \sigma^2(x_n) = \lVert y \rVert_2^2
-            = \phi(x_n)^\top (L L^\top)^{-1} \phi(x_n).
-        """
-        L = self._chol()
-        y = jax.scipy.linalg.solve_triangular(
-            L, einx.id("n d -> d n", features), lower=True
-        )
-        return einx.sum("[d] n", y * y)
 
 
 class RandomFeatureGaussianProcess(PyroxModule):
@@ -220,14 +98,7 @@ class RandomFeatureGaussianProcess(PyroxModule):
         Awareness.* NeurIPS.
     """
 
-    in_features: int = eqx.field(static=True)
-    num_features: int = eqx.field(static=True)
-    out_features: int = eqx.field(static=True)
-    init_lengthscale: float = 1.0
-    W_init: Float[Array, "D_in D"] | None = eqx.field(default=None)
-    bias_init: Float[Array, " D"] | None = eqx.field(default=None)
-    output_linear_init: Float[Array, "D D_out"] | None = eqx.field(default=None)
-    covariance: LaplaceRandomFeatureCovariance | None = eqx.field(default=None)
+    core: geonnax.RandomFeatureGaussianProcess
     pyrox_name: str | None = None
 
     @classmethod
@@ -245,56 +116,74 @@ class RandomFeatureGaussianProcess(PyroxModule):
         pyrox_name: str | None = None,
     ) -> RandomFeatureGaussianProcess:
         """Construct an SNGP head with frozen RFF freqs and an empty precision."""
-        if in_features <= 0 or num_features <= 0 or out_features <= 0:
-            raise ValueError(
-                "in_features, num_features, out_features must all be > 0; "
-                f"got {in_features=}, {num_features=}, {out_features=}."
-            )
-        if init_lengthscale <= 0:
-            raise ValueError(f"init_lengthscale must be > 0; got {init_lengthscale}.")
-        kw, kb, kh = jr.split(key, 3)
-        W_init = jr.normal(kw, (in_features, num_features))
-        bias_init = jr.uniform(kb, (num_features,), minval=0.0, maxval=2 * jnp.pi)
-        output_linear_init = _glorot_normal(
-            kh, num_features, out_features, scale=head_scale
-        )
-        cov = LaplaceRandomFeatureCovariance.init(
-            num_features, momentum=momentum, ridge=ridge
-        )
-        return cls(
+        # geonnax validates positive dims and init_lengthscale > 0;
+        # momentum / ridge constraints are validated inside the LRFC init.
+        core = geonnax.RandomFeatureGaussianProcess.init(
             in_features=in_features,
             num_features=num_features,
             out_features=out_features,
+            key=key,
             init_lengthscale=init_lengthscale,
-            W_init=W_init,
-            bias_init=bias_init,
-            output_linear_init=output_linear_init,
-            covariance=cov,
-            pyrox_name=pyrox_name,
+            momentum=momentum,
+            ridge=ridge,
+            head_scale=head_scale,
         )
+        return cls(core=core, pyrox_name=pyrox_name)
 
-    def __post_init__(self) -> None:
-        for name, attr, expected in (
-            ("W_init", self.W_init, (self.in_features, self.num_features)),
-            ("bias_init", self.bias_init, (self.num_features,)),
-            (
-                "output_linear_init",
-                self.output_linear_init,
-                (self.num_features, self.out_features),
-            ),
-        ):
-            if attr is None:
-                raise ValueError(
-                    f"RandomFeatureGaussianProcess requires {name}. Use "
-                    "RandomFeatureGaussianProcess.init(key, ...) to construct."
-                )
-            if attr.shape != expected:
-                raise ValueError(f"{name} shape {attr.shape} != expected {expected}.")
-        if self.covariance is None:
-            raise ValueError(
-                "RandomFeatureGaussianProcess requires a covariance container. "
-                "Use RandomFeatureGaussianProcess.init(key, ...) to construct."
-            )
+    # Read-only property accessors retain the pre-refactor attribute names so
+    # external callers (tests, user code reading static dims) keep working.
+    @property
+    def in_features(self) -> int:
+        return self.core.in_features
+
+    @property
+    def num_features(self) -> int:
+        return self.core.num_features
+
+    @property
+    def out_features(self) -> int:
+        return self.core.out_features
+
+    @property
+    def init_lengthscale(self) -> float:
+        return float(self.core.lengthscale)
+
+    @property
+    def W_init(self) -> Float[Array, "D_in D"]:
+        return self.core.W
+
+    @property
+    def bias_init(self) -> Float[Array, " D"]:
+        return self.core.bias
+
+    @property
+    def output_linear_init(self) -> Float[Array, "D D_out"]:
+        return self.core.output_linear
+
+    @property
+    def covariance(self) -> geonnax.LaplaceRandomFeatureCovariance:
+        return self.core.covariance
+
+    def _swap_feature_core(self) -> geonnax.RandomFeatureGaussianProcess:
+        """Register the RFF-map params and swap them into the core.
+
+        Only the frequency/bias/lengthscale arrays are needed for the
+        feature map; the linear-head params are registered inside
+        ``__call__`` so disabled branches (e.g. pure feature-map usage
+        via :meth:`feature_map`) don't materialise unused sites.
+        """
+        W = jax.lax.stop_gradient(self.pyrox_param("W", self.core.W))
+        b = jax.lax.stop_gradient(self.pyrox_param("bias", self.core.bias))
+        ls = self.pyrox_param(
+            "lengthscale",
+            self.core.lengthscale,
+            constraint=dist.constraints.positive,
+        )
+        return eqx.tree_at(
+            lambda c: (c.W, c.bias, c.lengthscale),
+            self.core,
+            (W, b, ls),
+        )
 
     @pyrox_method
     def feature_map(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D"]:
@@ -306,15 +195,14 @@ class RandomFeatureGaussianProcess(PyroxModule):
         frozen at their init values. The lengthscale is the active
         bandwidth control and is constrained positive.
         """
-        W = jax.lax.stop_gradient(self.pyrox_param("W", self.W_init))
-        b = jax.lax.stop_gradient(self.pyrox_param("bias", self.bias_init))
-        ls = self.pyrox_param(
-            "lengthscale",
-            jnp.asarray(self.init_lengthscale),
-            constraint=dist.constraints.positive,
-        )
-        z = einx.dot("... d, d f -> ... f", x, W) / ls + b
-        return jnp.sqrt(2.0 / self.num_features) * jnp.cos(z)
+        new_core = self._swap_feature_core()
+        # geonnax feature_map is single-example `(D_in,) -> (D,)`. Flatten
+        # arbitrary leading batch dims, vmap, then restore.
+        D_in = x.shape[-1]
+        batch_shape = x.shape[:-1]
+        flat = x.reshape(-1, D_in)
+        out = jax.vmap(new_core.feature_map)(flat)
+        return out.reshape((*batch_shape, self.num_features))
 
     @pyrox_method
     def __call__(
@@ -326,23 +214,36 @@ class RandomFeatureGaussianProcess(PyroxModule):
         Float[Array, "*batch D_out"]
         | tuple[Float[Array, "*batch D_out"], Float[Array, " *batch"]]
     ):
-        features = self.feature_map(x)
-        H = self.pyrox_param("output_linear", self.output_linear_init)
+        # Register the RFF + linear-head params and swap them into the core.
+        new_core = self._swap_feature_core()
+        H = self.pyrox_param("output_linear", self.core.output_linear)
         b_out = self.pyrox_param(
             "output_bias", jnp.zeros(self.out_features, dtype=x.dtype)
         )
-        mean = einx.dot("... f, f o -> ... o", features, H) + b_out
+        new_core = eqx.tree_at(
+            lambda c: (c.output_linear, c.output_bias),
+            new_core,
+            (H, b_out),
+        )
+
+        # geonnax `__call__` is single-example `(D_in,)`. Flatten leading
+        # batch dims, vmap, restore. `return_cov=False` keeps the output
+        # a plain array; `return_cov=True` returns (mean, var) per example
+        # and we restore the per-batch axes on both.
+        D_in = x.shape[-1]
+        batch_shape = x.shape[:-1]
+        flat = x.reshape(-1, D_in)
+
         if return_cov:
-            # variance_at expects a 2-D (N, D) features matrix; flatten any
-            # leading batch dims, compute the per-row variance, then restore.
-            flat_features = features.reshape(-1, self.num_features)
-            # `__post_init__` guarantees `self.covariance is not None`.
-            assert self.covariance is not None
-            var = self.covariance.variance_at(flat_features).reshape(
-                features.shape[:-1]
+            mean_flat, var_flat = jax.vmap(lambda xi: new_core(xi, return_cov=True))(
+                flat
             )
+            mean = mean_flat.reshape((*batch_shape, self.out_features))
+            var = var_flat.reshape(batch_shape)
             return mean, var
-        return mean
+
+        mean_flat = jax.vmap(new_core)(flat)
+        return mean_flat.reshape((*batch_shape, self.out_features))
 
     def update_precision(
         self, features: Float[Array, "*batch D"]
@@ -354,8 +255,8 @@ class RandomFeatureGaussianProcess(PyroxModule):
         update folds the empirical second moment into the EMA. Call
         this once per training batch *after* the gradient step.
         """
+        # Flatten any leading batch dims down to the single batch axis the
+        # geonnax `update_precision` expects.
         flat = features.reshape(-1, self.num_features)
-        # `__post_init__` guarantees `self.covariance is not None`.
-        assert self.covariance is not None
-        new_cov = self.covariance.update(flat)
-        return eqx.tree_at(lambda layer: layer.covariance, self, new_cov)
+        new_core = self.core.update_precision(flat)
+        return eqx.tree_at(lambda layer: layer.core, self, new_core)

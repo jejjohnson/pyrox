@@ -17,7 +17,7 @@ import pytest
 from numpyro import handlers
 
 from pyrox.nn import SIREN, BayesianSIREN, SirenDense
-from pyrox.nn._layers import _siren_W_limit
+from geonnax import siren_W_limit as _siren_W_limit
 
 
 # ---------------------------------------------------------------------------

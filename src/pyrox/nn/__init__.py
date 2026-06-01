@@ -1,91 +1,20 @@
 """Bayesian, spectral, and coordinate-encoding neural network layers.
 
-Dense / Bayesian-linear layers (``pyrox.nn._layers``):
+After the ``geonnax`` split, ``pyrox.nn`` consists of:
 
-* :class:`Deg2Rad` — element-wise degrees-to-radians conversion.
-* :class:`LonLatScale` — affine lon/lat scaling into ``[-1, 1]``.
-* :class:`Cartesian3DEncoder` — lon/lat lift to unit Cartesian
-  coordinates on :math:`S^2`.
-* :class:`CyclicEncoder` — periodic cos/sin encoding.
-* :class:`SphericalHarmonicEncoder` — real spherical-harmonic features.
-* :class:`DenseReparameterization` — weight-space Bayesian linear via
-  the reparameterization trick.
-* :class:`DenseFlipout` — variance-reduced Bayesian linear via the
-  Flipout estimator.
-* :class:`DenseVariational` — user-supplied prior + posterior
-  callables for full flexibility.
-* :class:`DenseVariationalDropout` — sparse variational dropout dense
-  layer with per-weight learnable dropout rates (Molchanov et al.,
-  2017).
-* :class:`DenseDVI` — Deterministic Variational Inference dense layer
-  that propagates Gaussian moments analytically (Wu et al., 2018).
-* :class:`DenseHierarchical` — hierarchical Bayesian dense layer with
-  multiplicative local + global shrinkage (Louizos et al., 2017).
-* :class:`MCDropout` — always-on dropout for Monte Carlo uncertainty.
-* :class:`DenseNCP` — Noise Contrastive Prior: deterministic backbone
-  + scaled stochastic perturbation.
-* :class:`MCSoftmaxDenseFA` — heteroscedastic multi-class output head
-  with input-dependent low-rank+diag logit noise (Collier et al. 2021).
-* :class:`MCSigmoidDenseFA` — same noise model with sigmoid output
-  for multi-label classification.
-* :class:`DenseRank1` — rank-1 ensemble dense layer (BatchEnsemble /
-  rank-1 BNN, Wen et al. 2020 / Dusenberry et al. 2020).
-* :class:`LayerNormEnsemble` — per-ensemble-member LayerNorm (drop-in
-  replacement for ``LayerNorm`` inside BatchEnsemble / Rank1 stacks).
-* :class:`MultiHeadAttentionBE` — multi-head attention with
-  BatchEnsemble per-member rank-1 projections on Q/K/V/O.
-* :class:`NCPContinuousPerturb` — input perturbation for NCP.
-* :class:`NCPNormalOutput` — output-side NCP KL regulariser
-  (Hafner et al. 2018).
-* :class:`RBFFourierFeatures` — SSGP-style [cos, sin] RFF (Gaussian).
-* :class:`RBFCosineFeatures` — cos(Wx + b) RFF variant (Gaussian).
-* :class:`MaternFourierFeatures` — SSGP-style RFF (Student-t).
-* :class:`MaternCosineFeatures` — cos(Wx + b) RFF variant (Student-t).
-* :class:`LaplaceFourierFeatures` — SSGP-style RFF (Cauchy).
-* :class:`LaplaceCosineFeatures` — cos(Wx + b) RFF variant (Cauchy).
-* :class:`ArcCosineFourierFeatures` — arc-cosine / ReLU features.
-* :class:`RandomKitchenSinks` — RFF + learned linear head.
-* :class:`SirenDense` — single sine-activated dense layer (SIREN).
-* :class:`SIREN` — multi-layer sinusoidal representation network.
-* :class:`BayesianSIREN` — SIREN with regime-scaled Normal priors.
-* :class:`DeepVSSGP` — deep random feature expansion for variational
-  SSGP (Cutajar et al. 2017).
-* :class:`RandomFeatureGaussianProcess` — SNGP output head with RFF
-  feature map and Laplace covariance over linear weights (Liu et al.,
-  2020).
-* :class:`LaplaceRandomFeatureCovariance` — pure-functional precision
-  container used by SNGP.
+* **Deterministic primitives** (re-exported from ``geonnax`` via
+  :mod:`pyrox.nn._geonnax`): SIREN, MFN, conditioning bases, encoders,
+  Slepian, orthogonal RFF, SNGP covariance container, etc.
+* **Bayesian wrappers** (per-family modules): ``_dense``, ``_features``,
+  ``_siren``, ``_mfn``, ``_vssgp``, ``_heteroscedastic``, ``_ensemble``,
+  ``_sngp``, ``_conditioning``, ``_bnf``, ``_slepian``. Each holds a
+  ``geonnax`` core and registers NumPyro sample / param sites.
+* **BNF + pandas-free helpers** (:mod:`pyrox.nn._bnf`,
+  :mod:`pyrox.nn._features`).
 
-Multiplicative Filter Networks (``pyrox.nn._layers``):
-
-* :class:`FourierFilter` — single Fourier filter primitive.
-* :class:`GaborFilter` — single Gabor filter primitive.
-* :class:`FourierNet` — multiplicative Fourier filter network.
-* :class:`GaborNet` — multiplicative Gabor filter network.
-* :class:`BayesianFourierNet` — FourierNet with NumPyro priors.
-* :class:`BayesianGaborNet` — GaborNet with NumPyro priors.
-* :func:`mfn_forward` — pure-JAX MFN forward helper.
-
-Bayesian Neural Field stack (``pyrox.nn._bnf``):
-
-* :class:`Standardization` — affine normalization with fixed mean/std.
-* :class:`FourierFeatures` — dyadic-frequency cos/sin basis per input.
-* :class:`SeasonalFeatures` — period-and-harmonic cos/sin basis.
-* :class:`InteractionFeatures` — element-wise products on column pairs.
-* :class:`BayesianNeuralField` — full BNF MLP with Logistic(0, 1) priors.
-
-Geographic / spherical helpers (``pyrox.nn._geo``):
-
-* :func:`deg2rad`, :func:`lonlat_scale`, :func:`lonlat_to_cartesian3d`,
-  :func:`cyclic_encode`, :func:`spherical_harmonic_encode` —
-  pure-JAX preprocessing helpers for lon/lat inputs.
-
-Pure-JAX feature helpers (``pyrox.nn._features``):
-
-* :func:`fourier_features`, :func:`seasonal_features`,
-  :func:`interaction_features`, :func:`standardize`,
-  :func:`unstandardize` — pandas-free building blocks the BNF layers
-  wrap.
+``MCDropout`` and ``LinearCore`` were dropped — use
+``equinox.nn.Dropout(p=rate, inference=False)`` and
+``equinox.nn.Linear`` directly.
 """
 
 from pyrox.nn._bnf import (
@@ -96,21 +25,34 @@ from pyrox.nn._bnf import (
     Standardization,
 )
 from pyrox.nn._conditioning import (
-    AbstractConditioner,
-    AffineModulation,
     BayesianAffineModulation,
     BayesianConcatConditioner,
     BayesianHyperLinear,
-    ConcatConditioner,
-    ConditionedINR,
     ConditionedRFFNet,
-    FiLM,
     HyperFourierFeatures,
-    HyperLinear,
-    HyperSIREN,
+)
+from pyrox.nn._dense import (
+    DenseDVI,
+    DenseFlipout,
+    DenseHierarchical,
+    DenseNCP,
+    DenseReparameterization,
+    DenseVariational,
+    DenseVariationalDropout,
+    NCPNormalOutput,
 )
 from pyrox.nn._ensemble import DenseRank1, LayerNormEnsemble, MultiHeadAttentionBE
 from pyrox.nn._features import (
+    ArcCosineFourierFeatures,
+    HSGPFeatures,
+    LaplaceCosineFeatures,
+    LaplaceFourierFeatures,
+    MaternCosineFeatures,
+    MaternFourierFeatures,
+    RandomKitchenSinks,
+    RBFCosineFeatures,
+    RBFFourierFeatures,
+    VariationalFourierFeatures,
     fourier_features,
     interaction_features,
     seasonal_features,
@@ -125,55 +67,38 @@ from pyrox.nn._geo import (
     lonlat_to_cartesian3d,
     spherical_harmonic_encode,
 )
-from pyrox.nn._heteroscedastic import MCSigmoidDenseFA, MCSoftmaxDenseFA
-from pyrox.nn._layers import (
+from pyrox.nn._geonnax import (
     SIREN,
-    ArcCosineFourierFeatures,
-    BayesianFourierNet,
-    BayesianGaborNet,
-    BayesianSIREN,
+    AbstractConditioner,
+    AffineModulation,
     Cartesian3DEncoder,
+    ConcatConditioner,
+    ConditionedINR,
     CyclicEncoder,
-    DeepVSSGP,
     Deg2Rad,
-    DenseDVI,
-    DenseFlipout,
-    DenseHierarchical,
-    DenseNCP,
-    DenseReparameterization,
-    DenseVariational,
-    DenseVariationalDropout,
+    FiLM,
     FourierFilter,
     FourierNet,
     GaborFilter,
     GaborNet,
-    HSGPFeatures,
-    LaplaceCosineFeatures,
-    LaplaceFourierFeatures,
+    HybridSphericalSlepianEncoder,
+    HyperLinear,
+    HyperSIREN,
+    LaplaceRandomFeatureCovariance,
     LonLatScale,
-    MaternCosineFeatures,
-    MaternFourierFeatures,
-    MCDropout,
     NCPContinuousPerturb,
-    NCPNormalOutput,
     OrthogonalRandomFeatures,
-    RandomKitchenSinks,
-    RBFCosineFeatures,
-    RBFFourierFeatures,
     SirenDense,
+    SlepianEncoder,
     SphericalHarmonicEncoder,
-    VariationalFourierFeatures,
     mfn_forward,
 )
-from pyrox.nn._slepian import (
-    BayesianSlepianEncoder,
-    HybridSphericalSlepianEncoder,
-    SlepianEncoder,
-)
-from pyrox.nn._sngp import (
-    LaplaceRandomFeatureCovariance,
-    RandomFeatureGaussianProcess,
-)
+from pyrox.nn._heteroscedastic import MCSigmoidDenseFA, MCSoftmaxDenseFA
+from pyrox.nn._mfn import BayesianFourierNet, BayesianGaborNet
+from pyrox.nn._siren import BayesianSIREN
+from pyrox.nn._slepian import BayesianSlepianEncoder
+from pyrox.nn._sngp import RandomFeatureGaussianProcess
+from pyrox.nn._vssgp import DeepVSSGP
 
 
 __all__ = [
@@ -221,7 +146,6 @@ __all__ = [
     "LaplaceRandomFeatureCovariance",
     "LayerNormEnsemble",
     "LonLatScale",
-    "MCDropout",
     "MCSigmoidDenseFA",
     "MCSoftmaxDenseFA",
     "MaternCosineFeatures",
