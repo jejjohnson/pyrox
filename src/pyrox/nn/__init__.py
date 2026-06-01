@@ -17,6 +17,14 @@ After the ``geonnax`` split, ``pyrox.nn`` consists of:
 ``equinox.nn.Linear`` directly.
 """
 
+from geonnax.geo import (
+    cyclic_encode,
+    deg2rad,
+    lonlat_scale,
+    lonlat_to_cartesian3d,
+    spherical_harmonic_encode,
+)
+
 from pyrox.nn._bnf import (
     BayesianNeuralField,
     FourierFeatures,
@@ -59,13 +67,6 @@ from pyrox.nn._features import (
     seasonal_frequencies,
     standardize,
     unstandardize,
-)
-from geonnax.geo import (
-    cyclic_encode,
-    deg2rad,
-    lonlat_scale,
-    lonlat_to_cartesian3d,
-    spherical_harmonic_encode,
 )
 from pyrox.nn._geonnax import (
     SIREN,
