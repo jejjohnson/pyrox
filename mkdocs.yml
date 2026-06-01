@@ -36,6 +36,11 @@ plugins:
             docstring_style: google
             show_source: true
             show_root_heading: true
+            # The GP API re-exports several gaussx symbols (SDEKernel,
+            # MaternSDE, ConstantSDE, …). griffe must preload the external
+            # gaussx package to resolve those aliases; without this the
+            # render path raises AliasResolutionError and the deploy fails.
+            preload_modules: [gaussx]
   - mkdocs-jupyter:
       execute: false
       ignore_h1_titles: true
