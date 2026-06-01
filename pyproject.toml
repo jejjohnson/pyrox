@@ -24,6 +24,7 @@ dependencies = [
     "equinox>=0.13.8",
     "numpyro>=0.21",
     "gaussx @ git+https://github.com/jejjohnson/gaussx.git@926be4f48f692dcfd0be25c3ec8200818ca7276b",
+    "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.2",
     "lineax>=0.1.1",
     "einops>=0.8.2",
     "einx>=0.4.3",
