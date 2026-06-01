@@ -35,7 +35,7 @@ optax = [
 # `pip install pyrox[bnf]` bundles what the Bayesian Neural Field stack needs:
 # pandas for `pyrox.preprocessing` and optax for the SGD-MAP / SVI inference.
 bnf = [
-    "pandas>=2.0",
+    "pandas>=3.0.3",
     "optax>=0.2",
 ]
 # `pip install pyrox[colab]` bundles what the example notebooks need to run
@@ -44,7 +44,7 @@ bnf = [
 colab = [
     "matplotlib>=3.10.9",
     "watermark>=2.6.0",
-    "pandas>=2.0",
+    "pandas>=3.0.3",
 ]
 
 [project.urls]
