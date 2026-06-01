@@ -30,10 +30,15 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
-from geonnax import AffineModulation as _GxAffineModulation
-from geonnax import ConcatConditioner as _GxConcatConditioner
-from geonnax import HyperLinear as _GxHyperLinear
-from geonnax.conditioning import GammaActivation, _GAMMA_ACTIVATIONS  # type: ignore[attr-defined]
+from geonnax import (
+    AffineModulation as _GxAffineModulation,
+    ConcatConditioner as _GxConcatConditioner,
+    HyperLinear as _GxHyperLinear,
+)
+from geonnax.conditioning import (  # type: ignore[attr-defined]
+    _GAMMA_ACTIVATIONS,
+    GammaActivation,
+)
 from jaxtyping import Array, Float
 
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
@@ -136,9 +141,7 @@ class BayesianConcatConditioner(PyroxModule):
             "proj_b",
             dist.Normal(0.0, self.prior_std).expand([self.num_features]).to_event(1),
         )
-        new_proj = eqx.tree_at(
-            lambda m: (m.weight, m.bias), self.core.proj, (W, b)
-        )
+        new_proj = eqx.tree_at(lambda m: (m.weight, m.bias), self.core.proj, (W, b))
         new_core = eqx.tree_at(lambda m: m.proj, self.core, new_proj)
 
         # Broadcast and batch via vmap; geonnax core expects single example.
@@ -244,9 +247,7 @@ class BayesianAffineModulation(PyroxModule):
             "gen_b",
             dist.Normal(0.0, self.prior_std).expand([out_dim]).to_event(1),
         )
-        new_gen = eqx.tree_at(
-            lambda m: (m.weight, m.bias), self.core.generator, (W, b)
-        )
+        new_gen = eqx.tree_at(lambda m: (m.weight, m.bias), self.core.generator, (W, b))
         new_core = eqx.tree_at(lambda m: m.generator, self.core, new_gen)
 
         squeeze_h = h.ndim == 1
@@ -348,9 +349,7 @@ class BayesianHyperLinear(PyroxModule):
             "gen_b",
             dist.Normal(0.0, self.prior_std).expand([flat_size]).to_event(1),
         )
-        new_gen = eqx.tree_at(
-            lambda m: (m.weight, m.bias), self.core.generator, (W, b)
-        )
+        new_gen = eqx.tree_at(lambda m: (m.weight, m.bias), self.core.generator, (W, b))
         new_core = eqx.tree_at(lambda m: m.generator, self.core, new_gen)
 
         squeeze_x = x.ndim == 1

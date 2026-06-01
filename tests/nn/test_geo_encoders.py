@@ -148,9 +148,9 @@ def test_sh_encoder_num_features(l_max: int):
 def test_sh_encoder_lonlat_input_mode():
     lonlat = _random_lonlat(32)
     direct = jax.vmap(SphericalHarmonicEncoder(l_max=4, input_mode="lonlat"))(lonlat)
-    via_cartesian = jax.vmap(
-        SphericalHarmonicEncoder(l_max=4, input_mode="cartesian")
-    )(jax.vmap(Cartesian3DEncoder())(lonlat))
+    via_cartesian = jax.vmap(SphericalHarmonicEncoder(l_max=4, input_mode="cartesian"))(
+        jax.vmap(Cartesian3DEncoder())(lonlat)
+    )
     np.testing.assert_allclose(direct, via_cartesian, atol=1e-6)
 
 

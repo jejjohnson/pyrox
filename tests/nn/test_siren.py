@@ -14,10 +14,10 @@ import jax.random as jr
 import numpy as np
 import optax
 import pytest
+from geonnax import siren_W_limit as _siren_W_limit
 from numpyro import handlers
 
 from pyrox.nn import SIREN, BayesianSIREN, SirenDense
-from geonnax import siren_W_limit as _siren_W_limit
 
 
 # ---------------------------------------------------------------------------

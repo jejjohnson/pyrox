@@ -43,6 +43,7 @@ from geonnax.geo import (
     spherical_harmonic_encode,
 )
 
+
 __all__ = [
     "SIREN",
     "AbstractConditioner",

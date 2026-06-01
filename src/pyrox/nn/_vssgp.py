@@ -192,9 +192,7 @@ class DeepVSSGP(PyroxModule):
         sampled_lengthscales: list[Float[Array, ""]] = []
         for layer_idx in range(self.core.depth):
             in_dim = (
-                self.core.in_features
-                if layer_idx == 0
-                else self.core.hidden_features
+                self.core.in_features if layer_idx == 0 else self.core.hidden_features
             )
             out_dim = (
                 self.core.out_features
