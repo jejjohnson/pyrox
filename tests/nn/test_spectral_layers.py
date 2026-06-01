@@ -77,7 +77,7 @@ def test_vff_rejects_nonpositive_lengthscale():
 
 def test_orf_output_shape():
     orf = OrthogonalRandomFeatures.init(in_features=4, n_features=8, key=jr.PRNGKey(0))
-    y = orf(jnp.zeros((6, 4)))
+    y = jax.vmap(orf)(jnp.zeros((6, 4)))
     assert y.shape == (6, 16)
 
 
@@ -120,8 +120,8 @@ def test_orf_kernel_approximation_lower_variance_than_rff():
         orf = OrthogonalRandomFeatures.init(
             in_features=D, n_features=n_features, key=jr.PRNGKey(s)
         )
-        phi_x = orf(x[None, :])[0]
-        phi_y = orf(xp[None, :])[0]
+        phi_x = orf(x)
+        phi_y = orf(xp)
         approx = float(jnp.dot(phi_x, phi_y))
         mse_orf += (approx - true_k) ** 2 / n_seeds
 

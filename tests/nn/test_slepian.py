@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro.handlers as handlers
@@ -28,7 +29,7 @@ def test_slepian_encoder_matches_basis_direct_call():
     )
 
     np.testing.assert_allclose(
-        np.asarray(encoder(xyz)),
+        np.asarray(jax.vmap(encoder)(xyz)),
         np.asarray(basis.evaluate(xyz)),
         atol=1e-6,
     )
@@ -42,10 +43,10 @@ def test_slepian_encoder_lonlat_shape_and_eigenvalue_weighting():
     )
     lonlat = jnp.array([[0.0, 0.0], [0.5 * jnp.pi, 0.0]])
 
-    assert weighted(lonlat).shape == (2, 4)
+    assert jax.vmap(weighted)(lonlat).shape == (2, 4)
     np.testing.assert_allclose(
-        np.asarray(weighted(lonlat)),
-        np.asarray(unweighted(lonlat) * jnp.sqrt(basis.eigenvalues)[None, :]),
+        np.asarray(jax.vmap(weighted)(lonlat)),
+        np.asarray(jax.vmap(unweighted)(lonlat) * jnp.sqrt(basis.eigenvalues)[None, :]),
         atol=1e-6,
     )
 
@@ -61,7 +62,7 @@ def test_hybrid_spherical_slepian_encoder_concatenates_features():
     )
     lonlat = jnp.array([[0.0, 0.0], [1.0, 0.2]])
 
-    assert encoder(lonlat).shape == (2, 13)
+    assert jax.vmap(encoder)(lonlat).shape == (2, 13)
     assert encoder.num_features == 13
 
 
@@ -87,7 +88,7 @@ def test_slepian_encoder_filter_jit():
 
     import equinox as eqx
 
-    encoded = eqx.filter_jit(encoder)(xyz)
+    encoded = eqx.filter_jit(lambda x: jax.vmap(encoder)(x))(xyz)
 
     assert encoded.shape == (1, 4)
     assert jnp.all(jnp.isfinite(encoded))

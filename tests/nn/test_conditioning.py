@@ -51,14 +51,14 @@ def test_conditioner_output_shape_2d(factory):
     cond = factory(jr.key(0))
     h = jnp.ones((6, 8))
     z = jnp.ones((6, 3))
-    assert cond(h, z).shape == (6, 8)
+    assert jax.vmap(cond)(h, z).shape == (6, 8)
 
 
 def test_hyper_linear_output_shape_2d():
     hyper = HyperLinear.init(target_in=4, target_out=8, cond_dim=3, key=jr.key(0))
     x = jnp.ones((6, 4))
     z = jnp.ones((6, 3))
-    assert hyper(x, z).shape == (6, 8)
+    assert jax.vmap(hyper)(x, z).shape == (6, 8)
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +72,9 @@ def test_affine_modulation_broadcasts_scalar_z():
     z = jr.normal(jr.key(2), (3,))
     z_expanded = einops.repeat(z, "k -> n k", n=6)
     np.testing.assert_allclose(
-        np.asarray(cond(h, z)), np.asarray(cond(h, z_expanded)), atol=1e-6
+        np.asarray(jax.vmap(cond, in_axes=(0, None))(h, z)),
+        np.asarray(jax.vmap(cond)(h, z_expanded)),
+        atol=1e-6,
     )
 
 
@@ -82,7 +84,9 @@ def test_concat_conditioner_broadcasts_scalar_z():
     z = jr.normal(jr.key(2), (3,))
     z_expanded = einops.repeat(z, "k -> n k", n=6)
     np.testing.assert_allclose(
-        np.asarray(cond(h, z)), np.asarray(cond(h, z_expanded)), atol=1e-6
+        np.asarray(jax.vmap(cond, in_axes=(0, None))(h, z)),
+        np.asarray(jax.vmap(cond)(h, z_expanded)),
+        atol=1e-6,
     )
 
 
@@ -96,7 +100,9 @@ def test_affine_modulation_identity_at_init_with_zero_z():
     cond = AffineModulation.init(num_features=8, cond_dim=3, key=jr.key(0))
     h = jr.normal(jr.key(1), (6, 8))
     z = jnp.zeros((6, 3))
-    np.testing.assert_allclose(np.asarray(cond(h, z)), np.asarray(h), atol=1e-6)
+    np.testing.assert_allclose(
+        np.asarray(jax.vmap(cond)(h, z)), np.asarray(h), atol=1e-6
+    )
 
 
 def test_film_alias_is_affine_modulation():
@@ -118,7 +124,7 @@ def test_affine_modulation_log_det_exp_matches_sum_raw_gamma():
     raw_gamma = raw[:, 4:]  # second half on the feature axis (β | raw_γ)
     expected = jnp.sum(raw_gamma, axis=-1)
     np.testing.assert_allclose(
-        np.asarray(cond.log_det(z)), np.asarray(expected), atol=1e-6
+        np.asarray(jax.vmap(cond.log_det)(z)), np.asarray(expected), atol=1e-6
     )
 
 
@@ -134,23 +140,25 @@ def test_affine_modulation_log_det_raises_when_not_exp():
 
 
 def test_hyper_linear_shared_vs_per_sample_agree_on_broadcast():
-    """Load-bearing: einops dispatch on z.ndim must agree when z is broadcast."""
+    """Load-bearing: shared and per-sample paths must agree when z is broadcast."""
     hyper = HyperLinear.init(target_in=4, target_out=6, cond_dim=3, key=jr.key(0))
     x = jr.normal(jr.key(1), (5, 4))
     z = jr.normal(jr.key(2), (3,))
     z_expanded = einops.repeat(z, "k -> n k", n=5)
     np.testing.assert_allclose(
-        np.asarray(hyper(x, z)), np.asarray(hyper(x, z_expanded)), atol=1e-6
+        np.asarray(jax.vmap(hyper, in_axes=(0, None))(x, z)),
+        np.asarray(jax.vmap(hyper)(x, z_expanded)),
+        atol=1e-6,
     )
 
 
 def test_hyper_linear_persample_uses_distinct_weights():
     """Different rows of z should produce different generated W."""
     hyper = HyperLinear.init(target_in=4, target_out=6, cond_dim=3, key=jr.key(0))
-    x = jnp.ones((1, 4))
+    x = jnp.ones((4,))
     z = jr.normal(jr.key(1), (2, 3)) * 5.0  # large magnitude → distinct outputs
-    z_a = z[0:1]
-    z_b = z[1:2]
+    z_a = z[0]
+    z_b = z[1]
     y_a = hyper(x, z_a)
     y_b = hyper(x, z_b)
     assert not jnp.allclose(y_a, y_b, atol=1e-3)
@@ -168,11 +176,11 @@ def test_conditioners_jit():
         ConcatConditioner.init(num_features=8, cond_dim=3, key=jr.key(0)),
         AffineModulation.init(num_features=8, cond_dim=3, key=jr.key(1)),
     ):
-        y = jax.jit(lambda c=cond: c(h, z))()
+        y = jax.jit(lambda c=cond: jax.vmap(c)(h, z))()
         assert jnp.all(jnp.isfinite(y))
 
     hyper = HyperLinear.init(target_in=4, target_out=8, cond_dim=3, key=jr.key(2))
-    y = jax.jit(lambda: hyper(jnp.ones((4, 4)), z))()
+    y = jax.jit(lambda: jax.vmap(hyper)(jnp.ones((4, 4)), z))()
     assert jnp.all(jnp.isfinite(y))
 
 
@@ -219,7 +227,7 @@ def test_conditioned_siren_output_shape():
     wrapped = ConditionedINR.init(
         inner, conditioner_cls=AffineModulation, cond_dim=4, key=jr.key(1)
     )
-    y = wrapped(jnp.ones((10, 2)), jnp.ones((10, 4)))
+    y = jax.vmap(wrapped)(jnp.ones((10, 2)), jnp.ones((10, 4)))
     assert y.shape == (10, 1)
 
 
@@ -232,7 +240,7 @@ def test_conditioned_siren_gradient_flows_to_inner_and_conditioners():
     z = jnp.ones((4, 3))
 
     def loss(model):
-        return jnp.sum(model(x, z) ** 2)
+        return jnp.sum(jax.vmap(model)(x, z) ** 2)
 
     grads = eqx.filter_grad(loss)(wrapped)
     leaves = jax.tree_util.tree_leaves(eqx.filter(grads, eqx.is_array))
@@ -255,7 +263,7 @@ def test_conditioned_inr_input_mode():
     # The head projects (in_features=5, cond_dim=3) → (5,) per row, then runs SIREN.
     # We fake-feed `x` of size 5 (matching inner.in_features) since input mode
     # uses h = x of size num_features = inner.in_features.
-    y = wrapped(jnp.ones((4, 5)), jnp.ones((4, 3)))
+    y = jax.vmap(wrapped)(jnp.ones((4, 5)), jnp.ones((4, 3)))
     assert y.shape == (4, 1)
 
 
@@ -281,7 +289,7 @@ def test_hyper_siren_output_shape():
         parameter_net=_Identity(),
         key=jr.key(0),
     )
-    y = nif(jnp.ones((8, 2)), jnp.ones((3,)))
+    y = jax.vmap(nif, in_axes=(0, None))(jnp.ones((8, 2)), jnp.ones((3,)))
     assert y.shape == (8, 1)
 
 

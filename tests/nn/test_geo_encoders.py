@@ -66,7 +66,7 @@ def test_lonlat_scale_maps_to_minus_one_one():
 
 def test_cartesian3d_unit_norm():
     lonlat = _random_lonlat(512)
-    xyz = Cartesian3DEncoder()(lonlat)
+    xyz = jax.vmap(Cartesian3DEncoder())(lonlat)
     norms = jnp.linalg.norm(xyz, axis=-1)
     np.testing.assert_allclose(np.asarray(norms), np.ones(512), atol=1e-6)
 
@@ -88,7 +88,9 @@ def test_cartesian3d_matches_hand_computed_axes():
         ],
         dtype=jnp.float32,
     )
-    np.testing.assert_allclose(Cartesian3DEncoder()(lonlat), expected, atol=1e-6)
+    np.testing.assert_allclose(
+        jax.vmap(Cartesian3DEncoder())(lonlat), expected, atol=1e-6
+    )
 
 
 def test_cartesian3d_convention_matches_sh_inducing_features():
@@ -110,7 +112,7 @@ def test_cartesian3d_convention_matches_sh_inducing_features():
     )
     kernel = RBF(init_lengthscale=1.0, init_variance=1.0)
     features = SphericalHarmonicInducingFeatures.init(l_max=3)
-    encoded_xyz = Cartesian3DEncoder()(lonlat)
+    encoded_xyz = jax.vmap(Cartesian3DEncoder())(lonlat)
     np.testing.assert_allclose(encoded_xyz, expected_xyz, atol=1e-6)
     np.testing.assert_allclose(
         features.k_ux(encoded_xyz, kernel),
@@ -135,7 +137,7 @@ def test_sh_encoder_matches_basis_function():
     xyz = _random_unit_xyz(64)
     layer = SphericalHarmonicEncoder(l_max=5, input_mode="cartesian")
     expected = real_spherical_harmonics(xyz, l_max=5)
-    np.testing.assert_allclose(layer(xyz), expected, atol=1e-6)
+    np.testing.assert_allclose(jax.vmap(layer)(xyz), expected, atol=1e-6)
 
 
 @pytest.mark.parametrize("l_max", [0, 1, 3, 8])
@@ -145,10 +147,10 @@ def test_sh_encoder_num_features(l_max: int):
 
 def test_sh_encoder_lonlat_input_mode():
     lonlat = _random_lonlat(32)
-    direct = SphericalHarmonicEncoder(l_max=4, input_mode="lonlat")(lonlat)
-    via_cartesian = SphericalHarmonicEncoder(l_max=4, input_mode="cartesian")(
-        Cartesian3DEncoder()(lonlat)
-    )
+    direct = jax.vmap(SphericalHarmonicEncoder(l_max=4, input_mode="lonlat"))(lonlat)
+    via_cartesian = jax.vmap(
+        SphericalHarmonicEncoder(l_max=4, input_mode="cartesian")
+    )(jax.vmap(Cartesian3DEncoder())(lonlat))
     np.testing.assert_allclose(direct, via_cartesian, atol=1e-6)
 
 
@@ -169,7 +171,7 @@ def test_sh_encoder_lonlat_input_mode():
     ],
 )
 def test_encoders_jit(layer: object, x: jnp.ndarray):
-    y = jax.jit(layer)(x)
+    y = jax.jit(jax.vmap(layer))(x)
     assert jnp.all(jnp.isfinite(y))
 
 
@@ -197,9 +199,9 @@ def test_encoders_composition_end_to_end():
         dtype=jnp.float32,
     )
     radians = Deg2Rad()(lonlat_deg)
-    scaled = LonLatScale()(lonlat_deg)
-    xyz = Cartesian3DEncoder(input_unit="radians")(radians)
-    sh = SphericalHarmonicEncoder(l_max=3, input_mode="cartesian")(xyz)
+    scaled = jax.vmap(LonLatScale())(lonlat_deg)
+    xyz = jax.vmap(Cartesian3DEncoder(input_unit="radians"))(radians)
+    sh = jax.vmap(SphericalHarmonicEncoder(l_max=3, input_mode="cartesian"))(xyz)
     assert scaled.shape == (3, 2)
     assert sh.shape == (3, 16)
     assert jnp.all(jnp.isfinite(scaled))

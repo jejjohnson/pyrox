@@ -35,17 +35,17 @@ def test_fourier_filter_output_shape():
     key = jr.PRNGKey(0)
     f = FourierFilter.init(in_features=3, out_features=16, key=key)
     x = jnp.ones((5, 3))
-    y = f(x)
+    y = jax.vmap(f)(x)
     assert y.shape == (5, 16)
 
 
 def test_fourier_filter_output_shape_single_point():
-    """Single-point (D,) input is promoted to (1, D) and returns (1, H)."""
+    """Single-point (D,) input returns (H,) under the single-example convention."""
     key = jr.PRNGKey(1)
     f = FourierFilter.init(in_features=3, out_features=8, key=key)
     x = jnp.ones((3,))
     y = f(x)
-    assert y.shape == (1, 8)
+    assert y.shape == (8,)
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +57,7 @@ def test_gabor_filter_output_shape():
     key = jr.PRNGKey(2)
     f = GaborFilter.init(in_features=3, out_features=16, key=key)
     x = jnp.ones((5, 3))
-    y = f(x)
+    y = jax.vmap(f)(x)
     assert y.shape == (5, 16)
 
 
@@ -77,13 +77,13 @@ def test_gabor_filter_envelope_decays():
 
     # At x = mu, envelope = exp(-gamma/2 * 0) = 1 -> g(x) = sin(Omega*mu + phi)
     x_at_mu = mu_known[:1, :]  # shape (1, 2), equals mu[0]
-    g_at_mu = f_known(x_at_mu)  # (1, 4)
+    g_at_mu = jax.vmap(f_known)(x_at_mu)  # (1, 4)
     g_sin_only = jnp.sin(x_at_mu @ f_known.Omega.T + f_known.phi)
     np.testing.assert_allclose(np.asarray(g_at_mu), np.asarray(g_sin_only), atol=1e-5)
 
     # Far from mu, envelope should be very small.
     x_far = jnp.ones((1, 2)) * 10.0
-    g_far = f_known(x_far)
+    g_far = jax.vmap(f_known)(x_far)
     # ||x - mu||^2 = 2 * 9.5^2 = 180.5 (sum across the D=2 dims);
     # envelope = exp(-0.5 * gamma * 180.5) ≈ 1e-39 with gamma=1.
     assert float(jnp.max(jnp.abs(g_far))) < 1e-10
@@ -100,7 +100,7 @@ def test_fourier_net_output_shape():
         in_features=2, hidden_features=32, out_features=4, depth=3, key=key
     )
     x = jnp.ones((10, 2))
-    y = net(x)
+    y = jax.vmap(net)(x)
     assert y.shape == (10, 4)
 
 
@@ -126,7 +126,7 @@ def test_gabor_net_output_shape():
         in_features=2, hidden_features=32, out_features=4, depth=3, key=key
     )
     x = jnp.ones((10, 2))
-    y = net(x)
+    y = jax.vmap(net)(x)
     assert y.shape == (10, 4)
 
 
@@ -152,9 +152,9 @@ def test_mfn_depth_1_matches_single_filter():
         in_features=2, hidden_features=8, out_features=3, depth=1, key=key
     )
     x = jnp.ones((4, 2))
-    y_net = net(x)
+    y_net = jax.vmap(net)(x)
     # Manually compute: z = filter(x); y = vmap(linear)(z)
-    z = net.filters[0](x)  # (4, 8)
+    z = jax.vmap(net.filters[0])(x)  # (4, 8)
     y_manual = jax.vmap(net.linears[0])(z)  # (4, 3)
     np.testing.assert_allclose(np.asarray(y_net), np.asarray(y_manual), atol=1e-5)
 
@@ -200,8 +200,8 @@ def test_gabor_depth_1_matches_rbf_rff_kernel():
     x = jnp.array([[0.1, 0.2]])  # (1, D)
     xp = jnp.array([[0.3, 0.1]])  # (1, D)
 
-    phi_x = filt_zero_mu(x)[0]  # (H,)
-    phi_xp = filt_zero_mu(xp)[0]  # (H,)
+    phi_x = jax.vmap(filt_zero_mu)(x)[0]  # (H,)
+    phi_xp = jax.vmap(filt_zero_mu)(xp)[0]  # (H,)
 
     K_hat = float(jnp.dot(phi_x, phi_xp)) / H
 
@@ -228,7 +228,7 @@ def test_fourier_net_jits():
 
     @jax.jit
     def fwd(x):
-        return net(x)
+        return jax.vmap(net)(x)
 
     y = fwd(jnp.ones((5, 2)))
     assert jnp.all(jnp.isfinite(y))
@@ -242,7 +242,7 @@ def test_gabor_net_jits():
 
     @jax.jit
     def fwd(x):
-        return net(x)
+        return jax.vmap(net)(x)
 
     y = fwd(jnp.ones((5, 2)))
     assert jnp.all(jnp.isfinite(y))
@@ -262,7 +262,7 @@ def test_mfn_gradient_flows_through_all_params():
     x = jnp.ones((3, 2))
 
     def loss_fn(m):
-        return jnp.sum(m(x) ** 2)
+        return jnp.sum(jax.vmap(m)(x) ** 2)
 
     grads = jax.grad(loss_fn)(net)
     leaves = jax.tree_util.tree_leaves(grads)
@@ -279,7 +279,7 @@ def test_gabor_mfn_gradient_flows_through_all_params():
     x = jnp.ones((3, 2))
 
     def loss_fn(m):
-        return jnp.sum(m(x) ** 2)
+        return jnp.sum(jax.vmap(m)(x) ** 2)
 
     grads = jax.grad(loss_fn)(net)
     leaves = jax.tree_util.tree_leaves(grads)
@@ -347,8 +347,8 @@ def test_mfn_forward_helper_matches_fourier_net():
         in_features=2, hidden_features=8, out_features=3, depth=3, key=key
     )
     x = jnp.ones((5, 2))
-    y_net = net(x)
-    y_helper = mfn_forward(x, net.filters, net.linears)
+    y_net = jax.vmap(net)(x)
+    y_helper = jax.vmap(lambda xi: mfn_forward(xi, net.filters, net.linears))(x)
     np.testing.assert_allclose(np.asarray(y_net), np.asarray(y_helper), atol=1e-5)
 
 
