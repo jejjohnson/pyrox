@@ -1,21 +1,11 @@
-"""Unified conditioning primitives for ``pyrox.nn``.
+"""Bayesian conditioning primitives for ``pyrox.nn``.
 
-A conditioner is a layer ``c(h, z) -> y`` that transforms an inner
-activation ``h`` based on a context / latent code ``z``. Three concrete
-conditioners cover the literature:
-
-* :class:`ConcatConditioner` — ``y = Linear([h ‖ z])``. Cheapest baseline,
-  parameter-heavy in ``cond_dim``. Same trick as
-  ``gauss_flows._src.nn.diffeq_nets.DiffeqMLP``.
-* :class:`AffineModulation` (also exported as :data:`FiLM`) — feature-wise
-  affine ``y = γ(z) ⊙ h + β(z)`` with a single ``eqx.nn.Linear`` generator.
-  Adapted from ``gauss_flows._src.transforms.bijections.conditioner.Conditioner``;
-  generalised here with selectable ``γ`` activation. The
-  ``gamma_activation="exp"`` mode exposes :meth:`AffineModulation.log_det`
-  so flowjax-style code can use it as a bijection wrapper.
-* :class:`HyperLinear` — full hypernetwork, ``(W, b) = g(z); y = W x + b``.
-  Generator is a single ``eqx.nn.Linear`` of width
-  ``target_out * target_in + target_out``.
+The deterministic conditioners (``ConcatConditioner``, ``AffineModulation``,
+``HyperLinear``) and the ``ConditionedINR`` / ``HyperSIREN`` composites now
+live in :mod:`geonnax` and are re-exported via :mod:`pyrox.nn._geonnax`.
+This module keeps the Bayesian variants whose forward passes register
+NumPyro sample sites — those cannot live in ``geonnax`` because they
+depend on the pyrox ``PyroxModule`` / ``pyrox_sample`` machinery.
 
 Bayesian variants (:class:`BayesianConcatConditioner`,
 :class:`BayesianAffineModulation`, :class:`BayesianHyperLinear`) put
@@ -25,522 +15,33 @@ the target size. This is the architectural advantage of doing Bayesian
 amortised inference via hypernetworks (NIF, MetaSDF) rather than directly
 over the target weights.
 
-The composite :class:`ConditionedINR` wraps any inner network exposing a
-``layers`` sequence (e.g. :class:`pyrox.nn.SIREN`,
-:class:`pyrox.nn.BayesianNeuralField`) with a per-layer conditioner. The
-:func:`HyperSIREN` constructor sugar builds the NIF ShapeNet/ParameterNet
-composite (Pan, Brunton, Kutz — JMLR 2023) by special-casing per-layer
-init-scale calibration so the generated weights match Sitzmann's
-variance-preservation property.
+Each Bayesian wrapper holds a frozen :mod:`geonnax` core, samples the
+generator's ``(W, b)`` once per ``model()`` call, swaps the sampled
+arrays into the core's ``eqx.nn.Linear`` via :func:`eqx.tree_at`, and
+then ``jax.vmap`` s the core forward across the batch axis. The
+:class:`HyperFourierFeatures` and :class:`ConditionedRFFNet` follow the
+same pattern, using :func:`geonnax.rff_forward` as the per-example
+feature kernel.
 """
 
 from __future__ import annotations
 
-import math
-from collections.abc import Callable
-from typing import Literal
-
-import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import jax.random as jr
 import numpyro.distributions as dist
-from jaxtyping import Array, Float, PRNGKeyArray
+from geonnax import (
+    AffineModulation as _GxAffineModulation,
+    ConcatConditioner as _GxConcatConditioner,
+    HyperLinear as _GxHyperLinear,
+)
+from geonnax.conditioning import (  # type: ignore[attr-defined]
+    _GAMMA_ACTIVATIONS,
+    GammaActivation,
+)
+from jaxtyping import Array, Float
 
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
-from pyrox.nn._layers import SIREN, SirenDense, _siren_W_limit
-
-
-GammaActivation = Literal["one_plus_tanh", "exp", "softplus", "identity"]
-ConditionedMode = Literal["input", "feature"]
-
-
-_GAMMA_ACTIVATIONS: tuple[str, ...] = ("one_plus_tanh", "exp", "softplus", "identity")
-
-
-def _apply_gamma(raw: Array, kind: str) -> Array:
-    if kind == "one_plus_tanh":
-        return 1.0 + jnp.tanh(raw)
-    if kind == "exp":
-        return jnp.exp(raw)
-    if kind == "softplus":
-        return jax.nn.softplus(raw)
-    if kind == "identity":
-        return raw
-    raise ValueError(
-        f"gamma_activation must be one of {_GAMMA_ACTIVATIONS}; got {kind!r}."
-    )
-
-
-def _broadcast_z(z: Array, n_rows: int) -> Array:
-    """Broadcast a single context ``(K,)`` to ``(N, K)``; pass-through otherwise."""
-    if z.ndim == 1:
-        return einx.id("k -> n k", z, n=n_rows)
-    return z
-
-
-def _atleast_2d_pair(h: Array, z: Array) -> tuple[Array, Array, bool]:
-    """Promote ``h``, ``z`` to 2D for the inner kernel; record whether to squeeze.
-
-    Conditioners accept either ``(C,)`` or ``(N, C)`` for ``h`` and
-    correspondingly ``(K,)`` or ``(N, K)`` for ``z``. Higher-rank batch
-    shapes are rejected here with a clear error rather than silently
-    misbroadcasting.
-    """
-    if h.ndim not in (1, 2):
-        raise ValueError(
-            f"Conditioners accept h of shape (C,) or (N, C); got h.ndim={h.ndim}. "
-            "For higher-rank batches, flatten leading axes first."
-        )
-    if z.ndim not in (1, 2):
-        raise ValueError(
-            f"Conditioners accept z of shape (K,) or (N, K); got z.ndim={z.ndim}. "
-            "For higher-rank batches, flatten leading axes first."
-        )
-    squeeze = h.ndim == 1
-    if squeeze:
-        h = einx.id("c -> 1 c", h)
-    z = _broadcast_z(z, h.shape[0])
-    return h, z, squeeze
-
-
-# ---------------------------------------------------------------------------
-# Protocol
-# ---------------------------------------------------------------------------
-
-
-class AbstractConditioner(PyroxModule):
-    """Duck-typed protocol for ``(h, z) -> y`` conditioning layers.
-
-    Concrete subclasses share the contract ``__call__(h, z) -> Array``
-    where ``h.shape[-1] == num_features`` and ``z.shape[-1] == cond_dim``.
-    There is no ``abstractmethod`` enforcement — subclasses simply
-    implement ``__call__`` decorated with :func:`pyrox_method`.
-
-    Attributes:
-        num_features: Output channel count, matching ``h.shape[-1]``.
-        cond_dim: Latent / context dimension, matching ``z.shape[-1]``.
-    """
-
-    num_features: int = eqx.field(static=True)
-    cond_dim: int = eqx.field(static=True)
-
-    def __call__(self, h: Array, z: Array) -> Array:  # pragma: no cover
-        # Declared so type checkers know subclasses are callable; concrete
-        # subclasses override this with ``@pyrox_method``.
-        raise NotImplementedError
-
-
-# ---------------------------------------------------------------------------
-# Concat conditioner: y = Linear([h ‖ z])
-# ---------------------------------------------------------------------------
-
-
-class ConcatConditioner(AbstractConditioner):
-    """Concatenate ``h`` and ``z`` then apply a single ``Linear``.
-
-    Cheapest, most expressive in principle, but parameter count grows
-    linearly with ``cond_dim``: ``(num_features + cond_dim) * num_features
-    + num_features`` (the bias). No init ceremony required — uses
-    ``eqx.nn.Linear`` defaults.
-
-    Attributes:
-        proj: Linear projection ``R^{C+K} -> R^{C}``.
-        num_features: Output channels ``C``.
-        cond_dim: Context dimension ``K``.
-        pyrox_name: Optional explicit scope name for NumPyro.
-
-    Example:
-        >>> import jax.random as jr, jax.numpy as jnp
-        >>> layer = ConcatConditioner.init(num_features=8, cond_dim=4, key=jr.key(0))
-        >>> y = layer(jnp.ones((5, 8)), jnp.ones((5, 4)))
-        >>> y.shape
-        (5, 8)
-    """
-
-    proj: eqx.nn.Linear
-    pyrox_name: str | None = eqx.field(static=True, default=None)
-
-    @classmethod
-    def init(
-        cls,
-        num_features: int,
-        cond_dim: int,
-        *,
-        key: PRNGKeyArray,
-        pyrox_name: str | None = None,
-    ) -> ConcatConditioner:
-        """Build a :class:`ConcatConditioner` with default ``eqx.nn.Linear`` init.
-
-        Args:
-            num_features: Output channel count.
-            cond_dim: Context dimension.
-            key: PRNG key for the projection's init.
-            pyrox_name: Optional explicit scope name.
-
-        Returns:
-            Initialised :class:`ConcatConditioner`.
-
-        Raises:
-            ValueError: If ``num_features`` or ``cond_dim`` is non-positive.
-        """
-        if num_features <= 0 or cond_dim <= 0:
-            raise ValueError(
-                "num_features and cond_dim must be positive; got "
-                f"num_features={num_features}, cond_dim={cond_dim}."
-            )
-        proj = eqx.nn.Linear(num_features + cond_dim, num_features, key=key)
-        return cls(
-            num_features=num_features,
-            cond_dim=cond_dim,
-            proj=proj,
-            pyrox_name=pyrox_name,
-        )
-
-    @pyrox_method
-    def __call__(
-        self,
-        h: Float[Array, "*batch C"],
-        z: Float[Array, "*batch K"] | Float[Array, " K"],
-    ) -> Float[Array, "*batch C"]:
-        if h.shape[-1] != self.num_features:
-            raise ValueError(
-                f"h.shape[-1]={h.shape[-1]} does not match "
-                f"num_features={self.num_features}."
-            )
-        if z.shape[-1] != self.cond_dim:
-            raise ValueError(
-                f"z.shape[-1]={z.shape[-1]} does not match cond_dim={self.cond_dim}."
-            )
-        h2d, z2d, squeeze = _atleast_2d_pair(h, z)
-        # Concatenate on the feature axis, then per-row Linear via vmap.
-        cat = jnp.concatenate([h2d, z2d], axis=-1)
-        out = jax.vmap(self.proj)(cat)
-        return out[0] if squeeze else out
-
-
-# ---------------------------------------------------------------------------
-# Affine modulation (FiLM): y = γ(z) ⊙ h + β(z)
-# ---------------------------------------------------------------------------
-
-
-class AffineModulation(AbstractConditioner):
-    r"""Feature-wise Linear Modulation (FiLM): ``y = γ(z) ⊙ h + β(z)``.
-
-    A single ``eqx.nn.Linear`` of output size ``2 * num_features``
-    produces the concatenated ``(raw_β, raw_γ)`` from the context vector.
-    The two halves are split on the feature axis via
-    :func:`einx.id` (no raw ``jnp.split``), then ``γ`` is passed
-    through the chosen activation:
-
-    * ``"one_plus_tanh"`` (default): ``γ = 1 + tanh(raw_γ)`` — identity at
-      init when the generator's bias is zero. The choice that gives FiLM
-      its "does nothing until trained" property.
-    * ``"exp"``: ``γ = exp(raw_γ)`` — strictly positive, required for
-      bijection use. In this mode :meth:`log_det` returns
-      ``sum(raw_γ, axis=-1)``, the closed-form log-Jacobian of an
-      element-wise scale.
-    * ``"softplus"``: ``γ = softplus(raw_γ)`` — strictly positive, slower
-      to leave the prior than ``exp``.
-    * ``"identity"``: ``γ = raw_γ`` — no shape guarantee, rarely useful.
-
-    Attributes:
-        generator: Linear ``R^K -> R^{2C}``.
-        num_features: Output channels ``C``.
-        cond_dim: Context dimension ``K``.
-        gamma_activation: Parameterisation of ``γ`` (see above).
-        pyrox_name: Optional explicit scope name for NumPyro.
-
-    Example:
-        >>> import jax.random as jr, jax.numpy as jnp
-        >>> film = AffineModulation.init(num_features=8, cond_dim=4, key=jr.key(0))
-        >>> y = film(jnp.ones((5, 8)), jnp.ones((5, 4)))
-        >>> y.shape
-        (5, 8)
-    """
-
-    generator: eqx.nn.Linear
-    gamma_activation: GammaActivation = eqx.field(static=True)
-    pyrox_name: str | None = eqx.field(static=True, default=None)
-
-    @classmethod
-    def init(
-        cls,
-        num_features: int,
-        cond_dim: int,
-        *,
-        key: PRNGKeyArray,
-        gamma_activation: GammaActivation = "one_plus_tanh",
-        pyrox_name: str | None = None,
-    ) -> AffineModulation:
-        """Build :class:`AffineModulation` with the default 2-output Linear generator.
-
-        Args:
-            num_features: Output channel count.
-            cond_dim: Context dimension.
-            key: PRNG key for the generator's init.
-            gamma_activation: Parameterisation of ``γ``; see the class docstring.
-            pyrox_name: Optional explicit scope name.
-
-        Returns:
-            Initialised :class:`AffineModulation`.
-
-        Raises:
-            ValueError: If ``num_features`` or ``cond_dim`` is non-positive,
-                or if ``gamma_activation`` is not a recognised value.
-        """
-        if num_features <= 0 or cond_dim <= 0:
-            raise ValueError(
-                "num_features and cond_dim must be positive; got "
-                f"num_features={num_features}, cond_dim={cond_dim}."
-            )
-        if gamma_activation not in _GAMMA_ACTIVATIONS:
-            raise ValueError(
-                f"gamma_activation must be one of {_GAMMA_ACTIVATIONS}; "
-                f"got {gamma_activation!r}."
-            )
-        generator = eqx.nn.Linear(cond_dim, 2 * num_features, key=key)
-        assert generator.bias is not None
-        # Bias-only zero-init: with bias=0 and "one_plus_tanh", γ=1 and β=0
-        # → the layer is identity at init (Perez et al. 2018 default).
-        generator = eqx.tree_at(
-            lambda m: m.bias,
-            generator,
-            jnp.zeros_like(generator.bias),
-        )
-        return cls(
-            num_features=num_features,
-            cond_dim=cond_dim,
-            generator=generator,
-            gamma_activation=gamma_activation,
-            pyrox_name=pyrox_name,
-        )
-
-    def _gamma_beta(self, z: Array) -> tuple[Array, Array, Array]:
-        """Compute ``(raw_γ, γ, β)`` from a context array of shape ``(N, K)``."""
-        raw = jax.vmap(self.generator)(z)  # (N, 2C)
-        # Split on the feature axis: first half = β, second half = raw_γ.
-        # einx.id keeps the (two, c) split explicit and avoids jnp.split.
-        split = einx.id("n (two c) -> two n c", raw, two=2)
-        beta, raw_gamma = split[0], split[1]
-        gamma = _apply_gamma(raw_gamma, self.gamma_activation)
-        return raw_gamma, gamma, beta
-
-    @pyrox_method
-    def __call__(
-        self,
-        h: Float[Array, "*batch C"],
-        z: Float[Array, "*batch K"] | Float[Array, " K"],
-    ) -> Float[Array, "*batch C"]:
-        if h.shape[-1] != self.num_features:
-            raise ValueError(
-                f"h.shape[-1]={h.shape[-1]} does not match "
-                f"num_features={self.num_features}."
-            )
-        if z.shape[-1] != self.cond_dim:
-            raise ValueError(
-                f"z.shape[-1]={z.shape[-1]} does not match cond_dim={self.cond_dim}."
-            )
-        h2d, z2d, squeeze = _atleast_2d_pair(h, z)
-        _raw_gamma, gamma, beta = self._gamma_beta(z2d)
-        out = gamma * h2d + beta
-        return out[0] if squeeze else out
-
-    def log_det(
-        self,
-        z: Float[Array, "*batch K"] | Float[Array, " K"],
-    ) -> Float[Array, " *batch"]:
-        """Sum of ``log γ`` across the feature axis.
-
-        Only valid when ``gamma_activation="exp"`` — that's the only
-        parameterisation for which ``log γ = raw_γ`` exactly. For other
-        modes this raises :class:`NotImplementedError`; callers that need
-        a generic Jacobian must compute it manually.
-
-        Args:
-            z: Context array of shape ``(N, K)`` or ``(K,)``.
-
-        Returns:
-            Log-determinant of the diagonal scaling, shape ``(N,)`` (or
-            scalar for 1-D ``z``).
-
-        Raises:
-            NotImplementedError: If ``gamma_activation != "exp"``.
-        """
-        if self.gamma_activation != "exp":
-            raise NotImplementedError(
-                "log_det is only defined for gamma_activation='exp'; got "
-                f"{self.gamma_activation!r}. Use exp parameterisation for "
-                "bijection wrappers."
-            )
-        squeeze = z.ndim == 1
-        z2d = einx.id("k -> 1 k", z) if squeeze else z
-        raw_gamma, _gamma, _beta = self._gamma_beta(z2d)
-        ldj = einx.sum("n [c]", raw_gamma)
-        return ldj[0] if squeeze else ldj
-
-
-#: Backwards-compatible alias for :class:`AffineModulation`.
-#:
-#: Issue #86 specs the layer as ``FiLM``; both names point at the same class.
-FiLM = AffineModulation
-
-
-# ---------------------------------------------------------------------------
-# Hypernetwork: (W, b) = g(z); y = W x + b
-# ---------------------------------------------------------------------------
-
-
-class HyperLinear(AbstractConditioner):
-    """Generate a target ``Linear``'s ``(W, b)`` from ``z``, then apply.
-
-    A single ``eqx.nn.Linear`` of output size ``target_out * target_in +
-    target_out`` produces the flat parameter vector for an ad-hoc linear
-    layer; ``W`` and ``b`` are split out via :func:`einx.id`.
-    The forward dispatches on ``z.ndim``:
-
-    * ``z.shape == (K,)`` — *shared* path: one ``(W, b)`` generated and
-      reused across every row of ``x``. Cheap (one small affine + one
-      matmul).
-    * ``z.shape == (N, K)`` — *per-sample* path: ``(W, b)`` generated for
-      each row, applied via ``einx.dot``. Costs ``N * C * C_in``
-      flops per call.
-
-    The generator weight scale is multiplied by ``init_scale`` so the
-    generated ``W`` magnitude starts small and the composite is near-zero
-    at init. Default ``init_scale=0.1`` matches NIF (Pan et al. 2023).
-
-    Attributes:
-        generator: Linear ``R^K -> R^{C_out * C_in + C_out}``.
-        target_in: Inner ``Linear``'s input dim ``C_in``.
-        target_out: Inner ``Linear``'s output dim ``C_out`` (= num_features).
-        cond_dim: Context dimension ``K``.
-        num_features: Alias for ``target_out`` (satisfies the protocol).
-        pyrox_name: Optional explicit scope name for NumPyro.
-
-    Example:
-        >>> import jax.random as jr, jax.numpy as jnp
-        >>> hyper = HyperLinear.init(
-        ...     target_in=4, target_out=8, cond_dim=3, key=jr.key(0)
-        ... )
-        >>> y_shared = hyper(jnp.ones((6, 4)), jnp.ones((3,)))
-        >>> y_persample = hyper(jnp.ones((6, 4)), jnp.ones((6, 3)))
-        >>> (y_shared.shape, y_persample.shape)
-        ((6, 8), (6, 8))
-    """
-
-    generator: eqx.nn.Linear
-    target_in: int = eqx.field(static=True)
-    target_out: int = eqx.field(static=True)
-    pyrox_name: str | None = eqx.field(static=True, default=None)
-
-    @classmethod
-    def init(
-        cls,
-        target_in: int,
-        target_out: int,
-        cond_dim: int,
-        *,
-        key: PRNGKeyArray,
-        init_scale: float = 0.1,
-        pyrox_name: str | None = None,
-    ) -> HyperLinear:
-        """Build a :class:`HyperLinear` with a small-magnitude generator init.
-
-        Args:
-            target_in: Input dimension of the generated ``Linear``.
-            target_out: Output dimension of the generated ``Linear``.
-            cond_dim: Context dimension.
-            key: PRNG key for generator init.
-            init_scale: Multiplicative factor on the generator weights so
-                the generated ``W`` stays small at init. Default ``0.1``.
-            pyrox_name: Optional explicit scope name.
-
-        Returns:
-            Initialised :class:`HyperLinear`.
-
-        Raises:
-            ValueError: If any of ``target_in``, ``target_out``,
-                ``cond_dim``, or ``init_scale`` is non-positive.
-        """
-        if target_in <= 0 or target_out <= 0 or cond_dim <= 0:
-            raise ValueError(
-                "target_in, target_out, and cond_dim must all be positive; got "
-                f"target_in={target_in}, target_out={target_out}, "
-                f"cond_dim={cond_dim}."
-            )
-        if init_scale <= 0:
-            raise ValueError(f"init_scale must be > 0; got {init_scale}.")
-        flat_size = target_out * target_in + target_out
-        gen = eqx.nn.Linear(cond_dim, flat_size, key=key)
-        # Scale weights and zero the bias so the generated (W, b) are small at init.
-        gen = eqx.tree_at(
-            lambda m: m.weight,
-            gen,
-            gen.weight * init_scale,
-        )
-        gen = eqx.tree_at(
-            lambda m: m.bias,
-            gen,
-            jnp.zeros_like(gen.bias),
-        )
-        return cls(
-            num_features=target_out,
-            cond_dim=cond_dim,
-            generator=gen,
-            target_in=target_in,
-            target_out=target_out,
-            pyrox_name=pyrox_name,
-        )
-
-    def _split_params(self, flat: Array) -> tuple[Array, Array]:
-        """Split flat ``(out * in + out,)`` into ``W: (out, in)`` and ``b: (out,)``."""
-        w_size = self.target_out * self.target_in
-        flat_W, flat_b = flat[:w_size], flat[w_size:]
-        W = einx.id(
-            "(c c_in) -> c c_in", flat_W, c=self.target_out, c_in=self.target_in
-        )
-        return W, flat_b
-
-    @pyrox_method
-    def __call__(
-        self,
-        x: Float[Array, "*batch C_in"],
-        z: Float[Array, "*batch K"] | Float[Array, " K"],
-    ) -> Float[Array, "*batch C_out"]:
-        if x.shape[-1] != self.target_in:
-            raise ValueError(
-                f"x.shape[-1]={x.shape[-1]} does not match target_in={self.target_in}."
-            )
-        if z.shape[-1] != self.cond_dim:
-            raise ValueError(
-                f"z.shape[-1]={z.shape[-1]} does not match cond_dim={self.cond_dim}."
-            )
-        squeeze = x.ndim == 1
-        if squeeze:
-            x = einx.id("c -> 1 c", x)
-
-        if z.ndim == 1:
-            # Shared (W, b): generate once, reuse across all rows.
-            flat = self.generator(z)
-            W, b = self._split_params(flat)
-            out = einx.dot("c c_in, n c_in -> n c", W, x) + b
-        else:
-            # Per-sample (W, b): generate per row of z, contract per row.
-            flats = jax.vmap(self.generator)(z)  # (N, out*in + out)
-            w_size = self.target_out * self.target_in
-            flat_W = flats[:, :w_size]
-            flat_b = flats[:, w_size:]
-            W = einx.id(
-                "n (c c_in) -> n c c_in",
-                flat_W,
-                c=self.target_out,
-                c_in=self.target_in,
-            )
-            out = einx.dot("n c c_in, n c_in -> n c", W, x) + flat_b
-
-        return out[0] if squeeze else out
 
 
 # ---------------------------------------------------------------------------
@@ -548,21 +49,29 @@ class HyperLinear(AbstractConditioner):
 # ---------------------------------------------------------------------------
 
 
-class BayesianConcatConditioner(AbstractConditioner):
-    """:class:`ConcatConditioner` with Normal priors on the projection.
+class BayesianConcatConditioner(PyroxModule):
+    """:class:`geonnax.ConcatConditioner` with Normal priors on the projection.
 
     Registers two NumPyro sample sites — ``{scope}.proj_W`` and
     ``{scope}.proj_b`` — under ``Normal(0, prior_std)``. Total of two
     sites per forward call; nothing is sampled from the inner ``h`` or
     the context ``z``.
 
+    Holds a frozen :class:`geonnax.ConcatConditioner` core whose
+    ``proj`` weights are swapped with the sampled arrays each call.
+
     Attributes:
+        core: Frozen :class:`geonnax.ConcatConditioner` carrying the
+            single-example forward.
         num_features: Output channels.
         cond_dim: Context dimension.
         prior_std: Scale of the Normal priors.
         pyrox_name: Optional explicit scope name for NumPyro.
     """
 
+    core: _GxConcatConditioner
+    num_features: int = eqx.field(static=True)
+    cond_dim: int = eqx.field(static=True)
     prior_std: float = eqx.field(static=True, default=1.0)
     pyrox_name: str | None = eqx.field(static=True, default=None)
 
@@ -590,7 +99,15 @@ class BayesianConcatConditioner(AbstractConditioner):
             )
         if prior_std <= 0:
             raise ValueError(f"prior_std must be > 0; got {prior_std}.")
+        # Initialise the core with a dummy key — the proj weights are
+        # overwritten by sampled values on every forward.
+        core = _GxConcatConditioner.init(
+            num_features=num_features,
+            cond_dim=cond_dim,
+            key=jax.random.key(0),
+        )
         return cls(
+            core=core,
             num_features=num_features,
             cond_dim=cond_dim,
             prior_std=prior_std,
@@ -613,31 +130,44 @@ class BayesianConcatConditioner(AbstractConditioner):
                 f"z.shape[-1]={z.shape[-1]} does not match cond_dim={self.cond_dim}."
             )
         in_dim = self.num_features + self.cond_dim
+        # eqx.nn.Linear stores weight as (out, in); match that shape.
         W = self.pyrox_sample(
             "proj_W",
             dist.Normal(0.0, self.prior_std)
-            .expand([in_dim, self.num_features])
+            .expand([self.num_features, in_dim])
             .to_event(2),
         )
         b = self.pyrox_sample(
             "proj_b",
             dist.Normal(0.0, self.prior_std).expand([self.num_features]).to_event(1),
         )
-        h2d, z2d, squeeze = _atleast_2d_pair(h, z)
-        cat = jnp.concatenate([h2d, z2d], axis=-1)
-        out = einx.dot("n in, in c -> n c", cat, W) + b
-        return out[0] if squeeze else out
+        new_proj = eqx.tree_at(lambda m: (m.weight, m.bias), self.core.proj, (W, b))
+        new_core = eqx.tree_at(lambda m: m.proj, self.core, new_proj)
+
+        # Broadcast and batch via vmap; geonnax core expects single example.
+        squeeze_h = h.ndim == 1
+        if squeeze_h:
+            h = h[None, :]
+        if z.ndim == 1:
+            z = jnp.broadcast_to(z, (h.shape[0], z.shape[-1]))
+        out = jax.vmap(new_core, in_axes=(0, 0))(h, z)
+        return out[0] if squeeze_h else out
 
 
-class BayesianAffineModulation(AbstractConditioner):
-    """:class:`AffineModulation` with Normal priors on the FiLM generator.
+class BayesianAffineModulation(PyroxModule):
+    """:class:`geonnax.AffineModulation` with Normal priors on the FiLM generator.
 
     Registers two sites — ``{scope}.gen_W`` and ``{scope}.gen_b`` —
     under ``Normal(0, prior_std)``. The ``γ`` activation is fixed by
     construction (default ``"one_plus_tanh"``) so the prior over the raw
     generator output induces a well-defined prior over ``γ``, ``β``.
 
+    Holds a frozen :class:`geonnax.AffineModulation` core whose
+    ``generator`` weights are swapped with the sampled arrays each call.
+
     Attributes:
+        core: Frozen :class:`geonnax.AffineModulation` carrying the
+            single-example forward.
         num_features: Output channels.
         cond_dim: Context dimension.
         gamma_activation: Parameterisation of ``γ``.
@@ -645,6 +175,9 @@ class BayesianAffineModulation(AbstractConditioner):
         pyrox_name: Optional explicit scope name.
     """
 
+    core: _GxAffineModulation
+    num_features: int = eqx.field(static=True)
+    cond_dim: int = eqx.field(static=True)
     gamma_activation: GammaActivation = eqx.field(static=True, default="one_plus_tanh")
     prior_std: float = eqx.field(static=True, default=1.0)
     pyrox_name: str | None = eqx.field(static=True, default=None)
@@ -672,7 +205,14 @@ class BayesianAffineModulation(AbstractConditioner):
             )
         if prior_std <= 0:
             raise ValueError(f"prior_std must be > 0; got {prior_std}.")
+        core = _GxAffineModulation.init(
+            num_features=num_features,
+            cond_dim=cond_dim,
+            key=jax.random.key(0),
+            gamma_activation=gamma_activation,
+        )
         return cls(
+            core=core,
             num_features=num_features,
             cond_dim=cond_dim,
             gamma_activation=gamma_activation,
@@ -696,27 +236,31 @@ class BayesianAffineModulation(AbstractConditioner):
                 f"z.shape[-1]={z.shape[-1]} does not match cond_dim={self.cond_dim}."
             )
         out_dim = 2 * self.num_features
+        # eqx.nn.Linear stores weight as (out, in); match that shape.
         W = self.pyrox_sample(
             "gen_W",
             dist.Normal(0.0, self.prior_std)
-            .expand([self.cond_dim, out_dim])
+            .expand([out_dim, self.cond_dim])
             .to_event(2),
         )
         b = self.pyrox_sample(
             "gen_b",
             dist.Normal(0.0, self.prior_std).expand([out_dim]).to_event(1),
         )
-        h2d, z2d, squeeze = _atleast_2d_pair(h, z)
-        raw = einx.dot("n k, k c -> n c", z2d, W) + b  # (N, 2C)
-        split = einx.id("n (two c) -> two n c", raw, two=2)
-        beta, raw_gamma = split[0], split[1]
-        gamma = _apply_gamma(raw_gamma, self.gamma_activation)
-        out = gamma * h2d + beta
-        return out[0] if squeeze else out
+        new_gen = eqx.tree_at(lambda m: (m.weight, m.bias), self.core.generator, (W, b))
+        new_core = eqx.tree_at(lambda m: m.generator, self.core, new_gen)
+
+        squeeze_h = h.ndim == 1
+        if squeeze_h:
+            h = h[None, :]
+        if z.ndim == 1:
+            z = jnp.broadcast_to(z, (h.shape[0], z.shape[-1]))
+        out = jax.vmap(new_core, in_axes=(0, 0))(h, z)
+        return out[0] if squeeze_h else out
 
 
-class BayesianHyperLinear(AbstractConditioner):
-    """:class:`HyperLinear` with Normal priors on the generator only.
+class BayesianHyperLinear(PyroxModule):
+    """:class:`geonnax.HyperLinear` with Normal priors on the generator only.
 
     Two sites: ``{scope}.gen_W`` and ``{scope}.gen_b``. The target
     weights ``(W_target, b_target)`` are *generated* — not sampled — so
@@ -726,6 +270,8 @@ class BayesianHyperLinear(AbstractConditioner):
     Bayesian amortised inference via hypernetworks.
 
     Attributes:
+        core: Frozen :class:`geonnax.HyperLinear` carrying the
+            single-example forward.
         target_in: Inner ``Linear``'s input dim ``C_in``.
         target_out: Inner ``Linear``'s output dim ``C_out``.
         cond_dim: Context dimension ``K``.
@@ -734,6 +280,9 @@ class BayesianHyperLinear(AbstractConditioner):
         pyrox_name: Optional explicit scope name.
     """
 
+    core: _GxHyperLinear
+    num_features: int = eqx.field(static=True)
+    cond_dim: int = eqx.field(static=True)
     target_in: int = eqx.field(static=True)
     target_out: int = eqx.field(static=True)
     prior_std: float = eqx.field(static=True, default=1.0)
@@ -758,7 +307,14 @@ class BayesianHyperLinear(AbstractConditioner):
             )
         if prior_std <= 0:
             raise ValueError(f"prior_std must be > 0; got {prior_std}.")
+        core = _GxHyperLinear.init(
+            target_in=target_in,
+            target_out=target_out,
+            cond_dim=cond_dim,
+            key=jax.random.key(0),
+        )
         return cls(
+            core=core,
             num_features=target_out,
             cond_dim=cond_dim,
             target_in=target_in,
@@ -782,450 +338,27 @@ class BayesianHyperLinear(AbstractConditioner):
                 f"z.shape[-1]={z.shape[-1]} does not match cond_dim={self.cond_dim}."
             )
         flat_size = self.target_out * self.target_in + self.target_out
-        W_gen = self.pyrox_sample(
+        # eqx.nn.Linear stores weight as (out, in); match that shape.
+        W = self.pyrox_sample(
             "gen_W",
             dist.Normal(0.0, self.prior_std)
-            .expand([self.cond_dim, flat_size])
+            .expand([flat_size, self.cond_dim])
             .to_event(2),
         )
-        b_gen = self.pyrox_sample(
+        b = self.pyrox_sample(
             "gen_b",
             dist.Normal(0.0, self.prior_std).expand([flat_size]).to_event(1),
         )
-        squeeze = x.ndim == 1
-        if squeeze:
-            x = einx.id("c -> 1 c", x)
-        w_size = self.target_out * self.target_in
+        new_gen = eqx.tree_at(lambda m: (m.weight, m.bias), self.core.generator, (W, b))
+        new_core = eqx.tree_at(lambda m: m.generator, self.core, new_gen)
 
+        squeeze_x = x.ndim == 1
+        if squeeze_x:
+            x = x[None, :]
         if z.ndim == 1:
-            flat = einx.dot("k, k f -> f", z, W_gen) + b_gen  # (flat_size,)
-            flat_W, flat_b = flat[:w_size], flat[w_size:]
-            W = einx.id(
-                "(c c_in) -> c c_in", flat_W, c=self.target_out, c_in=self.target_in
-            )
-            out = einx.dot("c c_in, n c_in -> n c", W, x) + flat_b
-        else:
-            flats = einx.dot("n k, k f -> n f", z, W_gen) + b_gen  # (N, flat_size)
-            flat_W = flats[:, :w_size]
-            flat_b = flats[:, w_size:]
-            W = einx.id(
-                "n (c c_in) -> n c c_in",
-                flat_W,
-                c=self.target_out,
-                c_in=self.target_in,
-            )
-            out = einx.dot("n c c_in, n c_in -> n c", W, x) + flat_b
-
-        return out[0] if squeeze else out
-
-
-# ---------------------------------------------------------------------------
-# Composite: any inner-network + per-layer conditioning
-# ---------------------------------------------------------------------------
-
-
-class ConditionedINR(PyroxModule):
-    """Wrap an inner network's per-layer activations with conditioners.
-
-    Given an ``inner`` network exposing a ``layers`` sequence (true for
-    :class:`pyrox.nn.SIREN` and any module that holds a list of callables
-    named ``layers``), :class:`ConditionedINR` runs the inner forward and
-    inserts a conditioner after each non-readout layer:
-
-    .. code:: text
-
-        z_0 = layer_0(x)
-        z_0 = cond_0(z_0, c)
-        z_1 = layer_1(z_0)
-        z_1 = cond_1(z_1, c)
-        ...
-        y   = layer_{L-1}(z_{L-2})        # readout, not conditioned
-
-    The ``mode="input"`` shortcut concatenates ``c`` to the input
-    *before* running ``inner`` — useful for inner networks that don't
-    expose a ``layers`` sequence (e.g. plain ``eqx.nn.MLP`` instances).
-
-    Conditioners must be ``AbstractConditioner`` instances whose
-    ``num_features`` matches the corresponding ``inner`` layer's output
-    width. The composite forward registers the union of the inner
-    network's sample sites and the per-layer conditioners' sites — no
-    site clashes because each conditioner gets a distinct ``pyrox_name``.
-
-    Attributes:
-        inner: Inner network with a ``layers`` attribute (for
-            ``mode="feature"``) or any callable (for ``mode="input"``).
-        conditioners: Per-layer conditioner list. Length equals
-            ``len(inner.layers) - 1`` for ``"feature"`` (no readout
-            conditioning) or 1 for ``"input"`` (a single
-            ``ConcatConditioner``-style head).
-        cond_dim: Context dimension shared by all conditioners.
-        mode: ``"feature"`` for per-layer modulation;
-            ``"input"`` for input-side concatenation.
-        pyrox_name: Optional explicit scope for NumPyro.
-
-    Example:
-        >>> import jax.random as jr, jax.numpy as jnp
-        >>> from pyrox.nn import SIREN
-        >>> key = jr.key(0)
-        >>> inner = SIREN.init(2, 32, 1, depth=4, key=key)
-        >>> wrapped = ConditionedINR.init(
-        ...     inner, conditioner_cls=AffineModulation, cond_dim=4, key=key
-        ... )
-        >>> y = wrapped(jnp.zeros((10, 2)), jnp.zeros((10, 4)))
-        >>> y.shape
-        (10, 1)
-    """
-
-    inner: PyroxModule | eqx.Module
-    conditioners: list[AbstractConditioner]
-    cond_dim: int = eqx.field(static=True)
-    mode: ConditionedMode = eqx.field(static=True)
-    pyrox_name: str | None = eqx.field(static=True, default=None)
-
-    @classmethod
-    def init(
-        cls,
-        inner: PyroxModule | eqx.Module,
-        *,
-        conditioner_cls: type[AbstractConditioner],
-        cond_dim: int,
-        key: PRNGKeyArray,
-        mode: ConditionedMode = "feature",
-        pyrox_name: str | None = None,
-        **conditioner_kwargs: object,
-    ) -> ConditionedINR:
-        """Build a :class:`ConditionedINR` around ``inner``.
-
-        Args:
-            inner: Inner network. Must have ``layers: Sequence`` for
-                ``mode="feature"``; any callable works for ``mode="input"``.
-            conditioner_cls: One of :class:`ConcatConditioner`,
-                :class:`AffineModulation`, :class:`HyperLinear`, or any of
-                the Bayesian variants.
-            cond_dim: Context dimension passed to each conditioner.
-            key: PRNG key, split internally for each conditioner.
-            mode: ``"feature"`` (per-layer modulation, default) or
-                ``"input"`` (single input-side concatenation).
-            pyrox_name: Optional explicit scope name.
-            **conditioner_kwargs: Extra kwargs forwarded to each
-                ``conditioner_cls.init``.
-
-        Returns:
-            Initialised :class:`ConditionedINR`.
-
-        Raises:
-            ValueError: If ``mode == "feature"`` and ``inner`` lacks a
-                ``layers`` attribute, or if any layer is missing the
-                ``out_features`` shape needed to size the conditioners.
-        """
-        if mode not in ("feature", "input"):
-            raise ValueError(f"mode must be 'feature' or 'input'; got {mode!r}.")
-
-        if mode == "input":
-            keys = jr.split(key, 1)
-            head = _build_conditioner(
-                conditioner_cls,
-                num_features=_inner_in_features(inner),
-                cond_dim=cond_dim,
-                key=keys[0],
-                pyrox_name=(f"{pyrox_name}.cond_input" if pyrox_name else None),
-                **conditioner_kwargs,
-            )
-            return cls(
-                inner=inner,
-                conditioners=[head],
-                cond_dim=cond_dim,
-                mode="input",
-                pyrox_name=pyrox_name,
-            )
-
-        layers = getattr(inner, "layers", None)
-        if layers is None:
-            raise ValueError(
-                "mode='feature' requires `inner` to expose a `layers` sequence "
-                "(e.g. pyrox.nn.SIREN). For inners without `layers`, use mode='input'."
-            )
-        if len(layers) < 2:
-            raise ValueError(
-                "mode='feature' needs at least two inner layers; got "
-                f"{len(layers)}. Use mode='input' for shallow inners."
-            )
-
-        # One conditioner per non-readout layer (skip the last).
-        n_cond = len(layers) - 1
-        keys = jr.split(key, n_cond)
-        conditioners: list[AbstractConditioner] = []
-        for i, k in enumerate(keys):
-            num_features = _layer_out_features(layers[i], i)
-            # When the parent has no explicit scope name, leave each
-            # conditioner's pyrox_name unset so PyroxModule's id-based
-            # fallback applies — that keeps sample-site names unique
-            # across multiple ConditionedINR instances in one trace.
-            child_name = f"{pyrox_name}.cond_{i}" if pyrox_name else None
-            conditioners.append(
-                _build_conditioner(
-                    conditioner_cls,
-                    num_features=num_features,
-                    cond_dim=cond_dim,
-                    key=k,
-                    pyrox_name=child_name,
-                    **conditioner_kwargs,
-                )
-            )
-        return cls(
-            inner=inner,
-            conditioners=conditioners,
-            cond_dim=cond_dim,
-            mode="feature",
-            pyrox_name=pyrox_name,
-        )
-
-    @pyrox_method
-    def __call__(
-        self,
-        x: Float[Array, "*batch D_in"],
-        z: Float[Array, "*batch K"] | Float[Array, " K"],
-    ) -> Float[Array, "*batch D_out"]:
-        if z.shape[-1] != self.cond_dim:
-            raise ValueError(
-                f"z.shape[-1]={z.shape[-1]} does not match cond_dim={self.cond_dim}."
-            )
-        if self.mode == "input":
-            head = self.conditioners[0]
-            x = head(x, z)
-            return self.inner(x)  # ty: ignore[call-non-callable]
-
-        # mode == "feature": run each non-readout inner layer, then condition.
-        layers = self.inner.layers  # ty: ignore[unresolved-attribute]
-        h = x
-        for i, layer in enumerate(layers[:-1]):
-            h = layer(h)
-            h = self.conditioners[i](h, z)
-        return layers[-1](h)
-
-
-def _build_conditioner(
-    cls: type[AbstractConditioner],
-    *,
-    num_features: int,
-    cond_dim: int,
-    key: PRNGKeyArray,
-    pyrox_name: str | None,
-    **kwargs: object,
-) -> AbstractConditioner:
-    """Construct a conditioner, threading the key only for variants that need one."""
-    if cls is HyperLinear:
-        # HyperLinear needs (target_in, target_out, cond_dim).
-        return HyperLinear.init(
-            target_in=num_features,
-            target_out=num_features,
-            cond_dim=cond_dim,
-            key=key,
-            pyrox_name=pyrox_name,
-            **kwargs,  # ty: ignore[invalid-argument-type]
-        )
-    if cls is BayesianHyperLinear:
-        return BayesianHyperLinear.init(
-            target_in=num_features,
-            target_out=num_features,
-            cond_dim=cond_dim,
-            pyrox_name=pyrox_name,
-            **kwargs,  # ty: ignore[invalid-argument-type]
-        )
-    if cls in (BayesianConcatConditioner, BayesianAffineModulation):
-        # Bayesian variants don't need a PRNG key (weights come from prior).
-        return cls.init(  # ty: ignore[unresolved-attribute]
-            num_features=num_features,
-            cond_dim=cond_dim,
-            pyrox_name=pyrox_name,
-            **kwargs,
-        )
-    return cls.init(  # ty: ignore[unresolved-attribute]
-        num_features=num_features,
-        cond_dim=cond_dim,
-        key=key,
-        pyrox_name=pyrox_name,
-        **kwargs,
-    )
-
-
-def _layer_out_features(layer: object, index: int) -> int:
-    """Best-effort extraction of a layer's output width."""
-    for attr in ("out_features", "output_dim", "hidden_features"):
-        v = getattr(layer, attr, None)
-        if isinstance(v, int) and v > 0:
-            return v
-    raise ValueError(
-        f"Could not infer out_features for layer #{index} of type "
-        f"{type(layer).__name__}. Expose an int `out_features` attribute."
-    )
-
-
-def _inner_in_features(inner: object) -> int:
-    for attr in ("in_features", "input_dim"):
-        v = getattr(inner, attr, None)
-        if isinstance(v, int) and v > 0:
-            return v
-    raise ValueError(
-        "Could not infer in_features for the inner network. Expose an int "
-        "`in_features` attribute or use mode='feature'."
-    )
-
-
-# ---------------------------------------------------------------------------
-# Constructor sugar: NIF-style HyperSIREN
-# ---------------------------------------------------------------------------
-
-
-class _GeneratedSiren(eqx.Module):
-    """Internal wrapper around a SIREN whose layers consume generated weights."""
-
-    parameter_net: eqx.Module
-    siren: SIREN
-    hyper_layers: list[HyperLinear]
-    in_features: int = eqx.field(static=True)
-    out_features: int = eqx.field(static=True)
-    depth: int = eqx.field(static=True)
-
-    def __call__(self, x: Array, mu: Array) -> Array:
-        z = self.parameter_net(mu)  # ty: ignore[call-non-callable]
-        squeeze = x.ndim == 1
-        if squeeze:
-            x = einx.id("c -> 1 c", x)
-        h = x
-        for siren_layer, hyper in zip(
-            self.siren.layers, self.hyper_layers, strict=True
-        ):
-            pre = hyper(h, z)
-            if siren_layer.layer_type == "last":
-                h = pre
-            else:
-                h = jnp.sin(siren_layer.omega * pre)
-        return h[0] if squeeze else h
-
-
-def HyperSIREN(
-    in_features: int,
-    hidden_features: int,
-    out_features: int,
-    *,
-    depth: int,
-    cond_dim: int,
-    parameter_net: eqx.Module,
-    key: PRNGKeyArray,
-    first_omega: float = 30.0,
-    hidden_omega: float = 30.0,
-    c: float = 6.0,
-    init_scale: float = 0.1,
-) -> _GeneratedSiren:
-    """NIF-style ShapeNet/ParameterNet composite (Pan, Brunton, Kutz — JMLR 2023).
-
-    Builds a SIREN shape-net of the requested topology, then constructs a
-    parallel list of :class:`HyperLinear` generators — one per SIREN layer
-    — whose ``init_scale`` is calibrated per Sitzmann regime so the
-    *expected magnitude* of each generated ``W`` matches the half-width
-    of Sitzmann's :func:`pyrox.nn._layers._siren_W_limit` at init.
-    Without this calibration the ShapeNet's pre-activation variance is
-    wrong and training is unstable.
-
-    The user-supplied ``parameter_net`` runs once on ``mu`` per forward
-    call to produce the latent ``z``; ``z`` then drives every per-layer
-    :class:`HyperLinear`. ``parameter_net`` must be callable with signature
-    ``(P,) -> (cond_dim,)``.
-
-    Args:
-        in_features: Coordinate dimension of the SIREN.
-        hidden_features: Hidden width.
-        out_features: Output dimension.
-        depth: SIREN depth (must be ≥ 2).
-        cond_dim: Latent dimension produced by ``parameter_net``.
-        parameter_net: User-supplied callable ``(P,) -> (cond_dim,)``.
-        key: PRNG key, split internally for the SIREN init and the hyper
-            generators.
-        first_omega: First-layer ``omega``.
-        hidden_omega: Hidden-layer ``omega``.
-        c: SIREN Theorem-1 constant.
-        init_scale: Multiplicative factor applied on top of the per-regime
-            calibration; default ``0.1`` matches NIF.
-
-    Returns:
-        A composite that takes ``(x, mu)`` and runs the NIF forward.
-
-    Raises:
-        ValueError: If ``depth < 2`` or any positive-only argument is
-            non-positive.
-    """
-    if depth < 2:
-        raise ValueError(f"depth must be >= 2 (first + last); got depth={depth}.")
-    for name, v in {
-        "in_features": in_features,
-        "hidden_features": hidden_features,
-        "out_features": out_features,
-        "cond_dim": cond_dim,
-        "first_omega": first_omega,
-        "hidden_omega": hidden_omega,
-        "c": c,
-        "init_scale": init_scale,
-    }.items():
-        if v <= 0:
-            raise ValueError(f"{name} must be > 0; got {v}.")
-
-    siren_key, *hyper_keys = jr.split(key, 1 + depth)
-    siren = SIREN.init(
-        in_features,
-        hidden_features,
-        out_features,
-        depth=depth,
-        key=siren_key,
-        first_omega=first_omega,
-        hidden_omega=hidden_omega,
-        c=c,
-    )
-    hyper_layers: list[HyperLinear] = []
-    for i, layer in enumerate(siren.layers):
-        layer_in = layer.in_features
-        layer_out = layer.out_features
-        # Calibrate so generated W magnitude ≈ Sitzmann's per-regime half-width.
-        regime_limit = _siren_W_limit(layer.layer_type, layer_in, layer.omega, c)
-        per_layer_scale = init_scale * regime_limit / math.sqrt(max(cond_dim, 1))
-        hyper_layers.append(
-            HyperLinear.init(
-                target_in=layer_in,
-                target_out=layer_out,
-                cond_dim=cond_dim,
-                key=hyper_keys[i],
-                init_scale=per_layer_scale,
-                pyrox_name=f"hyper_{i}",
-            )
-        )
-    return _GeneratedSiren(
-        parameter_net=parameter_net,
-        siren=siren,
-        hyper_layers=hyper_layers,
-        in_features=in_features,
-        out_features=out_features,
-        depth=depth,
-    )
-
-
-__all__ = [
-    "AbstractConditioner",
-    "AffineModulation",
-    "BayesianAffineModulation",
-    "BayesianConcatConditioner",
-    "BayesianHyperLinear",
-    "ConcatConditioner",
-    "ConditionedINR",
-    "ConditionedRFFNet",
-    "FiLM",
-    "HyperFourierFeatures",
-    "HyperLinear",
-    "HyperSIREN",
-]
-
-
-# Silence "imported but unused" — kept for users patching internals.
-_unused: tuple[Callable[..., object], ...] = (SirenDense,)
+            z = jnp.broadcast_to(z, (x.shape[0], z.shape[-1]))
+        out = jax.vmap(new_core, in_axes=(0, 0))(x, z)
+        return out[0] if squeeze_x else out
 
 
 # ---------------------------------------------------------------------------
@@ -1329,19 +462,30 @@ class HyperFourierFeatures(PyroxModule):
         )
 
     def _unpack(self, z: Array) -> tuple[Array, Array, Array]:
-        """Split ``parameter_net(z)`` into ``(W, b, log_l)``."""
+        """Split ``parameter_net(z)`` into ``(W, b, log_l)``.
+
+        ``W`` is returned with shape ``(in_features, n_features)`` to
+        match the layout expected by :func:`geonnax.rff_forward`.
+        """
         flat = self.parameter_net(z)  # ty: ignore[call-non-callable]
         w_size = self.in_features * self.n_features
         flat_W = flat[:w_size]
         b = flat[w_size : w_size + self.n_features]
         log_l = flat[-1]
-        W = einx.id(
-            "(d n) -> d n",
-            flat_W,
-            d=self.in_features,
-            n=self.n_features,
-        )
+        W = flat_W.reshape(self.in_features, self.n_features)
         return W, b, log_l
+
+    def _single_example(
+        self,
+        x: Float[Array, " D_in"],
+        W: Float[Array, "D_in n"],
+        b: Float[Array, " n"],
+        log_l: Float[Array, ""],
+    ) -> Float[Array, " D_rff"]:
+        """Per-example RFF with phase ``b``; mirrors :func:`geonnax.rff_forward`."""
+        proj = (x @ W) * jnp.exp(-log_l) + b  # (n,)
+        scale = jnp.sqrt(1.0 / self.n_features)
+        return scale * jnp.concatenate([jnp.cos(proj), jnp.sin(proj)], axis=-1)
 
     @pyrox_method
     def __call__(
@@ -1358,26 +502,25 @@ class HyperFourierFeatures(PyroxModule):
             raise ValueError(
                 f"z.shape[-1]={z.shape[-1]} does not match cond_dim={self.cond_dim}."
             )
-        squeeze = x.ndim == 1
-        if squeeze:
-            x = einx.id("d -> 1 d", x)
+        # Flatten arbitrary leading batch dims of x (and z, if per-sample) to
+        # (B, D_in) / (B, K), vmap the single-example forward, then restore.
+        D_in = x.shape[-1]
+        batch_shape = x.shape[:-1]
+        x_flat = x.reshape(-1, D_in)
 
         if z.ndim == 1:
             W, b, log_l = self._unpack(z)
-            # (N, D) · (D, n) / scalar  -> (N, n)
-            inv_l = jnp.exp(-log_l)
-            proj = einx.dot("n d, d k -> n k", x, W) * inv_l + b
+            out_flat = jax.vmap(lambda xi: self._single_example(xi, W, b, log_l))(
+                x_flat
+            )
         else:
-            # Per-sample features. Vectorise the unpack across the N axis.
-            W_all, b_all, log_l_all = jax.vmap(self._unpack)(z)
-            inv_l = jnp.exp(-log_l_all)  # (N,)
-            # (N, D) and (N, D, n) -> (N, n), then scale each row by 1/ℓ_n.
-            proj = einx.dot("n d k, n d -> n k", W_all, x)
-            proj = einx.multiply("n k, n -> n k", proj, inv_l) + b_all
+            z_flat = z.reshape(-1, z.shape[-1])
+            W_all, b_all, log_l_all = jax.vmap(self._unpack)(z_flat)
+            out_flat = jax.vmap(self._single_example)(x_flat, W_all, b_all, log_l_all)
 
-        scale = jnp.sqrt(1.0 / self.n_features)
-        out = scale * jnp.concatenate([jnp.cos(proj), jnp.sin(proj)], axis=-1)
-        return out[0] if squeeze else out
+        if batch_shape == ():
+            return out_flat[0]
+        return out_flat.reshape((*batch_shape, out_flat.shape[-1]))
 
 
 class ConditionedRFFNet(PyroxModule):
@@ -1426,7 +569,7 @@ class ConditionedRFFNet(PyroxModule):
         *,
         feat: HyperFourierFeatures,
         out_features: int,
-        key: PRNGKeyArray,
+        key: Array,
         pyrox_name: str | None = None,
     ) -> ConditionedRFFNet:
         """Build :class:`ConditionedRFFNet` with a default linear readout."""
@@ -1442,8 +585,21 @@ class ConditionedRFFNet(PyroxModule):
         z: Float[Array, "*batch K"] | Float[Array, " K"],
     ) -> Float[Array, "*batch D_out"]:
         phi = self.feat(x, z)
-        squeeze = phi.ndim == 1
-        if squeeze:
-            phi = einx.id("d -> 1 d", phi)
-        out = jax.vmap(self.readout)(phi)
-        return out[0] if squeeze else out
+        # Flatten arbitrary leading batch dims to (B, D_feat), vmap the
+        # single-example linear readout, then restore.
+        D_feat = phi.shape[-1]
+        batch_shape = phi.shape[:-1]
+        flat = phi.reshape(-1, D_feat)
+        out_flat = jax.vmap(self.readout)(flat)
+        if batch_shape == ():
+            return out_flat[0]
+        return out_flat.reshape((*batch_shape, out_flat.shape[-1]))
+
+
+__all__ = [
+    "BayesianAffineModulation",
+    "BayesianConcatConditioner",
+    "BayesianHyperLinear",
+    "ConditionedRFFNet",
+    "HyperFourierFeatures",
+]

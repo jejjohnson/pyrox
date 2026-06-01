@@ -26,7 +26,6 @@ from pyrox.nn import (
     LaplaceFourierFeatures,
     MaternCosineFeatures,
     MaternFourierFeatures,
-    MCDropout,
     NCPNormalOutput,
     RandomKitchenSinks,
     RBFCosineFeatures,
@@ -133,47 +132,6 @@ def test_variational_registers_weight_site():
     with handlers.trace() as tr, handlers.seed(rng_seed=0):
         layer(x)
     assert "var.weight" in tr
-
-
-# --- MCDropout -------------------------------------------------------------
-
-
-def test_mcdropout_output_shape():
-    drop = MCDropout(rate=0.5)
-    x = jnp.ones((4, 10))
-    y = drop(x, key=jr.PRNGKey(0))
-    assert y.shape == (4, 10)
-
-
-def test_mcdropout_zeros_some_elements():
-    drop = MCDropout(rate=0.5)
-    x = jnp.ones((100, 10))
-    y = drop(x, key=jr.PRNGKey(0))
-    assert jnp.any(y == 0.0)
-    assert jnp.any(y != 0.0)
-
-
-def test_mcdropout_scales_survivors():
-    drop = MCDropout(rate=0.5)
-    x = jnp.ones((1000, 10))
-    y = drop(x, key=jr.PRNGKey(0))
-    survivors = y[y != 0.0]
-    assert jnp.allclose(survivors, 1.0 / 0.5, atol=1e-5)
-
-
-def test_mcdropout_stochastic_across_keys():
-    drop = MCDropout(rate=0.5)
-    x = jnp.ones((10, 10))
-    y1 = drop(x, key=jr.PRNGKey(0))
-    y2 = drop(x, key=jr.PRNGKey(1))
-    assert not jnp.allclose(y1, y2)
-
-
-def test_mcdropout_is_not_pyrox_module():
-    from pyrox._core.pyrox_module import PyroxModule
-
-    drop = MCDropout()
-    assert not isinstance(drop, PyroxModule)
 
 
 # --- DenseNCP --------------------------------------------------------------

@@ -21,14 +21,12 @@ samples.
 
 from __future__ import annotations
 
-import math
 from typing import Self, cast
 
-import einx
 import equinox as eqx
+import geonnax
 import jax
 import jax.numpy as jnp
-import jax.random as jr
 import numpyro
 from jax import Array as JaxArray
 from jaxtyping import Array, Float, PRNGKeyArray
@@ -36,73 +34,11 @@ from jaxtyping import Array, Float, PRNGKeyArray
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
 
 
-def _glorot_uniform(
-    key: PRNGKeyArray, in_features: int, out_features: int
-) -> Float[Array, "D_in D_out"]:
-    lim = math.sqrt(6.0 / (in_features + out_features))
-    return jr.uniform(
-        key,
-        (in_features, out_features),
-        minval=-lim,
-        maxval=lim,
-    )
-
-
-def _hetero_noisy_logits(
-    layer: _HeteroscedasticBase,
-    x: Float[Array, "N D_in"],
-) -> Float[Array, "S N C"]:
-    """Sample ``num_mc_samples`` heteroscedastic logits in one shot.
-
-    Computes mean logits, low-rank factor, and diagonal scale via three
-    deterministic linear maps (registered as ``pyrox_param``), then
-    draws Monte Carlo logit perturbations.
-    """
-    N = x.shape[0]
-    C = layer.num_classes
-    r = layer.rank
-    S = layer.num_mc_samples
-
-    W_loc = layer.pyrox_param("W_loc", layer.W_loc_init)
-    b_loc = layer.pyrox_param("b_loc", jnp.zeros(C, dtype=x.dtype))
-    mu = einx.dot("n d, d c -> n c", x, W_loc) + b_loc  # (N, C)
-
-    W_scale = layer.pyrox_param("W_scale", layer.W_scale_init)
-    b_scale = layer.pyrox_param("b_scale", jnp.zeros(C * r, dtype=x.dtype))
-    # Low-rank factor: project to (N, C·r) then split the trailing axis.
-    raw_scale = einx.dot("n d, d k -> n k", x, W_scale) + b_scale
-    V = einx.id("n (c r) -> n c r", raw_scale, r=r)
-
-    W_diag = layer.pyrox_param("W_diag", layer.W_diag_init)
-    b_diag = layer.pyrox_param(
-        "b_diag", jnp.full((C,), float(layer.diag_init_bias), dtype=x.dtype)
-    )
-    sigma = jnp.exp(einx.dot("n d, d c -> n c", x, W_diag) + b_diag)  # (N, C)
-
-    key = cast(JaxArray, numpyro.prng_key())
-    kz, ku = jr.split(key)
-    z = jr.normal(kz, (S, N, r), dtype=x.dtype)
-    u = jr.normal(ku, (S, N, C), dtype=x.dtype)
-    # Low-rank + diagonal noise: V z contracts the rank axis r, the diagonal
-    # term broadcasts σ over the S sample axis. Both land at (S, N, C).
-    eps = einx.dot("n c r, s n r -> s n c", V, z) + einx.multiply(
-        "n c, s n c -> s n c", sigma, u
-    )
-    return einx.add("n c, s n c -> s n c", mu, eps)
-
-
 class _HeteroscedasticBase(PyroxModule):
     """Shared state and init for the FA-noise heteroscedastic layers."""
 
-    in_features: int = eqx.field(static=True)
-    num_classes: int = eqx.field(static=True)
-    rank: int = eqx.field(static=True)
-    num_mc_samples: int = eqx.field(static=True, default=10)
-    diag_init_bias: float = eqx.field(static=True, default=-3.0)
+    core: geonnax.HeteroscedasticHead
     pyrox_name: str | None = eqx.field(static=True, default=None)
-    W_loc_init: Float[Array, "D_in C"] | None = eqx.field(default=None)
-    W_scale_init: Float[Array, "D_in Cr"] | None = eqx.field(default=None)
-    W_diag_init: Float[Array, "D_in C"] | None = eqx.field(default=None)
 
     @classmethod
     def init(
@@ -118,56 +54,89 @@ class _HeteroscedasticBase(PyroxModule):
         pyrox_name: str | None = None,
     ) -> Self:
         """Construct the layer with Glorot-init linear factors."""
-        if in_features <= 0 or num_classes <= 0 or rank <= 0:
-            raise ValueError(
-                "in_features, num_classes, rank must all be > 0; "
-                f"got {in_features=}, {num_classes=}, {rank=}."
-            )
-        if num_mc_samples <= 0:
-            raise ValueError(f"num_mc_samples must be > 0; got {num_mc_samples}.")
-        kl, ks = jr.split(key)
-        W_loc_init = _glorot_uniform(kl, in_features, num_classes)
-        # Small init for the low-rank factor so it does not dominate the
-        # mean logits before training.
-        W_scale_init = scale_init_factor * _glorot_uniform(
-            ks, in_features, num_classes * rank
-        )
-        W_diag_init = jnp.zeros((in_features, num_classes))
-        return cls(
+        # geonnax already validates positive dims and num_mc_samples; let
+        # those errors propagate from the core init.
+        core_cls = cls._core_cls()
+        core = core_cls.init(
             in_features=in_features,
             num_classes=num_classes,
             rank=rank,
+            key=key,
             num_mc_samples=num_mc_samples,
             diag_init_bias=diag_init_bias,
-            pyrox_name=pyrox_name,
-            W_loc_init=W_loc_init,
-            W_scale_init=W_scale_init,
-            W_diag_init=W_diag_init,
+            scale_init_factor=scale_init_factor,
+        )
+        return cls(core=core, pyrox_name=pyrox_name)
+
+    @classmethod
+    def _core_cls(cls) -> type[geonnax.HeteroscedasticHead]:
+        raise NotImplementedError
+
+    # Convenience read-only attribute access — keeps the pre-refactor
+    # call sites (`layer.in_features`, etc.) working without storing the
+    # static dims as duplicate fields on the wrapper.
+    @property
+    def in_features(self) -> int:
+        return self.core.in_features
+
+    @property
+    def num_classes(self) -> int:
+        return self.core.num_classes
+
+    @property
+    def rank(self) -> int:
+        return self.core.rank
+
+    @property
+    def num_mc_samples(self) -> int:
+        return self.core.num_mc_samples
+
+    @property
+    def diag_init_bias(self) -> float:
+        return self.core.diag_init_bias
+
+    def _swap_core(self) -> geonnax.HeteroscedasticHead:
+        """Register weight arrays as ``pyrox_param`` sites and swap into the core.
+
+        Each of the six arrays (``W_loc``/``b_loc``/``W_scale``/
+        ``b_scale``/``W_diag``/``b_diag``) is registered once per
+        ``model()`` call using the core's stored value as the init,
+        then folded back into a new core via :func:`equinox.tree_at`.
+        """
+        W_loc = self.pyrox_param("W_loc", self.core.W_loc)
+        b_loc = self.pyrox_param("b_loc", self.core.b_loc)
+        W_scale = self.pyrox_param("W_scale", self.core.W_scale)
+        b_scale = self.pyrox_param("b_scale", self.core.b_scale)
+        W_diag = self.pyrox_param("W_diag", self.core.W_diag)
+        b_diag = self.pyrox_param("b_diag", self.core.b_diag)
+        return eqx.tree_at(
+            lambda c: (c.W_loc, c.b_loc, c.W_scale, c.b_scale, c.W_diag, c.b_diag),
+            self.core,
+            (W_loc, b_loc, W_scale, b_scale, W_diag, b_diag),
         )
 
-    def __post_init__(self) -> None:
-        if (
-            self.W_loc_init is None
-            or self.W_scale_init is None
-            or self.W_diag_init is None
-        ):
-            raise ValueError(
-                f"{type(self).__name__} requires W_loc_init / W_scale_init / "
-                "W_diag_init. Use the .init(key, ...) classmethod."
-            )
-        d_in, C, r = self.in_features, self.num_classes, self.rank
-        if self.W_loc_init.shape != (d_in, C):
-            raise ValueError(
-                f"W_loc_init shape {self.W_loc_init.shape} != ({d_in}, {C})."
-            )
-        if self.W_scale_init.shape != (d_in, C * r):
-            raise ValueError(
-                f"W_scale_init shape {self.W_scale_init.shape} != ({d_in}, {C * r})."
-            )
-        if self.W_diag_init.shape != (d_in, C):
-            raise ValueError(
-                f"W_diag_init shape {self.W_diag_init.shape} != ({d_in}, {C})."
-            )
+
+def _batched_logits(
+    new_core: geonnax.HeteroscedasticHead, x: Float[Array, "N D_in"]
+) -> Float[Array, "S N C"]:
+    """Run ``geonnax.hetero_noisy_logits`` over a batch of inputs.
+
+    The geonnax helper is single-example and consumes a PRNG ``key``.
+    To keep the wrapper batched-friendly we draw one fresh key per
+    batch element from ``numpyro.prng_key()`` and ``vmap`` over the
+    input/key pair. ``hetero_noisy_logits`` returns ``(S, C)`` per
+    example, so the vmapped output is ``(N, S, C)`` which we move to
+    the ``(S, N, C)`` layout that the existing softmax/sigmoid averaging
+    expects.
+    """
+    N = x.shape[0]
+    key = cast(JaxArray, numpyro.prng_key())
+    keys = jax.random.split(key, N)
+    per_example = jax.vmap(
+        lambda xi, ki: geonnax.hetero_noisy_logits(new_core, xi, key=ki)
+    )(x, keys)
+    # (N, S, C) -> (S, N, C)
+    return jnp.swapaxes(per_example, 0, 1)
 
 
 class MCSoftmaxDenseFA(_HeteroscedasticBase):
@@ -235,9 +204,14 @@ class MCSoftmaxDenseFA(_HeteroscedasticBase):
         Large-Scale Image Classification.* CVPR.
     """
 
+    @classmethod
+    def _core_cls(cls) -> type[geonnax.HeteroscedasticHead]:
+        return geonnax.MCSoftmaxDenseFA
+
     @pyrox_method
     def __call__(self, x: Float[Array, "N D_in"]) -> Float[Array, "N C"]:
-        logits = _hetero_noisy_logits(self, x)
+        new_core = self._swap_core()
+        logits = _batched_logits(new_core, x)
         return jnp.mean(jax.nn.softmax(logits, axis=-1), axis=0)
 
 
@@ -260,7 +234,12 @@ class MCSigmoidDenseFA(_HeteroscedasticBase):
     init API, and references.
     """
 
+    @classmethod
+    def _core_cls(cls) -> type[geonnax.HeteroscedasticHead]:
+        return geonnax.MCSigmoidDenseFA
+
     @pyrox_method
     def __call__(self, x: Float[Array, "N D_in"]) -> Float[Array, "N C"]:
-        logits = _hetero_noisy_logits(self, x)
+        new_core = self._swap_core()
+        logits = _batched_logits(new_core, x)
         return jnp.mean(jax.nn.sigmoid(logits), axis=0)

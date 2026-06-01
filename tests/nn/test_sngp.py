@@ -147,17 +147,10 @@ def test_sngp_init_validates_positive_dims_and_lengthscale():
         )
 
 
-def test_sngp_validates_init_arrays_shape():
-    with pytest.raises(ValueError, match="W_init shape"):
-        RandomFeatureGaussianProcess(
-            in_features=4,
-            num_features=8,
-            out_features=2,
-            W_init=jnp.zeros((3, 8)),  # wrong: should be (4, 8)
-            bias_init=jnp.zeros(8),
-            output_linear_init=jnp.zeros((8, 2)),
-            covariance=LaplaceRandomFeatureCovariance.init(8),
-        )
+# Init-array shape validation now lives in
+# ``geonnax.RandomFeatureGaussianProcess`` and is covered by the geonnax
+# test suite. The pyrox wrapper goes through ``.init(...)``
+# unconditionally.
 
 
 def test_sngp_registers_param_sites():

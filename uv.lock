@@ -616,6 +616,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "geonnax"
+version = "0.0.2"
+source = { git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.2#37e1d428fb07a2da23c3f8198a8e76b0cf410513" }
+dependencies = [
+    { name = "einops" },
+    { name = "einx" },
+    { name = "equinox" },
+    { name = "jax" },
+    { name = "jaxtyping" },
+]
+
+[[package]]
 name = "ghp-import"
 version = "2.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1887,6 +1899,7 @@ dependencies = [
     { name = "einx" },
     { name = "equinox" },
     { name = "gaussx" },
+    { name = "geonnax" },
     { name = "jax" },
     { name = "lineax" },
     { name = "numpyro" },
@@ -1941,6 +1954,7 @@ requires-dist = [
     { name = "einx", specifier = ">=0.4.3" },
     { name = "equinox", specifier = ">=0.13.8" },
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=926be4f48f692dcfd0be25c3ec8200818ca7276b" },
+    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.2" },
     { name = "jax", specifier = ">=0.10" },
     { name = "lineax", specifier = ">=0.1.1" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },

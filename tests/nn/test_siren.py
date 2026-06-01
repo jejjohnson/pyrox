@@ -14,10 +14,10 @@ import jax.random as jr
 import numpy as np
 import optax
 import pytest
+from geonnax import siren_W_limit as _siren_W_limit
 from numpyro import handlers
 
 from pyrox.nn import SIREN, BayesianSIREN, SirenDense
-from pyrox.nn._layers import _siren_W_limit
 
 
 # ---------------------------------------------------------------------------
@@ -28,7 +28,7 @@ from pyrox.nn._layers import _siren_W_limit
 def test_siren_dense_output_shape():
     layer = SirenDense.init(3, 16, key=jr.PRNGKey(0), layer_type="hidden")
     x = jnp.ones((5, 3))
-    y = layer(x)
+    y = jax.vmap(layer)(x)
     assert y.shape == (5, 16)
 
 
@@ -71,18 +71,18 @@ def test_siren_dense_activation_regimes():
 
     # first and hidden should apply sin(omega * pre)
     np.testing.assert_allclose(
-        np.asarray(layer_first(x)),
+        np.asarray(jax.vmap(layer_first)(x)),
         np.asarray(jnp.sin(omega * pre)),
         atol=1e-5,
     )
     np.testing.assert_allclose(
-        np.asarray(layer_hidden(x)),
+        np.asarray(jax.vmap(layer_hidden)(x)),
         np.asarray(jnp.sin(omega * pre)),
         atol=1e-5,
     )
     # last should be a plain linear
     np.testing.assert_allclose(
-        np.asarray(layer_last(x)),
+        np.asarray(jax.vmap(layer_last)(x)),
         np.asarray(pre),
         atol=1e-5,
     )
@@ -96,7 +96,7 @@ def test_siren_dense_activation_regimes():
 def test_siren_composite_output_shape():
     net = SIREN.init(2, 32, 4, depth=5, key=jr.PRNGKey(2))
     x = jnp.ones((10, 2))
-    y = net(x)
+    y = jax.vmap(net)(x)
     assert y.shape == (10, 4)
 
 
@@ -119,7 +119,7 @@ def test_siren_activation_variance_preserved():
     # scaled init (e.g. omega=1 or W~U(-1,1)), loose enough to absorb the
     # finite-sample estimator noise at 4096 samples.
     for layer in net.layers[:-1]:
-        z = layer(z)
+        z = jax.vmap(layer)(z)
         var = float(jnp.var(z))
         assert 0.3 <= var <= 1.5, (
             f"Hidden-layer variance {var:.4f} outside [0.3, 1.5] — "
@@ -137,7 +137,7 @@ def test_siren_jits():
 
     @jax.jit
     def fwd(x: jax.Array) -> jax.Array:
-        return net(x)
+        return jax.vmap(net)(x)
 
     y = fwd(jnp.ones((8, 2)))
     assert jnp.all(jnp.isfinite(y))
@@ -153,7 +153,7 @@ def test_siren_gradient_flows():
     x = jr.normal(jr.PRNGKey(55), (16, 2))
 
     def loss(params: SIREN) -> jax.Array:
-        return jnp.mean(params(x) ** 2)
+        return jnp.mean(jax.vmap(params)(x) ** 2)
 
     grads = jax.grad(loss)(net)
     for i, layer in enumerate(grads.layers):
@@ -182,7 +182,7 @@ def test_siren_fits_1d_sinusoid():
         params: SIREN, state: optax.OptState
     ) -> tuple[SIREN, optax.OptState, jax.Array]:
         def loss_fn(p: SIREN) -> jax.Array:
-            return jnp.mean((p(x) - y_true) ** 2)
+            return jnp.mean((jax.vmap(p)(x) - y_true) ** 2)
 
         loss, grads = jax.value_and_grad(loss_fn)(params)
         updates, new_state = optim.update(grads, state)

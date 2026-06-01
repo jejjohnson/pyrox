@@ -30,14 +30,14 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
-from jaxtyping import Array, Float
-
-from pyrox._core.pyrox_module import PyroxModule, pyrox_method
-from pyrox.nn._features import (
+from geonnax.basis import (
     fourier_features,
     interaction_features,
     seasonal_features,
 )
+from jaxtyping import Array, Float
+
+from pyrox._core.pyrox_module import PyroxModule, pyrox_method
 
 
 class Standardization(PyroxModule):

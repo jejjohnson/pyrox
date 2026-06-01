@@ -16,45 +16,39 @@
 
 from __future__ import annotations
 
-import math
-from typing import NamedTuple
-
-import einx
 import equinox as eqx
+import geonnax
 import jax
 import jax.numpy as jnp
-import jax.random as jr
 import numpyro.distributions as dist
+from geonnax import Rank1ProjInit
 from jaxtyping import Array, Float, PRNGKeyArray
 
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
 
 
-def _glorot_uniform(
-    key: PRNGKeyArray, in_features: int, out_features: int
-) -> Float[Array, "D_in D_out"]:
-    """Glorot-uniform init for a shared dense kernel."""
-    lim = math.sqrt(6.0 / (in_features + out_features))
-    return jr.uniform(
-        key,
-        (in_features, out_features),
-        minval=-lim,
-        maxval=lim,
-    )
+# Pre-refactor private alias retained for tests / external callers that imported
+# the NamedTuple by its old underscored name.
+_Rank1ProjInit = Rank1ProjInit
 
 
-def _rs_init(
-    key: PRNGKeyArray,
-    ensemble_size: int,
-    feature_dim: int,
-    init_scale: float,
-) -> Float[Array, "M D"]:
-    """Per-member rank-1-vector init: ``1 + init_scale * N(0, I)``.
+def _vmap_collapsed(core_fn, x: Float[Array, ...]) -> Float[Array, ...]:
+    """Apply a single-example ``core_fn`` over arbitrary leading batch dims.
 
-    Centered on 1.0 so the rank-1 perturbation is the identity in
-    expectation. ``init_scale`` controls per-member diversity.
+    Flattens ``x`` from ``(*batch, D)`` to ``(B, D)``, runs
+    ``jax.vmap(core_fn)``, then restores the batch dims. Output gains
+    a leading ensemble axis ``M`` because the geonnax cores are
+    single-example BatchEnsemble layers.
     """
-    return 1.0 + init_scale * jr.normal(key, (ensemble_size, feature_dim))
+    feature_dim = x.shape[-1]
+    batch_shape = x.shape[:-1]
+    flat = x.reshape(-1, feature_dim)
+    out_flat = jax.vmap(core_fn)(flat)  # (B, M, D_out)
+    # Move ensemble axis to the front: (B, M, D_out) -> (M, B, D_out).
+    out_flat = jnp.swapaxes(out_flat, 0, 1)
+    M = out_flat.shape[0]
+    out_features = out_flat.shape[-1]
+    return out_flat.reshape((M, *batch_shape, out_features))
 
 
 class DenseRank1(PyroxModule):
@@ -137,15 +131,9 @@ class DenseRank1(PyroxModule):
         Bayesian Neural Nets with Rank-1 Factors.* ICML.
     """
 
-    in_features: int = eqx.field(static=True)
-    out_features: int = eqx.field(static=True)
-    ensemble_size: int = eqx.field(static=True)
-    bias: bool = eqx.field(static=True, default=True)
+    core: geonnax.DenseRank1
     bayesian: bool = eqx.field(static=True, default=False)
     prior_scale: float = 0.5
-    W_init: Float[Array, "D_in D_out"] | None = eqx.field(default=None)
-    r_init: Float[Array, "M D_out"] | None = eqx.field(default=None)
-    s_init: Float[Array, "M D_in"] | None = eqx.field(default=None)
     pyrox_name: str | None = None
 
     @classmethod
@@ -163,100 +151,72 @@ class DenseRank1(PyroxModule):
         pyrox_name: str | None = None,
     ) -> DenseRank1:
         """Construct a layer with random per-member init vectors."""
-        if in_features <= 0 or out_features <= 0 or ensemble_size <= 0:
-            raise ValueError(
-                "in_features, out_features, ensemble_size must all be > 0; "
-                f"got {in_features=}, {out_features=}, {ensemble_size=}."
-            )
-        if init_scale < 0:
-            raise ValueError(f"init_scale must be >= 0; got {init_scale}.")
         # `prior_scale` is only consulted in Bayesian mode — don't reject
         # configs that pass through a sentinel default in deterministic mode.
         if bayesian and prior_scale <= 0:
             raise ValueError(
                 f"prior_scale must be > 0 when bayesian=True; got {prior_scale}."
             )
-        kw, kr, ks = jr.split(key, 3)
-        W_init = _glorot_uniform(kw, in_features, out_features)
-        r_init = _rs_init(kr, ensemble_size, out_features, init_scale)
-        s_init = _rs_init(ks, ensemble_size, in_features, init_scale)
-        return cls(
+        # geonnax handles positive-dim / init_scale validation.
+        core = geonnax.DenseRank1.init(
+            key,
             in_features=in_features,
             out_features=out_features,
             ensemble_size=ensemble_size,
             bias=bias,
+            init_scale=init_scale,
+        )
+        return cls(
+            core=core,
             bayesian=bayesian,
             prior_scale=prior_scale,
-            W_init=W_init,
-            r_init=r_init,
-            s_init=s_init,
             pyrox_name=pyrox_name,
         )
 
-    def __post_init__(self) -> None:
-        # Defensive shape checks: the dataclass init lets a user pass
-        # raw arrays bypassing init(), so validate here once at module
-        # construction time (cheap; not in the hot path).
-        if self.W_init is None or self.r_init is None or self.s_init is None:
-            raise ValueError(
-                "DenseRank1 requires W_init, r_init, s_init. Use "
-                "DenseRank1.init(key, ...) to construct from a PRNG key."
-            )
-        expected_W = (self.in_features, self.out_features)
-        expected_r = (self.ensemble_size, self.out_features)
-        expected_s = (self.ensemble_size, self.in_features)
-        if self.W_init.shape != expected_W:
-            raise ValueError(
-                f"W_init shape {self.W_init.shape} != expected {expected_W}."
-            )
-        if self.r_init.shape != expected_r:
-            raise ValueError(
-                f"r_init shape {self.r_init.shape} != expected {expected_r}."
-            )
-        if self.s_init.shape != expected_s:
-            raise ValueError(
-                f"s_init shape {self.s_init.shape} != expected {expected_s}."
-            )
+    # Convenience read-only attribute access.
+    @property
+    def in_features(self) -> int:
+        return self.core.in_features
+
+    @property
+    def out_features(self) -> int:
+        return self.core.out_features
+
+    @property
+    def ensemble_size(self) -> int:
+        return self.core.ensemble_size
+
+    @property
+    def bias(self) -> bool:
+        return self.core.bias
 
     @pyrox_method
     def __call__(
         self, x: Float[Array, "*batch D_in"]
     ) -> Float[Array, "M *batch D_out"]:
-        W = self.pyrox_param("W", self.W_init)
+        W = self.pyrox_param("W", self.core.W)
 
         if self.bayesian:
             r = self.pyrox_sample(
                 "r",
-                dist.Normal(self.r_init, self.prior_scale).to_event(2),
+                dist.Normal(self.core.r, self.prior_scale).to_event(2),
             )
             s = self.pyrox_sample(
                 "s",
-                dist.Normal(self.s_init, self.prior_scale).to_event(2),
+                dist.Normal(self.core.s, self.prior_scale).to_event(2),
             )
         else:
-            r = self.pyrox_param("r", self.r_init)
-            s = self.pyrox_param("s", self.s_init)
+            r = self.pyrox_param("r", self.core.r)
+            s = self.pyrox_param("s", self.core.s)
 
-        # yᵢ = ((x ∘ sᵢ) W) ∘ rᵢ + bᵢ. The einx `...` ellipsis keeps
-        # arbitrary leading batch dims while broadcasting the per-member
-        # sᵢ, rᵢ over them, and the named `m` axis is introduced by the
-        # input-scaling step. Avoids materialising the per-member
-        # effective kernel Wᵢ = (sᵢ ⊗ rᵢ) ∘ W and the manual reshapes
-        # that broadcasting rᵢ / bᵢ would otherwise need.
-        #   x:        (*batch, D_in)
-        #   x_scaled: (M, *batch, D_in)
-        #   h, out:   (M, *batch, D_out)
-        x_scaled = einx.multiply("... d, m d -> m ... d", x, s)
-        h = einx.dot("m ... d, d o -> m ... o", x_scaled, W)
-        out = einx.multiply("m ... o, m o -> m ... o", h, r)
+        b = self.pyrox_param("b", self.core.b) if self.bias else self.core.b
 
-        if self.bias:
-            b = self.pyrox_param(
-                "b",
-                jnp.zeros((self.ensemble_size, self.out_features)),
-            )
-            out = einx.add("m ... o, m o -> m ... o", out, b)
-        return out
+        new_core = eqx.tree_at(
+            lambda c: (c.W, c.r, c.s, c.b),
+            self.core,
+            (W, r, s, b),
+        )
+        return _vmap_collapsed(new_core, x)
 
 
 class LayerNormEnsemble(PyroxModule):
@@ -308,18 +268,42 @@ class LayerNormEnsemble(PyroxModule):
         (3, 5, 4)
     """
 
-    ensemble_size: int = eqx.field(static=True)
-    feature_dim: int = eqx.field(static=True)
-    eps: float = eqx.field(static=True, default=1e-5)
+    core: geonnax.LayerNormEnsemble
     pyrox_name: str | None = eqx.field(static=True, default=None)
 
-    def __post_init__(self) -> None:
-        if self.ensemble_size <= 0:
-            raise ValueError(f"ensemble_size must be > 0; got {self.ensemble_size}.")
-        if self.feature_dim <= 0:
-            raise ValueError(f"feature_dim must be > 0; got {self.feature_dim}.")
-        if self.eps <= 0:
-            raise ValueError(f"eps must be > 0; got {self.eps}.")
+    def __init__(
+        self,
+        ensemble_size: int,
+        feature_dim: int,
+        eps: float = 1e-5,
+        pyrox_name: str | None = None,
+        *,
+        core: geonnax.LayerNormEnsemble | None = None,
+    ) -> None:
+        # Keep the prior call signature (positional dims, kw eps / pyrox_name)
+        # so existing callers don't need to know about the geonnax core
+        # construction.
+        if core is None:
+            # geonnax validates positive ensemble_size / feature_dim / eps.
+            core = geonnax.LayerNormEnsemble.init(
+                ensemble_size=ensemble_size,
+                feature_dim=feature_dim,
+                eps=eps,
+            )
+        self.core = core
+        self.pyrox_name = pyrox_name
+
+    @property
+    def ensemble_size(self) -> int:
+        return self.core.ensemble_size
+
+    @property
+    def feature_dim(self) -> int:
+        return self.core.feature_dim
+
+    @property
+    def eps(self) -> float:
+        return self.core.eps
 
     @pyrox_method
     def __call__(self, x: Float[Array, "M *batch D"]) -> Float[Array, "M *batch D"]:
@@ -338,96 +322,25 @@ class LayerNormEnsemble(PyroxModule):
                 f"feature_dim = {self.feature_dim}."
             )
 
-        scales = self.pyrox_param(
-            "scales", jnp.ones((self.ensemble_size, self.feature_dim))
+        scales = self.pyrox_param("scales", self.core.scales)
+        biases = self.pyrox_param("biases", self.core.biases)
+
+        new_core = eqx.tree_at(
+            lambda c: (c.scales, c.biases),
+            self.core,
+            (scales, biases),
         )
-        biases = self.pyrox_param(
-            "biases", jnp.zeros((self.ensemble_size, self.feature_dim))
-        )
 
-        # Per-slice mean/var over the trailing feature axis.
-        mean = jnp.mean(x, axis=-1, keepdims=True)
-        var = jnp.var(x, axis=-1, keepdims=True)
-        x_hat = (x - mean) * jax.lax.rsqrt(var + self.eps)
-
-        # Per-member affine: broadcast (M, D) γ/β over the intermediate
-        # *batch axes via named ellipsis — no manual reshape bookkeeping.
-        #   x_hat: (M, *batch, D)   γ, β: (M, D)
-        scaled = einx.multiply("m ... d, m d -> m ... d", x_hat, scales)
-        return einx.add("m ... d, m d -> m ... d", scaled, biases)
-
-
-class _Rank1ProjInit(NamedTuple):
-    """Per-projection BatchEnsemble inits used by :class:`MultiHeadAttentionBE`.
-
-    Bundles the four arrays needed for one rank-1 projection
-    (:math:`W` shared, :math:`r, s, b` per-member) into a single
-    PyTree leaf so the parent module can carry one such NamedTuple
-    per Q/K/V/O projection.
-    """
-
-    W: Float[Array, "D_in D_out"]
-    r: Float[Array, "M D_out"]
-    s: Float[Array, "M D_in"]
-    b: Float[Array, "M D_out"]
-
-
-def _init_rank1_proj(
-    key: PRNGKeyArray,
-    in_features: int,
-    out_features: int,
-    ensemble_size: int,
-    init_scale: float,
-) -> _Rank1ProjInit:
-    """Glorot-init shared kernel + per-member rank-1 vectors + zero bias."""
-    kw, kr, ks = jr.split(key, 3)
-    return _Rank1ProjInit(
-        W=_glorot_uniform(kw, in_features, out_features),
-        r=_rs_init(kr, ensemble_size, out_features, init_scale),
-        s=_rs_init(ks, ensemble_size, in_features, init_scale),
-        b=jnp.zeros((ensemble_size, out_features)),
-    )
-
-
-def _apply_rank1_proj(
-    x: Float[Array, ...],
-    proj: _Rank1ProjInit,
-    ensemble_size: int,
-    bias: bool,
-    *,
-    has_ensemble: bool,
-) -> Float[Array, ...]:
-    r"""Apply ``y_i = ((x ⊙ s_i) @ W) ⊙ r_i + b_i`` per ensemble member.
-
-    Two modes selected by the *explicit* ``has_ensemble`` flag rather
-    than a shape heuristic — heuristics on ``x.shape[0] == ensemble_size``
-    silently mis-classify inputs whose sequence length happens to equal
-    the ensemble size (e.g. self-attention with ``T = M``):
-
-    * ``has_ensemble=False``: ``x`` has shape ``(*batch, D_in)`` and the
-      output gains a leading ``M`` axis: ``(M, *batch, D_out)``. Use
-      this for the Q/K/V projections, whose inputs are un-ensembled.
-    * ``has_ensemble=True``: ``x`` already carries an ``M`` leading
-      axis (``(M, *batch, D_in)``); the per-member projection flows
-      through unchanged. Use this for the O projection after attention
-      has already added the ensemble axis.
-    """
-    if has_ensemble:
-        if x.ndim < 2 or x.shape[0] != ensemble_size:
-            raise ValueError(
-                f"Expected x.shape[0] == ensemble_size ({ensemble_size}) when "
-                f"has_ensemble=True; got x.shape = {x.shape}."
-            )
-        # x already carries the M axis: scale per member over batch dims.
-        x_scaled = einx.multiply("m ... d, m d -> m ... d", x, proj.s)
-    else:
-        # x is un-ensembled: the M axis is introduced by the per-member scale.
-        x_scaled = einx.multiply("... d, m d -> m ... d", x, proj.s)
-    h = einx.dot("m ... d, d o -> m ... o", x_scaled, proj.W)
-    out = einx.multiply("m ... o, m o -> m ... o", h, proj.r)
-    if bias:
-        out = einx.add("m ... o, m o -> m ... o", out, proj.b)
-    return out
+        # Core takes (M, D) → (M, D); collapse arbitrary intermediate batch
+        # dims to a single leading axis, vmap over it, then restore. The
+        # ensemble axis stays at position 0 because the core is per-member.
+        M = self.ensemble_size
+        D = self.feature_dim
+        batch_shape = x.shape[1:-1]
+        flat = x.reshape(M, -1, D)  # (M, B, D)
+        # vmap over the B axis (position 1 on both input and output).
+        out = jax.vmap(new_core, in_axes=1, out_axes=1)(flat)  # (M, B, D)
+        return out.reshape((M, *batch_shape, D))
 
 
 class MultiHeadAttentionBE(PyroxModule):
@@ -497,15 +410,8 @@ class MultiHeadAttentionBE(PyroxModule):
         (3, 5, 8)
     """
 
-    embed_dim: int = eqx.field(static=True)
-    num_heads: int = eqx.field(static=True)
-    ensemble_size: int = eqx.field(static=True)
-    bias: bool = eqx.field(static=True, default=True)
+    core: geonnax.MultiHeadAttentionBE
     pyrox_name: str | None = eqx.field(static=True, default=None)
-    q_init: _Rank1ProjInit | None = eqx.field(default=None)
-    k_init: _Rank1ProjInit | None = eqx.field(default=None)
-    v_init: _Rank1ProjInit | None = eqx.field(default=None)
-    o_init: _Rank1ProjInit | None = eqx.field(default=None)
 
     @classmethod
     def init(
@@ -520,82 +426,55 @@ class MultiHeadAttentionBE(PyroxModule):
         pyrox_name: str | None = None,
     ) -> MultiHeadAttentionBE:
         """Construct an MHA-BE layer with random Q/K/V/O projection inits."""
-        if embed_dim <= 0 or num_heads <= 0 or ensemble_size <= 0:
-            raise ValueError(
-                "embed_dim, num_heads, ensemble_size must all be > 0; "
-                f"got {embed_dim=}, {num_heads=}, {ensemble_size=}."
-            )
-        if embed_dim % num_heads != 0:
-            raise ValueError(
-                f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})."
-            )
-        if init_scale < 0:
-            raise ValueError(f"init_scale must be >= 0; got {init_scale}.")
-        kq, kk, kv, ko = jr.split(key, 4)
-        return cls(
+        # geonnax validates positive dims, divisibility, init_scale.
+        core = geonnax.MultiHeadAttentionBE.init(
+            key,
             embed_dim=embed_dim,
             num_heads=num_heads,
             ensemble_size=ensemble_size,
             bias=bias,
-            pyrox_name=pyrox_name,
-            q_init=_init_rank1_proj(
-                kq, embed_dim, embed_dim, ensemble_size, init_scale
-            ),
-            k_init=_init_rank1_proj(
-                kk, embed_dim, embed_dim, ensemble_size, init_scale
-            ),
-            v_init=_init_rank1_proj(
-                kv, embed_dim, embed_dim, ensemble_size, init_scale
-            ),
-            o_init=_init_rank1_proj(
-                ko, embed_dim, embed_dim, ensemble_size, init_scale
-            ),
+            init_scale=init_scale,
         )
+        return cls(core=core, pyrox_name=pyrox_name)
 
-    def __post_init__(self) -> None:
-        # Validate positive dims first so the divisibility check below can't
-        # ZeroDivisionError on `num_heads = 0` (and so manual-construction
-        # users bypassing `.init` get the same clear error message as that
-        # classmethod's callers).
-        if self.embed_dim <= 0 or self.num_heads <= 0 or self.ensemble_size <= 0:
-            raise ValueError(
-                "embed_dim, num_heads, ensemble_size must all be > 0; "
-                f"got {self.embed_dim=}, {self.num_heads=}, "
-                f"{self.ensemble_size=}."
-            )
-        if self.embed_dim % self.num_heads != 0:
-            raise ValueError(
-                f"embed_dim ({self.embed_dim}) must be divisible by "
-                f"num_heads ({self.num_heads})."
-            )
-        # Defensive shape checks: the dataclass init lets a user pass raw
-        # _Rank1ProjInit tuples bypassing .init(), so validate per-array
-        # shapes once at construction time. Mirrors DenseRank1.__post_init__.
-        D, M = self.embed_dim, self.ensemble_size
-        expected = {"W": (D, D), "r": (M, D), "s": (M, D), "b": (M, D)}
-        for proj_name, attr in (
-            ("q_init", self.q_init),
-            ("k_init", self.k_init),
-            ("v_init", self.v_init),
-            ("o_init", self.o_init),
-        ):
-            if attr is None:
-                raise ValueError(
-                    f"{type(self).__name__} requires {proj_name}. Use "
-                    f"{type(self).__name__}.init(key, ...) to construct."
-                )
-            for arr_name, want in expected.items():
-                got = getattr(attr, arr_name).shape
-                if got != want:
-                    raise ValueError(
-                        f"{proj_name}.{arr_name} shape {got} != expected {want}."
-                    )
+    @property
+    def embed_dim(self) -> int:
+        return self.core.embed_dim
+
+    @property
+    def num_heads(self) -> int:
+        return self.core.num_heads
+
+    @property
+    def ensemble_size(self) -> int:
+        return self.core.ensemble_size
+
+    @property
+    def bias(self) -> bool:
+        return self.core.bias
 
     @property
     def head_dim(self) -> int:
-        return self.embed_dim // self.num_heads
+        return self.core.head_dim
 
-    def _register_proj(self, name: str, init: _Rank1ProjInit) -> _Rank1ProjInit:
+    # Maintain the pre-refactor attribute names for any external accessors.
+    @property
+    def q_init(self) -> Rank1ProjInit:
+        return self.core.q_proj
+
+    @property
+    def k_init(self) -> Rank1ProjInit:
+        return self.core.k_proj
+
+    @property
+    def v_init(self) -> Rank1ProjInit:
+        return self.core.v_proj
+
+    @property
+    def o_init(self) -> Rank1ProjInit:
+        return self.core.o_proj
+
+    def _register_proj(self, name: str, init: Rank1ProjInit) -> Rank1ProjInit:
         """Register a projection's arrays as ``pyrox_param`` sites.
 
         Skips the ``b`` site when ``self.bias`` is ``False`` so disabled
@@ -606,7 +485,7 @@ class MultiHeadAttentionBE(PyroxModule):
             if self.bias
             else jnp.zeros_like(init.b)
         )
-        return _Rank1ProjInit(
+        return Rank1ProjInit(
             W=self.pyrox_param(f"{name}_W", init.W),
             r=self.pyrox_param(f"{name}_r", init.r),
             s=self.pyrox_param(f"{name}_s", init.s),
@@ -620,55 +499,21 @@ class MultiHeadAttentionBE(PyroxModule):
         key: Float[Array, "S D"],
         value: Float[Array, "S D"],
     ) -> Float[Array, "M T D"]:
-        if query.ndim != 2 or query.shape[-1] != self.embed_dim:
-            raise ValueError(
-                f"query must be (T, embed_dim={self.embed_dim}); got {query.shape}."
-            )
-        if key.ndim != 2 or key.shape[-1] != self.embed_dim:
-            raise ValueError(
-                f"key must be (S, embed_dim={self.embed_dim}); got {key.shape}."
-            )
-        if value.shape != key.shape:
-            raise ValueError(
-                f"key and value must share shape; got {key.shape} vs {value.shape}."
-            )
-
         # Register the four projections.
-        assert self.q_init is not None  # __post_init__ guarantees
-        assert self.k_init is not None
-        assert self.v_init is not None
-        assert self.o_init is not None
-        q_proj = self._register_proj("q", self.q_init)
-        k_proj = self._register_proj("k", self.k_init)
-        v_proj = self._register_proj("v", self.v_init)
-        o_proj = self._register_proj("o", self.o_init)
+        q_proj = self._register_proj("q", self.core.q_proj)
+        k_proj = self._register_proj("k", self.core.k_proj)
+        v_proj = self._register_proj("v", self.core.v_proj)
+        o_proj = self._register_proj("o", self.core.o_proj)
 
-        M = self.ensemble_size
-        H = self.num_heads
-        d = self.head_dim
-
-        # Project inputs (no ensemble axis on input → M added on output).
-        Q = _apply_rank1_proj(
-            query, q_proj, M, self.bias, has_ensemble=False
-        )  # (M, T, D)
-        K = _apply_rank1_proj(
-            key, k_proj, M, self.bias, has_ensemble=False
-        )  # (M, S, D)
-        V = _apply_rank1_proj(
-            value, v_proj, M, self.bias, has_ensemble=False
-        )  # (M, S, D)
-
-        # Per-head split + transpose in one shot: (M, ·, H·d) → (M, H, ·, d).
-        Q = einx.id("m t (h d) -> m h t d", Q, h=H)  # (M, H, T, d)
-        K = einx.id("m s (h d) -> m h s d", K, h=H)  # (M, H, S, d)
-        V = einx.id("m s (h d) -> m h s d", V, h=H)  # (M, H, S, d)
-
-        scores = einx.dot("m h t d, m h s d -> m h t s", Q, K) / math.sqrt(d)
-        weights = jax.nn.softmax(scores, axis=-1)
-        attn = einx.dot("m h t s, m h s d -> m h t d", weights, V)  # (M, H, T, d)
-
-        # Merge heads back to (M, T, embed_dim): transpose + reshape in one shot.
-        attn = einx.id("m h t d -> m t (h d)", attn)
-
-        # Output projection: input already has the M axis.
-        return _apply_rank1_proj(attn, o_proj, M, self.bias, has_ensemble=True)
+        # Swap all four projections into the core; geonnax's __call__
+        # validates query/key/value shapes and runs the per-member
+        # attention. The core forward matches the pyrox call signature
+        # (un-ensembled `(T, D)` / `(S, D)` in → `(M, T, D)` out), so no
+        # vmap is needed here — the ensemble axis is intrinsic to the
+        # core, not a data batch.
+        new_core = eqx.tree_at(
+            lambda c: (c.q_proj, c.k_proj, c.v_proj, c.o_proj),
+            self.core,
+            (q_proj, k_proj, v_proj, o_proj),
+        )
+        return new_core(query, key, value)
