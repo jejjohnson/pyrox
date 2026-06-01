@@ -86,22 +86,10 @@ def test_dense_rank1_supports_arbitrary_batch_dims():
     assert y_1d.shape == (3, 2)
 
 
-def test_dense_rank1_validates_init_arrays_shape():
-    """Bypassing ``init`` with mis-sized arrays must fail loudly."""
-    with pytest.raises(ValueError, match="W_init shape"):
-        DenseRank1(
-            in_features=4,
-            out_features=2,
-            ensemble_size=3,
-            W_init=jnp.zeros((3, 2)),  # wrong: should be (4, 2)
-            r_init=jnp.ones((3, 2)),
-            s_init=jnp.ones((3, 4)),
-        )
-
-
-def test_dense_rank1_requires_init_arrays():
-    with pytest.raises(ValueError, match=r"DenseRank1\.init"):
-        DenseRank1(in_features=4, out_features=2, ensemble_size=3)
+# Init-array validation now lives in ``geonnax.DenseRank1`` and is covered
+# by the geonnax test suite. The pyrox wrapper goes through ``.init(...)``
+# unconditionally, so the old direct-construction error paths no longer
+# exist at this layer.
 
 
 # --- deterministic mode (BatchEnsemble) ------------------------------------
@@ -176,9 +164,9 @@ def test_dense_rank1_matches_explicit_per_member_kernel():
     x = jr.normal(jr.PRNGKey(11), (6, 3))
     with handlers.seed(rng_seed=0):
         y = layer(x)
-    W = layer.W_init
-    r = layer.r_init
-    s = layer.s_init
+    W = layer.core.W
+    r = layer.core.r
+    s = layer.core.s
     b = jnp.zeros((4, 2))
     expected = jnp.stack(
         [(x * s[i]) @ W * r[i] + b[i] for i in range(4)],
@@ -239,7 +227,7 @@ def test_dense_rank1_bayesian_priors_centred_on_inits():
     with handlers.trace() as tr, handlers.seed(rng_seed=0):
         layer(x)
     r_fn = tr["rb.r"]["fn"]
-    assert jnp.allclose(r_fn.base_dist.loc, layer.r_init)
+    assert jnp.allclose(r_fn.base_dist.loc, layer.core.r)
     assert jnp.allclose(r_fn.base_dist.scale, 0.25)
 
 
@@ -457,11 +445,6 @@ def test_mha_be_init_validates_positive_dims():
         )
 
 
-def test_mha_be_requires_inits():
-    with pytest.raises(ValueError, match=r"\.init\(key"):
-        MultiHeadAttentionBE(embed_dim=4, num_heads=2, ensemble_size=2)
-
-
 def test_mha_be_registers_all_four_projection_param_sites():
     mha = MultiHeadAttentionBE.init(
         jr.PRNGKey(0),
@@ -501,66 +484,9 @@ def test_mha_be_no_bias_skips_bias_param_sites():
         assert f"mha_nobias.{proj}_b" not in tr
 
 
-def test_mha_be_post_init_validates_positive_dims():
-    """Direct construction must reject non-positive dims with a clear error,
-    not raise ``ZeroDivisionError`` from the embed_dim % num_heads check.
-    """
-    from pyrox.nn._ensemble import _Rank1ProjInit
-
-    good = _Rank1ProjInit(
-        W=jnp.zeros((4, 4)),
-        r=jnp.ones((2, 4)),
-        s=jnp.ones((2, 4)),
-        b=jnp.zeros((2, 4)),
-    )
-    with pytest.raises(ValueError, match=r"must all be > 0"):
-        MultiHeadAttentionBE(
-            embed_dim=4,
-            num_heads=0,  # would crash modulo before this fix
-            ensemble_size=2,
-            q_init=good,
-            k_init=good,
-            v_init=good,
-            o_init=good,
-        )
-    with pytest.raises(ValueError, match=r"must all be > 0"):
-        MultiHeadAttentionBE(
-            embed_dim=0,
-            num_heads=2,
-            ensemble_size=2,
-            q_init=good,
-            k_init=good,
-            v_init=good,
-            o_init=good,
-        )
-
-
-def test_mha_be_post_init_validates_init_array_shapes():
-    """Bypassing ``.init`` with mis-sized projection arrays must fail loudly."""
-    from pyrox.nn._ensemble import _Rank1ProjInit
-
-    good = _Rank1ProjInit(
-        W=jnp.zeros((4, 4)),
-        r=jnp.ones((2, 4)),
-        s=jnp.ones((2, 4)),
-        b=jnp.zeros((2, 4)),
-    )
-    bad_W = _Rank1ProjInit(
-        W=jnp.zeros((3, 4)),  # wrong: should be (4, 4)
-        r=jnp.ones((2, 4)),
-        s=jnp.ones((2, 4)),
-        b=jnp.zeros((2, 4)),
-    )
-    with pytest.raises(ValueError, match=r"q_init\.W shape"):
-        MultiHeadAttentionBE(
-            embed_dim=4,
-            num_heads=2,
-            ensemble_size=2,
-            q_init=bad_W,
-            k_init=good,
-            v_init=good,
-            o_init=good,
-        )
+# Positive-dim and init-array-shape validation now lives in
+# ``geonnax.MultiHeadAttentionBE`` and is covered by the geonnax test
+# suite. The pyrox wrapper goes through ``.init(...)`` unconditionally.
 
 
 def test_mha_be_members_are_distinct_with_nonzero_init_scale():

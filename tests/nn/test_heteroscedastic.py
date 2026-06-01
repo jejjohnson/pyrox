@@ -57,21 +57,9 @@ def test_softmax_fa_init_validates_positive_dims():
         )
 
 
-def test_softmax_fa_validates_init_arrays_shape():
-    with pytest.raises(ValueError, match="W_loc_init shape"):
-        MCSoftmaxDenseFA(
-            in_features=4,
-            num_classes=3,
-            rank=2,
-            W_loc_init=jnp.zeros((3, 3)),  # wrong: should be (4, 3)
-            W_scale_init=jnp.zeros((4, 6)),
-            W_diag_init=jnp.zeros((4, 3)),
-        )
-
-
-def test_softmax_fa_requires_init_arrays():
-    with pytest.raises(ValueError, match=r"\.init\(key"):
-        MCSoftmaxDenseFA(in_features=4, num_classes=3, rank=2)
+# Init-array validation now lives in ``geonnax.HeteroscedasticHead``
+# and is covered by the geonnax test suite. The pyrox wrapper goes
+# through ``.init(...)`` unconditionally.
 
 
 # --- site registration ------------------------------------------------------
@@ -158,7 +146,7 @@ def test_softmax_fa_low_noise_limit_approaches_softmax_of_mu():
     with handlers.seed(rng_seed=0):
         probs = layer(x)
     # Reproduce mean logits from the same init values.
-    mu = x @ layer.W_loc_init + jnp.zeros(3)
+    mu = x @ layer.core.W_loc + jnp.zeros(3)
     expected = jnp.exp(mu) / jnp.exp(mu).sum(axis=-1, keepdims=True)
     assert jnp.allclose(probs, expected, atol=1e-3)
 
