@@ -20,7 +20,7 @@ from jaxtyping import Array, Float
 
 from pyrox._basis import slepian_cap_basis
 from pyrox._core import Parameterized, pyrox_method
-from pyrox.nn._geo import lonlat_to_cartesian3d
+from geonnax.geo import lonlat_to_cartesian3d
 
 
 def _unit_xyz(

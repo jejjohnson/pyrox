@@ -60,7 +60,7 @@ from pyrox.nn._features import (
     standardize,
     unstandardize,
 )
-from pyrox.nn._geo import (
+from geonnax.geo import (
     cyclic_encode,
     deg2rad,
     lonlat_scale,
