@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -131,16 +132,18 @@ class SparseMarkovGPPrior(eqx.Module):
 
     def inducing_operator(self) -> lx.AbstractLinearOperator:
         r"""Return ``K_{ZZ} + \text{jitter}\,I`` as a PSD ``lineax`` operator."""
-        diffs = jnp.abs(self.Z[:, None] - self.Z[None, :])
+        # Pairwise |Zᵢ - Zⱼ| lags between inducing times → (M, M).
+        diffs = jnp.abs(einx.subtract("i, j -> i j", self.Z, self.Z))
         K_zz = sde_autocovariance(self.sde_kernel, diffs)
-        K_zz = 0.5 * (K_zz + K_zz.T)
+        K_zz = 0.5 * (K_zz + einx.id("i j -> j i", K_zz))
         K_zz = K_zz + self.jitter * jnp.eye(K_zz.shape[0], dtype=K_zz.dtype)
         return _psd_operator(K_zz)
 
     def cross_covariance(self, times: Float[Array, " N"]) -> Float[Array, "N M"]:
         """``K_{XZ}`` — pairwise SDE autocov between training and inducing times."""
         t = jnp.asarray(times)
-        diffs = jnp.abs(t[:, None] - self.Z[None, :])
+        # Pairwise |tₙ - Zₘ| lags between training and inducing times → (N, M).
+        diffs = jnp.abs(einx.subtract("n, m -> n m", t, self.Z))
         return sde_autocovariance(self.sde_kernel, diffs)
 
     def kernel_diag(self, times: Float[Array, " N"]) -> Float[Array, " N"]:

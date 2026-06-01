@@ -40,6 +40,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -130,7 +131,8 @@ class NonGaussConditionedGP(eqx.Module):
         y_tilde = self.site_nat1 / self.site_nat2
         residual = y_tilde - prior_mean_train
         alpha = jax.scipy.linalg.cho_solve((L, True), residual)
-        return self.prior.mean(X_star) + K_cross @ alpha
+        # μ_* = μ(X_*) + K_{*f} α,  K_{*f}: (M, N), α: (N,) → (M,).
+        return self.prior.mean(X_star) + einx.dot("m n, n -> m", K_cross, alpha)
 
     def predict_var(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
         r""":math:`\Sigma_{**} - K_{*f} (K + \mathrm{diag}(1/\Lambda))^{-1} K_{f*}`."""
@@ -138,8 +140,12 @@ class NonGaussConditionedGP(eqx.Module):
             L = self._pseudo_factor()
             K_cross = self.prior.kernel(X_star, self.prior.X)
             K_diag = self.prior.kernel.diag(X_star)
-        v = jax.scipy.linalg.solve_triangular(L, K_cross.T, lower=True)
-        return jnp.maximum(K_diag - jnp.sum(v * v, axis=0), 0.0)
+        # v = L⁻¹ K_{f*}, shape (N, M); the predictive variance reduction is
+        # the column-wise squared norm Σ_n v_{n,*}².
+        v = jax.scipy.linalg.solve_triangular(
+            L, einx.id("m n -> n m", K_cross), lower=True
+        )
+        return jnp.maximum(K_diag - einx.sum("[n] m", v * v), 0.0)
 
     def predict(
         self, X_star: Float[Array, "M D"]
@@ -159,9 +165,11 @@ class NonGaussConditionedGP(eqx.Module):
         y_tilde = self.site_nat1 / self.site_nat2
         residual = y_tilde - prior_mean_train
         alpha = jax.scipy.linalg.cho_solve((L, True), residual)
-        mean = prior_mean_test + K_cross @ alpha
-        v = jax.scipy.linalg.solve_triangular(L, K_cross.T, lower=True)
-        var = jnp.maximum(K_diag - jnp.sum(v * v, axis=0), 0.0)
+        mean = prior_mean_test + einx.dot("m n, n -> m", K_cross, alpha)
+        v = jax.scipy.linalg.solve_triangular(
+            L, einx.id("m n -> n m", K_cross), lower=True
+        )
+        var = jnp.maximum(K_diag - einx.sum("[n] m", v * v), 0.0)
         return mean, var
 
 
@@ -212,12 +220,12 @@ def _posterior_from_diag_sites(
     y_tilde = nat1 / nat2
     residual = y_tilde - prior_mean
     alpha = jax.scipy.linalg.cho_solve((L, True), residual)
-    q_mean = prior_mean + K @ alpha
+    q_mean = prior_mean + einx.dot("i j, j -> i", K, alpha)
 
     # V = K - K (K + diag(sigma2))^-1 K
     M = jax.scipy.linalg.cho_solve((L, True), K)
-    V = K - K @ M
-    V = 0.5 * (V + V.T)
+    V = K - einx.dot("i j, j k -> i k", K, M)
+    V = 0.5 * (V + einx.id("i j -> j i", V))
     q_var = jnp.diag(V)
     return q_mean, V, q_var
 
@@ -259,7 +267,7 @@ def _psd_safe_cholesky(M: Float[Array, "N N"]) -> Float[Array, "N N"]:
     a PSD :mod:`lineax` operator. Float32 + densely-packed kernel
     inputs is the realistic failure case this guards against.
     """
-    M_sym = 0.5 * (M + M.T)
+    M_sym = 0.5 * (M + einx.id("i j -> j i", M))
     return safe_cholesky(_psd_operator(M_sym))
 
 
@@ -324,7 +332,9 @@ def _laplace_log_marginal(
     alpha = jax.scipy.linalg.cho_solve((L_K, True), residual)
     quad = 0.5 * jnp.dot(residual, alpha)
     sqrt_lam = jnp.sqrt(Lam)
-    B = jnp.eye(K.shape[0], dtype=K.dtype) + sqrt_lam[:, None] * K * sqrt_lam[None, :]
+    # B = I + √Λ K √Λ (symmetric two-sided diagonal scaling of K).
+    scaled_K = einx.multiply("i, i j, j -> i j", sqrt_lam, K, sqrt_lam)
+    B = jnp.eye(K.shape[0], dtype=K.dtype) + scaled_K
     L_B = _psd_safe_cholesky(B)
     logdet = 2.0 * jnp.sum(jnp.log(jnp.diag(L_B)))
     return ll - quad - 0.5 * logdet

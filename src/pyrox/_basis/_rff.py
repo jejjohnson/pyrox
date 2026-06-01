@@ -47,6 +47,7 @@ Other stationary kernels will raise :class:`NotImplementedError`;
 
 from __future__ import annotations
 
+import einx
 import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
@@ -217,6 +218,10 @@ def evaluate_rff_cosine_paths(
     vectorized over path index ``s`` and input index ``n``. See the
     module docstring for the reconstruction argument.
     """
-    angles = jnp.einsum("nd,sdf->snf", X, omega) / lengthscale + phase[:, None, :]
+    # Project inputs onto each path's frequencies (contract feature dim d),
+    # then add the per-path phase broadcast over the input axis n → (S, N, F).
+    projected = einx.dot("n d, s d f -> s n f", X, omega) / lengthscale
+    angles = einx.add("s n f, s f -> s n f", projected, phase)
     features = jnp.sqrt(2.0 * variance / omega.shape[-1]) * jnp.cos(angles)
-    return jnp.sum(features * weights[:, None, :], axis=-1)
+    # Weighted sum over the F random features → (S, N).
+    return einx.dot("s n f, s f -> s n", features, weights)

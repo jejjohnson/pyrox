@@ -45,6 +45,7 @@ import math
 from collections.abc import Callable, Sequence
 from typing import Any, Literal, NamedTuple, cast
 
+import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -275,7 +276,7 @@ class DenseReparameterization(PyroxModule):
             self.prior_scale,
         ).to_event(2)
         W = self.pyrox_sample("weight", prior_w)
-        out = x @ W
+        out = einx.dot("... din, din dout -> ... dout", x, W)
         if self.bias:
             prior_b = dist.Normal(
                 jnp.zeros(self.out_features), self.prior_scale
@@ -319,7 +320,7 @@ class DenseFlipout(PyroxModule):
             self.prior_scale,
         ).to_event(2)
         W = self.pyrox_sample("weight", prior_w)
-        out = x @ W
+        out = einx.dot("... din, din dout -> ... dout", x, W)
 
         if self.bias:
             prior_b = dist.Normal(
@@ -356,7 +357,7 @@ class DenseVariational(PyroxModule):
     def __call__(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D_out"]:
         prior = self.make_prior(self.in_features, self.out_features)
         W = self.pyrox_sample("weight", prior)
-        out = x @ W
+        out = einx.dot("... din, din dout -> ... dout", x, W)
         if self.bias:
             b = self.pyrox_sample(
                 "bias",
@@ -473,7 +474,7 @@ class DenseNCP(PyroxModule):
             "bias_det",
             dist.Normal(jnp.zeros(self.out_features), 1.0).to_event(1),
         )
-        det = x @ W_d + b_d
+        det = einx.dot("... din, din dout -> ... dout", x, W_d) + b_d
 
         W_s = self.pyrox_sample(
             "weight_stoch",
@@ -489,7 +490,7 @@ class DenseNCP(PyroxModule):
             "scale",
             dist.LogNormal(jnp.log(jnp.maximum(jnp.array(self.init_scale), 1e-6)), 1.0),
         )
-        stoch = scale * (x @ W_s + b_s)
+        stoch = scale * (einx.dot("... din, din dout -> ... dout", x, W_s) + b_s)
 
         return det + stoch
 
@@ -774,8 +775,8 @@ class DenseVariationalDropout(PyroxModule):
         log_alpha_clamped = jnp.clip(log_alpha, _VD_LOG_ALPHA_MIN, _VD_LOG_ALPHA_MAX)
         alpha = jnp.exp(log_alpha_clamped)
 
-        gamma = x @ theta
-        delta = (x**2) @ (alpha * theta**2)
+        gamma = einx.dot("... din, din dout -> ... dout", x, theta)
+        delta = einx.dot("... din, din dout -> ... dout", x**2, alpha * theta**2)
         # Floor to a tiny positive value: keeps the sqrt gradient finite at
         # delta = 0 without injecting visible noise (sqrt(1e-30) ≈ 1e-15).
         std = jnp.sqrt(jnp.maximum(delta, 1e-30))
@@ -902,7 +903,7 @@ class DenseHierarchical(PyroxModule):
         # Effective weight uses the broadcasted multiplicative scaling.
         # Equivalent (and slightly cheaper) to scaling x first then matmul:
         #   y = ((x * z_loc) @ theta) * z_glob.
-        out = ((x * z_loc) @ theta) * z_glob
+        out = einx.dot("... din, din dout -> ... dout", x * z_loc, theta) * z_glob
         if self.bias:
             b = self.pyrox_param("b", jnp.zeros(self.out_features))
             out = out + b
@@ -1036,8 +1037,10 @@ class DenseDVI(PyroxModule):
         )
         W_var = jnp.exp(W_log_var)
 
-        out_mean = mean @ W_mean
-        out_var = (var) @ (W_mean**2) + (mean**2 + var) @ W_var
+        out_mean = einx.dot("... din, din dout -> ... dout", mean, W_mean)
+        out_var = einx.dot("... din, din dout -> ... dout", var, W_mean**2) + einx.dot(
+            "... din, din dout -> ... dout", mean**2 + var, W_var
+        )
 
         if self.bias:
             b_mean = self.pyrox_param("bias_mean", jnp.zeros(self.out_features))
@@ -1084,7 +1087,7 @@ def _rff_forward(
     x: Float[Array, "*batch D_in"],
 ) -> Float[Array, "*batch D_rff"]:
     """Shared RFF feature map: ``sqrt(1/D) [cos(xW/l), sin(xW/l)]``."""
-    z = x @ W / lengthscale
+    z = einx.dot("... din, din f -> ... f", x, W) / lengthscale
     scale = jnp.sqrt(1.0 / n_features)
     return scale * jnp.concatenate([jnp.cos(z), jnp.sin(z)], axis=-1)
 
@@ -1097,7 +1100,8 @@ def _rff_cosine_forward(
     x: Float[Array, "*batch D_in"],
 ) -> Float[Array, "*batch n_features"]:
     """Shared single-cosine RFF feature map: ``sqrt(2/D) cos(xW/l + b)``."""
-    return jnp.sqrt(2.0 / n_features) * jnp.cos(x @ W / lengthscale + b)
+    proj = einx.dot("... din, din f -> ... f", x, W) / lengthscale + b
+    return jnp.sqrt(2.0 / n_features) * jnp.cos(proj)
 
 
 class RBFFourierFeatures(PyroxModule):
@@ -1305,7 +1309,7 @@ class RandomKitchenSinks(PyroxModule):
             "bias",
             dist.Normal(self.init_bias, 1.0).to_event(1),
         )
-        return phi @ beta + bias
+        return einx.dot("... r, r dout -> ... dout", phi, beta) + bias
 
 
 class RBFCosineFeatures(PyroxModule):
@@ -1566,7 +1570,7 @@ class ArcCosineFourierFeatures(PyroxModule):
             "lengthscale",
             dist.LogNormal(jnp.log(jnp.asarray(self.init_lengthscale)), 1.0),
         )
-        z = x @ W / ls
+        z = einx.dot("... din, din f -> ... f", x, W) / ls
         if self.order == 0:
             h = (z > 0.0).astype(x.dtype)
         else:
@@ -1810,7 +1814,7 @@ class HSGPFeatures(PyroxModule):
             "alpha",
             dist.Normal(0.0, 1.0).expand([self.num_basis]).to_event(1),
         )
-        return jnp.einsum("nm,m->n", Phi, sqrt_S * alpha)
+        return einx.dot("n m, m -> n", Phi, sqrt_S * alpha)
 
 
 # ---------------------------------------------------------------------------
@@ -2011,7 +2015,7 @@ class SirenDense(eqx.Module):
             ``sin(ω · (x W + b))`` for ``layer_type`` in ``{"first", "hidden"}``,
             or ``x W + b`` for ``layer_type == "last"``.
         """
-        pre = x @ self.W + self.b
+        pre = einx.dot("... i, i o -> ... o", x, self.W) + self.b
         if self.layer_type == "last":
             return pre
         return jnp.sin(self.omega * pre)
@@ -2308,7 +2312,7 @@ class BayesianSIREN(PyroxModule):
                 f"layer_{i}.b",
                 dist.Normal(0.0, b_scale).expand([spec.out_features]).to_event(1),
             )
-            pre = z @ W + b
+            pre = einx.dot("... i, i o -> ... o", z, W) + b
             z = pre if spec.layer_type == "last" else jnp.sin(spec.omega * pre)
         return z
 
@@ -2477,7 +2481,7 @@ class DeepVSSGP(PyroxModule):
                 .to_event(2),
             )
             phi = _rff_forward(W_freq, ls, self.n_features, z)
-            z = phi @ W_proj
+            z = einx.dot("... f, f o -> ... o", phi, W_proj)
         return z
 
 
@@ -2573,7 +2577,8 @@ class FourierFilter(PyroxModule):
         Returns:
             Filter output of shape ``(N, H)``.
         """
-        return jnp.sin(jnp.atleast_2d(x) @ self.Omega.T + self.phi)
+        proj = einx.dot("n d, h d -> n h", jnp.atleast_2d(x), self.Omega)
+        return jnp.sin(proj + self.phi)
 
 
 class GaborFilter(PyroxModule):
@@ -2707,12 +2712,12 @@ class GaborFilter(PyroxModule):
         # intermediate that pairwise broadcasting would materialise.
         x_norm_sq = jnp.sum(x2d**2, axis=-1, keepdims=True)  # (N, 1)
         mu_norm_sq = jnp.sum(self.mu**2, axis=-1)[None, :]  # (1, H)
-        cross = x2d @ self.mu.T  # (N, H)
+        cross = einx.dot("n d, h d -> n h", x2d, self.mu)  # (N, H)
         sq_dist = x_norm_sq + mu_norm_sq - 2.0 * cross  # (N, H)
         # Clip in case of float roundoff producing tiny negative values.
         sq_dist = jnp.maximum(sq_dist, 0.0)
         envelope = jnp.exp(-0.5 * gamma[None, :] * sq_dist)  # (N, H)
-        sinusoidal = jnp.sin(x2d @ self.Omega.T + self.phi)  # (N, H)
+        sinusoidal = jnp.sin(einx.dot("n d, h d -> n h", x2d, self.Omega) + self.phi)
         return sinusoidal * envelope
 
 

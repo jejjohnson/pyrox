@@ -17,7 +17,7 @@ are the engine of both VFF (#49, GP-side) and HSGP (#41, NN-side).
 
 from __future__ import annotations
 
-import einops
+import einx
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
@@ -50,7 +50,7 @@ def fourier_basis_1d(
     if L <= 0:
         raise ValueError(f"L must be > 0, got {L}.")
     j = jnp.arange(1, num_basis + 1, dtype=x.dtype)
-    arg = einops.einsum(x + L, j, "n, m -> n m") * (jnp.pi / (2.0 * L))
+    arg = einx.dot("n, m -> n m", x + L, j) * (jnp.pi / (2.0 * L))
     return jnp.sin(arg) / jnp.sqrt(L)
 
 
@@ -132,8 +132,9 @@ def fourier_basis(
     # Tensor-product the bases (row-major flatten of the multi-index).
     Phi = bases[0]
     for b in bases[1:]:
-        Phi = einops.einsum(Phi, b, "n a, n b -> n a b")
-        Phi = einops.rearrange(Phi, "n a b -> n (a b)")
+        # Per-row outer product (n, a, b) then row-major flatten to (n, a·b).
+        Phi = einx.multiply("n a, n b -> n a b", Phi, b)
+        Phi = einx.id("n a b -> n (a b)", Phi)
 
     # Sum-of-eigenvalues across axes via pure JAX broadcasting — row-major
     # flatten matches the basis layout above.

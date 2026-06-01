@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -379,11 +380,15 @@ class PosteriorLinearizationMarkov(eqx.Module):
             cav_mean = cav_var * (q_mean / q_var - nat1)
 
             std = jnp.sqrt(cav_var)
-            f_grid = cav_mean[None, :] + std[None, :] * x_nodes[:, None]
+            # Gauss-Hermite grid fₙ + σₙ ξ_q over (Q nodes, N sites).
+            f_grid = einx.add(
+                "q n, n -> q n", einx.multiply("q, n -> q n", x_nodes, std), cav_mean
+            )
             g_grid = jax.vmap(lambda f_row: grad_fn(f_row, y))(f_grid)
             h_grid = jax.vmap(lambda f_row: hess_fn(f_row, y))(f_grid)
-            g_avg = jnp.sum(w_nodes[:, None] * g_grid, axis=0)
-            h_avg = jnp.sum(w_nodes[:, None] * h_grid, axis=0)
+            # Quadrature average = weighted sum over the node axis q → (N,).
+            g_avg = einx.dot("q, q n -> n", w_nodes, g_grid)
+            h_avg = einx.dot("q, q n -> n", w_nodes, h_grid)
 
             new_prec = jnp.maximum(-h_avg, self.precision_floor)
             new_nat1 = g_avg + new_prec * cav_mean

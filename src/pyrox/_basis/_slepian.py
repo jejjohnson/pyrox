@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 
+import einx
 import equinox as eqx
 import jax.numpy as jnp
 from jaxtyping import Array, Float
@@ -102,9 +103,11 @@ def _slepian_block(
         if m_abs > 0:
             factor *= math.sqrt(2.0)
         rows.append(factor * p_lm)
-    weighted = jnp.stack(rows, axis=0) * w[None, :]
+    basis = jnp.stack(rows, axis=0)  # (B, Q) Legendre values per node
+    weighted = einx.multiply("b q, q -> b q", basis, w)
     phi_factor = 2.0 * jnp.pi if m_abs == 0 else jnp.pi
-    return phi_factor * (weighted @ jnp.stack(rows, axis=0).T)
+    # Quadrature inner products ∫ Pᵦ Pᵧ dz: contract the node axis q → (B, B).
+    return phi_factor * einx.dot("b q, c q -> b c", weighted, basis)
 
 
 def shannon_number(l_max: int, area: float | Float[Array, ""]) -> Float[Array, ""]:
@@ -201,8 +204,13 @@ def _centered_coordinates(
     north = jnp.asarray(
         [-jnp.sin(lat) * jnp.cos(lon), -jnp.sin(lat) * jnp.sin(lon), jnp.cos(lat)]
     )
+    # Project each point onto the local (east, north, centre) frame.
     return jnp.stack(
-        [unit_xyz @ east, unit_xyz @ north, unit_xyz @ centre],
+        [
+            einx.dot("n d, d -> n", unit_xyz, east),
+            einx.dot("n d, d -> n", unit_xyz, north),
+            einx.dot("n d, d -> n", unit_xyz, centre),
+        ],
         axis=-1,
     )
 
@@ -238,7 +246,8 @@ class SlepianCapBasis(eqx.Module):
         """Evaluate retained Slepian functions at unit Cartesian locations."""
         centered = self.centred_coordinates(unit_xyz)
         harmonics = real_spherical_harmonics(centered, self.l_max)
-        return harmonics @ self.coeffs
+        # Mix harmonics into Slepian modes: contract the harmonic axis m.
+        return einx.dot("n m, m k -> n k", harmonics, self.coeffs)
 
     def rotate_to(self, lonlat_centre: Float[Array, " 2"]) -> SlepianCapBasis:
         """Return an equivalent cap basis evaluated around ``lonlat_centre``."""

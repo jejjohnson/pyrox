@@ -25,6 +25,7 @@ Bayesian neural fields.* Nat. Commun. 15, 7942.
 
 from __future__ import annotations
 
+import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -294,7 +295,10 @@ class BayesianNeuralField(PyroxModule):
                 self._logistic_prior(()),
             )
             h = h / jnp.sqrt(fan_in)
-            h = activation(jax.nn.softplus(layer_gain) * (h @ W + b))
+            h = activation(
+                jax.nn.softplus(layer_gain)
+                * (einx.dot("... i, i o -> ... o", h, W) + b)
+            )
 
         # 6. Output linear, scaled by softplus(output_gain).
         fan_in = h.shape[-1]
@@ -311,4 +315,5 @@ class BayesianNeuralField(PyroxModule):
             self._logistic_prior(()),
         )
         h = h / jnp.sqrt(fan_in)
-        return (jax.nn.softplus(output_gain) * (h @ W_out + b_out)).squeeze(-1)
+        out = einx.dot("... i, i o -> ... o", h, W_out) + b_out
+        return (jax.nn.softplus(output_gain) * out).squeeze(-1)

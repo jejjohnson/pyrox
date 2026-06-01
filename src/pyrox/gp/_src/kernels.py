@@ -17,14 +17,15 @@ already-evaluated Gram matrices, not on callables. Higher-level
 :class:`pyrox.gp.Kernel` classes (Wave 2 Layer 1, see issue #20) compose
 callables and may opt in to gaussx's scalable variants when needed.
 
-Index axes are named via :mod:`einops` (``einsum`` / ``rearrange``) rather
-than raw broadcasting so shape intent stays legible at the call site.
+Index axes are named via :mod:`einx` (``einx.dot`` / ``einx.id`` /
+``einx.add``) rather than raw broadcasting so shape intent stays legible
+at the call site.
 """
 
 from __future__ import annotations
 
+import einx
 import jax.numpy as jnp
-from einops import einsum, rearrange
 from jaxtyping import Array, Float
 
 
@@ -40,10 +41,12 @@ def _pairwise_sq_dist(
     small negative values that arise from float cancellation on
     near-identical points.
     """
-    n1 = einsum(X1, X1, "n1 d, n1 d -> n1")
-    n2 = einsum(X2, X2, "n2 d, n2 d -> n2")
-    cross = einsum(X1, X2, "n1 d, n2 d -> n1 n2")
-    return jnp.clip(n1[:, None] + n2[None, :] - 2.0 * cross, min=0.0)
+    n1 = einx.dot("n1 d, n1 d -> n1", X1, X1)
+    n2 = einx.dot("n2 d, n2 d -> n2", X2, X2)
+    cross = einx.dot("n1 d, n2 d -> n1 n2", X1, X2)
+    # ‖xᵢ‖² + ‖x′ⱼ‖² broadcast to (N1, N2) via a named outer sum.
+    norm_sum = einx.add("n1, n2 -> n1 n2", n1, n2)
+    return jnp.clip(norm_sum - 2.0 * cross, min=0.0)
 
 
 def rbf_kernel(
@@ -168,7 +171,7 @@ def linear_kernel(
     Returns:
         ``(N1, N2)`` Gram matrix.
     """
-    return variance * einsum(X1, X2, "n1 d, n2 d -> n1 n2") + bias
+    return variance * einx.dot("n1 d, n2 d -> n1 n2", X1, X2) + bias
 
 
 def rational_quadratic_kernel(
@@ -230,7 +233,7 @@ def polynomial_kernel(
     """
     if degree < 1:
         raise ValueError(f"polynomial_kernel requires degree >= 1, got {degree!r}")
-    dot = einsum(X1, X2, "n1 d, n2 d -> n1 n2")
+    dot = einx.dot("n1 d, n2 d -> n1 n2", X1, X2)
     return variance * (dot + bias) ** degree
 
 
@@ -287,7 +290,8 @@ def white_kernel(
     Returns:
         ``(N1, N2)`` Gram matrix.
     """
-    diff = rearrange(X1, "n1 d -> n1 1 d") - rearrange(X2, "n2 d -> 1 n2 d")
+    # Pairwise feature difference (N1, N2, D) via named broadcasting.
+    diff = einx.subtract("n1 d, n2 d -> n1 n2 d", X1, X2)
     match = jnp.all(diff == 0.0, axis=-1)
     return variance * match.astype(X1.dtype)
 

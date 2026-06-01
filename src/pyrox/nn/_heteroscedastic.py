@@ -24,6 +24,7 @@ from __future__ import annotations
 import math
 from typing import Self, cast
 
+import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -64,24 +65,30 @@ def _hetero_noisy_logits(
 
     W_loc = layer.pyrox_param("W_loc", layer.W_loc_init)
     b_loc = layer.pyrox_param("b_loc", jnp.zeros(C, dtype=x.dtype))
-    mu = x @ W_loc + b_loc
+    mu = einx.dot("n d, d c -> n c", x, W_loc) + b_loc  # (N, C)
 
     W_scale = layer.pyrox_param("W_scale", layer.W_scale_init)
     b_scale = layer.pyrox_param("b_scale", jnp.zeros(C * r, dtype=x.dtype))
-    V = (x @ W_scale + b_scale).reshape(N, C, r)
+    # Low-rank factor: project to (N, C·r) then split the trailing axis.
+    raw_scale = einx.dot("n d, d k -> n k", x, W_scale) + b_scale
+    V = einx.id("n (c r) -> n c r", raw_scale, r=r)
 
     W_diag = layer.pyrox_param("W_diag", layer.W_diag_init)
     b_diag = layer.pyrox_param(
         "b_diag", jnp.full((C,), float(layer.diag_init_bias), dtype=x.dtype)
     )
-    sigma = jnp.exp(x @ W_diag + b_diag)
+    sigma = jnp.exp(einx.dot("n d, d c -> n c", x, W_diag) + b_diag)  # (N, C)
 
     key = cast(JaxArray, numpyro.prng_key())
     kz, ku = jr.split(key)
     z = jr.normal(kz, (S, N, r), dtype=x.dtype)
     u = jr.normal(ku, (S, N, C), dtype=x.dtype)
-    eps = jnp.einsum("ncr,snr->snc", V, z) + sigma[None, :, :] * u
-    return mu[None, :, :] + eps
+    # Low-rank + diagonal noise: V z contracts the rank axis r, the diagonal
+    # term broadcasts σ over the S sample axis. Both land at (S, N, C).
+    eps = einx.dot("n c r, s n r -> s n c", V, z) + einx.multiply(
+        "n c, s n c -> s n c", sigma, u
+    )
+    return einx.add("n c, s n c -> s n c", mu, eps)
 
 
 class _HeteroscedasticBase(PyroxModule):

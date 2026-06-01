@@ -39,6 +39,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
+import einx
 import equinox as eqx
 import jax.numpy as jnp
 import lineax as lx
@@ -427,8 +428,12 @@ class SlepianInducingFeatures(eqx.Module):
     def K_uu(self, kernel: Kernel, *, jitter: float = 1e-6) -> lx.MatrixLinearOperator:
         """Dense Slepian inducing covariance with diagonal jitter."""
         a_per_feature = self._per_feature_coeffs(kernel)
-        weighted_coeffs = self.basis.coeffs * a_per_feature[:, None]
-        K = self.basis.coeffs.T @ weighted_coeffs
+        # Scale each feature row by its Funk-Hecke coefficient, then form the
+        # Gram K = Φᵀ diag(a) Φ by contracting the feature axis f.
+        weighted_coeffs = einx.multiply(
+            "f m, f -> f m", self.basis.coeffs, a_per_feature
+        )
+        K = einx.dot("f i, f j -> i j", self.basis.coeffs, weighted_coeffs)
         K = K + jitter * jnp.eye(self.basis.num_modes, dtype=K.dtype)
         return lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)
 
@@ -449,7 +454,10 @@ class SlepianInducingFeatures(eqx.Module):
         centred = self.basis.centred_coordinates(unit_xyz)
         Y = real_spherical_harmonics(centred, self.l_max)
         a_per_feature = self._per_feature_coeffs(kernel)
-        return (Y * a_per_feature[None, :]) @ self.basis.coeffs
+        # Weight each harmonic by its Funk-Hecke coefficient, then project
+        # onto the Slepian modes by contracting the feature axis f.
+        Y_weighted = einx.multiply("n f, f -> n f", Y, a_per_feature)
+        return einx.dot("n f, f m -> n m", Y_weighted, self.basis.coeffs)
 
 
 # ---------------------------------------------------------------------------

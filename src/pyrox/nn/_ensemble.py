@@ -19,6 +19,7 @@ from __future__ import annotations
 import math
 from typing import NamedTuple
 
+import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -236,29 +237,25 @@ class DenseRank1(PyroxModule):
             r = self.pyrox_param("r", self.r_init)
             s = self.pyrox_param("s", self.s_init)
 
-        # y_i = ((x ∘ s_i) @ W) ∘ r_i + b_i. einsum's `...` lets us keep
-        # arbitrary leading batch dims while broadcasting s_i, r_i over
-        # them. Avoids materialising the per-member effective kernel
-        # W_i = (s_i ⊗ r_i) ∘ W.
-        x_scaled = jnp.einsum("...d,md->m...d", x, s)
-        h = jnp.einsum("m...d,do->m...o", x_scaled, W)
-        # Broadcast r_i over the *batch dims by expanding to (M, *(1,)*B, D_out)
-        # where B is the number of batch dims (h.ndim - 2 to drop M and D_out).
-        batch_ndim = h.ndim - 2
-        r_b = r.reshape(
-            (self.ensemble_size,) + (1,) * batch_ndim + (self.out_features,)
-        )
-        out = h * r_b
+        # yᵢ = ((x ∘ sᵢ) W) ∘ rᵢ + bᵢ. The einx `...` ellipsis keeps
+        # arbitrary leading batch dims while broadcasting the per-member
+        # sᵢ, rᵢ over them, and the named `m` axis is introduced by the
+        # input-scaling step. Avoids materialising the per-member
+        # effective kernel Wᵢ = (sᵢ ⊗ rᵢ) ∘ W and the manual reshapes
+        # that broadcasting rᵢ / bᵢ would otherwise need.
+        #   x:        (*batch, D_in)
+        #   x_scaled: (M, *batch, D_in)
+        #   h, out:   (M, *batch, D_out)
+        x_scaled = einx.multiply("... d, m d -> m ... d", x, s)
+        h = einx.dot("m ... d, d o -> m ... o", x_scaled, W)
+        out = einx.multiply("m ... o, m o -> m ... o", h, r)
 
         if self.bias:
             b = self.pyrox_param(
                 "b",
                 jnp.zeros((self.ensemble_size, self.out_features)),
             )
-            b_b = b.reshape(
-                (self.ensemble_size,) + (1,) * batch_ndim + (self.out_features,)
-            )
-            out = out + b_b
+            out = einx.add("m ... o, m o -> m ... o", out, b)
         return out
 
 
@@ -353,12 +350,11 @@ class LayerNormEnsemble(PyroxModule):
         var = jnp.var(x, axis=-1, keepdims=True)
         x_hat = (x - mean) * jax.lax.rsqrt(var + self.eps)
 
-        # Broadcast (M, D) scale/bias over the *batch axes between them.
-        batch_ndim = x.ndim - 2
-        broadcast_shape = (
-            (self.ensemble_size,) + (1,) * batch_ndim + (self.feature_dim,)
-        )
-        return scales.reshape(broadcast_shape) * x_hat + biases.reshape(broadcast_shape)
+        # Per-member affine: broadcast (M, D) γ/β over the intermediate
+        # *batch axes via named ellipsis — no manual reshape bookkeeping.
+        #   x_hat: (M, *batch, D)   γ, β: (M, D)
+        scaled = einx.multiply("m ... d, m d -> m ... d", x_hat, scales)
+        return einx.add("m ... d, m d -> m ... d", scaled, biases)
 
 
 class _Rank1ProjInit(NamedTuple):
@@ -422,13 +418,15 @@ def _apply_rank1_proj(
                 f"Expected x.shape[0] == ensemble_size ({ensemble_size}) when "
                 f"has_ensemble=True; got x.shape = {x.shape}."
             )
-        x_scaled = x * proj.s.reshape((ensemble_size,) + (1,) * (x.ndim - 2) + (-1,))
+        # x already carries the M axis: scale per member over batch dims.
+        x_scaled = einx.multiply("m ... d, m d -> m ... d", x, proj.s)
     else:
-        x_scaled = jnp.einsum("...d,md->m...d", x, proj.s)
-    h = jnp.einsum("m...d,do->m...o", x_scaled, proj.W)
-    out = h * proj.r.reshape((ensemble_size,) + (1,) * (h.ndim - 2) + (-1,))
+        # x is un-ensembled: the M axis is introduced by the per-member scale.
+        x_scaled = einx.multiply("... d, m d -> m ... d", x, proj.s)
+    h = einx.dot("m ... d, d o -> m ... o", x_scaled, proj.W)
+    out = einx.multiply("m ... o, m o -> m ... o", h, proj.r)
     if bias:
-        out = out + proj.b.reshape((ensemble_size,) + (1,) * (out.ndim - 2) + (-1,))
+        out = einx.add("m ... o, m o -> m ... o", out, proj.b)
     return out
 
 
@@ -648,8 +646,6 @@ class MultiHeadAttentionBE(PyroxModule):
         M = self.ensemble_size
         H = self.num_heads
         d = self.head_dim
-        T = query.shape[0]
-        S = key.shape[0]
 
         # Project inputs (no ensemble axis on input → M added on output).
         Q = _apply_rank1_proj(
@@ -662,17 +658,17 @@ class MultiHeadAttentionBE(PyroxModule):
             value, v_proj, M, self.bias, has_ensemble=False
         )  # (M, S, D)
 
-        # Per-head reshape: (M, *, D) → (M, num_heads, *, head_dim).
-        Q = Q.reshape(M, T, H, d).transpose(0, 2, 1, 3)  # (M, H, T, d)
-        K = K.reshape(M, S, H, d).transpose(0, 2, 1, 3)  # (M, H, S, d)
-        V = V.reshape(M, S, H, d).transpose(0, 2, 1, 3)  # (M, H, S, d)
+        # Per-head split + transpose in one shot: (M, ·, H·d) → (M, H, ·, d).
+        Q = einx.id("m t (h d) -> m h t d", Q, h=H)  # (M, H, T, d)
+        K = einx.id("m s (h d) -> m h s d", K, h=H)  # (M, H, S, d)
+        V = einx.id("m s (h d) -> m h s d", V, h=H)  # (M, H, S, d)
 
-        scores = jnp.einsum("mhtd,mhsd->mhts", Q, K) / math.sqrt(d)
+        scores = einx.dot("m h t d, m h s d -> m h t s", Q, K) / math.sqrt(d)
         weights = jax.nn.softmax(scores, axis=-1)
-        attn = jnp.einsum("mhts,mhsd->mhtd", weights, V)  # (M, H, T, d)
+        attn = einx.dot("m h t s, m h s d -> m h t d", weights, V)  # (M, H, T, d)
 
-        # Concatenate heads back to (M, T, embed_dim).
-        attn = attn.transpose(0, 2, 1, 3).reshape(M, T, self.embed_dim)
+        # Merge heads back to (M, T, embed_dim): transpose + reshape in one shot.
+        attn = einx.id("m h t d -> m t (h d)", attn)
 
         # Output projection: input already has the M axis.
         return _apply_rank1_proj(attn, o_proj, M, self.bias, has_ensemble=True)
