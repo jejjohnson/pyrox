@@ -44,6 +44,7 @@ nav:
   - Home: index.md
   - Examples:
       - Demo: notebooks/example_demo.ipynb
+      - GPD via peaks-over-threshold: notebooks/evt_gpd_pot.ipynb
       - EVT distributions overview: notebooks/evt_distributions_overview.ipynb
       - Fréchet on heavy-tailed maxima: notebooks/evt_frechet_heavy_tails.ipynb
       - Weibull on bounded extremes: notebooks/evt_weibull_bounded.ipynb
