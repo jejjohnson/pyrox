@@ -44,6 +44,7 @@ nav:
   - Home: index.md
   - Examples:
       - Demo: notebooks/example_demo.ipynb
+      - GEVD on annual block maxima: notebooks/evt_gevd_block_maxima.ipynb
       - GPD via peaks-over-threshold: notebooks/evt_gpd_pot.ipynb
       - Quantile-regression threshold + GPD: notebooks/evt_quantile_regression_gpd.ipynb
       - Non-stationary GEVD (neural ODE): notebooks/evt_nonstat_neural_ode.ipynb
