@@ -20,11 +20,11 @@ classifiers = [
     "Development Status :: 2 - Pre-Alpha",
 ]
 dependencies = [
-    # numpyro 0.20.x uses jax internals that were removed in jax >= 0.7.
-    # Pin jax/jaxlib below that ceiling until numpyro catches up.
-    "jax>=0.4,<0.7",
-    "jaxlib>=0.4,<0.7",
-    "numpyro>=0.15",
+    # numpyro >= 0.21 restored support for the jax internals that moved in
+    # jax 0.7; keep the ceiling below the next major (0.11) as a guard rail.
+    "jax>=0.4,<0.11",
+    "jaxlib>=0.4,<0.11",
+    "numpyro>=0.21",
     "xarray>=2024.0",
     "numpy>=1.26",
     "scipy>=1.11",
