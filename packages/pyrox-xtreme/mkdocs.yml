@@ -45,6 +45,7 @@ nav:
   - Examples:
       - Demo: notebooks/example_demo.ipynb
       - EVT distributions overview: notebooks/evt_distributions_overview.ipynb
+      - Fréchet on heavy-tailed maxima: notebooks/evt_frechet_heavy_tails.ipynb
       - Weibull on bounded extremes: notebooks/evt_weibull_bounded.ipynb
       - HPP — from scratch + NumPyro: notebooks/hpp_from_scratch_and_numpyro.ipynb
       - IPP — from scratch + NumPyro: notebooks/ipp_from_scratch_and_numpyro.ipynb
