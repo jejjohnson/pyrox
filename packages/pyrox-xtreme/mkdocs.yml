@@ -49,6 +49,7 @@ nav:
       - Quantile-regression threshold + GPD: notebooks/evt_quantile_regression_gpd.ipynb
       - Non-stationary GEVD (parametric trend): notebooks/evt_nonstat_parametric.ipynb
       - Non-stationary GEVD (neural ODE): notebooks/evt_nonstat_neural_ode.ipynb
+      - Non-stationary GEVD (P-splines): notebooks/evt_nonstat_splines.ipynb
       - EVT distributions overview: notebooks/evt_distributions_overview.ipynb
       - Fréchet on heavy-tailed maxima: notebooks/evt_frechet_heavy_tails.ipynb
       - Weibull on bounded extremes: notebooks/evt_weibull_bounded.ipynb
