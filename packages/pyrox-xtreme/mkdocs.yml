@@ -45,6 +45,7 @@ nav:
   - Examples:
       - Demo: notebooks/example_demo.ipynb
       - GPD via peaks-over-threshold: notebooks/evt_gpd_pot.ipynb
+      - Quantile-regression threshold + GPD: notebooks/evt_quantile_regression_gpd.ipynb
       - EVT distributions overview: notebooks/evt_distributions_overview.ipynb
       - Fréchet on heavy-tailed maxima: notebooks/evt_frechet_heavy_tails.ipynb
       - Weibull on bounded extremes: notebooks/evt_weibull_bounded.ipynb
