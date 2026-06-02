@@ -85,6 +85,61 @@ def gev_cdf(
     return jnp.where(is_gumbel, gumbel, gevd)
 
 
+def gev_survival(
+    x: Float[Array, ...],
+    loc: Float[Array, ...],
+    scale: Float[Array, ...],
+    shape: Float[Array, ...],
+) -> Float[Array, ...]:
+    r"""Survival function :math:`S(x) = 1 - F(x)` of the GEV distribution.
+
+    Uses ``-expm1(log F)`` rather than ``1 - F`` so the deep upper tail
+    (where :math:`F \approx 1` and :math:`S` is tiny) stays accurate
+    instead of cancelling against 1.0.
+    """
+    shape = jnp.asarray(shape)
+    is_gumbel = jnp.abs(shape) < _GUMBEL_THRESHOLD
+    xi = _safe_shape(shape)
+
+    z = (x - loc) / scale
+    t = 1.0 + xi * z
+    valid = t > 0.0
+    t_safe = jnp.where(valid, t, 1.0)
+
+    gumbel = -jnp.expm1(-jnp.exp(-z))
+    gev_inside = -jnp.expm1(-jnp.power(t_safe, -1.0 / xi))
+    # Below the Fréchet (ξ > 0) lower endpoint S = 1; above the Weibull
+    # (ξ < 0) upper endpoint S = 0.
+    boundary = jnp.where(shape > 0, 1.0, 0.0)
+    gevd = jnp.where(valid, gev_inside, boundary)
+
+    return jnp.where(is_gumbel, gumbel, gevd)
+
+
+def gev_log_survival(
+    x: Float[Array, ...],
+    loc: Float[Array, ...],
+    scale: Float[Array, ...],
+    shape: Float[Array, ...],
+) -> Float[Array, ...]:
+    r"""Log survival function :math:`\log S(x) = \log(1 - F(x))` of the GEV."""
+    shape = jnp.asarray(shape)
+    is_gumbel = jnp.abs(shape) < _GUMBEL_THRESHOLD
+    xi = _safe_shape(shape)
+
+    z = (x - loc) / scale
+    t = 1.0 + xi * z
+    valid = t > 0.0
+    t_safe = jnp.where(valid, t, 1.0)
+
+    gumbel = jnp.log(-jnp.expm1(-jnp.exp(-z)))
+    gev_inside = jnp.log(-jnp.expm1(-jnp.power(t_safe, -1.0 / xi)))
+    boundary = jnp.where(shape > 0, 0.0, -jnp.inf)
+    gevd = jnp.where(valid, gev_inside, boundary)
+
+    return jnp.where(is_gumbel, gumbel, gevd)
+
+
 def gev_icdf(
     q: Float[Array, ...],
     loc: Float[Array, ...],

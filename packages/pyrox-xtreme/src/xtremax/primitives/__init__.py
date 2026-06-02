@@ -22,8 +22,10 @@ from xtremax.primitives.gev import (
     gev_cdf,
     gev_icdf,
     gev_log_prob,
+    gev_log_survival,
     gev_mean,
     gev_return_level,
+    gev_survival,
 )
 from xtremax.primitives.gpd import (
     gpd_cdf,
@@ -39,6 +41,17 @@ from xtremax.primitives.gumbel import (
     gumbel_mean,
     gumbel_return_level,
 )
+from xtremax.primitives.nonstationary import (
+    assemble_nonstationary_gev_fields,
+    expected_exceedances,
+    nonstationary_return_level,
+    nonstationary_return_period,
+)
+from xtremax.primitives.spatial import (
+    design_matrix,
+    pairwise_distances,
+    two_range_correlation,
+)
 from xtremax.primitives.weibull import (
     weibull_cdf,
     weibull_icdf,
@@ -49,6 +62,9 @@ from xtremax.primitives.weibull import (
 
 
 __all__ = [
+    "assemble_nonstationary_gev_fields",
+    "design_matrix",
+    "expected_exceedances",
     # Fréchet (GEV, ξ > 0)
     "frechet_cdf",
     "frechet_icdf",
@@ -59,8 +75,10 @@ __all__ = [
     "gev_cdf",
     "gev_icdf",
     "gev_log_prob",
+    "gev_log_survival",
     "gev_mean",
     "gev_return_level",
+    "gev_survival",
     # GPD
     "gpd_cdf",
     "gpd_icdf",
@@ -73,6 +91,10 @@ __all__ = [
     "gumbel_log_prob",
     "gumbel_mean",
     "gumbel_return_level",
+    "nonstationary_return_level",
+    "nonstationary_return_period",
+    "pairwise_distances",
+    "two_range_correlation",
     # Weibull (GEV, ξ < 0)
     "weibull_cdf",
     "weibull_icdf",
