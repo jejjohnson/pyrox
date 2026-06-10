@@ -2,10 +2,12 @@
 
 The `pyrox.nn` subpackage ships uncertainty-aware neural network layers in four families:
 
-1. **Geographic / spherical encoders** (re-exported from `geonnax` via `pyrox.nn._geonnax`) — degree/radian, lon/lat, cyclic, and spherical-harmonic preprocessing for geophysical inputs.
-2. **Dense / Bayesian-linear layers** (`pyrox.nn._dense`) — reparameterization, Flipout, hierarchical, NCP, DVI, and variational-dropout variants of `Wx + b`.
-3. **Bayesian Neural Field stack** (`pyrox.nn._bnf`) — five layers that together implement the BNF architecture (Saad et al., Nat. Comms. 2024).
-4. **Pure-JAX feature helpers** (`pyrox.nn._features`) — pandas-free building blocks the BNF layers wrap.
+1. **Geographic / spherical encoders** (re-exported from `geonnax`) — degree/radian, lon/lat, cyclic, spherical-harmonic, and Slepian preprocessing for geophysical inputs.
+2. **Dense / Bayesian-linear layers** (`pyrox.nn._dense`) — reparameterization, Flipout, hierarchical, NCP, DVI, rank-1 ensemble, and variational-dropout variants of `Wx + b`.
+3. **Spectral / GP-flavoured layers** — random-feature kernel maps, SNGP and VSSGP heads, deep random-feature expansions.
+4. **Ensembles & output heads** — BatchEnsemble layers, heteroscedastic Monte-Carlo output heads.
+5. **Bayesian Neural Field stack** (`pyrox.nn._bnf`) — five layers that together implement the BNF architecture (Saad et al., Nat. Comms. 2024).
+6. **Pure-JAX feature helpers** (re-exported from `geonnax.basis`) — pandas-free building blocks the BNF layers wrap.
 
 See also: [Geo encoders](nn/geo_encoders.md) for the longitude/latitude and spherical-harmonic API surface.
 
@@ -17,9 +19,17 @@ See also: [Geo encoders](nn/geo_encoders.md) for the longitude/latitude and sphe
 
 ::: pyrox.nn.DenseVariational
 
+::: pyrox.nn.DenseDVI
+
+::: pyrox.nn.DenseHierarchical
+
+::: pyrox.nn.DenseVariationalDropout
+
 ::: pyrox.nn.DenseNCP
 
 ::: pyrox.nn.NCPContinuousPerturb
+
+::: pyrox.nn.NCPNormalOutput
 
 ::: pyrox.nn.RBFFourierFeatures
 
@@ -93,6 +103,42 @@ with handlers.seed(rng_seed=0):
 ::: pyrox.nn.SIREN
 
 ::: pyrox.nn.BayesianSIREN
+
+## SNGP — spectral-normalised GP head
+
+The SNGP output layer (Liu et al., 2020): a random-feature GP last layer
+whose posterior covariance comes from a Laplace approximation
+(`LaplaceRandomFeatureCovariance`, re-exported from `geonnax`), giving
+distance-aware uncertainty from a single deterministic forward pass.
+
+::: pyrox.nn.RandomFeatureGaussianProcess
+
+::: pyrox.nn.LaplaceRandomFeatureCovariance
+
+## Deep spectral GPs
+
+::: pyrox.nn.DeepVSSGP
+
+## Ensembles — BatchEnsemble / rank-1
+
+Efficient deep ensembles that share one weight matrix and learn
+per-member rank-1 perturbations (Wen et al., 2020; Dusenberry et al.,
+2020).
+
+::: pyrox.nn.DenseRank1
+
+::: pyrox.nn.LayerNormEnsemble
+
+::: pyrox.nn.MultiHeadAttentionBE
+
+## Heteroscedastic output heads
+
+Monte-Carlo sigmoid / softmax output layers with factor-analysis noise
+(Collier et al., 2021) for input-dependent label noise.
+
+::: pyrox.nn.MCSigmoidDenseFA
+
+::: pyrox.nn.MCSoftmaxDenseFA
 
 ## Bayesian Neural Field stack
 

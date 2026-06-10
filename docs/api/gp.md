@@ -1,10 +1,14 @@
 # GP API
 
-Wave 2 ships the dense-GP foundation: kernel *math functions*, concrete
-`Parameterized` kernel classes, abstract component protocols, and the
-model-facing entry points (`GPPrior`, `ConditionedGP`, `gp_factor`,
-`gp_sample`). Scalable matrix construction and solver strategies
-(numerically stable assembly, implicit operators, batched matvec,
+The full GP stack: kernel *math functions*, concrete `Parameterized`
+kernel classes, model-facing entry points (`GPPrior`, `ConditionedGP`,
+`gp_factor`, `gp_sample`), sparse variational GPs with inter-domain
+inducing features, variational guides and likelihoods, non-Gaussian
+inference strategies (Laplace, Gauss-Newton, EP, posterior
+linearization, quasi-Newton — dense and Markov), pathwise (Matheron)
+posterior samplers, state-space (Kalman) GPs, and multi-output kernels.
+Scalable matrix construction and solver strategies (numerically stable
+assembly, implicit operators, batched matvec,
 Cholesky / CG / BBMM / LSMR / SLQ) live in
 [`gaussx`](https://github.com/jejjohnson/gaussx).
 
@@ -76,7 +80,7 @@ with `autoguide`, and flip `set_mode("model" | "guide")`.
 
 Inter-domain inducing-feature families used to build scalable sparse GPs
 where the inducing-prior covariance ``K_uu`` becomes diagonal. Pass any
-of these to :class:`SparseGPPrior` via the ``inducing=`` keyword in
+of these to `SparseGPPrior` via the ``inducing=`` keyword in
 place of a raw point matrix ``Z``.
 
 ```python
@@ -90,6 +94,7 @@ prior    = SparseGPPrior(kernel=kernel, inducing=features)   # K_uu is diagonal!
 ::: pyrox.gp.InducingFeatures
 ::: pyrox.gp.FourierInducingFeatures
 ::: pyrox.gp.SphericalHarmonicInducingFeatures
+::: pyrox.gp.SlepianInducingFeatures
 ::: pyrox.gp.LaplacianInducingFeatures
 ::: pyrox.gp.DecoupledInducingFeatures
 ::: pyrox.gp.funk_hecke_coefficients
@@ -98,10 +103,87 @@ prior    = SparseGPPrior(kernel=kernel, inducing=features)   # K_uu is diagonal!
 
 ::: pyrox.gp.SparseGPPrior
 
+## Variational guides
+
+Variational families `q(u)` over the inducing values of a
+`SparseGPPrior`. All five expose the same building-block interface —
+`sample(key)`, `log_prob(u)`, `kl_divergence(prior_cov)`, and
+`predict(K_xz, K_zz_op, K_xx_diag)` — so they swap freely inside the
+SVGP ELBO. `WhitenedGuide` parameterizes in whitened coordinates
+`u = L_zz v` (the standard choice for stable optimization);
+`NaturalGuide` parameterizes in natural form for natural-gradient / CVI
+workflows; `DeltaGuide` is a point mass for MAP-style training.
+
+::: pyrox.gp.FullRankGuide
+::: pyrox.gp.MeanFieldGuide
+::: pyrox.gp.WhitenedGuide
+::: pyrox.gp.NaturalGuide
+::: pyrox.gp.DeltaGuide
+
+## Likelihoods
+
+Observation models for latent-GP workflows. Each maps latent function
+values to a summed log-density `log_prob(f, y)`; `DistLikelihood` wraps
+any `numpyro.distributions.Distribution` factory for one-off models.
+
+::: pyrox.gp.GaussianLikelihood
+::: pyrox.gp.HeteroscedasticGaussianLikelihood
+::: pyrox.gp.BernoulliLikelihood
+::: pyrox.gp.PoissonLikelihood
+::: pyrox.gp.SoftmaxLikelihood
+::: pyrox.gp.StudentTLikelihood
+::: pyrox.gp.DistLikelihood
+
+## SVGP inference
+
+The structured SVGP ELBO as a differentiable scalar (`svgp_elbo`), its
+NumPyro registration (`svgp_factor`), and the natural-gradient / CVI
+update loop (`ConjugateVI`) that exploits the `NaturalGuide`
+parameterization for conjugate-style coordinate ascent.
+
+::: pyrox.gp.svgp_elbo
+::: pyrox.gp.svgp_factor
+::: pyrox.gp.ConjugateVI
+
+## Non-Gaussian inference strategies
+
+Site-based Gaussian approximations `q(f) = N(m, V)` of the posterior
+under a non-conjugate likelihood. All five strategies share the same
+diagonal-site view and differ only in where the per-site curvature
+comes from: exact Hessian at the mode (Laplace), PSD-projected
+Gauss-Newton curvature, statistical linearization under the cavity
+(posterior linearization / CVI), moment matching against the tilted
+distribution (EP), or L-BFGS to the MAP with a Laplace covariance at
+convergence (quasi-Newton). Each `fit(prior, likelihood, y)` returns a
+`NonGaussConditionedGP` that quacks like `ConditionedGP`.
+
+::: pyrox.gp.LaplaceInference
+::: pyrox.gp.GaussNewtonInference
+::: pyrox.gp.PosteriorLinearization
+::: pyrox.gp.ExpectationPropagation
+::: pyrox.gp.QuasiNewtonInference
+::: pyrox.gp.NonGaussConditionedGP
+
+## Multi-output GPs
+
+Vector-valued GPs via coregionalization: the linear model of
+coregionalization (LMC) mixes `Q` independent latent processes through
+a learned matrix, the intrinsic coregionalization model (ICM) shares
+one latent kernel, and the orthogonal instantaneous linear mixing model
+(OILMM) constrains the mixing to be orthogonal so inference decouples
+per latent process (the projections delegate to `gaussx.oilmm_project`
+/ `gaussx.oilmm_back_project`).
+
+::: pyrox.gp.LMCKernel
+::: pyrox.gp.ICMKernel
+::: pyrox.gp.OILMMKernel
+::: pyrox.gp.MultiOutputInducingVariables
+::: pyrox.gp.SharedInducingPoints
+
 ## Pathwise posterior samplers (#39)
 
 Callable posterior function draws via Matheron's rule. Each sampled
-path is a :class:`PathwiseFunction` that evaluates in
+path is a `PathwiseFunction` that evaluates in
 ``O(N_* · F · D + N_* · N_corr)`` per path — ``N_* · F · D`` for the
 RFF prior draw and ``N_* · N_corr`` for the kernel correction against
 the ``N_corr`` training (exact) or inducing (decoupled) points — so the
@@ -174,6 +256,7 @@ qp = QuasiPeriodicSDE(matern, per)                # state dim = 2 * 15 = 30
 ```
 
 ::: pyrox.gp.SDEKernel
+::: pyrox.gp.SDEParams
 ::: pyrox.gp.MaternSDE
 ::: pyrox.gp.ConstantSDE
 ::: pyrox.gp.CosineSDE
@@ -225,23 +308,49 @@ def temporal_model(times, y):
     markov_gp_factor("obs", prior, y, jnp.array(0.01))
 ```
 
-Currently scoped to Gaussian-likelihood regression on a single time axis.
-Non-Gaussian likelihoods on top of the Markov path (CVI, EP) and
-spatio-temporal Markov priors land in later waves.
+For non-Gaussian likelihoods on the Markov path, see the
+[Markov non-Gaussian strategies](#non-gaussian-inference-markov) below;
+for inducing-grid scalability, the [sparse Markov GP](#sparse-markov-gp).
 
 ::: pyrox.gp.MarkovGPPrior
 ::: pyrox.gp.ConditionedMarkovGP
 ::: pyrox.gp.markov_gp_factor
 ::: pyrox.gp.markov_gp_sample
 
+## Non-Gaussian inference (Markov)
+
+The Markov-aware counterparts of the site-based strategies above: same
+diagonal-site math, but the global posterior recomputation runs through
+the Kalman filter / RTS smoother in `O(N d^3)` instead of a dense
+`O(N^3)` solve. Each `fit(prior, likelihood, y)` returns a
+`NonGaussConditionedMarkovGP` with the same `predict` API as the
+Gaussian-likelihood `ConditionedMarkovGP`.
+
+::: pyrox.gp.LaplaceMarkovInference
+::: pyrox.gp.GaussNewtonMarkovInference
+::: pyrox.gp.PosteriorLinearizationMarkov
+::: pyrox.gp.ExpectationPropagationMarkov
+::: pyrox.gp.NonGaussConditionedMarkovGP
+
+## Sparse Markov GP
+
+Sparse variational GP over an SDE kernel and an inducing *time* grid:
+the variational family lives on the inducing times while predictions
+exploit the Markov structure between them.
+
+::: pyrox.gp.SparseMarkovGPPrior
+::: pyrox.gp.SparseConditionedMarkovGP
+::: pyrox.gp.sparse_markov_elbo
+::: pyrox.gp.sparse_markov_factor
+
 ## Component protocols
 
-Abstract pyrox-local bases for the orthogonal component stack. Wave 2
-ships only the contracts for `Guide` and `Likelihood` — concrete
-implementations land in later waves. Cubature integrators (Gauss-Hermite,
+Abstract pyrox-local bases for the orthogonal component stack — the
+contracts that the concrete kernels, guides, and likelihoods above
+implement. Cubature integrators (Gauss-Hermite,
 Monte Carlo) come from `gaussx.AbstractIntegrator` and its concrete
 subclasses; solver strategies live in
-[`gaussx._strategies`](https://github.com/jejjohnson/gaussx).
+[`gaussx`](https://github.com/jejjohnson/gaussx).
 
 ::: pyrox.gp.Kernel
 ::: pyrox.gp.Guide

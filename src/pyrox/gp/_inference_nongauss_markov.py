@@ -1,18 +1,18 @@
-"""Site-based non-Gaussian inference for :class:`MarkovGPPrior`.
+"""Site-based non-Gaussian inference for `MarkovGPPrior`.
 
-Couples the site-based view from :mod:`pyrox.gp._inference_nongauss`
+Couples the site-based view from `pyrox.gp._inference_nongauss`
 (each likelihood factor contributes a diagonal Gaussian site with
-naturals :math:`(\\lambda, \\Lambda)`) to the linear-time Kalman /
-RTS-smoother backbone in :mod:`pyrox.gp._markov`.
+naturals $(\\lambda, \\Lambda)$) to the linear-time Kalman /
+RTS-smoother backbone in `pyrox.gp._markov`.
 
 Each iteration runs the filter + smoother once with per-step
-pseudo-observation variance :math:`R_n = 1/\\Lambda_n` and pseudo-target
-:math:`\\tilde y_n = \\lambda_n / \\Lambda_n` to obtain the marginal
-posterior :math:`q(f_n) = \\mathcal{N}(m_n, V_n)` on the training grid;
+pseudo-observation variance $R_n = 1/\\Lambda_n$ and pseudo-target
+$\\tilde y_n = \\lambda_n / \\Lambda_n$ to obtain the marginal
+posterior $q(f_n) = \\mathcal{N}(m_n, V_n)$ on the training grid;
 strategies differ only in how new site naturals are obtained from the
-local likelihood given ``(m_n, V_n)``. Cost is :math:`O(I N d^3)` for
+local likelihood given ``(m_n, V_n)``. Cost is $O(I N d^3)$ for
 ``I`` iterations on ``N`` time points and SDE state dimension ``d`` —
-linear in ``N``, where the dense path is :math:`O(I N^3)`.
+linear in ``N``, where the dense path is $O(I N^3)$.
 
 Predictions reuse the same Kalman trick: the merged grid
 ``sort(times \\cup t_star)`` with the test points masked produces
@@ -50,7 +50,7 @@ def _prior_marginal_variance(prior: MarkovGPPrior) -> Float[Array, " N"]:
     r"""Stationary prior marginal variance ``H P_inf H^T`` per training time.
 
     Stationary 1-D SDE kernels have a constant marginal variance equal to
-    :math:`H P_\infty H^\top` (equivalent to the kernel ``variance``); we
+    $H P_\infty H^\top$ (equivalent to the kernel ``variance``); we
     broadcast it to ``(N,)`` so it can seed the cavity-update loops in PL
     and EP without hard-coding ``1.0`` on rescaled kernels.
     """
@@ -67,7 +67,7 @@ def _markov_smoothed_posterior(
     r"""Smoothed marginals on the training grid given diagonal site naturals.
 
     Treats the sites as a synthetic Gaussian likelihood with per-step
-    variance :math:`1/\Lambda_n` and target :math:`\lambda_n / \Lambda_n`
+    variance $1/\Lambda_n$ and target $\lambda_n / \Lambda_n$
     (centred on the prior mean), then runs filter + RTS smoother. Returns
     ``(f_mean, f_var, log_marg)`` over the training times where
     ``log_marg`` is the Kalman log-likelihood of the *pseudo-observations*
@@ -97,7 +97,7 @@ def _markov_smoothed_posterior(
 class NonGaussConditionedMarkovGP(eqx.Module):
     """Markov GP conditioned on a non-Gaussian likelihood via a site-based strategy.
 
-    Equivalent role to :class:`pyrox.gp.ConditionedMarkovGP` but the
+    Equivalent role to `pyrox.gp.ConditionedMarkovGP` but the
     posterior over training latents is a generic Gaussian
     approximation produced by one of the strategies in this module
     rather than the closed-form Gaussian-likelihood smoother. Predictions
@@ -106,10 +106,10 @@ class NonGaussConditionedMarkovGP(eqx.Module):
     points masked.
 
     Attributes:
-        prior: The originating :class:`MarkovGPPrior`.
+        prior: The originating `MarkovGPPrior`.
         y: Training targets (kept for round-trip / diagnostics).
-        site_nat1: Diagonal site naturals :math:`\\lambda \\in \\mathbb{R}^N`.
-        site_nat2: Diagonal site precisions :math:`\\Lambda \\in \\mathbb{R}^N`
+        site_nat1: Diagonal site naturals $\\lambda \\in \\mathbb{R}^N$.
+        site_nat2: Diagonal site precisions $\\Lambda \\in \\mathbb{R}^N$
             (positive).
         q_mean: Posterior mean over training latents.
         q_var: Marginal posterior variance per training point.
@@ -139,7 +139,7 @@ class NonGaussConditionedMarkovGP(eqx.Module):
         Re-runs filter + smoother over the merged grid
         ``sort(times \cup t_star)`` with per-step pseudo-observation
         variances ``1/Λ_n`` on the training points and the test points
-        masked out of the update step. Cost is :math:`O((N + M)\,d^3)`.
+        masked out of the update step. Cost is $O((N + M)\,d^3)$.
         """
         F, _L, H, _Qc, P_inf = self.prior.sde_kernel.sde_params()
         times = self.prior.times
@@ -187,15 +187,15 @@ class NonGaussConditionedMarkovGP(eqx.Module):
 
 
 class LaplaceMarkovInference(eqx.Module):
-    r"""Laplace approximation for :class:`MarkovGPPrior`.
+    r"""Laplace approximation for `MarkovGPPrior`.
 
     Fixed-point Newton on the smoothed posterior: at each iteration run
     filter + smoother with the current sites to obtain marginals
     ``(m_n, V_n)``, then update site naturals from per-point gradient /
     Hessian of ``log p(y | f)`` evaluated at ``f = m``. Site precision
-    :math:`\Lambda = -h` is clipped to ``precision_floor``.
+    $\Lambda = -h$ is clipped to ``precision_floor``.
 
-    Args:
+    Attributes:
         max_iter: Newton iterations. Default ``20``.
         tol: ``inf``-norm convergence on the posterior mean. Default ``1e-6``.
         damping: Step-size in (0, 1] applied to each Newton update.
@@ -280,13 +280,13 @@ class LaplaceMarkovInference(eqx.Module):
 class GaussNewtonMarkovInference(eqx.Module):
     r"""Gauss-Newton (Markov) inference: Newton with a strict PSD floor.
 
-    Identical to :class:`LaplaceMarkovInference` for log-concave
+    Identical to `LaplaceMarkovInference` for log-concave
     likelihoods (Bernoulli, Poisson). For non-log-concave likelihoods
     (StudentT) the larger ``precision_floor`` keeps the Newton step
     PSD-stable. Same fixed-point loop and damping behaviour as
-    :class:`LaplaceMarkovInference`.
+    `LaplaceMarkovInference`.
 
-    Args:
+    Attributes:
         max_iter: Newton iterations. Default ``20``.
         tol: ``inf``-norm tolerance on the posterior mean. Default ``1e-6``.
         damping: Step-size in (0, 1]. Default ``1.0``.
@@ -317,7 +317,7 @@ class GaussNewtonMarkovInference(eqx.Module):
 
 
 class PosteriorLinearizationMarkov(eqx.Module):
-    r"""Posterior linearization for :class:`MarkovGPPrior` (Markov IPLF).
+    r"""Posterior linearization for `MarkovGPPrior` (Markov IPLF).
 
     Iterates filter + smoother + cavity-averaged statistical
     linearization. At each iteration, with current sites producing
@@ -326,7 +326,7 @@ class PosteriorLinearizationMarkov(eqx.Module):
     per-point gradient and Hessian under the cavity (via Gauss-Hermite),
     and update the sites.
 
-    Args:
+    Attributes:
         max_iter: Iterations. Default ``20``.
         tol: ``inf``-norm tolerance on the posterior mean. Default ``1e-6``.
         damping: Step-size in (0, 1]. Default ``0.5``.
@@ -425,13 +425,13 @@ class PosteriorLinearizationMarkov(eqx.Module):
 
 
 class ExpectationPropagationMarkov(eqx.Module):
-    r"""Parallel Expectation Propagation for :class:`MarkovGPPrior`.
+    r"""Parallel Expectation Propagation for `MarkovGPPrior`.
 
     Each iteration: run filter + smoother, form cavities at every site,
     match tilted-distribution moments via Gauss-Hermite (with log-space
     stabilisation), and update sites with damping.
 
-    Args:
+    Attributes:
         max_iter: EP iterations. Default ``40``.
         tol: ``inf``-norm tolerance on the posterior mean. Default ``1e-5``.
         damping: Damping in (0, 1]. Default ``0.5``.

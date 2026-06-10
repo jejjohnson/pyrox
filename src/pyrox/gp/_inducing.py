@@ -1,36 +1,36 @@
 r"""Inter-domain inducing-feature families for sparse GPs.
 
 An inducing *feature* generalizes an inducing *point*: instead of
-:math:`u_m = f(z_m)` for a finite collection of pseudo-inputs, we take
+$u_m = f(z_m)$ for a finite collection of pseudo-inputs, we take
 
-.. math::
+$$
+u_m = \langle f, \phi_m \rangle_{\mathcal{H}_k}
+$$
 
-    u_m = \langle f, \phi_m \rangle_{\mathcal{H}_k}
-
-for a basis :math:`\{\phi_m\}` of the kernel's RKHS. The payoff: when
-:math:`\{\phi_m\}` is an eigenbasis of the (negative) Laplacian on the
-input domain *and* the kernel is stationary, :math:`K_{uu}` becomes
-diagonal — the bottleneck :math:`M \times M` solve degenerates to an
+for a basis $\{\phi_m\}$ of the kernel's RKHS. The payoff: when
+$\{\phi_m\}$ is an eigenbasis of the (negative) Laplacian on the
+input domain *and* the kernel is stationary, $K_{uu}$ becomes
+diagonal — the bottleneck $M \times M$ solve degenerates to an
 elementwise divide.
 
 This module ships:
 
-- :class:`FourierInducingFeatures`     — VFF on the bounded box (Hensman
+- `FourierInducingFeatures`     — VFF on the bounded box (Hensman
   et al. 2017)
-- :class:`SphericalHarmonicInducingFeatures` — VISH on the 2-sphere
+- `SphericalHarmonicInducingFeatures` — VISH on the 2-sphere
   (Dutordoir et al. 2020)
-- :class:`LaplacianInducingFeatures`   — Laplacian eigenfeatures on a graph
-- :class:`DecoupledInducingFeatures`   — distinct mean / covariance bases
+- `LaplacianInducingFeatures`   — Laplacian eigenfeatures on a graph
+- `DecoupledInducingFeatures`   — distinct mean / covariance bases
   (Cheng & Boots 2017)
 
-All concretions implement the :class:`InducingFeatures` protocol so that
-:class:`pyrox.gp.SparseGPPrior` can accept them in place of a raw ``Z``.
+All concretions implement the `InducingFeatures` protocol so that
+`pyrox.gp.SparseGPPrior` can accept them in place of a raw ``Z``.
 
 **Diagonal-structure invariant.** ``K_uu`` for the diagonal cases is
-constructed via :class:`lineax.DiagonalLinearOperator` and jitter is
+constructed via `lineax.DiagonalLinearOperator` and jitter is
 folded into the diagonal vector — *never* added as ``jnp.eye``. This
-preserves the structural dispatch in :mod:`gaussx.solve` /
-:mod:`gaussx.cholesky`, which short-circuits diagonal operators to O(M)
+preserves the structural dispatch in `gaussx.solve` /
+`gaussx.cholesky`, which short-circuits diagonal operators to O(M)
 elementwise ops. Test ``test_inducing_features.test_vff_k_uu_is_diagonal``
 guards this end-to-end.
 """
@@ -67,15 +67,15 @@ class InducingFeatures(Protocol):
     Implementations expose the inducing-prior covariance ``K_uu`` and the
     cross-covariance ``k_ux(X)`` between data points and inducing
     features. Diagonal-friendly concretions return
-    :class:`lineax.DiagonalLinearOperator` so the downstream solve dispatches
+    `lineax.DiagonalLinearOperator` so the downstream solve dispatches
     to elementwise division.
 
     **Input shape is family-dependent.** ``k_ux`` takes a batch of data
     points ``X`` in whatever representation the family consumes:
 
-    - :class:`FourierInducingFeatures`: coordinates ``(N, D)``.
-    - :class:`SphericalHarmonicInducingFeatures`: unit vectors ``(N, 3)``.
-    - :class:`LaplacianInducingFeatures`: integer node indices ``(N,)``.
+    - `FourierInducingFeatures`: coordinates ``(N, D)``.
+    - `SphericalHarmonicInducingFeatures`: unit vectors ``(N, 3)``.
+    - `LaplacianInducingFeatures`: integer node indices ``(N,)``.
 
     Each implementation validates its own expected shape and dtype.
     """
@@ -102,7 +102,7 @@ def _is_stationary(kernel: Kernel) -> bool:
     """Whether ``kernel`` has a registered closed-form spectral density.
 
     Used as the structural-stationarity check for inducing features that
-    derive ``K_uu`` from :func:`pyrox._basis.spectral_density`. Conservative
+    derive ``K_uu`` from `pyrox._basis.spectral_density`. Conservative
     by design — kernels that *are* stationary but lack a registered
     spectral density (e.g. ``RationalQuadratic``) currently return ``False``.
     """
@@ -115,7 +115,7 @@ def _diagonal_with_jitter(
     """Build a ``DiagonalLinearOperator`` with jitter folded into the vector.
 
     Critical for scalability: adding jitter via ``+ jnp.eye(M)`` would
-    densify the operator and silently revert :mod:`gaussx.solve` to its
+    densify the operator and silently revert `gaussx.solve` to its
     O(M^3) fallback. Folding into the diagonal vector keeps dispatch in
     the elementwise-divide short-circuit.
     """
@@ -139,24 +139,24 @@ def _to_tuple(value: int | float | tuple, D: int, name: str) -> tuple:
 
 
 class FourierInducingFeatures(eqx.Module):
-    r"""VFF — Variational Fourier inducing features on :math:`[-L, L]^D`.
+    r"""VFF — Variational Fourier inducing features on $[-L, L]^D$.
 
-    For a stationary kernel with spectral density :math:`S(\cdot)`, the
-    basis :math:`\{\phi_j\}` of Laplacian eigenfunctions on the box gives
+    For a stationary kernel with spectral density $S(\cdot)$, the
+    basis $\{\phi_j\}$ of Laplacian eigenfunctions on the box gives
 
-    .. math::
+    $$
+    K_{uu} = \mathrm{diag}\!\big(S(\sqrt{\lambda_j})\big),
+    \qquad
+    K_{ux}(x)_j = S(\sqrt{\lambda_j})\,\phi_j(x).
+    $$
 
-        K_{uu} = \mathrm{diag}\!\big(S(\sqrt{\lambda_j})\big),
-        \qquad
-        K_{ux}(x)_j = S(\sqrt{\lambda_j})\,\phi_j(x).
-
-    With this convention :math:`K_{ux} K_{uu}^{-1} = \phi_j(x)`, so the
+    With this convention $K_{ux} K_{uu}^{-1} = \phi_j(x)$, so the
     SVGP predictive mean reduces to a basis evaluation. ``K_{uu}`` is
-    returned as a :class:`lineax.DiagonalLinearOperator` to preserve the
+    returned as a `lineax.DiagonalLinearOperator` to preserve the
     O(M) solve dispatch end-to-end.
 
     Attributes:
-        in_features: Input dimension :math:`D`.
+        in_features: Input dimension $D$.
         num_basis_per_dim: Per-axis number of 1D eigenfunctions; total
             count is ``prod(num_basis_per_dim)``.
         L: Per-axis box half-width.
@@ -203,7 +203,7 @@ class FourierInducingFeatures(eqx.Module):
     def K_uu(
         self, kernel: Kernel, *, jitter: float = 1e-6
     ) -> lx.DiagonalLinearOperator:
-        """Diagonal :math:`K_{uu}` — entries ``S(sqrt(lambda_j))`` plus jitter."""
+        """Diagonal $K_{uu}$ — entries ``S(sqrt(lambda_j))`` plus jitter."""
         self._check_stationary(kernel)
         with _kernel_context(kernel):
             lam = fourier_eigenvalues(self.num_basis_per_dim, self.L, self.in_features)
@@ -211,7 +211,7 @@ class FourierInducingFeatures(eqx.Module):
         return _diagonal_with_jitter(S, jitter)
 
     def k_ux(self, x: Float[Array, "N D"], kernel: Kernel) -> Float[Array, "N M"]:
-        """Cross-covariance entries :math:`S(\\sqrt{\\lambda_j})\\,\\phi_j(x)`."""
+        """Cross-covariance entries $S(\\sqrt{\\lambda_j})\\,\\phi_j(x)$."""
         self._check_stationary(kernel)
         if x.ndim != 2 or x.shape[-1] != self.in_features:
             raise ValueError(f"x must be (N, {self.in_features}); got shape {x.shape}.")
@@ -232,18 +232,18 @@ def funk_hecke_coefficients(
     *,
     num_quadrature: int = 256,
 ) -> Float[Array, " l_max_plus_1"]:
-    r"""Funk-Hecke coefficients of a zonal kernel on :math:`S^2`.
+    r"""Funk-Hecke coefficients of a zonal kernel on $S^2$.
 
-    For a kernel of the form :math:`k(x, x') = \kappa(x \cdot x')` on the
+    For a kernel of the form $k(x, x') = \kappa(x \cdot x')$ on the
     unit 2-sphere, the Funk-Hecke theorem gives:
 
-    .. math::
-
-        a_l = 2\pi \int_{-1}^{1} \kappa(t)\,P_l(t)\,dt.
+    $$
+    a_l = 2\pi \int_{-1}^{1} \kappa(t)\,P_l(t)\,dt.
+    $$
 
     Returns ``(l_max + 1,)`` coefficients indexed by ``l``. We treat any
     Euclidean kernel as zonal-on-the-sphere via
-    :math:`\kappa(t) = k_{\mathrm{euc}}(\hat{n}_0, \hat{n}_t)` for unit
+    $\kappa(t) = k_{\mathrm{euc}}(\hat{n}_0, \hat{n}_t)$ for unit
     vectors at angular separation ``arccos(t)``.
     """
     # Gauss-Legendre quadrature nodes on [-1, 1] (host-side setup constants).
@@ -279,12 +279,12 @@ def _gauss_legendre_nodes(n: int) -> tuple[Float[Array, " n"], Float[Array, " n"
 
 
 class SphericalHarmonicInducingFeatures(eqx.Module):
-    r"""VISH — inducing harmonics on :math:`S^2` (Dutordoir et al. 2020).
+    r"""VISH — inducing harmonics on $S^2$ (Dutordoir et al. 2020).
 
-    For any zonal kernel :math:`k(x, x') = \kappa(x \cdot x')` on the
-    unit 2-sphere, the Funk-Hecke theorem gives a diagonal :math:`K_{uu}`
+    For any zonal kernel $k(x, x') = \kappa(x \cdot x')$ on the
+    unit 2-sphere, the Funk-Hecke theorem gives a diagonal $K_{uu}$
     whose eigenvalues are the kernel's Funk-Hecke coefficients
-    :math:`a_l`. The cross-covariance is :math:`a_l\,Y_{lm}(x)`.
+    $a_l$. The cross-covariance is $a_l\,Y_{lm}(x)$.
 
     Funk-Hecke coefficients are computed by Gauss-Legendre quadrature
     (arbitrary kernels supported, no closed form required). For
@@ -326,7 +326,7 @@ class SphericalHarmonicInducingFeatures(eqx.Module):
     def K_uu(
         self, kernel: Kernel, *, jitter: float = 1e-6
     ) -> lx.DiagonalLinearOperator:
-        """Diagonal :math:`K_{uu}` — Funk-Hecke coefficients per harmonic."""
+        """Diagonal $K_{uu}$ — Funk-Hecke coefficients per harmonic."""
         diag = self._per_feature_coeffs(kernel)
         return _diagonal_with_jitter(diag, jitter)
 
@@ -335,7 +335,7 @@ class SphericalHarmonicInducingFeatures(eqx.Module):
         unit_xyz: Float[Array, "N 3"],
         kernel: Kernel,
     ) -> Float[Array, "N M"]:
-        r"""Cross-covariance: :math:`a_l\,Y_{lm}(x)`."""
+        r"""Cross-covariance: $a_l\,Y_{lm}(x)$."""
         if unit_xyz.ndim != 2 or unit_xyz.shape[-1] != 3:
             raise ValueError(f"unit_xyz must be (N, 3); got {unit_xyz.shape}.")
         Y = real_spherical_harmonics(unit_xyz, self.l_max)
@@ -344,15 +344,15 @@ class SphericalHarmonicInducingFeatures(eqx.Module):
 
 
 class SlepianInducingFeatures(eqx.Module):
-    r"""Region-localized Slepian inducing features on :math:`S^2`.
+    r"""Region-localized Slepian inducing features on $S^2$.
 
     The retained Slepian functions are linear combinations ``G = Y C`` of the
     real spherical-harmonic basis evaluated in the cap-centred frame. For a
     zonal kernel with Funk-Hecke coefficients ``a_l`` this gives dense
     inducing covariance ``K_uu = C.T diag(a_l) C`` and cross-covariance
     ``K_ux = Y(R x) diag(a_l) C``, where ``R`` is the rotation aligning the
-    cap centre with the north pole. The basis (a :class:`SlepianCapBasis`)
-    is built once at :meth:`init` time and stored on the module so that
+    cap centre with the north pole. The basis (a `SlepianCapBasis`)
+    is built once at `init` time and stored on the module so that
     ``K_uu``, ``k_ux`` and ``num_features`` are cheap matrix multiplies.
     """
 
@@ -445,7 +445,7 @@ class SlepianInducingFeatures(eqx.Module):
         """Cross-covariance between unit-sphere inputs and Slepian features.
 
         Spherical harmonics are evaluated in the cap-centred frame to match
-        :meth:`SlepianCapBasis.evaluate`; without this rotation, two
+        `SlepianCapBasis.evaluate`; without this rotation, two
         ``SlepianInducingFeatures`` differing only in cap centre would
         produce the same cross-covariance.
         """
@@ -468,15 +468,15 @@ class SlepianInducingFeatures(eqx.Module):
 class LaplacianInducingFeatures(eqx.Module):
     r"""Inducing features from low-frequency graph Laplacian eigenvectors.
 
-    For a graph with normalized Laplacian :math:`L`, take the smallest
-    ``num_basis`` eigenpairs :math:`(\mu_j, v_j)`. Treating the kernel as
+    For a graph with normalized Laplacian $L$, take the smallest
+    ``num_basis`` eigenpairs $(\mu_j, v_j)$. Treating the kernel as
     a function of the graph distance — specifically, applying the kernel
-    *spectrum* :math:`g(\mu)` to the Laplacian eigenvalues — gives a
-    diagonal :math:`K_{uu}`.
+    *spectrum* $g(\mu)$ to the Laplacian eigenvalues — gives a
+    diagonal $K_{uu}$.
 
     This implementation supports the *heat-kernel* family
-    :math:`g(\mu) = \exp(-\mu / (2 \ell^2))` (matching :class:`pyrox.gp.RBF`
-    in spectrum) by reusing :func:`pyrox._basis.spectral_density` with the
+    $g(\mu) = \exp(-\mu / (2 \ell^2))$ (matching `pyrox.gp.RBF`
+    in spectrum) by reusing `pyrox._basis.spectral_density` with the
     eigenvalues as input.
 
     Attributes:
@@ -567,7 +567,7 @@ class DecoupledInducingFeatures(eqx.Module):
 
     Note:
         ``DecoupledInducingFeatures`` itself does *not* implement
-        :class:`InducingFeatures` (no single ``K_uu`` makes sense for two
+        `InducingFeatures` (no single ``K_uu`` makes sense for two
         bases). Consumers should access ``.mean_features`` and
         ``.cov_features`` directly.
     """

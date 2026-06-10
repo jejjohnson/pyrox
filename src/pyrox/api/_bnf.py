@@ -2,13 +2,13 @@
 
 Three configurations:
 
-* :class:`BNFEstimator` — MAP fit (``prior_weight=1``).
-* :class:`BNFEstimatorMLE` — MLE fit (``prior_weight=0``); identical
+* `BNFEstimator` — MAP fit (``prior_weight=1``).
+* `BNFEstimatorMLE` — MLE fit (``prior_weight=0``); identical
   otherwise.
-* :class:`BNFEstimatorVI` — mean-field VI via ``ensemble_vi`` over
+* `BNFEstimatorVI` — mean-field VI via ``ensemble_vi`` over
   ``AutoNormal``.
 
-All three return a :class:`FittedBNF` whose ``predict`` produces a
+All three return a `FittedBNF` whose ``predict`` produces a
 posterior-predictive mean (Gaussian-mixture closed form for
 ``observation_model="NORMAL"``) and, optionally, per-row quantiles
 (MC-sampled from the mixture).
@@ -74,7 +74,7 @@ def _df_to_design(
 
 
 def _build_bnf(fit: SpatiotemporalFit, width: int, depth: int) -> BayesianNeuralField:
-    """Construct the :class:`BayesianNeuralField` layer from a fit bundle."""
+    """Construct the `BayesianNeuralField` layer from a fit bundle."""
     d_in = len(fit.feature_cols)
     return BayesianNeuralField(
         input_scales=tuple([1.0] * d_in),  # already standardized
@@ -157,10 +157,10 @@ def _bnf_log_joint(
 class BNFEstimator(EstimatorBase):
     """MAP-fit Bayesian Neural Field estimator.
 
-    Composes the BNF layer (:class:`pyrox.nn.BayesianNeuralField`) with
-    pandas-side preprocessing (:func:`pyrox.preprocessing.fit_spatiotemporal`)
+    Composes the BNF layer (`pyrox.nn.BayesianNeuralField`) with
+    pandas-side preprocessing (`pyrox.preprocessing.fit_spatiotemporal`)
     and an ensemble-MAP inference loop
-    (:func:`pyrox.inference.ensemble_map`).
+    (`pyrox.inference.ensemble_map`).
 
     Attributes:
         feature_cols: Input columns (first one is time).
@@ -292,22 +292,22 @@ class BNFEstimatorMLE(BNFEstimator):
 
 
 class BNFEstimatorVI(BNFEstimator):
-    """BNF estimator using mean-field VI via :func:`ensemble_vi`."""
+    """BNF estimator using mean-field VI via `ensemble_vi`."""
 
     inference_kind: InferenceKind = eqx.field(static=True, default="vi")
 
 
 class FittedBNF(FittedEstimator):
-    """Output of :meth:`BNFEstimator.fit`.
+    """Output of `BNFEstimator.fit`.
 
     Attributes:
-        config: The :class:`BNFEstimator` that produced this fit.
+        config: The `BNFEstimator` that produced this fit.
         fit_bundle: Pandas-side preprocessing record.
         params: Stacked per-ensemble-member parameter dict (each leaf
             has a leading ``(E,)`` axis for MAP, or an
             ``AutoNormal``-shaped variational-parameter dict for VI).
         losses: Per-member loss history, shape ``(E, num_epochs)``.
-        bnf_template: The :class:`BayesianNeuralField` layer instance
+        bnf_template: The `BayesianNeuralField` layer instance
             used for inference (identical across members).
     """
 

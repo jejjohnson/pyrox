@@ -11,7 +11,7 @@ batched matvec, prediction caches, Cholesky-with-jitter, solvers —
 lives in `gaussx`. See `gaussx.stable_rbf_kernel`, `gaussx.cholesky`,
 `gaussx.log_marginal_likelihood`, `gaussx.predict_mean`, etc.
 
-Higher-level :class:`pyrox.gp.Kernel` subclasses (Wave 2 Layer 1, see
+Higher-level `pyrox.gp.Kernel` subclasses (Wave 2 Layer 1, see
 issue #20) wrap these formulas in a NumPyro-aware ``Parameterized``
 shell and can opt in to gaussx's scalable variants when needed.
 """

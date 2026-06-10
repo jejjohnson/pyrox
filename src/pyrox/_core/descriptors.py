@@ -13,7 +13,7 @@ class PyroxParam(NamedTuple):
     Bundles init value, constraint, and optional event dimension as a
     single descriptor. This type is a plain value object — higher-level
     APIs that consume it (for example a future declarative registration
-    helper) live elsewhere; :meth:`PyroxModule.pyrox_param` takes the
+    helper) live elsewhere; `PyroxModule.pyrox_param` takes the
     fields individually as keyword arguments.
 
     Attributes:
@@ -33,11 +33,11 @@ class PyroxParam(NamedTuple):
 class PyroxSample:
     """Lightweight metadata container for a random sample site.
 
-    Wraps the prior — either a :class:`numpyro.distributions.Distribution`
+    Wraps the prior — either a `numpyro.distributions.Distribution`
     or a callable ``(self) -> Distribution`` for dependent priors that
     reference other sampled values on the same module. Like
-    :class:`PyroxParam`, this is a plain value object; call
-    :meth:`PyroxModule.pyrox_sample` with the underlying prior directly.
+    `PyroxParam`, this is a plain value object; call
+    `PyroxModule.pyrox_sample` with the underlying prior directly.
     """
 
     prior: Any | Callable[[Any], Any]

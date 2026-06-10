@@ -2,21 +2,21 @@
 
 This module hosts two related groups:
 
-1. *Pure-JAX feature helpers* — :func:`fourier_features`,
-   :func:`seasonal_frequencies`, :func:`seasonal_features`,
-   :func:`interaction_features`, :func:`standardize`,
-   :func:`unstandardize`. Stateless functions re-exported from
-   :mod:`geonnax.basis` (the implementations moved there with the
+1. *Pure-JAX feature helpers* — `fourier_features`,
+   `seasonal_frequencies`, `seasonal_features`,
+   `interaction_features`, `standardize`,
+   `unstandardize`. Stateless functions re-exported from
+   `geonnax.basis` (the implementations moved there with the
    package split) for the deterministic coordinate-encoder layers.
-2. *Bayesian random-feature layers* — :class:`RBFFourierFeatures`,
-   :class:`MaternFourierFeatures`, :class:`LaplaceFourierFeatures`,
-   :class:`RandomKitchenSinks`, :class:`RBFCosineFeatures`,
-   :class:`MaternCosineFeatures`, :class:`LaplaceCosineFeatures`,
-   :class:`ArcCosineFourierFeatures`,
-   :class:`VariationalFourierFeatures`, and :class:`HSGPFeatures`.
-   These previously lived in :mod:`pyrox.nn._layers`. The deterministic
-   RFF kernel is now consumed from :mod:`geonnax`
-   (:func:`geonnax.rff_forward` and :func:`geonnax.rff_cosine_forward`),
+2. *Bayesian random-feature layers* — `RBFFourierFeatures`,
+   `MaternFourierFeatures`, `LaplaceFourierFeatures`,
+   `RandomKitchenSinks`, `RBFCosineFeatures`,
+   `MaternCosineFeatures`, `LaplaceCosineFeatures`,
+   `ArcCosineFourierFeatures`,
+   `VariationalFourierFeatures`, and `HSGPFeatures`.
+   These previously lived in `pyrox.nn._layers`. The deterministic
+   RFF kernel is now consumed from `geonnax`
+   (`geonnax.rff_forward` and `geonnax.rff_cosine_forward`),
    which is single-example ``(D,) -> (D,)``; the pyrox wrappers stay
    batched ``(*batch, D)`` and ``jax.vmap`` the geonnax core over the
    batch axis. The Bayesian site-registration (priors on ``W``, ``b``,
@@ -24,7 +24,7 @@ This module hosts two related groups:
    values are closed over the vmapped call — never sampled per data
    point.
 
-Implementation uses :mod:`einx` (``einx.id`` for broadcasts/reshapes,
+Implementation uses `einx` (``einx.id`` for broadcasts/reshapes,
 ``einx.prod`` for axis reductions) for any non-trivial reshaping, per the
 project convention.
 """
@@ -80,7 +80,7 @@ def _vmap_rff_forward(
     """Vmap ``geonnax.rff_forward`` over the leading batch axis of ``x``.
 
     The geonnax core is single-example ``(D_in,) -> (D_rff,)``;
-    :func:`vmap_over_flat_batch` preserves the documented support for
+    `vmap_over_flat_batch` preserves the documented support for
     both unbatched ``(D_in,)`` and batched ``(*batch, D_in)`` callers.
     """
     return vmap_over_flat_batch(
@@ -96,7 +96,7 @@ def _vmap_rff_cosine_forward(
     x: Float[Array, "*batch D_in"],
 ) -> Float[Array, "*batch n_features"]:
     """Vmap ``geonnax.rff_cosine_forward`` with the same flatten/restore
-    pattern as :func:`_vmap_rff_forward`."""
+    pattern as `_vmap_rff_forward`."""
     return vmap_over_flat_batch(
         lambda xi: geonnax.rff_cosine_forward(W, b, lengthscale, n_features, xi), x
     )
@@ -105,9 +105,9 @@ def _vmap_rff_cosine_forward(
 class RBFFourierFeatures(PyroxModule):
     r"""SSGP-style RFF layer with RBF spectral density.
 
-    Both the spectral frequencies :math:`W` and the lengthscale
-    :math:`\ell` are ``pyrox_sample`` sites — :math:`W` has a
-    standard normal prior (the RBF spectral density) and :math:`\ell`
+    Both the spectral frequencies $W$ and the lengthscale
+    $\ell$ are ``pyrox_sample`` sites — $W$ has a
+    standard normal prior (the RBF spectral density) and $\ell$
     has a ``LogNormal`` prior. Under SVI, the guide learns a posterior
     over both; under a seed handler, they are drawn from the prior.
 
@@ -158,15 +158,15 @@ class RBFFourierFeatures(PyroxModule):
 class MaternFourierFeatures(PyroxModule):
     r"""SSGP-style RFF layer with Matern spectral density.
 
-    Spectral frequencies :math:`W` have a ``StudentT(df=2\nu)`` prior
-    (the Matern spectral density). The smoothness :math:`\nu` controls
+    Spectral frequencies $W$ have a ``StudentT(df=2\nu)`` prior
+    (the Matern spectral density). The smoothness $\nu$ controls
     the regularity: ``nu=0.5`` (Laplace), ``nu=1.5`` (Matern-3/2),
     ``nu=2.5`` (Matern-5/2).
 
     Attributes:
         in_features: Input dimension.
         n_features: Number of frequency pairs.
-        nu: Smoothness parameter :math:`\nu`.
+        nu: Smoothness parameter $\nu$.
         init_lengthscale: Prior location for the lengthscale.
         pyrox_name: Explicit scope name for NumPyro site registration.
     """
@@ -215,7 +215,7 @@ class MaternFourierFeatures(PyroxModule):
 class LaplaceFourierFeatures(PyroxModule):
     r"""SSGP-style RFF layer with Laplace (Matern-1/2) spectral density.
 
-    Spectral frequencies :math:`W` have a ``Cauchy`` prior (Student-t
+    Spectral frequencies $W$ have a ``Cauchy`` prior (Student-t
     with ``df = 1``).
 
     Attributes:
@@ -264,13 +264,13 @@ class LaplaceFourierFeatures(PyroxModule):
 class RandomKitchenSinks(PyroxModule):
     r"""Random Kitchen Sinks: RFF + a learned linear head.
 
-    Composes any RFF layer (:class:`RBFFourierFeatures`,
-    :class:`MaternFourierFeatures`, :class:`LaplaceFourierFeatures`)
+    Composes any RFF layer (`RBFFourierFeatures`,
+    `MaternFourierFeatures`, `LaplaceFourierFeatures`)
     with a trainable linear projection:
 
-    .. math::
-
-        y = \phi(x)\, \beta + b
+    $$
+    y = \phi(x)\, \beta + b
+    $$
 
     The linear head (``beta``, ``bias``) is registered via
     ``pyrox_sample`` with ``Normal`` priors.
@@ -317,17 +317,17 @@ class RBFCosineFeatures(PyroxModule):
 
     Uses the single-cosine feature map with a bias term:
 
-    .. math::
+    $$
+    \phi(x) = \sqrt{2 / D}\,\cos(x W / \ell + b)
+    $$
 
-        \phi(x) = \sqrt{2 / D}\,\cos(x W / \ell + b)
-
-    where :math:`W \sim \mathcal{N}(0, I)` and
-    :math:`b \sim \mathrm{Uniform}(0, 2\pi)`. This variant produces
+    where $W \sim \mathcal{N}(0, I)$ and
+    $b \sim \mathrm{Uniform}(0, 2\pi)$. This variant produces
     ``n_features``-dimensional output (half the dimension of the
-    ``[cos, sin]`` variant in :class:`RBFFourierFeatures`) and is
+    ``[cos, sin]`` variant in `RBFFourierFeatures`) and is
     commonly used in Random Kitchen Sinks implementations.
 
-    All parameters (:math:`W`, :math:`b`, :math:`\ell`) are
+    All parameters ($W$, $b$, $\ell$) are
     ``pyrox_sample`` sites.
 
     Attributes:
@@ -380,26 +380,26 @@ class RBFCosineFeatures(PyroxModule):
 class MaternCosineFeatures(PyroxModule):
     r"""Cosine-bias variant of random Fourier features for the Matern kernel.
 
-    Single-cosine analogue of :class:`MaternFourierFeatures`:
+    Single-cosine analogue of `MaternFourierFeatures`:
 
-    .. math::
+    $$
+    \phi(x) = \sqrt{2 / D}\,\cos(x W / \ell + b)
+    $$
 
-        \phi(x) = \sqrt{2 / D}\,\cos(x W / \ell + b)
-
-    where :math:`W \sim \mathrm{StudentT}(2\nu)` (the Matern spectral
-    density) and :math:`b \sim \mathrm{Uniform}(0, 2\pi)`. Output dim is
+    where $W \sim \mathrm{StudentT}(2\nu)$ (the Matern spectral
+    density) and $b \sim \mathrm{Uniform}(0, 2\pi)$. Output dim is
     ``n_features`` (vs ``2 * n_features`` for the ``[cos, sin]``
     variant). Approximates the same kernel as
-    :class:`MaternFourierFeatures` in expectation but with higher
+    `MaternFourierFeatures` in expectation but with higher
     variance per draw — see Sutherland & Schneider (2015).
 
-    All parameters (:math:`W`, :math:`b`, :math:`\ell`) are
+    All parameters ($W$, $b$, $\ell$) are
     ``pyrox_sample`` sites.
 
     Attributes:
         in_features: Input dimension.
         n_features: Number of random features (= output dimension).
-        nu: Smoothness parameter :math:`\nu`.
+        nu: Smoothness parameter $\nu$.
         init_lengthscale: Prior location for the lengthscale.
         pyrox_name: Explicit scope name for NumPyro site registration.
     """
@@ -452,18 +452,18 @@ class MaternCosineFeatures(PyroxModule):
 class LaplaceCosineFeatures(PyroxModule):
     r"""Cosine-bias variant of random Fourier features for the Laplace kernel.
 
-    Single-cosine analogue of :class:`LaplaceFourierFeatures` (the
+    Single-cosine analogue of `LaplaceFourierFeatures` (the
     Matern-1/2 kernel):
 
-    .. math::
+    $$
+    \phi(x) = \sqrt{2 / D}\,\cos(x W / \ell + b)
+    $$
 
-        \phi(x) = \sqrt{2 / D}\,\cos(x W / \ell + b)
-
-    where :math:`W \sim \mathrm{Cauchy}(0, 1)` (Student-t with
-    ``df = 1``) and :math:`b \sim \mathrm{Uniform}(0, 2\pi)`. Output
+    where $W \sim \mathrm{Cauchy}(0, 1)$ (Student-t with
+    ``df = 1``) and $b \sim \mathrm{Uniform}(0, 2\pi)$. Output
     dim is ``n_features``.
 
-    All parameters (:math:`W`, :math:`b`, :math:`\ell`) are
+    All parameters ($W$, $b$, $\ell$) are
     ``pyrox_sample`` sites.
 
     Attributes:
@@ -516,15 +516,15 @@ class LaplaceCosineFeatures(PyroxModule):
 class ArcCosineFourierFeatures(PyroxModule):
     r"""Random features for the arc-cosine kernel (Cho & Saul, 2009).
 
-    The arc-cosine kernel of order :math:`p` corresponds to an
+    The arc-cosine kernel of order $p$ corresponds to an
     infinite-width single-layer ReLU network. The random feature map
     is:
 
-    .. math::
+    $$
+    \phi(x) = \sqrt{2 / D}\,\max(0,\, x W / \ell)^p
+    $$
 
-        \phi(x) = \sqrt{2 / D}\,\max(0,\, x W / \ell)^p
-
-    where :math:`W \sim \mathcal{N}(0, I)`.
+    where $W \sim \mathcal{N}(0, I)$.
 
     ``order=0`` gives the Heaviside (step) feature; ``order=1`` gives
     the ReLU feature (the most common); ``order=2`` gives the squared
@@ -583,23 +583,23 @@ class ArcCosineFourierFeatures(PyroxModule):
 class VariationalFourierFeatures(PyroxModule):
     r"""VSSGP — RFF with a learnable variational posterior over frequencies.
 
-    Standard RFF (e.g. :class:`RBFFourierFeatures`) treats the spectral
-    frequencies :math:`W` as a frozen prior draw; VSSGP (Gal & Turner,
-    2015) treats :math:`W` as a latent with a learnable mean-field
+    Standard RFF (e.g. `RBFFourierFeatures`) treats the spectral
+    frequencies $W$ as a frozen prior draw; VSSGP (Gal & Turner,
+    2015) treats $W$ as a latent with a learnable mean-field
     posterior, recovering spectral *uncertainty* on top of the
     feature-space uncertainty.
 
-    Prior: :math:`p(W) = \mathcal{N}(0, I)` (RBF spectral density in
+    Prior: $p(W) = \mathcal{N}(0, I)$ (RBF spectral density in
     lengthscale-1 units). The lengthscale is itself a sampled site
     (``LogNormal(log init_lengthscale, 1)``) so that frequencies are
     rescaled to the physical kernel.
 
-    Under SVI, attach an :class:`~numpyro.infer.autoguide.AutoNormal` to
+    Under SVI, attach an `AutoNormal` to
     learn the posterior on ``W``; under prior-only seeds, behaves
-    identically to :class:`RBFFourierFeatures`.
+    identically to `RBFFourierFeatures`.
 
     Attributes:
-        in_features: Input dimension :math:`D`.
+        in_features: Input dimension $D$.
         n_features: Number of frequency pairs (output dim ``2 * n_features``).
         init_lengthscale: Prior location for the kernel lengthscale.
         pyrox_name: Explicit scope name for NumPyro site registration.
@@ -648,27 +648,27 @@ class HSGPFeatures(PyroxModule):
     r"""Hilbert-Space Gaussian Process feature layer (Riutort-Mayol et al., 2023).
 
     A *deterministic* Laplacian-eigenfunction basis on the bounded box
-    :math:`[-L, L]^D` plus learnable per-basis amplitudes with a
+    $[-L, L]^D$ plus learnable per-basis amplitudes with a
     kernel-spectral-density prior:
 
-    .. math::
+    $$
+    \hat{f}(x) = \sum_{j=1}^{M} \alpha_j\,\sqrt{S(\sqrt{\lambda_j})}\,\phi_j(x),
+    \quad \alpha_j \sim \mathcal{N}(0, 1).
+    $$
 
-        \hat{f}(x) = \sum_{j=1}^{M} \alpha_j\,\sqrt{S(\sqrt{\lambda_j})}\,\phi_j(x),
-        \quad \alpha_j \sim \mathcal{N}(0, 1).
-
-    This is the NN-side dual of :class:`pyrox.gp.FourierInducingFeatures`
+    This is the NN-side dual of `pyrox.gp.FourierInducingFeatures`
     — same basis, different prior wiring. As ``M`` and ``L`` grow, the
     induced GP converges to the kernel passed in.
 
     Attributes:
-        in_features: Input dimension :math:`D`.
+        in_features: Input dimension $D$.
         num_basis_per_dim: Per-axis number of 1D eigenfunctions; total
             basis count is ``prod(num_basis_per_dim)``.
         L: Per-axis box half-width.
-        kernel: A stationary kernel from :mod:`pyrox.gp` whose spectral
+        kernel: A stationary kernel from `pyrox.gp` whose spectral
             density supplies the per-basis prior variance. Currently
-            :class:`pyrox.gp.RBF` and :class:`pyrox.gp.Matern` are
-            supported by :func:`pyrox._basis.spectral_density`.
+            `pyrox.gp.RBF` and `pyrox.gp.Matern` are
+            supported by `pyrox._basis.spectral_density`.
         pyrox_name: Explicit scope name for NumPyro site registration.
     """
 

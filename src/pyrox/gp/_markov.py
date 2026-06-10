@@ -1,17 +1,17 @@
 """Kalman-based Markov GP prior on top of the SDE-kernel surface.
 
 Stationary 1-D GP kernels with rational spectral densities admit exact
-linear-Gaussian state-space representations (see :mod:`pyrox.gp._sde_kernels`
-and the :class:`pyrox.gp.SDEKernel` protocol). This module turns those
+linear-Gaussian state-space representations (see `pyrox.gp._sde_kernels`
+and the `pyrox.gp.SDEKernel` protocol). This module turns those
 representations into a working temporal-GP model: forward Kalman filter for
 the marginal log-likelihood, backward RTS smoother for the posterior, and a
 NumPyro-aware shell so the path drops into models the same way
-:class:`pyrox.gp.GPPrior` does.
+`pyrox.gp.GPPrior` does.
 
-For a sorted observation grid of length :math:`N` and SDE state dimension
-:math:`d`, both the marginal likelihood and the smoothed posterior cost
-:math:`O(N\\,d^3)` — linear in :math:`N`, where the dense path is
-:math:`O(N^3)`.
+For a sorted observation grid of length $N$ and SDE state dimension
+$d$, both the marginal likelihood and the smoothed posterior cost
+$O(N\\,d^3)$ — linear in $N$, where the dense path is
+$O(N^3)$.
 
 Test-time predictions for arbitrary ``t_star`` are produced by re-running the
 filter+smoother over the merged grid ``sort(times \\cup t_star)`` with the
@@ -78,7 +78,7 @@ def _kalman_filter(
     ``mask[k] = 0`` skips the update (no information from ``residual[k]``
     enters the state). ``R_seq`` is the per-step observation variance.
 
-    Delegates to :func:`gaussx.kalman_filter` (gaussx 0.0.13 added the
+    Delegates to `gaussx.kalman_filter` (gaussx 0.0.13 added the
     time-varying / mask generalisation that pyrox needs). ``F`` is unused
     by the gaussx call — it's accepted for API symmetry with the prior
     pyrox implementation, which constructed the predict step from
@@ -119,8 +119,8 @@ def _rts_smoother(
 ) -> tuple[Float[Array, "N d"], Float[Array, "N d d"]]:
     """Backward Rauch-Tung-Striebel smoother.
 
-    Delegates to :func:`gaussx.rts_smoother`. Reconstructs a
-    :class:`gaussx.FilterState` from the unpacked per-step arrays so call
+    Delegates to `gaussx.rts_smoother`. Reconstructs a
+    `gaussx.FilterState` from the unpacked per-step arrays so call
     sites that wire the filter and smoother together (passing tuples)
     don't have to change shape.
     """
@@ -146,19 +146,19 @@ def _build_dt_full(times: Float[Array, " N"]) -> Float[Array, " N"]:
 class MarkovGPPrior(eqx.Module):
     r"""Linear-time temporal GP prior over a sorted 1-D grid.
 
-    Wraps any :class:`pyrox.gp.SDEKernel` (e.g. :class:`pyrox.gp.MaternSDE`,
-    :class:`pyrox.gp.SumSDE`, :class:`pyrox.gp.PeriodicSDE`) to give Kalman
+    Wraps any `pyrox.gp.SDEKernel` (e.g. `pyrox.gp.MaternSDE`,
+    `pyrox.gp.SumSDE`, `pyrox.gp.PeriodicSDE`) to give Kalman
     filtering for the marginal log-likelihood and RTS smoothing for the
     posterior on the training grid. Supports an optional mean function and a
     small observation-noise floor for numerical stability.
 
     Attributes:
-        sde_kernel: Any :class:`SDEKernel`. Provides ``(F, L, H, Q_c, P_inf)``
+        sde_kernel: Any `SDEKernel`. Provides ``(F, L, H, Q_c, P_inf)``
             via ``sde_params()`` and the discrete transition sequence via
             ``discretise_sequence(dt)``.
         times: Sorted, strictly increasing observation times of shape
             ``(N,)``. Concrete (non-traced) ``times`` arrays are validated
-            for monotonicity at construction time; under :func:`jax.jit` /
+            for monotonicity at construction time; under `jax.jit` /
             SVI / MCMC the input is a tracer and the check is silently
             skipped — callers must guarantee monotonicity in that case.
         mean_fn: Optional callable mapping ``times -> (N,)`` mean values.
@@ -178,7 +178,7 @@ class MarkovGPPrior(eqx.Module):
         >>> log_marg = prior.log_marginal(y, jnp.asarray(0.01))
 
     Notes:
-        The solver-strategy plumbing used by :class:`pyrox.gp.GPPrior` does
+        The solver-strategy plumbing used by `pyrox.gp.GPPrior` does
         not apply here — Kalman filtering is its own linear-algebra path
         and does not factor through ``gaussx.AbstractSolverStrategy``.
     """
@@ -219,7 +219,7 @@ class MarkovGPPrior(eqx.Module):
 
     @property
     def state_dim(self) -> int:
-        """SDE state dimension :math:`d` for this kernel."""
+        """SDE state dimension $d$ for this kernel."""
         return self.sde_kernel.state_dim
 
     def mean(self, times: Float[Array, " M"]) -> Float[Array, " M"]:
@@ -319,27 +319,27 @@ class MarkovGPPrior(eqx.Module):
 
         Convenience that forwards to ``strategy.fit(self, likelihood, y)``.
         Pick any of the Markov-aware site-based strategies in
-        :mod:`pyrox.gp._inference_nongauss_markov`:
-        :class:`pyrox.gp.LaplaceMarkovInference`,
-        :class:`pyrox.gp.GaussNewtonMarkovInference`,
-        :class:`pyrox.gp.PosteriorLinearizationMarkov`, or
-        :class:`pyrox.gp.ExpectationPropagationMarkov`. Returns a
-        :class:`pyrox.gp.NonGaussConditionedMarkovGP` with the same
+        `pyrox.gp._inference_nongauss_markov`:
+        `pyrox.gp.LaplaceMarkovInference`,
+        `pyrox.gp.GaussNewtonMarkovInference`,
+        `pyrox.gp.PosteriorLinearizationMarkov`, or
+        `pyrox.gp.ExpectationPropagationMarkov`. Returns a
+        `pyrox.gp.NonGaussConditionedMarkovGP` with the same
         ``predict`` API as the Gaussian-likelihood
-        :class:`ConditionedMarkovGP`.
+        `ConditionedMarkovGP`.
         """
         return strategy.fit(self, likelihood, y)
 
     def log_prob(self, f: Float[Array, " N"]) -> Float[Array, ""]:
-        r"""Log density of an exact-state path :math:`f(t_n) = H x_n` under the prior.
+        r"""Log density of an exact-state path $f(t_n) = H x_n$ under the prior.
 
         Evaluates ``log N(f | mu(times), K_NN)`` where ``K_NN`` is the dense
         Gram of the kernel encoded by ``sde_kernel`` on ``self.times``.
         Computes the dense covariance via ``H exp(F |t_i - t_j|) P_inf H^T``
-        — one ``expm`` per pairwise lag, costing :math:`O(N^2 d^3)` for the
-        Gram plus :math:`O(N^3)` for the Cholesky solve — intended for
+        — one ``expm`` per pairwise lag, costing $O(N^2 d^3)$ for the
+        Gram plus $O(N^3)$ for the Cholesky solve — intended for
         sanity checks and small-grid use rather than scalable inference.
-        For training, prefer :meth:`log_marginal`.
+        For training, prefer `log_marginal`.
         """
         K = _dense_sde_gram(self.sde_kernel, self.times)
         cov_op = lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)
@@ -351,9 +351,9 @@ def _dense_sde_gram(
 ) -> Float[Array, "N N"]:
     r"""Dense Gram ``K_ij = H exp(F |t_i - t_j|) P_inf H^T`` with diagonal jitter.
 
-    One ``expm`` per pairwise lag — :math:`O(N^2 d^3)`. Intended for the
-    small-``N`` dense paths (:meth:`MarkovGPPrior.log_prob`,
-    :func:`markov_gp_sample`); scalable inference goes through the Kalman
+    One ``expm`` per pairwise lag — $O(N^2 d^3)$. Intended for the
+    small-``N`` dense paths (`MarkovGPPrior.log_prob`,
+    `markov_gp_sample`); scalable inference goes through the Kalman
     filter instead.
     """
     F, _L, H, _Qc, P_inf = sde_kernel.sde_params()
@@ -377,17 +377,17 @@ class ConditionedMarkovGP(eqx.Module):
     """Markov GP conditioned on Gaussian-likelihood observations.
 
     Holds the smoothed posterior on the training grid plus the marginal
-    log-likelihood. Use :meth:`predict` for marginal posterior mean / variance
+    log-likelihood. Use `predict` for marginal posterior mean / variance
     at arbitrary test times.
 
     Attributes:
-        prior: The originating :class:`MarkovGPPrior`.
+        prior: The originating `MarkovGPPrior`.
         y: Observations of shape ``(N,)``.
         noise_var: Observation variance used for conditioning.
         smoothed_means: ``(N, d)`` smoothed state means at training times.
         smoothed_covs: ``(N, d, d)`` smoothed state covariances at training
             times.
-        log_marginal: Scalar :math:`\\log p(y \\mid \\theta)`.
+        log_marginal: Scalar $\\log p(y \\mid \\theta)$.
     """
 
     prior: MarkovGPPrior
@@ -407,7 +407,7 @@ class ConditionedMarkovGP(eqx.Module):
         ``sort(times \\cup t_star)`` with the test points masked out of the
         update step, then read off the smoothed marginals at the test
         positions via ``H @ m`` and ``H @ P @ H^T``. Cost is
-        :math:`O((N + M)\\,d^3)`. Handles training-grid lookups, forecasting,
+        $O((N + M)\\,d^3)$. Handles training-grid lookups, forecasting,
         backcasting, and within-window interpolation under one code path.
         """
         F, _L, H, _Qc, P_inf = self.prior.sde_kernel.sde_params()

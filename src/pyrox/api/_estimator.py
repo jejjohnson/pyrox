@@ -5,8 +5,8 @@ family. The full sklearn-style validation surface (multi-output
 support, pipeline composition, ``GPEstimator``) is tracked separately;
 what's here is the contract every estimator must satisfy:
 
-* Subclass :class:`EstimatorBase` with ``feature_cols`` /
-  ``target_col`` plus any model-specific :class:`equinox.Module`
+* Subclass `EstimatorBase` with ``feature_cols`` /
+  ``target_col`` plus any model-specific `equinox.Module`
   fields.
 * Implement ``fit(self, df, *, seed) -> FittedEstimator``. Return a
   *new* fitted record; never mutate ``self``.
@@ -41,7 +41,7 @@ class EstimatorBase(eqx.Module):
     target_col: str = eqx.field(static=True)
 
     def fit(self, df: pd.DataFrame, *, seed: PRNGKeyArray | int) -> FittedEstimator:
-        """Fit and return a new :class:`FittedEstimator`.
+        """Fit and return a new `FittedEstimator`.
 
         Subclasses override; ``EstimatorBase.fit`` raises.
         """
@@ -51,9 +51,9 @@ class EstimatorBase(eqx.Module):
 
 
 class FittedEstimator(eqx.Module):
-    """Output of :meth:`EstimatorBase.fit`.
+    """Output of `EstimatorBase.fit`.
 
-    Subclasses store fitted parameters as :class:`equinox.Module`
+    Subclasses store fitted parameters as `equinox.Module`
     fields and implement ``predict``. The base class enforces only
     the immutable-PyTree contract.
     """

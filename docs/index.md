@@ -7,10 +7,8 @@ pyrox bridges [Equinox](https://docs.kidger.site/equinox/) modules and [NumPyro]
 ## Package layout
 
 - **`pyrox._core`** — the Equinox-to-NumPyro bridge. `PyroxModule`, `PyroxParam`, `PyroxSample`, `Parameterized`, `pyrox_method`.
-- **`pyrox.gp`** — Gaussian process building blocks and protocols (Wave 2+).
-- **`pyrox.nn`** — Bayesian and uncertainty-aware NN layers (Wave 3+).
-
-Wave 1 ships `pyrox._core`. GP and NN subpackages are scaffolded as placeholders until their dedicated waves land.
+- **`pyrox.gp`** — Gaussian process building blocks: kernels, sparse/variational GPs, non-Gaussian inference, pathwise samplers, Markov (Kalman) GPs, multi-output GPs.
+- **`pyrox.nn`** — Bayesian and uncertainty-aware NN layers: dense variants, spectral layers, SNGP, ensembles, the Bayesian Neural Field stack.
 
 ## Installation
 
@@ -102,9 +100,10 @@ Switch `kernel.set_mode("guide")` to draw variational params instead of sampling
 
 ## Links
 
+- [API Reference](api/reference.md)
 - [Core API](api/core.md)
-- [GP API](api/gp.md) *(scaffold)*
-- [NN API](api/nn.md) *(scaffold)*
+- [GP API](api/gp.md)
+- [NN API](api/nn.md)
 - [Contributing](contributing.md)
 - [Changelog](CHANGELOG.md)
 - [GitHub](https://github.com/jejjohnson/pyrox)

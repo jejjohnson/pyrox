@@ -9,15 +9,15 @@ These are the canonical closed-form *math* for each kernel — small,
 readable, and tutorial-facing. The companion *scalable construction*
 surface (numerically stable matrix assembly, mixed-precision
 accumulation, implicit/structured operators, batched matvec) lives in
-`gaussx`; see :func:`gaussx.stable_rbf_kernel` and
-:class:`gaussx.ImplicitKernelOperator` for the production path.
+`gaussx`; see `gaussx.stable_rbf_kernel` and
+`gaussx.ImplicitKernelOperator` for the production path.
 
-The composition helpers :func:`kernel_add` and :func:`kernel_mul` act on
+The composition helpers `kernel_add` and `kernel_mul` act on
 already-evaluated Gram matrices, not on callables. Higher-level
-:class:`pyrox.gp.Kernel` classes (Wave 2 Layer 1, see issue #20) compose
+`pyrox.gp.Kernel` classes (Wave 2 Layer 1, see issue #20) compose
 callables and may opt in to gaussx's scalable variants when needed.
 
-Index axes are named via :mod:`einx` (``einx.dot`` / ``einx.id`` /
+Index axes are named via `einx` (``einx.dot`` / ``einx.id`` /
 ``einx.add``) rather than raw broadcasting so shape intent stays legible
 at the call site.
 """
@@ -35,7 +35,7 @@ def _pairwise_sq_dist(
 ) -> Float[Array, "N1 N2"]:
     """Squared Euclidean distance matrix ``||X1[i] - X2[j]||^2``.
 
-    Expanded as :math:`\\|x\\|^2 + \\|x'\\|^2 - 2\\,x^\\top x'` so all
+    Expanded as $\\|x\\|^2 + \\|x'\\|^2 - 2\\,x^\\top x'$ so all
     intermediates stay at ``(N1,)``, ``(N2,)``, or ``(N1, N2)`` — no
     ``(N1, N2, D)`` broadcast tensor. Clipped at zero to absorb the
     small negative values that arise from float cancellation on
@@ -57,8 +57,9 @@ def rbf_kernel(
 ) -> Float[Array, "N1 N2"]:
     r"""Radial basis function (squared exponential) kernel.
 
-    .. math::
-        k(x, x') = \sigma^2 \exp\!\left(-\frac{\|x - x'\|^2}{2\ell^2}\right)
+    $$
+    k(x, x') = \sigma^2 \exp\!\left(-\frac{\|x - x'\|^2}{2\ell^2}\right)
+    $$
 
     Args:
         X1: ``(N1, D)`` inputs.
@@ -82,9 +83,10 @@ def matern_kernel(
 ) -> Float[Array, "N1 N2"]:
     r"""Matern kernel with closed-form ``nu in {1/2, 3/2, 5/2}``.
 
-    .. math::
-        k(x, x') = \sigma^2\, f_\nu(r / \ell),
-        \qquad r = \|x - x'\|
+    $$
+    k(x, x') = \sigma^2\, f_\nu(r / \ell),
+    \qquad r = \|x - x'\|
+    $$
 
     Only the three common half-integer orders are supported because those
     admit closed-form expressions without Bessel evaluations. ``nu`` is a
@@ -126,10 +128,11 @@ def periodic_kernel(
 ) -> Float[Array, "N1 N2"]:
     r"""Periodic (MacKay) kernel.
 
-    .. math::
-        k(x, x') = \sigma^2 \exp\!\left(
-            -\frac{2 \sin^2(\pi \|x - x'\| / p)}{\ell^2}
-        \right)
+    $$
+    k(x, x') = \sigma^2 \exp\!\left(
+        -\frac{2 \sin^2(\pi \|x - x'\| / p)}{\ell^2}
+    \right)
+    $$
 
     For multi-dimensional inputs the argument uses the Euclidean distance,
     matching the common GPML convention.
@@ -159,8 +162,9 @@ def linear_kernel(
 ) -> Float[Array, "N1 N2"]:
     r"""Linear kernel.
 
-    .. math::
-        k(x, x') = \sigma^2\, x^\top x' + b
+    $$
+    k(x, x') = \sigma^2\, x^\top x' + b
+    $$
 
     Args:
         X1: ``(N1, D)`` inputs.
@@ -183,10 +187,11 @@ def rational_quadratic_kernel(
 ) -> Float[Array, "N1 N2"]:
     r"""Rational quadratic kernel.
 
-    .. math::
-        k(x, x') = \sigma^2 \left(
-            1 + \frac{\|x - x'\|^2}{2\alpha \ell^2}
-        \right)^{-\alpha}
+    $$
+    k(x, x') = \sigma^2 \left(
+        1 + \frac{\|x - x'\|^2}{2\alpha \ell^2}
+    \right)^{-\alpha}
+    $$
 
     Scale mixture of RBF kernels: the limit ``alpha -> infty`` recovers the
     RBF, small ``alpha`` yields heavier-tailed correlations.
@@ -214,10 +219,11 @@ def polynomial_kernel(
 ) -> Float[Array, "N1 N2"]:
     r"""Polynomial kernel.
 
-    .. math::
-        k(x, x') = \sigma^2 \bigl(x^\top x' + b\bigr)^d
+    $$
+    k(x, x') = \sigma^2 \bigl(x^\top x' + b\bigr)^d
+    $$
 
-    :func:`linear_kernel` is the special case ``degree == 1`` without the
+    `linear_kernel` is the special case ``degree == 1`` without the
     outer power. ``degree`` is a static Python int so the kernel specializes
     at trace time.
 
@@ -245,13 +251,14 @@ def cosine_kernel(
 ) -> Float[Array, "N1 N2"]:
     r"""Cosine kernel.
 
-    .. math::
-        k(x, x') = \sigma^2 \cos\!\left(
-            \frac{2 \pi \|x - x'\|}{p}
-        \right)
+    $$
+    k(x, x') = \sigma^2 \cos\!\left(
+        \frac{2 \pi \|x - x'\|}{p}
+    \right)
+    $$
 
     Useful as a simple periodic building block alongside
-    :func:`periodic_kernel`; unlike the Mackay form this one uses plain
+    `periodic_kernel`; unlike the Mackay form this one uses plain
     cosine of distance and can go negative.
 
     Args:
@@ -276,8 +283,9 @@ def white_kernel(
 ) -> Float[Array, "N1 N2"]:
     r"""White-noise kernel.
 
-    .. math::
-        k(x, x') = \sigma^2 \,\delta(x, x')
+    $$
+    k(x, x') = \sigma^2 \,\delta(x, x')
+    $$
 
     Nonzero only where ``X1[i]`` exactly matches ``X2[j]`` across all feature
     dimensions. When evaluated at ``X1 == X2`` this yields ``sigma^2 * I``.
@@ -303,8 +311,9 @@ def constant_kernel(
 ) -> Float[Array, "N1 N2"]:
     r"""Constant kernel.
 
-    .. math::
-        k(x, x') = \sigma^2
+    $$
+    k(x, x') = \sigma^2
+    $$
 
     A rank-one kernel useful as a scalar offset additive component.
 

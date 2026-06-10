@@ -2,24 +2,24 @@
 
 Three kinds of likelihood ship in this module:
 
-* **Concrete analytic** — :class:`GaussianLikelihood` carries closed-form
-  expected log-likelihood, so :func:`svgp_elbo` can skip numerical
+* **Concrete analytic** — `GaussianLikelihood` carries closed-form
+  expected log-likelihood, so `svgp_elbo` can skip numerical
   integration entirely and use
-  :func:`gaussx.variational_elbo_gaussian`.
-* **Generic wrapper** — :class:`DistLikelihood` turns *any*
-  ``numpyro.distributions.Distribution`` into a :class:`Likelihood` via
+  `gaussx.variational_elbo_gaussian`.
+* **Generic wrapper** — `DistLikelihood` turns *any*
+  ``numpyro.distributions.Distribution`` into a `Likelihood` via
   a user-supplied link function ``f -> dist``. Non-conjugate ELBO paths
   integrate the wrapped ``log_prob`` numerically through a gaussx
   integrator.
-* **Concrete non-Gaussian** — :class:`BernoulliLikelihood`,
-  :class:`PoissonLikelihood`, :class:`StudentTLikelihood` are scalar
+* **Concrete non-Gaussian** — `BernoulliLikelihood`,
+  `PoissonLikelihood`, `StudentTLikelihood` are scalar
   observation models for the advanced inference strategies (Laplace, GN,
-  EP, posterior linearization). :class:`SoftmaxLikelihood` and
-  :class:`HeteroscedasticGaussianLikelihood` are multi-latent
+  EP, posterior linearization). `SoftmaxLikelihood` and
+  `HeteroscedasticGaussianLikelihood` are multi-latent
   (``latent_dim > 1``); their ``log_prob`` works but the scalar-latent
   advanced inference paths reject them with a clear error.
 
-All likelihoods satisfy the :class:`pyrox.gp.Likelihood` protocol:
+All likelihoods satisfy the `pyrox.gp.Likelihood` protocol:
 ``log_prob(f, y) -> scalar``. Multi-latent observation models declare
 their per-observation latent count via the ``latent_dim`` static field
 (default ``1`` for scalar likelihoods).
@@ -39,14 +39,14 @@ from pyrox.gp._protocols import Likelihood
 
 
 class GaussianLikelihood(Likelihood):
-    r"""Gaussian observation model :math:`p(y \mid f) = N(y \mid f, \sigma^2)`.
+    r"""Gaussian observation model $p(y \mid f) = N(y \mid f, \sigma^2)$.
 
     The only likelihood with a closed-form expected log-likelihood,
     enabling the analytical Titsias ELBO via
-    :func:`gaussx.variational_elbo_gaussian`.
+    `gaussx.variational_elbo_gaussian`.
 
     Attributes:
-        noise_var: Observation noise variance :math:`\sigma^2`.
+        noise_var: Observation noise variance $\sigma^2$.
     """
 
     noise_var: float | Float[Array, ""]
@@ -66,25 +66,25 @@ class DistLikelihood(Likelihood):
     The user supplies a *link function* that maps the latent function
     value ``f`` to a numpyro distribution over observations:
 
-    .. code-block:: python
+    ```python
+    # Bernoulli with logit link
+    lik = DistLikelihood(lambda f: dist.Bernoulli(logits=f))
 
-        # Bernoulli with logit link
-        lik = DistLikelihood(lambda f: dist.Bernoulli(logits=f))
+    # Poisson with log link
+    lik = DistLikelihood(lambda f: dist.Poisson(rate=jnp.exp(f)))
 
-        # Poisson with log link
-        lik = DistLikelihood(lambda f: dist.Poisson(rate=jnp.exp(f)))
+    # Student-t noise
+    lik = DistLikelihood(lambda f: dist.StudentT(df=3, loc=f, scale=0.5))
+    ```
 
-        # Student-t noise
-        lik = DistLikelihood(lambda f: dist.StudentT(df=3, loc=f, scale=0.5))
-
-    The resulting object satisfies the :class:`Likelihood` protocol and
-    can be passed to :func:`svgp_elbo`. Because no closed-form expected
+    The resulting object satisfies the `Likelihood` protocol and
+    can be passed to `svgp_elbo`. Because no closed-form expected
     log-likelihood is available, the ELBO uses numerical integration
     (``GaussHermiteIntegrator`` or ``MonteCarloIntegrator`` from gaussx).
 
     Attributes:
         dist_fn: Callable mapping ``f`` to a
-            :class:`numpyro.distributions.Distribution`.
+            `numpyro.distributions.Distribution`.
     """
 
     dist_fn: Callable[..., Any] = eqx.field(static=True)
@@ -102,7 +102,7 @@ class BernoulliLikelihood(Likelihood):
     r"""Binary classification likelihood with logit link.
 
     ``p(y \mid f) = \mathrm{Bernoulli}(\sigma(f))`` where
-    :math:`\sigma` is the logistic function. Targets ``y`` are
+    $\sigma$ is the logistic function. Targets ``y`` are
     ``{0, 1}`` valued. Scalar latent (``latent_dim = 1``).
     """
 
@@ -137,9 +137,9 @@ class StudentTLikelihood(Likelihood):
     (``latent_dim = 1``). Both ``df`` and ``scale`` are positive.
 
     Attributes:
-        df: Degrees of freedom :math:`\nu > 0`. Smaller values give
+        df: Degrees of freedom $\nu > 0$. Smaller values give
             heavier tails. ``df -> infinity`` recovers the Gaussian.
-        scale: Scale parameter :math:`\sigma > 0`.
+        scale: Scale parameter $\sigma > 0$.
     """
 
     df: float | Float[Array, ""]
@@ -162,12 +162,12 @@ class SoftmaxLikelihood(Likelihood):
     Targets ``y`` are integer class indices in ``[0, num_classes)``.
 
     Multi-latent (``latent_dim = num_classes``). The scalar-latent
-    advanced inference strategies in :mod:`pyrox.gp._inference_nongauss`
+    advanced inference strategies in `pyrox.gp._inference_nongauss`
     reject this likelihood with a clear error; use SVGP / MAP for now,
     or wait for the multi-latent inference follow-up.
 
     Attributes:
-        num_classes: Number of output classes :math:`C \geq 2`.
+        num_classes: Number of output classes $C \geq 2$.
     """
 
     num_classes: int = eqx.field(static=True)
@@ -193,7 +193,7 @@ class HeteroscedasticGaussianLikelihood(Likelihood):
 
     Each observation consumes two latents — the mean and the
     log-noise-standard-deviation:
-    :math:`p(y_n | f_n^{(0)}, f_n^{(1)}) = N(y_n | f_n^{(0)}, e^{2 f_n^{(1)}})`.
+    $p(y_n | f_n^{(0)}, f_n^{(1)}) = N(y_n | f_n^{(0)}, e^{2 f_n^{(1)}})$.
 
     Multi-latent (``latent_dim = 2``). The scalar-latent advanced
     inference strategies reject this likelihood; use SVGP for now.

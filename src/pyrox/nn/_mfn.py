@@ -1,7 +1,7 @@
 """Bayesian Multiplicative Filter Networks.
 
 The deterministic ``FourierNet`` / ``GaborNet`` / ``mfn_forward``
-primitives live in :mod:`geonnax`; this module hosts the pyrox-specific
+primitives live in `geonnax`; this module hosts the pyrox-specific
 Bayesian wrappers ``BayesianFourierNet`` / ``BayesianGaborNet`` that
 sample each filter and readout linear from a NumPyro prior.
 
@@ -9,8 +9,8 @@ Composition is used over inheritance: the geonnax cores are plain
 ``eqx.Module`` subclasses, while the pyrox variants need the
 ``PyroxModule`` sample-site machinery, and mixing the two via MRO is
 brittle. Instead each wrapper holds the deterministic core as a field
-and rebuilds it with sampled weights via :func:`eqx.tree_at` before
-running the single-example forward under :func:`jax.vmap`.
+and rebuilds it with sampled weights via `eqx.tree_at` before
+running the single-example forward under `jax.vmap`.
 """
 
 from __future__ import annotations
@@ -79,25 +79,25 @@ def _sample_normal_linears(
 class BayesianFourierNet(PyroxModule):
     r"""FourierNet with Bayesian priors on all filter and linear weights.
 
-    A thin subclass of :class:`FourierNet` that overrides ``__call__`` to
+    A thin subclass of `FourierNet` that overrides ``__call__`` to
     register NumPyro sample sites for every parameter:
 
     - Per filter *i*: ``filter_{i}.Omega`` and ``filter_{i}.phi``.
     - Per linear *i*: ``linear_{i}.W`` and ``linear_{i}.b``.
 
-    Total number of sites: :math:`4L` where :math:`L` is ``depth``.
+    Total number of sites: $4L$ where $L$ is ``depth``.
 
     Priors:
 
-    - :math:`\Omega_i \sim \mathcal{N}(0, \sigma^2)` (matrix).
-    - :math:`\varphi_i \sim \mathrm{Uniform}(-\pi, \pi)`.
-    - :math:`W_i \sim \mathcal{N}(0, \sigma^2)` (matrix).
-    - :math:`b_i \sim \mathcal{N}(0, \sigma^2)` (vector).
+    - $\Omega_i \sim \mathcal{N}(0, \sigma^2)$ (matrix).
+    - $\varphi_i \sim \mathrm{Uniform}(-\pi, \pi)$.
+    - $W_i \sim \mathcal{N}(0, \sigma^2)$ (matrix).
+    - $b_i \sim \mathcal{N}(0, \sigma^2)$ (vector).
 
     Attributes:
-        prior_std: Prior standard deviation :math:`\\sigma` for Gaussian
+        prior_std: Prior standard deviation $\\sigma$ for Gaussian
             sites (default 1.0).  Phase sites always use
-            :math:`\mathrm{Uniform}(-\pi, \pi)`.
+            $\mathrm{Uniform}(-\pi, \pi)$.
     """
 
     core: FourierNet
@@ -117,9 +117,9 @@ class BayesianFourierNet(PyroxModule):
         prior_std: float = 1.0,
         pyrox_name: str | None = None,
     ) -> BayesianFourierNet:
-        """Construct a :class:`BayesianFourierNet`.
+        """Construct a `BayesianFourierNet`.
 
-        Args mirror :meth:`FourierNet.init`, plus:
+        Args mirror `FourierNet.init`, plus:
 
         Args:
             prior_std: Prior standard deviation for Gaussian sites
@@ -127,7 +127,7 @@ class BayesianFourierNet(PyroxModule):
 
         Raises:
             ValueError: If ``prior_std`` is non-positive or any
-                :meth:`FourierNet.init` validation fails.
+                `FourierNet.init` validation fails.
         """
         _require_positive(prior_std=prior_std)
         core = FourierNet.init(
@@ -202,26 +202,26 @@ class BayesianFourierNet(PyroxModule):
 class BayesianGaborNet(PyroxModule):
     r"""GaborNet with Bayesian priors on all filter and linear weights.
 
-    A thin subclass of :class:`GaborNet` that overrides ``__call__`` to
+    A thin subclass of `GaborNet` that overrides ``__call__`` to
     register NumPyro sample sites for every parameter:
 
     - Per filter *i*: ``filter_{i}.Omega``, ``filter_{i}.phi``,
       ``filter_{i}.mu``, and ``filter_{i}.log_gamma``.
     - Per linear *i*: ``linear_{i}.W`` and ``linear_{i}.b``.
 
-    Total number of sites: :math:`6L` where :math:`L` is ``depth``.
+    Total number of sites: $6L$ where $L$ is ``depth``.
 
     Priors:
 
-    - :math:`\Omega_i \sim \mathcal{N}(0, \sigma^2)` (matrix).
-    - :math:`\varphi_i \sim \mathrm{Uniform}(-\pi, \pi)`.
-    - :math:`\mu_i \sim \mathrm{Uniform}(\texttt{domain\_low},\texttt{domain\_high})`.
-    - :math:`\log\gamma_i \sim \mathcal{N}(0, \sigma^2)` (log-space).
-    - :math:`W_i \sim \mathcal{N}(0, \sigma^2)` (matrix).
-    - :math:`b_i \sim \mathcal{N}(0, \sigma^2)` (vector).
+    - $\Omega_i \sim \mathcal{N}(0, \sigma^2)$ (matrix).
+    - $\varphi_i \sim \mathrm{Uniform}(-\pi, \pi)$.
+    - $\mu_i \sim \mathrm{Uniform}(\texttt{domain\_low},\texttt{domain\_high})$.
+    - $\log\gamma_i \sim \mathcal{N}(0, \sigma^2)$ (log-space).
+    - $W_i \sim \mathcal{N}(0, \sigma^2)$ (matrix).
+    - $b_i \sim \mathcal{N}(0, \sigma^2)$ (vector).
 
     Attributes:
-        prior_std: Prior standard deviation :math:`\\sigma` for Gaussian
+        prior_std: Prior standard deviation $\\sigma$ for Gaussian
             and log-gamma sites (default 1.0).
     """
 
@@ -244,9 +244,9 @@ class BayesianGaborNet(PyroxModule):
         prior_std: float = 1.0,
         pyrox_name: str | None = None,
     ) -> BayesianGaborNet:
-        """Construct a :class:`BayesianGaborNet`.
+        """Construct a `BayesianGaborNet`.
 
-        Args mirror :meth:`GaborNet.init`, plus:
+        Args mirror `GaborNet.init`, plus:
 
         Args:
             prior_std: Prior standard deviation for Gaussian and
@@ -254,7 +254,7 @@ class BayesianGaborNet(PyroxModule):
 
         Raises:
             ValueError: If ``prior_std`` is non-positive or any
-                :meth:`GaborNet.init` validation fails.
+                `GaborNet.init` validation fails.
         """
         _require_positive(prior_std=prior_std)
         core = GaborNet.init(

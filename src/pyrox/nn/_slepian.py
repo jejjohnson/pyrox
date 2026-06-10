@@ -1,8 +1,8 @@
 """Bayesian Slepian positional encoder.
 
-The deterministic :class:`SlepianEncoder` and
-:class:`HybridSphericalSlepianEncoder` now live in :mod:`geonnax` and are
-re-exported via :mod:`pyrox.nn._geonnax`. This module keeps the Bayesian
+The deterministic `SlepianEncoder` and
+`HybridSphericalSlepianEncoder` now live in `geonnax` and are
+re-exported via `pyrox.nn._geonnax`. This module keeps the Bayesian
 variant whose forward registers NumPyro ``param`` sites for the cap
 geometry (radius and centre), which is pyrox-specific and depends on the
 ``Parameterized`` base class.

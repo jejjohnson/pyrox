@@ -1,10 +1,10 @@
 """Concrete kernel classes — ``Parameterized`` wrappers over the math primitives.
 
 Each class registers its hyperparameters with constraints through
-:class:`pyrox._core.Parameterized`, so users can attach priors and
-autoguides via :meth:`set_prior` / :meth:`autoguide` and flip between
-prior/guide modes with :meth:`set_mode`. The numerical body delegates to
-the pure closed-form functions in :mod:`pyrox.gp._src.kernels`.
+`pyrox._core.Parameterized`, so users can attach priors and
+autoguides via `set_prior` / `autoguide` and flip between
+prior/guide modes with `set_mode`. The numerical body delegates to
+the pure closed-form functions in `pyrox.gp._src.kernels`.
 
 Kernels with a static structural parameter (``Matern.nu``,
 ``Polynomial.degree``) take that parameter as a class field rather than
@@ -12,7 +12,7 @@ a registered JAX param — those numbers choose code paths, not
 optimization targets.
 
 Scalable matrix construction (mixed-precision accumulation, implicit
-operators, batched matvec) lives in :mod:`gaussx`; these wrappers own
+operators, batched matvec) lives in `gaussx`; these wrappers own
 the NumPyro-aware surface only.
 """
 
@@ -28,10 +28,10 @@ from pyrox.gp._src import kernels as _k
 
 
 class _ParameterizedKernel(Parameterized, Kernel):
-    """Shared base — mixes :class:`Parameterized` state with the :class:`Kernel`.
+    """Shared base — mixes `Parameterized` state with the `Kernel`.
 
-    Subclasses only need to implement :meth:`setup` (register params +
-    priors) and :meth:`__call__` (evaluate the math primitive).
+    Subclasses only need to implement `setup` (register params +
+    priors) and `__call__` (evaluate the math primitive).
     """
 
     def diag(self, X: Float[Array, "N D"]) -> Float[Array, " N"]:
@@ -238,7 +238,7 @@ class Polynomial(_ParameterizedKernel):
 
     ``degree`` is a static class field (it selects an integer power, not
     an optimization target). ``bias`` is constrained nonnegative — the
-    ``degree=1`` case reduces to :class:`Linear` and has the same
+    ``degree=1`` case reduces to `Linear` and has the same
     PSD-requires-``b>=0`` failure mode.
     """
 

@@ -1,28 +1,28 @@
 """Sparse GP prior — inducing-input variational foundation.
 
-The :class:`SparseGPPrior` wraps a kernel together with either a fixed
+The `SparseGPPrior` wraps a kernel together with either a fixed
 set of *inducing inputs* ``Z`` of shape ``(M, D)`` or an *inducing-feature*
-object (e.g. :class:`pyrox.gp.FourierInducingFeatures`) that derives
+object (e.g. `pyrox.gp.FourierInducingFeatures`) that derives
 ``K_zz`` and ``K_xz`` from a Laplacian eigenbasis. It exposes the
 inducing covariance ``K_zz``, cross covariances ``K_xz``, and the prior
 diagonal ``K_xx`` as building blocks. A sparse variational guide
-(:class:`pyrox.gp.FullRankGuide`, :class:`MeanFieldGuide`, or
-:class:`WhitenedGuide`) consumes these matrices to produce a predictive
+(`pyrox.gp.FullRankGuide`, `MeanFieldGuide`, or
+`WhitenedGuide`) consumes these matrices to produce a predictive
 distribution at any test set.
 
 When the prior is built from inducing features, ``K_zz`` is returned as a
-:class:`lineax.DiagonalLinearOperator` and jitter is folded *into the
+`lineax.DiagonalLinearOperator` and jitter is folded *into the
 diagonal vector* — never added as ``jnp.eye``. This preserves the
-diagonal-dispatch short-circuit in :func:`gaussx.solve` /
-:func:`gaussx.cholesky` end-to-end, which is the entire point of the
+diagonal-dispatch short-circuit in `gaussx.solve` /
+`gaussx.cholesky` end-to-end, which is the entire point of the
 inducing-feature reduction.
 
 This wave intentionally stops at building blocks: the sparse ELBO entry
-point — analogous to :func:`gp_factor` for the collapsed Gaussian path
+point — analogous to `gp_factor` for the collapsed Gaussian path
 — lands in Wave 3's variational inference issue. Until then the user
 assembles the ELBO in their NumPyro model from
-:meth:`Guide.kl_divergence` and the predictive moments returned by
-:meth:`Guide.predict`.
+`Guide.kl_divergence` and the predictive moments returned by
+`Guide.predict`.
 """
 
 from __future__ import annotations
@@ -56,31 +56,31 @@ class SparseGPPrior(eqx.Module):
     Represents the *zero-mean* prior over inducing values ``u = f(Z)``
     used by sparse variational guides:
 
-    .. math::
-
-        p(u) = \mathcal{N}(0,\, K_{ZZ} + \mathrm{jitter}\,I).
+    $$
+    p(u) = \mathcal{N}(0,\, K_{ZZ} + \mathrm{jitter}\,I).
+    $$
 
     The standard SVGP convention is to subtract any global mean function
     before forming the prior over ``u`` and to add it back at predict
     time, so the inducing-prior mean is fixed to zero (this is what the
-    guides' KL terms assume — see :meth:`FullRankGuide.kl_divergence`,
-    :meth:`MeanFieldGuide.kl_divergence`, :meth:`WhitenedGuide.kl_divergence`).
-    The :attr:`mean_fn` attribute on this class is exposed as a
+    guides' KL terms assume — see `FullRankGuide.kl_divergence`,
+    `MeanFieldGuide.kl_divergence`, `WhitenedGuide.kl_divergence`).
+    The `mean_fn` attribute on this class is exposed as a
     convenience for callers that want to add ``mu(X_*)`` back onto the
-    predictive mean returned by :meth:`Guide.predict`; it is **not**
-    incorporated in :meth:`inducing_operator` or in the guides' KL.
+    predictive mean returned by `Guide.predict`; it is **not**
+    incorporated in `inducing_operator` or in the guides' KL.
 
     Pair with a sparse variational guide that owns ``q(u) = N(m, S)`` to
     obtain the standard SVGP predictive
 
-    .. math::
-
-        \mu_*(x) = K_{xZ} K_{ZZ}^{-1} m, \qquad
-        \sigma_*^2(x) = k(x, x) - K_{xZ} K_{ZZ}^{-1} K_{Zx}
-                       + K_{xZ} K_{ZZ}^{-1} S K_{ZZ}^{-1} K_{Zx}.
+    $$
+    \mu_*(x) = K_{xZ} K_{ZZ}^{-1} m, \qquad
+    \sigma_*^2(x) = k(x, x) - K_{xZ} K_{ZZ}^{-1} K_{Zx}
+                   + K_{xZ} K_{ZZ}^{-1} S K_{ZZ}^{-1} K_{Zx}.
+    $$
 
     Attributes:
-        kernel: Any :class:`pyrox.gp.Kernel` — evaluated on ``Z``.
+        kernel: Any `pyrox.gp.Kernel` — evaluated on ``Z``.
         Z: Inducing inputs of shape ``(M, D)``.
         mean_fn: Callable ``X -> (N,)`` or ``None`` for the zero mean.
             Convenience accessor; not folded into the inducing prior.
@@ -124,15 +124,15 @@ class SparseGPPrior(eqx.Module):
         r"""Return ``K_{ZZ} + \text{jitter}\,I`` as a ``lineax`` operator.
 
         For point-inducing priors, returns a dense
-        :class:`lineax.MatrixLinearOperator` with ``positive_semidefinite_tag``.
+        `lineax.MatrixLinearOperator` with ``positive_semidefinite_tag``.
         For inducing-feature priors, delegates to
-        :meth:`InducingFeatures.K_uu` — typically a
-        :class:`lineax.DiagonalLinearOperator` so the downstream
-        :func:`gaussx.solve` dispatches in O(M) instead of O(M^3).
+        `InducingFeatures.K_uu` — typically a
+        `lineax.DiagonalLinearOperator` so the downstream
+        `gaussx.solve` dispatches in O(M) instead of O(M^3).
 
         Single kernel call; safe standalone for kernels with priors. For
         building several SVGP blocks together, prefer
-        :meth:`predictive_blocks`, which scopes one shared kernel
+        `predictive_blocks`, which scopes one shared kernel
         context across ``K_zz``, ``K_xz``, and ``K_xx_diag`` so
         Pattern B / C kernels register their NumPyro hyperparameter
         sites once instead of resampling per call.
@@ -147,16 +147,16 @@ class SparseGPPrior(eqx.Module):
         return _psd_operator(K)
 
     def cross_covariance(self, X: Array) -> Float[Array, "N M"]:
-        r""":math:`K_{XZ}` — covariance between ``X`` and the inducing inputs/features.
+        r"""$K_{XZ}$ — covariance between ``X`` and the inducing inputs/features.
 
         The expected shape of ``X`` is inducing-family-dependent:
 
-        - Point-inducing (``Z``) or :class:`FourierInducingFeatures`:
+        - Point-inducing (``Z``) or `FourierInducingFeatures`:
           coordinates ``(N, D)``.
-        - :class:`SphericalHarmonicInducingFeatures`: unit vectors ``(N, 3)``.
-        - :class:`LaplacianInducingFeatures`: integer node indices ``(N,)``.
+        - `SphericalHarmonicInducingFeatures`: unit vectors ``(N, 3)``.
+        - `LaplacianInducingFeatures`: integer node indices ``(N,)``.
 
-        See :meth:`predictive_blocks` for the shared-context batch
+        See `predictive_blocks` for the shared-context batch
         helper to use when assembling several SVGP blocks together.
         """
         if self.inducing is not None:
@@ -169,7 +169,7 @@ class SparseGPPrior(eqx.Module):
     def kernel_diag(self, X: Float[Array, "N D"]) -> Float[Array, " N"]:
         r"""Prior diagonal ``\mathrm{diag}\,K(X, X)`` — variance at each ``x``.
 
-        See :meth:`predictive_blocks` for the shared-context batch
+        See `predictive_blocks` for the shared-context batch
         helper to use when assembling several SVGP blocks together.
         """
         with _kernel_context(self.kernel):
@@ -186,7 +186,7 @@ class SparseGPPrior(eqx.Module):
 
         For Pattern B / C kernels with prior'd hyperparameters, the three
         kernel evaluations needed for an SVGP predictive must share a
-        single :class:`pyrox.PyroxModule` context so the underlying
+        single `pyrox.PyroxModule` context so the underlying
         ``pyrox_sample`` sites register once and yield consistent
         hyperparameter draws across ``K_{ZZ}``, ``K_{XZ}``, and the
         diagonal ``\mathrm{diag}\,K(X, X)``. Without this scoping, three
@@ -194,12 +194,12 @@ class SparseGPPrior(eqx.Module):
         samples (under seed) or raise NumPyro duplicate-site errors
         (under tracing) — either way invalidating the SVGP math.
 
-        For pure :class:`equinox.Module` kernels (no ``_get_context``),
-        this is equivalent to calling :meth:`inducing_operator`,
-        :meth:`cross_covariance`, and :meth:`kernel_diag` independently.
+        For pure `equinox.Module` kernels (no ``_get_context``),
+        this is equivalent to calling `inducing_operator`,
+        `cross_covariance`, and `kernel_diag` independently.
 
         For inducing-feature priors, ``K_zz_op`` is a
-        :class:`lineax.DiagonalLinearOperator` (jitter folded into the
+        `lineax.DiagonalLinearOperator` (jitter folded into the
         diagonal vector — never ``+ jnp.eye``) so the downstream solve
         stays O(M).
         """
@@ -220,10 +220,10 @@ class SparseGPPrior(eqx.Module):
         return DenseSolver() if self.solver is None else self.solver
 
     def log_prob(self, u: Float[Array, " M"]) -> Float[Array, ""]:
-        r"""Log-density under :math:`p(u) = \mathcal{N}(0, K_{ZZ} + \text{jitter}\,I)`.
+        r"""Log-density under $p(u) = \mathcal{N}(0, K_{ZZ} + \text{jitter}\,I)$.
 
-        Delegates to :func:`gaussx.gaussian_log_prob` with the
-        configured :attr:`solver` so the user-supplied solver controls
+        Delegates to `gaussx.gaussian_log_prob` with the
+        configured `solver` so the user-supplied solver controls
         the ``solve`` / ``logdet`` work on ``K_zz_op``. Useful for
         scoring inducing values against the SVGP prior in non-NumPyro
         contexts (e.g.\\ tests, diagnostics).
@@ -237,13 +237,13 @@ class SparseGPPrior(eqx.Module):
         r"""Draw ``u \sim p(u)`` from the inducing prior.
 
         Wraps the inducing operator in a
-        :class:`gaussx.MultivariateNormal` with the configured
-        :attr:`solver`. ``MultivariateNormal.sample`` factors the
-        covariance via :func:`gaussx.cholesky` and reparameterizes;
+        `gaussx.MultivariateNormal` with the configured
+        `solver`. ``MultivariateNormal.sample`` factors the
+        covariance via `gaussx.cholesky` and reparameterizes;
         the returned draw has shape ``(M,)``.
 
         Note: the SVGP variational workflow samples ``u`` from the
-        *guide* :math:`q(u)`, not the prior. This method exists so the
+        *guide* $q(u)$, not the prior. This method exists so the
         prior surface is symmetric with the guide surface and so users
         can score / draw inducing values against the prior directly
         (e.g.\\ for tests or for prior-sample initialization).
