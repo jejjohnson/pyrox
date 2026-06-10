@@ -84,6 +84,7 @@ from gaussx import (
     gaussian_log_prob,
     natural_to_mean_cov,
     safe_cholesky,
+    symmetrize,
     whitened_svgp_predict,
 )
 from jaxtyping import Array, Float
@@ -163,8 +164,7 @@ def _svgp_predict_unwhitened(
     # Cholesky via gaussx.safe_cholesky — adaptive jitter handles the
     # near-singular S=0 case (DeltaGuide) and the float32 paths where a
     # hard-coded jitter rounds to zero. Symmetrize first for numerics.
-    Sv = 0.5 * (Sv + einx.id("i j -> j i", Sv))
-    Lv = safe_cholesky(_possemi_cov_operator(Sv))
+    Lv = safe_cholesky(_possemi_cov_operator(symmetrize(Sv)))
     return whitened_svgp_predict(K_zz_op, K_xz, m_v, Lv, K_xx_diag)
 
 
@@ -500,15 +500,25 @@ class NaturalGuide(Guide):
         """Build the precision operator ``Lambda = -2 nat2`` (PSD)."""
         return _possemi_cov_operator(-2.0 * self.nat2)
 
+    def _moment_mean(self) -> Float[Array, " M"]:
+        """Moment-form mean via one structured solve — no covariance build.
+
+        :func:`gaussx.natural_to_mean_cov` returns the covariance as a
+        *lazy* inverse operator, so discarding it here is free.
+        """
+        nat2_op = _negsemi_cov_operator(self.nat2)
+        m, _ = natural_to_mean_cov(
+            self.nat1, nat2_op, solver=_resolve_solver(self.solver)
+        )
+        return m
+
     def _moments(self) -> tuple[Float[Array, " M"], Float[Array, "M M"]]:
         """Return ``(mean, cov_array)`` via :func:`gaussx.natural_to_mean_cov`."""
         nat2_op = _negsemi_cov_operator(self.nat2)
         m, cov_op = natural_to_mean_cov(
             self.nat1, nat2_op, solver=_resolve_solver(self.solver)
         )
-        cov = cov_op.as_matrix()
-        cov = 0.5 * (cov + einx.id("i j -> j i", cov))
-        return m, cov
+        return m, symmetrize(cov_op.as_matrix())
 
     def _mvn(self) -> MultivariateNormalPrecision:
         """Wrap the natural form as a :class:`gaussx.MultivariateNormalPrecision`.
@@ -516,9 +526,8 @@ class NaturalGuide(Guide):
         Carries the precision operator directly, so ``sample`` /
         ``log_prob`` never materialize the covariance.
         """
-        m, _ = self._moments()
         return MultivariateNormalPrecision(
-            loc=m,
+            loc=self._moment_mean(),
             prec_operator=self._precision_operator(),
             solver=_resolve_solver(self.solver),
         )
@@ -531,7 +540,7 @@ class NaturalGuide(Guide):
     @property
     def mean(self) -> Float[Array, " M"]:
         """Recover the moment-form mean ``m = S nat1``."""
-        return self._moments()[0]
+        return self._moment_mean()
 
     def sample(self, key: Array) -> Float[Array, " M"]:
         r"""Draw ``u \sim q`` via :class:`gaussx.MultivariateNormalPrecision`.

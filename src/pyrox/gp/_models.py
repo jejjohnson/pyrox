@@ -99,13 +99,13 @@ class GPPrior(eqx.Module):
 
     def _prior_operator(self) -> lx.AbstractLinearOperator:
         K = self.kernel(self.X, self.X)
-        K = K + self.jitter * jnp.eye(K.shape[0], dtype=K.dtype)
+        K = K.at[jnp.diag_indices_from(K)].add(self.jitter)
         return _psd_operator(K)
 
     def _noisy_operator(self, noise_var: Float[Array, ""]) -> lx.AbstractLinearOperator:
         K = self.kernel(self.X, self.X)
-        reg = (self.jitter + noise_var) * jnp.eye(K.shape[0], dtype=K.dtype)
-        return _psd_operator(K + reg)
+        K = K.at[jnp.diag_indices_from(K)].add(self.jitter + noise_var)
+        return _psd_operator(K)
 
     def _resolved_solver(self) -> AbstractSolverStrategy:
         return DenseSolver() if self.solver is None else self.solver

@@ -434,7 +434,7 @@ class SlepianInducingFeatures(eqx.Module):
             "f m, f -> f m", self.basis.coeffs, a_per_feature
         )
         K = einx.dot("f i, f j -> i j", self.basis.coeffs, weighted_coeffs)
-        K = K + jitter * jnp.eye(self.basis.num_modes, dtype=K.dtype)
+        K = K.at[jnp.diag_indices_from(K)].add(jitter)
         return lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)
 
     def k_ux(

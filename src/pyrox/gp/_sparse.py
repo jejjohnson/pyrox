@@ -143,7 +143,7 @@ class SparseGPPrior(eqx.Module):
         assert self.Z is not None
         with _kernel_context(self.kernel):
             K = self.kernel(self.Z, self.Z)
-        K = K + self.jitter * jnp.eye(K.shape[0], dtype=K.dtype)
+        K = K.at[jnp.diag_indices_from(K)].add(self.jitter)
         return _psd_operator(K)
 
     def cross_covariance(self, X: Array) -> Float[Array, "N M"]:
@@ -211,9 +211,7 @@ class SparseGPPrior(eqx.Module):
                 assert self.Z is not None
                 K_zz_raw = self.kernel(self.Z, self.Z)
                 K_xz = self.kernel(X, self.Z)
-                K_zz = K_zz_raw + self.jitter * jnp.eye(
-                    K_zz_raw.shape[0], dtype=K_zz_raw.dtype
-                )
+                K_zz = K_zz_raw.at[jnp.diag_indices_from(K_zz_raw)].add(self.jitter)
                 K_zz_op = _psd_operator(K_zz)
             K_xx_diag = self.kernel.diag(X)
         return K_zz_op, K_xz, K_xx_diag

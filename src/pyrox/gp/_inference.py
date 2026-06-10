@@ -26,8 +26,9 @@ import numpyro
 from gaussx import (
     AbstractIntegrator as GaussxIntegrator,
     GaussianState,
-    cholesky,
     log_likelihood_expectation,
+    solve_matrix,
+    symmetrize,
     variational_elbo_gaussian,
 )
 from jaxtyping import Array, Float
@@ -267,40 +268,20 @@ class ConjugateVI:
 
         grad1, grad2 = self._site_gradients(likelihood, y, f_loc, f_var)
 
-        # B = K_zz^{-1} K_zx, shape (M, N)
-        # Via two triangular solves: A = L^{-1} K_zx, B = L^{-T} A.
-        L_zz = cholesky(K_zz_op)
+        # B = K_zz^{-1} K_zx via gaussx.solve_matrix: one Cholesky
+        # factorization shared across the matrix RHS for dense PSD
+        # K_zz, structured dispatch (O(M) diagonal) otherwise.
         K_zx = einx.id("n m -> m n", K_xz)  # (N, M) → (M, N)
-        A = jax.vmap(
-            lambda col: lx.linear_solve(L_zz, col).value,
-            in_axes=1,
-            out_axes=1,
-        )(K_zx)
-        B = jax.vmap(
-            lambda col: lx.linear_solve(L_zz.T, col).value,
-            in_axes=1,
-            out_axes=1,
-        )(A)
+        B = solve_matrix(K_zz_op, K_zx)
 
         # Prior natural parameters: p(u) = N(0, K_zz)
         # => eta1_prior = 0, eta2_prior = -0.5 K_zz^{-1}
-        # Build K_zz^{-1} via Cholesky solves (more stable than inv).
+        # K_zz^{-1} must be dense here (it seeds the dense nat2), so
+        # solve against I and re-symmetrize.
         M = K_zz_op.in_size()
         nat1_prior = jnp.zeros_like(guide.nat1)
         eye = jnp.eye(M, dtype=guide.nat2.dtype)
-        K_zz_inv = jax.vmap(
-            lambda col: lx.linear_solve(L_zz.T, col).value,
-            in_axes=1,
-            out_axes=1,
-        )(
-            jax.vmap(
-                lambda col: lx.linear_solve(L_zz, col).value,
-                in_axes=1,
-                out_axes=1,
-            )(eye)
-        )
-        K_zz_inv = 0.5 * (K_zz_inv + einx.id("i j -> j i", K_zz_inv))
-        nat2_prior = -0.5 * K_zz_inv
+        nat2_prior = -0.5 * symmetrize(solve_matrix(K_zz_op, eye))
 
         # Project per-point site natural parameters into inducing
         # space. The site λ₁ = grad1 - f_loc * grad2 (not just grad1);

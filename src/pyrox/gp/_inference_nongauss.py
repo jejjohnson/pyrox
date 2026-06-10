@@ -49,9 +49,11 @@ from gaussx import (
     AbstractIntegrator,
     GaussHermiteIntegrator,
     GaussianState,
+    cholesky_logdet,
     damped_natural_update,
     ep_tilted_moments,
     safe_cholesky,
+    symmetrize,
 )
 from jaxtyping import Array, Float
 
@@ -115,9 +117,8 @@ class NonGaussConditionedGP(eqx.Module):
     def _pseudo_factor(self) -> Float[Array, "N N"]:
         """Cholesky of ``K + diag(1/Λ + jitter)`` via :func:`_psd_safe_cholesky`."""
         K = self.prior.kernel(self.prior.X, self.prior.X)
-        N = K.shape[0]
-        eye = jnp.eye(N, dtype=K.dtype)
-        K_reg = K + (jnp.reciprocal(self.site_nat2) + self.prior.jitter)[:, None] * eye
+        diag_reg = jnp.reciprocal(self.site_nat2) + self.prior.jitter
+        K_reg = K.at[jnp.diag_indices_from(K)].add(diag_reg)
         return _psd_safe_cholesky(K_reg)
 
     def predict_mean(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
@@ -191,7 +192,7 @@ def _check_scalar_latent(lik: Likelihood) -> None:
 def _prior_K(prior: GPPrior) -> Float[Array, "N N"]:
     with _kernel_context(prior.kernel):
         K = prior.kernel(prior.X, prior.X)
-    return K + prior.jitter * jnp.eye(K.shape[0], dtype=K.dtype)
+    return K.at[jnp.diag_indices_from(K)].add(prior.jitter)
 
 
 def _posterior_from_diag_sites(
@@ -199,22 +200,22 @@ def _posterior_from_diag_sites(
     nat1: Float[Array, " N"],
     nat2: Float[Array, " N"],
     prior_mean: Float[Array, " N"],
-) -> tuple[Float[Array, " N"], Float[Array, "N N"], Float[Array, " N"]]:
-    r"""Compute ``q(f) = N(m, V)`` from diagonal site naturals.
+) -> tuple[Float[Array, " N"], Float[Array, " N"]]:
+    r"""Compute the marginals of ``q(f) = N(m, V)`` from diagonal site naturals.
 
     Sites contribute a synthetic Gaussian likelihood with mean
     ``y_tilde = nat1 / nat2`` and variance ``1/nat2``. The posterior
     mean is
     :math:`m = \mu + K (K + \mathrm{diag}(1/\Lambda))^{-1} (y_{\rm tilde} - \mu)`,
-    and the posterior covariance is
-    :math:`V = K - K (K + \mathrm{diag}(1/\Lambda))^{-1} K`.
+    and the marginal posterior variances are the diagonal of
+    :math:`V = K - K (K + \mathrm{diag}(1/\Lambda))^{-1} K`, computed
+    without materializing ``V``: with ``W = L^{-1} K`` the diagonal is
+    ``diag(K) - sum_n W_{n,i}^2``.
 
-    Returns ``(q_mean, q_cov, q_var)``.
+    Returns ``(q_mean, q_var)``.
     """
-    N = K.shape[0]
-    eye = jnp.eye(N, dtype=K.dtype)
     sigma2 = jnp.reciprocal(nat2)
-    K_reg = K + sigma2[:, None] * eye
+    K_reg = K.at[jnp.diag_indices_from(K)].add(sigma2)
     L = _psd_safe_cholesky(K_reg)
 
     y_tilde = nat1 / nat2
@@ -222,12 +223,9 @@ def _posterior_from_diag_sites(
     alpha = jax.scipy.linalg.cho_solve((L, True), residual)
     q_mean = prior_mean + einx.dot("i j, j -> i", K, alpha)
 
-    # V = K - K (K + diag(sigma2))^-1 K
-    M = jax.scipy.linalg.cho_solve((L, True), K)
-    V = K - einx.dot("i j, j k -> i k", K, M)
-    V = 0.5 * (V + einx.id("i j -> j i", V))
-    q_var = jnp.diag(V)
-    return q_mean, V, q_var
+    W = jax.scipy.linalg.solve_triangular(L, K, lower=True)
+    q_var = jnp.diag(K) - einx.sum("[n] i", W * W)
+    return q_mean, q_var
 
 
 def _per_point_grad_hess(
@@ -267,8 +265,7 @@ def _psd_safe_cholesky(M: Float[Array, "N N"]) -> Float[Array, "N N"]:
     a PSD :mod:`lineax` operator. Float32 + densely-packed kernel
     inputs is the realistic failure case this guards against.
     """
-    M_sym = 0.5 * (M + einx.id("i j -> j i", M))
-    return safe_cholesky(_psd_operator(M_sym))
+    return safe_cholesky(_psd_operator(symmetrize(M)))
 
 
 def _per_site_expectation(
@@ -334,10 +331,9 @@ def _laplace_log_marginal(
     sqrt_lam = jnp.sqrt(Lam)
     # B = I + √Λ K √Λ (symmetric two-sided diagonal scaling of K).
     scaled_K = einx.multiply("i, i j, j -> i j", sqrt_lam, K, sqrt_lam)
-    B = jnp.eye(K.shape[0], dtype=K.dtype) + scaled_K
+    B = scaled_K.at[jnp.diag_indices_from(scaled_K)].add(1.0)
     L_B = _psd_safe_cholesky(B)
-    logdet = 2.0 * jnp.sum(jnp.log(jnp.diag(L_B)))
-    return ll - quad - 0.5 * logdet
+    return ll - quad - 0.5 * cholesky_logdet(L_B)
 
 
 def _log_prob_per_point_factory(
@@ -414,7 +410,7 @@ class LaplaceInference(eqx.Module):
             # Site precision Λ = -h (positive for log-concave likelihoods).
             Lam = jnp.maximum(-h, self.precision_floor)
             nat1 = g + Lam * f
-            f_newton, _, _ = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
+            f_newton, _ = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
             f_new = (1.0 - self.damping) * f + self.damping * f_newton
             delta = jnp.max(jnp.abs(f_new - f))
             f = f_new
@@ -427,7 +423,7 @@ class LaplaceInference(eqx.Module):
         g, h = _per_point_grad_hess(log_prob_per_point, f, y)
         Lam = jnp.maximum(-h, self.precision_floor)
         nat1 = g + Lam * f
-        q_mean, _, q_var = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
+        q_mean, q_var = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
 
         log_marg = _laplace_log_marginal(log_prob_per_point, f, y, prior_mean, K, Lam)
 
@@ -498,7 +494,7 @@ class GaussNewtonInference(eqx.Module):
             # even when ``-h`` goes negative (StudentT tails).
             Lam = jnp.maximum(-h, self.precision_floor)
             nat1 = g + Lam * f
-            f_newton, _, _ = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
+            f_newton, _ = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
             f_new = (1.0 - self.damping) * f + self.damping * f_newton
             delta = jnp.max(jnp.abs(f_new - f))
             f = f_new
@@ -510,7 +506,7 @@ class GaussNewtonInference(eqx.Module):
         g, h = _per_point_grad_hess(log_prob_per_point, f, y)
         Lam = jnp.maximum(-h, self.precision_floor)
         nat1 = g + Lam * f
-        q_mean, _, q_var = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
+        q_mean, q_var = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
 
         log_marg = _laplace_log_marginal(log_prob_per_point, f, y, prior_mean, K, Lam)
 
@@ -616,7 +612,7 @@ class PosteriorLinearization(eqx.Module):
             assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
             nat2 = jnp.maximum(nat2, self.precision_floor)
 
-            q_mean_new, _, q_var = _posterior_from_diag_sites(K, nat1, nat2, prior_mean)
+            q_mean_new, q_var = _posterior_from_diag_sites(K, nat1, nat2, prior_mean)
             delta = jnp.max(jnp.abs(q_mean_new - q_mean))
             q_mean = q_mean_new
             n_iter = it + 1
@@ -730,7 +726,7 @@ class ExpectationPropagation(eqx.Module):
             assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
             nat2 = jnp.maximum(nat2, self.precision_floor)
 
-            q_mean_new, _, q_var = _posterior_from_diag_sites(K, nat1, nat2, prior_mean)
+            q_mean_new, q_var = _posterior_from_diag_sites(K, nat1, nat2, prior_mean)
             delta = jnp.max(jnp.abs(q_mean_new - q_mean))
             q_mean = q_mean_new
             n_iter = it + 1
@@ -829,7 +825,7 @@ class QuasiNewtonInference(eqx.Module):
         g, h = _per_point_grad_hess(log_prob_per_point, f_opt, y)
         Lam = jnp.maximum(-h, self.precision_floor)
         nat1 = g + Lam * f_opt
-        q_mean, _, q_var = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
+        q_mean, q_var = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
 
         log_marg = _laplace_log_marginal(
             log_prob_per_point, f_opt, y, prior_mean, K, Lam

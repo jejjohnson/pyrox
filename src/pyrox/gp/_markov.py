@@ -31,6 +31,7 @@ import equinox as eqx
 import gaussx
 import jax
 import jax.numpy as jnp
+import lineax as lx
 import numpyro
 from gaussx import FilterState
 from jaxtyping import Array, Float
@@ -340,27 +341,36 @@ class MarkovGPPrior(eqx.Module):
         sanity checks and small-grid use rather than scalable inference.
         For training, prefer :meth:`log_marginal`.
         """
-        F, _L, H, _Qc, P_inf = self.sde_kernel.sde_params()
-        # Pairwise absolute time lags |tᵢ - tⱼ| as an (N, N) grid.
-        diffs = jnp.abs(einx.subtract("i, j -> i j", self.times, self.times))
-        # Vectorise H exp(F |dt|) P_inf H^T over the (N, N) lag grid.
-        flat_dt = diffs.reshape(-1)
+        K = _dense_sde_gram(self.sde_kernel, self.times)
+        cov_op = lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)
+        return gaussx.gaussian_log_prob(self.mean(self.times), cov_op, f)
 
-        def _k(tau: Float[Array, ""]) -> Float[Array, ""]:
-            return (H @ jax.scipy.linalg.expm(F * tau) @ P_inf @ H.T)[0, 0]
 
-        K_flat = jax.vmap(_k)(flat_dt)
-        K = K_flat.reshape(diffs.shape)
-        K = 0.5 * (K + einx.id("i j -> j i", K))
-        n = self.times.shape[0]
-        K = K + 1e-8 * jnp.eye(n, dtype=K.dtype)
-        residual = f - self.mean(self.times)
-        L = jnp.linalg.cholesky(K)
-        alpha = jax.scipy.linalg.solve_triangular(L, residual, lower=True)
-        log_2pi = jnp.log(2.0 * jnp.pi).astype(K.dtype)
-        return (
-            -0.5 * (alpha @ alpha) - jnp.sum(jnp.log(jnp.diag(L))) - 0.5 * n * log_2pi
-        )
+def _dense_sde_gram(
+    sde_kernel: SDEKernel, times: Float[Array, " N"]
+) -> Float[Array, "N N"]:
+    r"""Dense Gram ``K_ij = H exp(F |t_i - t_j|) P_inf H^T`` with diagonal jitter.
+
+    One ``expm`` per pairwise lag — :math:`O(N^2 d^3)`. Intended for the
+    small-``N`` dense paths (:meth:`MarkovGPPrior.log_prob`,
+    :func:`markov_gp_sample`); scalable inference goes through the Kalman
+    filter instead.
+    """
+    F, _L, H, _Qc, P_inf = sde_kernel.sde_params()
+    # Pairwise absolute time lags |tᵢ - tⱼ| as an (N, N) grid.
+    diffs = jnp.abs(einx.subtract("i, j -> i j", times, times))
+    # Vectorise H exp(F |dt|) P_inf H^T over the (N, N) lag grid.
+    flat_dt = einx.rearrange("i j -> (i j)", diffs)
+
+    def _k(tau: Float[Array, ""]) -> Float[Array, ""]:
+        return (H @ jax.scipy.linalg.expm(F * tau) @ P_inf @ H.T)[0, 0]
+
+    K_flat = jax.vmap(_k)(flat_dt)
+    # einx.rearrange is typed as possibly returning a tuple (multi-output
+    # patterns); narrow back to a single array for the typechecker.
+    K_grid = jnp.asarray(einx.rearrange("(i j) -> i j", K_flat, i=times.shape[0]))
+    K = gaussx.symmetrize(K_grid)
+    return K.at[jnp.diag_indices_from(K)].add(1e-8)
 
 
 class ConditionedMarkovGP(eqx.Module):
@@ -468,20 +478,8 @@ def markov_gp_sample(
     when ``N`` is small. Scalable Markov-aware sample sites land in a
     later wave alongside non-Gaussian likelihood support.
     """
-    F, _L, H, _Qc, P_inf = prior.sde_kernel.sde_params()
-    times = prior.times
-    # Pairwise absolute time lags |tᵢ - tⱼ| as an (N, N) grid.
-    diffs = jnp.abs(einx.subtract("i, j -> i j", times, times))
-    flat_dt = diffs.reshape(-1)
-
-    def _k(tau: Float[Array, ""]) -> Float[Array, ""]:
-        return (H @ jax.scipy.linalg.expm(F * tau) @ P_inf @ H.T)[0, 0]
-
-    K = jax.vmap(_k)(flat_dt).reshape(diffs.shape)
-    K = 0.5 * (K + einx.id("i j -> j i", K))
-    n = times.shape[0]
-    K = K + 1e-8 * jnp.eye(n, dtype=K.dtype)
-    mu = prior.mean(times)
+    K = _dense_sde_gram(prior.sde_kernel, prior.times)
+    mu = prior.mean(prior.times)
     return numpyro.sample(  # ty: ignore[invalid-return-type]
         name, dist.MultivariateNormal(mu, covariance_matrix=K)
     )
