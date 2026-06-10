@@ -23,7 +23,7 @@ dependencies = [
     "jax>=0.10",
     "equinox>=0.13.8",
     "numpyro>=0.21",
-    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@f3e8ebf8a1103474772332eb2fa04a28886e5752",
+    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@cd6264c92d32f433515d3efb06a0672a02280339",
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.5",
     "lineax>=0.1.1",
     "einops>=0.8.2",
@@ -91,7 +91,7 @@ examples = [
 
 [tool.uv.sources]
 # gaussx is not yet on PyPI; resolve from GitHub until the first release.
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", rev = "f3e8ebf8a1103474772332eb2fa04a28886e5752" }
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", rev = "cd6264c92d32f433515d3efb06a0672a02280339" }
 
 [build-system]
 requires = ["hatchling"]
