@@ -20,7 +20,7 @@ classifiers = [
     "Development Status :: 2 - Pre-Alpha",
 ]
 dependencies = [
-    "jax>=0.10",
+    "jax>=0.10.1",
     "equinox>=0.13.8",
     "numpyro>=0.21",
     "gaussx @ git+https://github.com/jejjohnson/gaussx.git@cd6264c92d32f433515d3efb06a0672a02280339",
