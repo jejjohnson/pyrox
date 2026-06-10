@@ -26,8 +26,7 @@ import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import lineax as lx
-from gaussx import cholesky, unwhiten
+from gaussx import cholesky, solve_rows, unwhiten
 from jaxtyping import Array, Float
 
 from pyrox._basis._rff import (
@@ -79,29 +78,6 @@ def _frozen_kernel_fn(
         "Pathwise sampling currently supports RBF and Matern kernels; "
         f"got {type(kernel).__name__}."
     )
-
-
-def _solve_with_cholesky(
-    chol: lx.AbstractLinearOperator,
-    rhs: Float[Array, "S R"],
-) -> Float[Array, "S R"]:
-    """Solve ``L L^T alpha^T = rhs^T`` column-wise; return ``alpha`` shape ``(S, R)``.
-
-    Each row of ``rhs`` is a per-path right-hand side; the output row
-    is ``(L L^T)^{-1}`` applied to that row, so downstream callers can
-    contract ``K_cross[n, r] * alpha[s, r]`` without extra transposes.
-    """
-    left = jax.vmap(
-        lambda col: lx.linear_solve(chol, col).value,
-        in_axes=1,
-        out_axes=1,
-    )(rhs.T)
-    solved = jax.vmap(
-        lambda col: lx.linear_solve(chol.T, col).value,
-        in_axes=1,
-        out_axes=1,
-    )(left)
-    return solved.T
 
 
 def _broadcast_mean(
@@ -265,9 +241,9 @@ class PathwiseSampler(eqx.Module):
         residual = (
             self.conditioned_gp.y[None, :] - (mean_train[None, :] + prior_train) - noise
         )
-        correction_weights = _solve_with_cholesky(
-            cholesky(self.conditioned_gp.operator), residual
-        )
+        # Per-path Matheron correction weights alpha = (K + eps I)^{-1} r
+        # via gaussx.solve_rows — structured dispatch on the cached operator.
+        correction_weights = solve_rows(self.conditioned_gp.operator, residual)
         return PathwiseFunction(
             kernel_fn=_frozen_kernel_fn(kernel, variance, lengthscale),
             correction_points=X,
@@ -366,7 +342,7 @@ class DecoupledPathwiseSampler(eqx.Module):
                 phase=phase,
                 weights=feature_weights,
             )
-            inducing_chol = cholesky(self.prior.inducing_operator())
+            inducing_op = self.prior.inducing_operator()
 
         # See docstring: u_tilde must have covariance K_zz + jitter I.
         jitter = jnp.asarray(self.prior.jitter, dtype=Z.dtype)
@@ -377,14 +353,16 @@ class DecoupledPathwiseSampler(eqx.Module):
         guide_keys = jax.random.split(guide_key, n_paths)
         guide_samples = jax.vmap(self.guide.sample)(guide_keys)
         if isinstance(self.guide, WhitenedGuide):
+            inducing_chol = cholesky(inducing_op)
             inducing_samples = jax.vmap(lambda sample: unwhiten(sample, inducing_chol))(
                 guide_samples
             )
         else:
             inducing_samples = guide_samples
 
-        correction_weights = _solve_with_cholesky(
-            inducing_chol,
+        # Per-path Matheron correction weights via gaussx.solve_rows.
+        correction_weights = solve_rows(
+            inducing_op,
             inducing_samples - prior_inducing,
         )
         return PathwiseFunction(

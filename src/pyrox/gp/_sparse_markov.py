@@ -47,6 +47,7 @@ from gaussx import (
     MultivariateNormal,
     gaussian_log_prob,
     sde_autocovariance,
+    symmetrize,
 )
 from jaxtyping import Array, Float
 
@@ -135,8 +136,8 @@ class SparseMarkovGPPrior(eqx.Module):
         # Pairwise |Zᵢ - Zⱼ| lags between inducing times → (M, M).
         diffs = jnp.abs(einx.subtract("i, j -> i j", self.Z, self.Z))
         K_zz = sde_autocovariance(self.sde_kernel, diffs)
-        K_zz = 0.5 * (K_zz + einx.id("i j -> j i", K_zz))
-        K_zz = K_zz + self.jitter * jnp.eye(K_zz.shape[0], dtype=K_zz.dtype)
+        K_zz = symmetrize(K_zz)
+        K_zz = K_zz.at[jnp.diag_indices_from(K_zz)].add(self.jitter)
         return _psd_operator(K_zz)
 
     def cross_covariance(self, times: Float[Array, " N"]) -> Float[Array, "N M"]:

@@ -229,6 +229,29 @@ class DenseNCP(PyroxModule):
         return det + stoch
 
 
+def _diag_gaussian_kl(
+    mean: Float[Array, ...],
+    var: Float[Array, ...],
+    log_var: Float[Array, ...],
+    *,
+    prior_mean: float | Float[Array, ""],
+    log_prior_scale: float | Float[Array, ""],
+    prior_var: float | Float[Array, ""],
+) -> Float[Array, ...]:
+    r"""Element-wise ``KL[N(mean, var) || N(prior_mean, prior_var)]``.
+
+    ``var`` and ``log_var`` are taken separately so each caller keeps its
+    native parameterization bit-exactly (no ``log(exp(.))`` round-trip for
+    log-variance parameterizations, no ``exp(log(.))`` for std ones).
+    """
+    return (
+        log_prior_scale
+        - 0.5 * log_var
+        + (var + (mean - prior_mean) ** 2) / (2.0 * prior_var)
+        - 0.5
+    )
+
+
 class NCPNormalOutput(PyroxModule):
     r"""Output-side Noise Contrastive Prior layer (Hafner et al., 2018).
 
@@ -357,11 +380,13 @@ class NCPNormalOutput(PyroxModule):
             )
         prior_var = jnp.asarray(self.prior_std) ** 2
         noisy_var = noisy_std**2
-        kl_per_elem = (
-            jnp.log(self.prior_std)
-            - 0.5 * jnp.log(noisy_var)
-            + (noisy_var + (noisy_mean - self.prior_mean) ** 2) / (2.0 * prior_var)
-            - 0.5
+        kl_per_elem = _diag_gaussian_kl(
+            noisy_mean,
+            noisy_var,
+            jnp.log(noisy_var),
+            prior_mean=self.prior_mean,
+            log_prior_scale=jnp.log(self.prior_std),
+            prior_var=prior_var,
         )
         # Sum only over the trailing feature axis. Keeping the leading
         # batch axis intact is what makes NumPyro's plate machinery do
@@ -791,22 +816,28 @@ class DenseDVI(PyroxModule):
         # jax_enable_x64 + float32 params).
         log_prior_scale = jnp.asarray(math.log(self.prior_scale), dtype=W_mean.dtype)
         prior_var = jnp.asarray(self.prior_scale**2, dtype=W_mean.dtype)
-        kl_w = jnp.sum(
-            log_prior_scale
-            - 0.5 * W_log_var
-            + (W_var + W_mean**2) / (2.0 * prior_var)
-            - 0.5
+        kl = jnp.sum(
+            _diag_gaussian_kl(
+                W_mean,
+                W_var,
+                W_log_var,
+                prior_mean=0.0,
+                log_prior_scale=log_prior_scale,
+                prior_var=prior_var,
+            )
         )
-        kl = kl_w
         if self.bias:
             b_var = jnp.exp(b_log_var)
-            kl_b = jnp.sum(
-                log_prior_scale
-                - 0.5 * b_log_var
-                + (b_var + b_mean**2) / (2.0 * prior_var)
-                - 0.5
+            kl = kl + jnp.sum(
+                _diag_gaussian_kl(
+                    b_mean,
+                    b_var,
+                    b_log_var,
+                    prior_mean=0.0,
+                    log_prior_scale=log_prior_scale,
+                    prior_var=prior_var,
+                )
             )
-            kl = kl + kl_b
         # Add -KL to the model log density. This is a per-layer scalar
         # (sums over the weight / bias matrices, not the batch) — its
         # emission is independent of any data plate the layer lives in.

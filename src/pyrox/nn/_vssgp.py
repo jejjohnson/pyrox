@@ -16,6 +16,7 @@ from geonnax import DeepVSSGPCore
 from jaxtyping import Array, Float
 
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
+from pyrox.nn._batching import vmap_over_flat_batch
 
 
 class DeepVSSGP(PyroxModule):
@@ -228,13 +229,8 @@ class DeepVSSGP(PyroxModule):
                 jnp.stack(sampled_lengthscales),
             ),
         )
-        # Flatten arbitrary leading batch dims to (B, D_in), vmap the
-        # single-example geonnax core, then restore the batch shape.
-        D_in = x.shape[-1]
-        batch_shape = x.shape[:-1]
-        flat = x.reshape(-1, D_in)
-        out_flat = jax.vmap(sampled_core)(flat)
-        return out_flat.reshape((*batch_shape, out_flat.shape[-1]))
+        # Single-example geonnax core over arbitrary leading batch dims.
+        return vmap_over_flat_batch(sampled_core, x)
 
 
 __all__ = ["DeepVSSGP"]

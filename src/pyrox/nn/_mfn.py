@@ -32,6 +32,50 @@ def _require_positive(**values: float) -> None:
             raise ValueError(f"{name} must be > 0, got {v}.")
 
 
+def _sample_filter_omega_phi(
+    module: PyroxModule,
+    i: int,
+    f: FourierFilter | GaborFilter,
+    prior_std: float,
+) -> tuple[Array, Array]:
+    """Sample the shared MFN filter parameters ``(Omega, phi)``.
+
+    Both filter families share a Normal prior on the frequency matrix
+    ``Omega`` and a Uniform prior on the phase ``phi``.
+    """
+    Omega = module.pyrox_sample(
+        f"filter_{i}.Omega",
+        dist.Normal(0.0, prior_std).expand([f.out_features, f.in_features]).to_event(2),
+    )
+    phi = module.pyrox_sample(
+        f"filter_{i}.phi",
+        dist.Uniform(-jnp.pi, jnp.pi).expand([f.out_features]).to_event(1),
+    )
+    return Omega, phi
+
+
+def _sample_normal_linears(
+    module: PyroxModule,
+    linears: list[eqx.nn.Linear],
+    prior_std: float,
+) -> list[eqx.nn.Linear]:
+    """Sample ``(W, b)`` for each MFN readout linear from a Normal prior."""
+    sampled: list[eqx.nn.Linear] = []
+    for i, lin in enumerate(linears):
+        W = module.pyrox_sample(
+            f"linear_{i}.W",
+            dist.Normal(0.0, prior_std)
+            .expand([lin.out_features, lin.in_features])
+            .to_event(2),
+        )
+        b_vec = module.pyrox_sample(
+            f"linear_{i}.b",
+            dist.Normal(0.0, prior_std).expand([lin.out_features]).to_event(1),
+        )
+        sampled.append(eqx.tree_at(lambda ll: (ll.weight, ll.bias), lin, (W, b_vec)))
+    return sampled
+
+
 class BayesianFourierNet(PyroxModule):
     r"""FourierNet with Bayesian priors on all filter and linear weights.
 
@@ -137,35 +181,14 @@ class BayesianFourierNet(PyroxModule):
 
         sampled_filters: list[FourierFilter] = []
         for i, f in enumerate(self.core.filters):
-            Omega = self.pyrox_sample(
-                f"filter_{i}.Omega",
-                dist.Normal(0.0, self.prior_std)
-                .expand([f.out_features, f.in_features])
-                .to_event(2),
-            )
-            phi = self.pyrox_sample(
-                f"filter_{i}.phi",
-                dist.Uniform(-jnp.pi, jnp.pi).expand([f.out_features]).to_event(1),
-            )
+            Omega, phi = _sample_filter_omega_phi(self, i, f, self.prior_std)
             sampled_filters.append(
                 eqx.tree_at(lambda ff: (ff.Omega, ff.phi), f, (Omega, phi))
             )
 
-        sampled_linears: list[eqx.nn.Linear] = []
-        for i, lin in enumerate(self.core.linears):
-            W = self.pyrox_sample(
-                f"linear_{i}.W",
-                dist.Normal(0.0, self.prior_std)
-                .expand([lin.out_features, lin.in_features])
-                .to_event(2),
-            )
-            b_vec = self.pyrox_sample(
-                f"linear_{i}.b",
-                dist.Normal(0.0, self.prior_std).expand([lin.out_features]).to_event(1),
-            )
-            sampled_linears.append(
-                eqx.tree_at(lambda ll: (ll.weight, ll.bias), lin, (W, b_vec))
-            )
+        sampled_linears = _sample_normal_linears(
+            self, self.core.linears, self.prior_std
+        )
 
         sampled_core = eqx.tree_at(
             lambda c: (c.filters, c.linears),
@@ -299,16 +322,7 @@ class BayesianGaborNet(PyroxModule):
 
         sampled_filters: list[GaborFilter] = []
         for i, f in enumerate(self.core.filters):
-            Omega = self.pyrox_sample(
-                f"filter_{i}.Omega",
-                dist.Normal(0.0, self.prior_std)
-                .expand([f.out_features, f.in_features])
-                .to_event(2),
-            )
-            phi = self.pyrox_sample(
-                f"filter_{i}.phi",
-                dist.Uniform(-jnp.pi, jnp.pi).expand([f.out_features]).to_event(1),
-            )
+            Omega, phi = _sample_filter_omega_phi(self, i, f, self.prior_std)
             mu = self.pyrox_sample(
                 f"filter_{i}.mu",
                 dist.Uniform(low, high)
@@ -327,21 +341,9 @@ class BayesianGaborNet(PyroxModule):
                 )
             )
 
-        sampled_linears: list[eqx.nn.Linear] = []
-        for i, lin in enumerate(self.core.linears):
-            W = self.pyrox_sample(
-                f"linear_{i}.W",
-                dist.Normal(0.0, self.prior_std)
-                .expand([lin.out_features, lin.in_features])
-                .to_event(2),
-            )
-            b_vec = self.pyrox_sample(
-                f"linear_{i}.b",
-                dist.Normal(0.0, self.prior_std).expand([lin.out_features]).to_event(1),
-            )
-            sampled_linears.append(
-                eqx.tree_at(lambda ll: (ll.weight, ll.bias), lin, (W, b_vec))
-            )
+        sampled_linears = _sample_normal_linears(
+            self, self.core.linears, self.prior_std
+        )
 
         sampled_core = eqx.tree_at(
             lambda c: (c.filters, c.linears),
