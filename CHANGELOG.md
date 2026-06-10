@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.15](https://github.com/jejjohnson/pyrox/compare/v0.0.14...v0.0.15) (2026-06-10)
+
+
+### Features
+
+* upgrade to gaussx 0.0.18 + geonnax 0.0.5, dedupe linalg and basis surfaces onto upstream ([#173](https://github.com/jejjohnson/pyrox/issues/173)) ([75ffe99](https://github.com/jejjohnson/pyrox/commit/75ffe996e101d36fcf00d721462bd00b49bbe38a))
+
 ## [0.0.14](https://github.com/jejjohnson/pyrox/compare/v0.0.13...v0.0.14) (2026-05-12)
 
 
