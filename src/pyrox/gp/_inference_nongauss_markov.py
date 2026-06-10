@@ -195,7 +195,7 @@ class LaplaceMarkovInference(eqx.Module):
     Hessian of ``log p(y | f)`` evaluated at ``f = m``. Site precision
     :math:`\Lambda = -h` is clipped to ``precision_floor``.
 
-    Args:
+    Attributes:
         max_iter: Newton iterations. Default ``20``.
         tol: ``inf``-norm convergence on the posterior mean. Default ``1e-6``.
         damping: Step-size in (0, 1] applied to each Newton update.
@@ -286,7 +286,7 @@ class GaussNewtonMarkovInference(eqx.Module):
     PSD-stable. Same fixed-point loop and damping behaviour as
     :class:`LaplaceMarkovInference`.
 
-    Args:
+    Attributes:
         max_iter: Newton iterations. Default ``20``.
         tol: ``inf``-norm tolerance on the posterior mean. Default ``1e-6``.
         damping: Step-size in (0, 1]. Default ``1.0``.
@@ -326,7 +326,7 @@ class PosteriorLinearizationMarkov(eqx.Module):
     per-point gradient and Hessian under the cavity (via Gauss-Hermite),
     and update the sites.
 
-    Args:
+    Attributes:
         max_iter: Iterations. Default ``20``.
         tol: ``inf``-norm tolerance on the posterior mean. Default ``1e-6``.
         damping: Step-size in (0, 1]. Default ``0.5``.
@@ -431,7 +431,7 @@ class ExpectationPropagationMarkov(eqx.Module):
     match tilted-distribution moments via Gauss-Hermite (with log-space
     stabilisation), and update sites with damping.
 
-    Args:
+    Attributes:
         max_iter: EP iterations. Default ``40``.
         tol: ``inf``-norm tolerance on the posterior mean. Default ``1e-5``.
         damping: Damping in (0, 1]. Default ``0.5``.

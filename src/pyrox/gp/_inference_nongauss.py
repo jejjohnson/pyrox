@@ -373,7 +373,7 @@ class LaplaceInference(eqx.Module):
     :math:`\log p(y) \approx \log p(y | \hat f) - \tfrac12 \hat f^\top
     K^{-1} \hat f - \tfrac12 \log |I + K \Lambda|`.
 
-    Args:
+    Attributes:
         max_iter: Newton iterations. Default ``20``.
         tol: ``inf``-norm convergence tolerance on ``f``. Default ``1e-6``.
         damping: Step-size in (0, 1] applied to each Newton update:
@@ -457,7 +457,7 @@ class GaussNewtonInference(eqx.Module):
     For Bernoulli / Poisson the Fisher information equals the negative
     Hessian, so GGN ≡ Laplace; for StudentT the floor matters.
 
-    Args:
+    Attributes:
         max_iter: Iterations. Default ``20``.
         tol: ``inf``-norm convergence tolerance on ``f``. Default ``1e-6``.
         damping: Step-size in (0, 1] applied to each Newton update.
@@ -540,7 +540,7 @@ class PosteriorLinearization(eqx.Module):
     in the Gaussian-cavity limit to taking one EP-style step but using
     derivative expectations instead of moment matching.
 
-    Args:
+    Attributes:
         integrator: Cavity integrator. Default
             ``gaussx.GaussHermiteIntegrator(order=20)``.
         max_iter: Iterations. Default ``20``.
@@ -654,7 +654,7 @@ class ExpectationPropagation(eqx.Module):
     embarrassingly vectorizable and converges for well-behaved
     log-concave likelihoods; for problematic models reduce ``damping``.
 
-    Args:
+    Attributes:
         integrator: Cavity integrator. Default
             ``gaussx.GaussHermiteIntegrator(order=20)``. EP only reads
             the integrator's ``order`` attribute when delegating to
@@ -771,7 +771,7 @@ class QuasiNewtonInference(eqx.Module):
     delivers the simpler "QN optimization, Laplace covariance"
     contract.
 
-    Args:
+    Attributes:
         max_iter: L-BFGS iterations. Default ``50``.
         tol: Gradient-norm tolerance. Default ``1e-6``.
         precision_floor: Lower bound on the diagonal precision.

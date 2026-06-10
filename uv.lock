@@ -604,7 +604,7 @@ wheels = [
 [[package]]
 name = "gaussx"
 version = "0.0.18"
-source = { git = "https://github.com/jejjohnson/gaussx.git?rev=cc59a6c3c51f342279d3d27c6175061da8608677#cc59a6c3c51f342279d3d27c6175061da8608677" }
+source = { git = "https://github.com/jejjohnson/gaussx.git?rev=f511e1047fe3d84eca5d4ac3a4bc2a42b6ac6353#f511e1047fe3d84eca5d4ac3a4bc2a42b6ac6353" }
 dependencies = [
     { name = "einx" },
     { name = "equinox" },
@@ -1953,7 +1953,7 @@ requires-dist = [
     { name = "einops", specifier = ">=0.8.2" },
     { name = "einx", specifier = ">=0.4.3" },
     { name = "equinox", specifier = ">=0.13.8" },
-    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=cc59a6c3c51f342279d3d27c6175061da8608677" },
+    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=f511e1047fe3d84eca5d4ac3a4bc2a42b6ac6353" },
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.5" },
     { name = "jax", specifier = ">=0.10" },
     { name = "lineax", specifier = ">=0.1.1" },

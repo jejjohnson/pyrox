@@ -37,6 +37,20 @@ features = encoder(lonlat_deg)  # (N, 81)
 
 ::: pyrox.nn.SphericalHarmonicEncoder
 
+## Slepian encoders
+
+Region-localized spherical encoders built on the Slepian concentration
+problem. The deterministic `SlepianEncoder` and
+`HybridSphericalSlepianEncoder` are re-exported from `geonnax`;
+`BayesianSlepianEncoder` adds NumPyro sites over the cap radius and
+centre.
+
+::: pyrox.nn.SlepianEncoder
+
+::: pyrox.nn.HybridSphericalSlepianEncoder
+
+::: pyrox.nn.BayesianSlepianEncoder
+
 ## Pure-JAX helper functions
 
 ::: pyrox.nn.deg2rad
