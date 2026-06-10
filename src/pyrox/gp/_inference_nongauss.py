@@ -5,34 +5,34 @@ posterior ``q(f) = N(m, V)`` over the latent function values at the
 training inputs, given a non-conjugate likelihood ``p(y | f)``. They
 share the same site-based view: each likelihood factor contributes a
 diagonal Gaussian *site* with natural parameters
-:math:`(\\lambda^{(1)}, \\Lambda^{(2)}) = (J - H m, -H)`. Strategies
+$(\\lambda^{(1)}, \\Lambda^{(2)}) = (J - H m, -H)$. Strategies
 differ only in how the per-site curvature ``H`` and effective gradient
 ``J`` are obtained:
 
 ================================  =======================================
 Strategy                          Curvature ``H`` from
 ================================  =======================================
-:class:`LaplaceInference`         exact ``-d^2 log p / df^2`` at the mode
-:class:`GaussNewtonInference`     generalized Gauss-Newton
+`LaplaceInference`         exact ``-d^2 log p / df^2`` at the mode
+`GaussNewtonInference`     generalized Gauss-Newton
                                   (positive-semidefinite by construction)
-:class:`PosteriorLinearization`   statistical linearization under cavity
+`PosteriorLinearization`   statistical linearization under cavity
                                   via cubature
-:class:`ExpectationPropagation`   moment matching against the tilted
+`ExpectationPropagation`   moment matching against the tilted
                                   distribution per site
-:class:`QuasiNewtonInference`     L-BFGS optimization to MAP, exact
+`QuasiNewtonInference`     L-BFGS optimization to MAP, exact
                                   Hessian at convergence
 ================================  =======================================
 
-All five accept a :class:`pyrox.gp.GPPrior` and a scalar-latent
-:class:`pyrox.gp.Likelihood`, and return an
-:class:`NonGaussConditionedGP` that quacks like
-:class:`pyrox.gp.ConditionedGP` (``predict``, ``predict_mean``,
+All five accept a `pyrox.gp.GPPrior` and a scalar-latent
+`pyrox.gp.Likelihood`, and return an
+`NonGaussConditionedGP` that quacks like
+`pyrox.gp.ConditionedGP` (``predict``, ``predict_mean``,
 ``predict_var``).
 
 Everything here is pure JAX and ``equinox``-compatible (jit / grad /
 vmap). The heavy lifting — cavity arithmetic, natural-parameter
 updates, GGN curvature, Cholesky solves — comes from
-:mod:`gaussx`.
+`gaussx`.
 """
 
 from __future__ import annotations
@@ -71,15 +71,15 @@ if TYPE_CHECKING:
 class NonGaussConditionedGP(eqx.Module):
     """GP conditioned on a non-Gaussian likelihood via an advanced strategy.
 
-    Equivalent role to :class:`pyrox.gp.ConditionedGP` but the
+    Equivalent role to `pyrox.gp.ConditionedGP` but the
     posterior over training latents is a generic
     ``q(f) = N(q_mean, q_cov)`` rather than a Gaussian-likelihood
     closed form. Predictions at test inputs use the standard
     *site-as-pseudo-observation* trick: any site-based Gaussian
     approximation of ``p(f | y)`` looks identical to a Gaussian-
     likelihood regression with synthetic per-point noise variance
-    :math:`\\sigma_n^2 = 1/\\Lambda_n^{(2)}` and synthetic targets
-    :math:`\\tilde y_n = \\lambda_n^{(1)} / \\Lambda_n^{(2)}` (in the
+    $\\sigma_n^2 = 1/\\Lambda_n^{(2)}$ and synthetic targets
+    $\\tilde y_n = \\lambda_n^{(1)} / \\Lambda_n^{(2)}$ (in the
     zero-mean prior frame). Predictions reconstruct ``K_reg = K +
     diag(1 / Lambda)`` and Cholesky-factorize it on each call (the
     full-Cholesky cost is ``O(N^3)`` per ``predict`` invocation; the
@@ -89,12 +89,12 @@ class NonGaussConditionedGP(eqx.Module):
     workflows keep resampling correctly.
 
     Attributes:
-        prior: The :class:`GPPrior`.
+        prior: The `GPPrior`.
         y: Training targets (kept for round-trip / diagnostics).
         site_nat1: Diagonal site naturals
-            :math:`\\lambda^{(1)} \\in \\mathbb{R}^N`.
+            $\\lambda^{(1)} \\in \\mathbb{R}^N$.
         site_nat2: Diagonal site precisions
-            :math:`\\Lambda^{(2)} \\in \\mathbb{R}^N` (positive).
+            $\\Lambda^{(2)} \\in \\mathbb{R}^N$ (positive).
         q_mean: Posterior mean over training latents.
         q_var: Marginal posterior variance per training point.
         log_marginal_approx: Approximate log marginal likelihood
@@ -115,14 +115,14 @@ class NonGaussConditionedGP(eqx.Module):
     converged: bool = eqx.field(static=True)
 
     def _pseudo_factor(self) -> Float[Array, "N N"]:
-        """Cholesky of ``K + diag(1/Λ + jitter)`` via :func:`_psd_safe_cholesky`."""
+        """Cholesky of ``K + diag(1/Λ + jitter)`` via `_psd_safe_cholesky`."""
         K = self.prior.kernel(self.prior.X, self.prior.X)
         diag_reg = jnp.reciprocal(self.site_nat2) + self.prior.jitter
         K_reg = K.at[jnp.diag_indices_from(K)].add(diag_reg)
         return _psd_safe_cholesky(K_reg)
 
     def predict_mean(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
-        r""":math:`\mu_* = \mu(X_*) + K_{*f}\,\alpha` with
+        r"""$\mu_* = \mu(X_*) + K_{*f}\,\alpha$ with
         ``alpha`` derived from the site naturals."""
         with _kernel_context(self.prior.kernel):
             L = self._pseudo_factor()
@@ -136,7 +136,7 @@ class NonGaussConditionedGP(eqx.Module):
         return self.prior.mean(X_star) + einx.dot("m n, n -> m", K_cross, alpha)
 
     def predict_var(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
-        r""":math:`\Sigma_{**} - K_{*f} (K + \mathrm{diag}(1/\Lambda))^{-1} K_{f*}`."""
+        r"""$\Sigma_{**} - K_{*f} (K + \mathrm{diag}(1/\Lambda))^{-1} K_{f*}$."""
         with _kernel_context(self.prior.kernel):
             L = self._pseudo_factor()
             K_cross = self.prior.kernel(X_star, self.prior.X)
@@ -206,9 +206,9 @@ def _posterior_from_diag_sites(
     Sites contribute a synthetic Gaussian likelihood with mean
     ``y_tilde = nat1 / nat2`` and variance ``1/nat2``. The posterior
     mean is
-    :math:`m = \mu + K (K + \mathrm{diag}(1/\Lambda))^{-1} (y_{\rm tilde} - \mu)`,
+    $m = \mu + K (K + \mathrm{diag}(1/\Lambda))^{-1} (y_{\rm tilde} - \mu)$,
     and the marginal posterior variances are the diagonal of
-    :math:`V = K - K (K + \mathrm{diag}(1/\Lambda))^{-1} K`, computed
+    $V = K - K (K + \mathrm{diag}(1/\Lambda))^{-1} K$, computed
     without materializing ``V``: with ``W = L^{-1} K`` the diagonal is
     ``diag(K) - sum_n W_{n,i}^2``.
 
@@ -256,13 +256,13 @@ def _psd_operator(M: Float[Array, "N N"]) -> lx.AbstractLinearOperator:
 
 
 def _psd_safe_cholesky(M: Float[Array, "N N"]) -> Float[Array, "N N"]:
-    """Symmetrize ``M`` then call :func:`gaussx.safe_cholesky`.
+    """Symmetrize ``M`` then call `gaussx.safe_cholesky`.
 
     ``gaussx.safe_cholesky`` runs an adaptive ``while_loop`` that
     multiplies a diagonal jitter from ``1e-8`` to ``1e-2`` until the
     Cholesky succeeds (or returns NaNs after 5 retries). It does not
     symmetrize its input, so we do that here before wrapping ``M`` as
-    a PSD :mod:`lineax` operator. Float32 + densely-packed kernel
+    a PSD `lineax` operator. Float32 + densely-packed kernel
     inputs is the realistic failure case this guards against.
     """
     return safe_cholesky(_psd_operator(symmetrize(M)))
@@ -275,18 +275,18 @@ def _per_site_expectation(
     var: Float[Array, " N"],
     y: Float[Array, " N"],
 ) -> Float[Array, " N"]:
-    r"""Per-site Gaussian expectation via :mod:`gaussx`'s integrator API.
+    r"""Per-site Gaussian expectation via `gaussx`'s integrator API.
 
-    For each site :math:`n`, evaluates
-    :math:`\mathbb{E}_{f_n \sim \mathcal{N}(\text{mean}_n, \text{var}_n)}
-    [\text{fn\_scalar}(f_n, y_n)]` by lifting ``(mean[n], var[n])`` into a
-    1-D :class:`gaussx.GaussianState` and delegating to
+    For each site $n$, evaluates
+    $\mathbb{E}_{f_n \sim \mathcal{N}(\text{mean}_n, \text{var}_n)}
+    [\text{fn\_scalar}(f_n, y_n)]$ by lifting ``(mean[n], var[n])`` into a
+    1-D `gaussx.GaussianState` and delegating to
     ``integrator.integrate(fn_lifted, state).state.mean[0]``. Uses
-    :func:`jax.vmap` over the site axis to recover the per-site
-    ``(N,) -> (N,)`` shape contract that :class:`PosteriorLinearization`
+    `jax.vmap` over the site axis to recover the per-site
+    ``(N,) -> (N,)`` shape contract that `PosteriorLinearization`
     needs. This sits on top of ``gaussx.AbstractIntegrator`` so users
-    can swap in :class:`gaussx.MonteCarloIntegrator`,
-    :class:`gaussx.UnscentedIntegrator`, etc., without changing pyrox.
+    can swap in `gaussx.MonteCarloIntegrator`,
+    `gaussx.UnscentedIntegrator`, etc., without changing pyrox.
     """
 
     def per_site(
@@ -316,11 +316,11 @@ def _laplace_log_marginal(
     r"""Standard Laplace log-marginal-likelihood approximation.
 
     Computes
-    :math:`\log p(y) \approx \log p(y \mid \hat f)
+    $\log p(y) \approx \log p(y \mid \hat f)
     - \tfrac12 (\hat f - \mu)^\top K^{-1} (\hat f - \mu)
-    - \tfrac12 \log |I + K \Lambda|`
+    - \tfrac12 \log |I + K \Lambda|$
 
-    with both Cholesky factorizations gated through :func:`_psd_safe_cholesky`
+    with both Cholesky factorizations gated through `_psd_safe_cholesky`
     to survive near-singular ``K`` under float32 + dense data.
     """
     ll = log_prob_per_point(f, y).sum()
@@ -364,14 +364,14 @@ class LaplaceInference(eqx.Module):
     Iterates the standard GP-Laplace fixed-point loop (Rasmussen &
     Williams Algorithm 3.1): at each iteration evaluate per-point
     gradient ``g`` and Hessian-diag ``h`` of ``log p(y | f)``, form the
-    Newton update with site precision :math:`\Lambda = -h` (clipped to
+    Newton update with site precision $\Lambda = -h$ (clipped to
     a small positive floor for numerical safety), and recompute ``f``
     as the mean of the implied Gaussian posterior.
 
     The reported ``log_marginal_approx`` is the standard Laplace
     log-marginal-likelihood approximation
-    :math:`\log p(y) \approx \log p(y | \hat f) - \tfrac12 \hat f^\top
-    K^{-1} \hat f - \tfrac12 \log |I + K \Lambda|`.
+    $\log p(y) \approx \log p(y | \hat f) - \tfrac12 \hat f^\top
+    K^{-1} \hat f - \tfrac12 \log |I + K \Lambda|$.
 
     Attributes:
         max_iter: Newton iterations. Default ``20``.
@@ -446,9 +446,9 @@ class LaplaceInference(eqx.Module):
 class GaussNewtonInference(eqx.Module):
     r"""Gauss-Newton inference: Newton loop with PSD-projected curvature.
 
-    Identical to :class:`LaplaceInference` for log-concave likelihoods,
+    Identical to `LaplaceInference` for log-concave likelihoods,
     where ``-d^2 log p / df^2`` is already positive. For non-log-concave
-    likelihoods (e.g. :class:`StudentTLikelihood`, where the Hessian
+    likelihoods (e.g. `StudentTLikelihood`, where the Hessian
     becomes positive in the tails) GN aggressively floors the curvature
     to a strictly-positive value via ``precision_floor``, guaranteeing a
     PSD site precision and stable Newton steps. Laplace uses the same
@@ -464,7 +464,7 @@ class GaussNewtonInference(eqx.Module):
             Default ``1.0`` (full Newton step). Drop below 1 for
             non-log-concave likelihoods where pure Newton oscillates.
         precision_floor: Lower bound on the diagonal precision. Default
-            ``1e-3`` — larger than :class:`LaplaceInference` to ensure
+            ``1e-3`` — larger than `LaplaceInference` to ensure
             stable updates on non-log-concave likelihoods.
     """
 
@@ -532,9 +532,9 @@ class PosteriorLinearization(eqx.Module):
     At each iteration: form the cavity ``q_n^\\(¬n) = N(m^c_n, v^c_n)``
     by removing the current site, then under the cavity compute
     statistical-linearization moments
-    :math:`\bar g = E_{\rm cav}[\partial_f \log p]` and
-    :math:`\bar h = E_{\rm cav}[\partial^2_f \log p]` via the integrator,
-    update the site naturals via :func:`gaussx.blr_diag_update` with
+    $\bar g = E_{\rm cav}[\partial_f \log p]$ and
+    $\bar h = E_{\rm cav}[\partial^2_f \log p]$ via the integrator,
+    update the site naturals via `gaussx.blr_diag_update` with
     a damping factor, recompute the global posterior, repeat. This is
     PL/CVI in the sense of Adam/Garcia-Fernandez/Sarkka — equivalent
     in the Gaussian-cavity limit to taking one EP-style step but using
@@ -658,7 +658,7 @@ class ExpectationPropagation(eqx.Module):
         integrator: Cavity integrator. Default
             ``gaussx.GaussHermiteIntegrator(order=20)``. EP only reads
             the integrator's ``order`` attribute when delegating to
-            :func:`gaussx.ep_tilted_moments`; non-Gauss-Hermite
+            `gaussx.ep_tilted_moments`; non-Gauss-Hermite
             integrators fall back to ``order=20``.
         max_iter: Iterations. Default ``40``.
         damping: Damping in (0, 1]. Default ``0.5``.
@@ -710,7 +710,7 @@ class ExpectationPropagation(eqx.Module):
             cav_var = jnp.reciprocal(cav_prec)
             cav_mean = cav_var * (q_mean / q_var - nat1)
 
-            # Tilted moments via :func:`gaussx.ep_tilted_moments`. The
+            # Tilted moments via `gaussx.ep_tilted_moments`. The
             # gaussx API expects a ``log_lik_fn(f)`` with the per-site
             # target baked in, so ``_per_site_tilted`` closes over
             # ``y_n`` and ``vmap`` recovers the ``(N,)`` shape contract.
@@ -759,7 +759,7 @@ class QuasiNewtonInference(eqx.Module):
     r"""MAP optimization via L-BFGS, Laplace covariance at convergence.
 
     Optimizes the unnormalized log posterior
-    :math:`\log p(y | f) - \tfrac12 (f - \mu)^\top K^{-1} (f - \mu)`
+    $\log p(y | f) - \tfrac12 (f - \mu)^\top K^{-1} (f - \mu)$
     with ``optax.lbfgs``, then forms a Laplace-style Gaussian
     approximation centered at the optimum using the exact per-point
     Hessian. The optimization is the cheap path for very high N where

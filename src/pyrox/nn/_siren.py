@@ -2,7 +2,7 @@
 
 The deterministic ``SIREN`` / ``SirenDense`` primitives and the
 ``SirenLayerSpec`` / ``build_siren_specs`` / ``siren_W_limit`` helpers
-all live in :mod:`geonnax`; this module hosts only the pyrox-specific
+all live in `geonnax`; this module hosts only the pyrox-specific
 Bayesian wrapper that swaps each layer's ``W`` / ``b`` for
 ``pyrox_sample`` sites.
 """
@@ -31,23 +31,23 @@ def _require_positive(**values: float) -> None:
 class BayesianSIREN(PyroxModule):
     r"""SIREN with regime-scaled Normal priors on all layer weights.
 
-    Replaces the deterministic weight matrices of :class:`SIREN` with NumPyro
-    sample sites.  For layer :math:`i` with Sitzmann Theorem 1 half-width
-    :math:`a_i` (the uniform bound used by :class:`SirenDense`):
+    Replaces the deterministic weight matrices of `SIREN` with NumPyro
+    sample sites.  For layer $i$ with Sitzmann Theorem 1 half-width
+    $a_i$ (the uniform bound used by `SirenDense`):
 
-    .. math::
+    $$
+    W_i \sim \mathcal{N}\!\left(0,\, \sigma_0 \cdot \frac{a_i}{\sqrt{3}}\right),
+    \qquad
+    b_i \sim \mathcal{N}\!\left(0,\,
+        \sigma_0 \cdot \frac{1}{\sqrt{3 \, d_i}}\right),
+    $$
 
-        W_i \sim \mathcal{N}\!\left(0,\, \sigma_0 \cdot \frac{a_i}{\sqrt{3}}\right),
-        \qquad
-        b_i \sim \mathcal{N}\!\left(0,\,
-            \sigma_0 \cdot \frac{1}{\sqrt{3 \, d_i}}\right),
-
-    where :math:`\sigma_0` is ``prior_std`` and :math:`d_i` is the input
-    dimension of layer :math:`i`.  The :math:`a_i / \sqrt{3}` factor makes
-    :math:`\operatorname{Var}(W_i)` equal to the variance of Sitzmann's
-    :math:`\mathcal{U}(-a_i, a_i)` init exactly, so the Bayesian prior
+    where $\sigma_0$ is ``prior_std`` and $d_i$ is the input
+    dimension of layer $i$.  The $a_i / \sqrt{3}$ factor makes
+    $\operatorname{Var}(W_i)$ equal to the variance of Sitzmann's
+    $\mathcal{U}(-a_i, a_i)$ init exactly, so the Bayesian prior
     preserves the activation variance prescribed by Theorem 1 — avoiding
-    the saturated-sine pathology that a flat :math:`\mathcal{N}(0, 1)`
+    the saturated-sine pathology that a flat $\mathcal{N}(0, 1)$
     prior would cause.
 
     Registered sites: ``{scope}.layer_0.W``, ``{scope}.layer_0.b``, …,
@@ -67,7 +67,7 @@ class BayesianSIREN(PyroxModule):
         prior_std: Scale factor for the regime-scaled Normal prior (default 1.0).
         pyrox_name: Explicit scope name for NumPyro site registration.
 
-    Example:
+    Examples:
         >>> import jax.random as jr, jax.numpy as jnp
         >>> from numpyro import handlers
         >>> net = BayesianSIREN.init(2, 32, 1, depth=3)
@@ -101,7 +101,7 @@ class BayesianSIREN(PyroxModule):
         prior_std: float = 1.0,
         pyrox_name: str | None = None,
     ) -> BayesianSIREN:
-        """Construct a :class:`BayesianSIREN`.
+        """Construct a `BayesianSIREN`.
 
         All weights come from the prior, so no PRNG key is needed at
         construction time — the key enters when sampling inside a
@@ -119,7 +119,7 @@ class BayesianSIREN(PyroxModule):
             pyrox_name: Optional explicit scope name for NumPyro.
 
         Returns:
-            Initialised :class:`BayesianSIREN`.
+            Initialised `BayesianSIREN`.
 
         Raises:
             ValueError: If ``depth < 2``, or any of the feature dimensions,

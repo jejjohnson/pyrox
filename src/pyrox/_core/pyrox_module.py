@@ -1,11 +1,11 @@
 """PyroxModule and pyrox_method — Equinox-to-NumPyro bridge primitives.
 
-Defines the base :class:`PyroxModule` that lets Equinox modules register
+Defines the base `PyroxModule` that lets Equinox modules register
 deterministic parameters and random sample sites with NumPyro, plus a
 per-call ``_Context`` cache that prevents duplicate site registration
 within a single probabilistic call.
 
-Pattern B usage::
+Pattern B usage:
 
     class BayesianLinear(PyroxModule):
         in_features: int
@@ -74,9 +74,9 @@ class _Context:
 class PyroxModule(eqx.Module):
     """Equinox module with NumPyro site registration and per-call caching.
 
-    Subclasses register deterministic parameters via :meth:`pyrox_param`
-    and random variables via :meth:`pyrox_sample`. Wrap the method that
-    drives registration (typically ``__call__``) with :func:`pyrox_method`
+    Subclasses register deterministic parameters via `pyrox_param`
+    and random variables via `pyrox_sample`. Wrap the method that
+    drives registration (typically ``__call__``) with `pyrox_method`
     so the per-call ``_Context`` is active for the duration of the call.
 
     Without the decorator the cache is inactive and duplicate references
@@ -158,7 +158,7 @@ class PyroxModule(eqx.Module):
 
         Class-level registries are keyed by ``id(self)``. Equinox modules
         are typically weak-referenceable, so cleanup normally happens via
-        :mod:`weakref.finalize`. Call this explicitly in environments where
+        `weakref.finalize`. Call this explicitly in environments where
         weak refs are not available or when you need deterministic cleanup.
         """
         PyroxModule._contexts.pop(id(self), None)

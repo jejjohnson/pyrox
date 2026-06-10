@@ -3,9 +3,9 @@
 Provides per-instance registries for constrained parameters, attached
 priors, guide-type metadata, and a ``model`` / ``guide`` mode switch.
 Both GP kernels and NN layers that want a structured priors+guides
-workflow subclass :class:`Parameterized`.
+workflow subclass `Parameterized`.
 
-Pattern C usage::
+Pattern C usage:
 
     class RBFKernel(Parameterized):
         def setup(self):
@@ -57,17 +57,17 @@ class _State:
 class Parameterized(PyroxModule):
     """Shared base for modules with priors, constraints, and mode switching.
 
-    Subclasses typically declare parameters inside :meth:`setup`, which is
+    Subclasses typically declare parameters inside `setup`, which is
     invoked automatically after ``__init__`` completes. Use
-    :meth:`register_param` to declare a parameter, :meth:`set_prior` to
-    attach a prior, :meth:`autoguide` to pick a guide type, and
-    :meth:`set_mode` to switch between sampling from the prior and
+    `register_param` to declare a parameter, `set_prior` to
+    attach a prior, `autoguide` to pick a guide type, and
+    `set_mode` to switch between sampling from the prior and
     sampling from the guide.
 
     Per-instance state (params, priors, guides, mode) lives in a
     class-level registry keyed by ``id(self)``. Cleanup happens via
-    :mod:`weakref.finalize` when the instance is collected; call
-    :meth:`_teardown` for explicit cleanup.
+    `weakref.finalize` when the instance is collected; call
+    `_teardown` for explicit cleanup.
     """
 
     _registry: ClassVar[dict[int, _State]] = {}

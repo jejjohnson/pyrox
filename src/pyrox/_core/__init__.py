@@ -2,11 +2,11 @@
 
 Public surface:
 
-- :class:`PyroxModule` — Equinox module with pyrox_param / pyrox_sample
-- :class:`PyroxParam` — declarative parameter descriptor
-- :class:`PyroxSample` — declarative sample descriptor
-- :class:`Parameterized` — param registry with priors, guides, and modes
-- :func:`pyrox_method` — decorator that activates the per-call context
+- `PyroxModule` — Equinox module with pyrox_param / pyrox_sample
+- `PyroxParam` — declarative parameter descriptor
+- `PyroxSample` — declarative sample descriptor
+- `Parameterized` — param registry with priors, guides, and modes
+- `pyrox_method` — decorator that activates the per-call context
 """
 
 from pyrox._core.descriptors import PyroxParam, PyroxSample

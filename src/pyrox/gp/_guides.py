@@ -1,63 +1,63 @@
-"""Sparse SVGP variational guide families — concrete :class:`Guide` types.
+"""Sparse SVGP variational guide families — concrete `Guide` types.
 
-Five guides over the inducing values ``u`` of a :class:`SparseGPPrior`:
+Five guides over the inducing values ``u`` of a `SparseGPPrior`:
 
-* :class:`FullRankGuide` — :math:`q(u) = \\mathcal{N}(m, L_S L_S^\\top)`,
+* `FullRankGuide` — $q(u) = \\mathcal{N}(m, L_S L_S^\\top)$,
   expressive but ``O(M^3)`` per ELBO call.
-* :class:`MeanFieldGuide` — :math:`q(u) = \\mathcal{N}(m, \\mathrm{diag}(s^2))`,
+* `MeanFieldGuide` — $q(u) = \\mathcal{N}(m, \\mathrm{diag}(s^2))$,
   cheap and easy to optimize but cannot capture cross-correlations between
   inducing values.
-* :class:`WhitenedGuide` — :math:`q(v) = \\mathcal{N}(m_v, L_v L_v^\\top)` in
+* `WhitenedGuide` — $q(v) = \\mathcal{N}(m_v, L_v L_v^\\top)$ in
   whitened coordinates ``v`` such that ``u = L_{ZZ} v``. The KL term is
   against the standard normal and the predictive uses
-  :func:`gaussx.whitened_svgp_predict` directly. This is the standard
+  `gaussx.whitened_svgp_predict` directly. This is the standard
   parameterization for stable SVGP optimization (Hensman et al., 2015).
-* :class:`NaturalGuide` — :math:`q(u) = \\mathcal{N}(m, S)` parameterized
-  in *natural form* :math:`(\\eta_1, \\eta_2)` with
-  :math:`\\eta_1 = S^{-1}m` and :math:`\\eta_2 = -\\tfrac{1}{2} S^{-1}`.
-  Exposes a damped :meth:`NaturalGuide.natural_update` for natural-
+* `NaturalGuide` — $q(u) = \\mathcal{N}(m, S)$ parameterized
+  in *natural form* $(\\eta_1, \\eta_2)$ with
+  $\\eta_1 = S^{-1}m$ and $\\eta_2 = -\\tfrac{1}{2} S^{-1}$.
+  Exposes a damped `NaturalGuide.natural_update` for natural-
   gradient and CVI-style workflows that update ``q`` in natural-
   parameter space.
-* :class:`DeltaGuide` — point-mass :math:`q(u) = \\delta(u - \\text{loc})`
+* `DeltaGuide` — point-mass $q(u) = \\delta(u - \\text{loc})$
   for MAP-style workflows. ``log_prob`` is constant and
-  :meth:`DeltaGuide.kl_divergence` returns the loc-dependent
-  :math:`-\\log p(\\text{loc})` so ``ELL - kl_divergence`` reduces to
+  `DeltaGuide.kl_divergence` returns the loc-dependent
+  $-\\log p(\\text{loc})$ so ``ELL - kl_divergence`` reduces to
   the joint log-density.
 
 All five expose the same building-block interface:
 
-* :meth:`sample(key)` — raw draw from ``q(u)`` (or ``q(v)`` for the
-  whitened guide; deterministic for :class:`DeltaGuide`). Does not
+* `sample(key)` — raw draw from ``q(u)`` (or ``q(v)`` for the
+  whitened guide; deterministic for `DeltaGuide`). Does not
   touch the NumPyro trace.
-* :meth:`log_prob(u)` — variational log density at ``u`` (or ``v``).
-* :meth:`kl_divergence(prior_cov)` — closed-form KL against the inducing
+* `log_prob(u)` — variational log density at ``u`` (or ``v``).
+* `kl_divergence(prior_cov)` — closed-form KL against the inducing
   prior covariance ``K_zz + jitter I``. The whitened guide ignores its
   argument; the KL is against ``N(0, I)``. The delta guide returns the
   loc-dependent ``-log p(loc)``.
-* :meth:`predict(K_xz, K_zz_op, K_xx_diag)` — predictive mean and
+* `predict(K_xz, K_zz_op, K_xx_diag)` — predictive mean and
   variance at ``X``. ``K_xz`` and ``K_xx_diag`` come from
-  :meth:`SparseGPPrior.cross_covariance` and
-  :meth:`SparseGPPrior.kernel_diag`; ``K_zz_op`` from
-  :meth:`SparseGPPrior.inducing_operator`.
+  `SparseGPPrior.cross_covariance` and
+  `SparseGPPrior.kernel_diag`; ``K_zz_op`` from
+  `SparseGPPrior.inducing_operator`.
 
 All Gaussian linear-algebra is delegated to ``gaussx``: natural-parameter
-conversions go through :func:`gaussx.natural_to_mean_cov` /
-:func:`gaussx.mean_cov_to_natural`, the damped natural update through
-:func:`gaussx.damped_natural_update`, log-densities through
-:func:`gaussx.gaussian_log_prob`, KL through
-:func:`gaussx.dist_kl_divergence`, and Cholesky through
-:func:`gaussx.cholesky` / :func:`gaussx.safe_cholesky`. The
-:class:`NaturalGuide` ``sample`` / ``log_prob`` paths route through
-:class:`gaussx.MultivariateNormalPrecision` so the precision Cholesky
-is used directly without ever materializing :math:`\\Sigma`. The same
+conversions go through `gaussx.natural_to_mean_cov` /
+`gaussx.mean_cov_to_natural`, the damped natural update through
+`gaussx.damped_natural_update`, log-densities through
+`gaussx.gaussian_log_prob`, KL through
+`gaussx.dist_kl_divergence`, and Cholesky through
+`gaussx.cholesky` / `gaussx.safe_cholesky`. The
+`NaturalGuide` ``sample`` / ``log_prob`` paths route through
+`gaussx.MultivariateNormalPrecision` so the precision Cholesky
+is used directly without ever materializing $\\Sigma$. The same
 primitives back the future natural-gradient and CVI inference paths.
 
 Each guide accepts an optional ``solver`` field
-(:class:`gaussx.AbstractSolverStrategy`) so the user can pick the
+(`gaussx.AbstractSolverStrategy`) so the user can pick the
 ``solve`` / ``logdet`` strategy for paths that consume a solver
 (``natural_to_mean_cov``, ``gaussian_log_prob``,
 ``MultivariateNormalPrecision``). ``None`` defaults to
-:class:`gaussx.DenseSolver`. Unused fields are still exposed on the
+`gaussx.DenseSolver`. Unused fields are still exposed on the
 guide for downstream consumers (e.g.\\ inference loops) that need to
 solve against the variational covariance.
 
@@ -65,7 +65,7 @@ The sparse ELBO entry point that wires these into NumPyro lands in the
 Wave 3 inference issue. Until then the user assembles the ELBO manually:
 sample ``u`` (or ``v``) via ``numpyro.sample``, predict ``f`` at the
 training inputs, integrate the per-point log-likelihood under
-``q(f_n)``, and subtract :meth:`kl_divergence`.
+``q(f_n)``, and subtract `kl_divergence`.
 """
 
 from __future__ import annotations
@@ -95,7 +95,7 @@ from pyrox.gp._protocols import Guide
 def _resolve_solver(
     solver: AbstractSolverStrategy | None,
 ) -> AbstractSolverStrategy:
-    """Default solver pattern shared by all guides — see :class:`SparseGPPrior`."""
+    """Default solver pattern shared by all guides — see `SparseGPPrior`."""
     return DenseSolver() if solver is None else solver
 
 
@@ -133,15 +133,17 @@ def _svgp_predict_unwhitened(
 
     Implements
 
-    .. math::
-
-        \mu_*(x) &= K_{xZ} K_{ZZ}^{-1} m, \\
-        \sigma^2_*(x) &= k(x,x)
-            - K_{xZ} K_{ZZ}^{-1} K_{Zx}
-            + K_{xZ} K_{ZZ}^{-1} S K_{ZZ}^{-1} K_{Zx},
+    $$
+    \begin{aligned}
+    \mu_*(x) &= K_{xZ} K_{ZZ}^{-1} m, \\
+    \sigma^2_*(x) &= k(x,x)
+        - K_{xZ} K_{ZZ}^{-1} K_{Zx}
+        + K_{xZ} K_{ZZ}^{-1} S K_{ZZ}^{-1} K_{Zx},
+    \end{aligned}
+    $$
 
     by reduction to the whitened SVGP predictive
-    (:func:`gaussx.whitened_svgp_predict`): if ``u = L_{ZZ} v`` with
+    (`gaussx.whitened_svgp_predict`): if ``u = L_{ZZ} v`` with
     ``v ~ q(v) = N(m_v, S_v)`` then ``m_v = L_{ZZ}^{-1} m`` and
     ``S_v = L_{ZZ}^{-1} S L_{ZZ}^{-T}``. The whitened predictive uses
     only ``L_{v} = chol(S_v)`` and is ``O(M^2 N)`` after the
@@ -171,9 +173,9 @@ def _svgp_predict_unwhitened(
 class FullRankGuide(Guide):
     r"""Full-rank Gaussian variational posterior over inducing values ``u``.
 
-    .. math::
-
-        q(u) = \mathcal{N}(m,\, L_S L_S^\top),
+    $$
+    q(u) = \mathcal{N}(m,\, L_S L_S^\top),
+    $$
 
     parameterized by the mean ``mean`` of shape ``(M,)`` and the
     *lower-triangular* Cholesky factor ``scale_tril`` of shape ``(M, M)``.
@@ -183,7 +185,7 @@ class FullRankGuide(Guide):
         scale_tril: Lower-triangular Cholesky factor of the variational
             covariance, shape ``(M, M)``. The covariance is
             ``S = scale_tril @ scale_tril.T``.
-        solver: Optional :class:`gaussx.AbstractSolverStrategy` exposed
+        solver: Optional `gaussx.AbstractSolverStrategy` exposed
             so downstream consumers (e.g.\\ inference loops that solve
             against this guide's covariance) can pick the solver. The
             guide's own ``log_prob`` / ``kl_divergence`` use the
@@ -219,10 +221,10 @@ class FullRankGuide(Guide):
         return self.mean + einx.dot("i j, j -> i", self.scale_tril, eps)
 
     def log_prob(self, u: Float[Array, " ..."]) -> Float[Array, ""]:  # ty: ignore[invalid-method-override]
-        r"""Variational log density ``\log q(u)`` via :func:`gaussx.gaussian_log_prob`.
+        r"""Variational log density ``\log q(u)`` via `gaussx.gaussian_log_prob`.
 
         Delegates the ``solve`` and ``logdet`` work to the configured
-        solver so the user-supplied :attr:`solver` actually controls the
+        solver so the user-supplied `solver` actually controls the
         numerical path.
         """
         return gaussian_log_prob(
@@ -235,7 +237,7 @@ class FullRankGuide(Guide):
     def kl_divergence(self, prior_cov: lx.AbstractLinearOperator) -> Float[Array, ""]:
         r"""``KL(q(u) || p(u))`` against an inducing prior with zero mean.
 
-        Falls back to :func:`gaussx.dist_kl_divergence`, which dispatches
+        Falls back to `gaussx.dist_kl_divergence`, which dispatches
         on operator structure for the trace and logdet terms but does
         not yet take an explicit solver.
         """
@@ -252,10 +254,10 @@ class FullRankGuide(Guide):
     ) -> tuple[Float[Array, " N"], Float[Array, " N"]]:
         r"""Predictive ``(mean, variance)`` at points with cross-cov ``K_xz``.
 
-        Routes through :func:`_svgp_predict_unwhitened`, which dispatches
-        on the structure of ``K_zz_op`` via :func:`gaussx.cholesky` /
-        :func:`gaussx.whitened_svgp_predict`. These primitives do not
-        currently accept an explicit solver — the :attr:`solver` field
+        Routes through `_svgp_predict_unwhitened`, which dispatches
+        on the structure of ``K_zz_op`` via `gaussx.cholesky` /
+        `gaussx.whitened_svgp_predict`. These primitives do not
+        currently accept an explicit solver — the `solver` field
         is exposed for downstream consumers.
         """
         u_cov = einx.dot("i j, k j -> i k", self.scale_tril, self.scale_tril)
@@ -265,9 +267,9 @@ class FullRankGuide(Guide):
 class MeanFieldGuide(Guide):
     r"""Diagonal Gaussian variational posterior over inducing values ``u``.
 
-    .. math::
-
-        q(u) = \mathcal{N}(m,\, \mathrm{diag}(s^2)),
+    $$
+    q(u) = \mathcal{N}(m,\, \mathrm{diag}(s^2)),
+    $$
 
     parameterized by the mean ``mean`` and the per-coordinate standard
     deviations ``scale``.
@@ -276,8 +278,8 @@ class MeanFieldGuide(Guide):
         mean: Variational mean ``m`` of shape ``(M,)``.
         scale: Per-coordinate standard deviations ``s`` of shape ``(M,)``.
             Must be strictly positive.
-        solver: Optional :class:`gaussx.AbstractSolverStrategy` — see
-            :class:`FullRankGuide` for usage. ``None`` by default.
+        solver: Optional `gaussx.AbstractSolverStrategy` — see
+            `FullRankGuide` for usage. ``None`` by default.
     """
 
     mean: Float[Array, " M"]
@@ -293,7 +295,7 @@ class MeanFieldGuide(Guide):
         solver: AbstractSolverStrategy | None = None,
     ) -> MeanFieldGuide:
         """Construct a guide initialized to ``N(0, scale^2 I)`` — see
-        :meth:`FullRankGuide.init` for the dtype convention."""
+        `FullRankGuide.init` for the dtype convention."""
         m = jnp.zeros(num_inducing)
         s = jnp.full(num_inducing, scale)
         return cls(mean=m, scale=s, solver=solver)
@@ -304,11 +306,11 @@ class MeanFieldGuide(Guide):
         return self.mean + self.scale * eps
 
     def log_prob(self, u: Float[Array, " ..."]) -> Float[Array, ""]:  # ty: ignore[invalid-method-override]
-        r"""Variational log density ``\log q(u)`` via :func:`gaussx.gaussian_log_prob`.
+        r"""Variational log density ``\log q(u)`` via `gaussx.gaussian_log_prob`.
 
         The covariance operator is built from the per-coordinate scales
-        as a :class:`lineax.MatrixLinearOperator` tagged
-        :data:`positive_semidefinite_tag`; structural dispatch routes
+        as a `lineax.MatrixLinearOperator` tagged
+        `positive_semidefinite_tag`; structural dispatch routes
         through the configured solver.
         """
         return gaussian_log_prob(
@@ -352,8 +354,8 @@ class WhitenedGuide(Guide):
         scale_tril: Lower-triangular Cholesky factor of the whitened
             variational covariance, shape ``(M, M)``. The covariance in
             whitened space is ``L_v @ L_v.T``.
-        solver: Optional :class:`gaussx.AbstractSolverStrategy` — see
-            :class:`FullRankGuide` for usage. ``None`` by default.
+        solver: Optional `gaussx.AbstractSolverStrategy` — see
+            `FullRankGuide` for usage. ``None`` by default.
     """
 
     mean: Float[Array, " M"]
@@ -369,7 +371,7 @@ class WhitenedGuide(Guide):
         solver: AbstractSolverStrategy | None = None,
     ) -> WhitenedGuide:
         """Construct a guide initialized to ``N(0, scale^2 I)`` in whitened
-        space — see :meth:`FullRankGuide.init` for the dtype convention."""
+        space — see `FullRankGuide.init` for the dtype convention."""
         m = jnp.zeros(num_inducing)
         L = scale * jnp.eye(num_inducing)
         return cls(mean=m, scale_tril=L, solver=solver)
@@ -380,10 +382,10 @@ class WhitenedGuide(Guide):
         return self.mean + einx.dot("i j, j -> i", self.scale_tril, eps)
 
     def log_prob(self, v: Float[Array, " ..."]) -> Float[Array, ""]:  # ty: ignore[invalid-method-override]
-        r"""Whitened ``\log q(v)`` via :func:`gaussx.gaussian_log_prob`.
+        r"""Whitened ``\log q(v)`` via `gaussx.gaussian_log_prob`.
 
         Delegates ``solve`` and ``logdet`` to the configured solver so
-        the user-supplied :attr:`solver` controls the numerical path
+        the user-supplied `solver` controls the numerical path
         (the ``KL(q(v) \| N(0, I))`` term remains the kernel-free
         closed form).
         """
@@ -402,18 +404,18 @@ class WhitenedGuide(Guide):
 
         Computes
 
-        .. math::
-
-            \mathrm{KL}(\mathcal{N}(m_v, L_v L_v^\top) \,\|\,
-                       \mathcal{N}(0, I))
-            = \tfrac{1}{2} \bigl(
-                \|m_v\|^2 + \|L_v\|_F^2 - M
-                - 2 \sum_i \log |[L_v]_{ii}|
-            \bigr).
+        $$
+        \mathrm{KL}(\mathcal{N}(m_v, L_v L_v^\top) \,\|\,
+                   \mathcal{N}(0, I))
+        = \tfrac{1}{2} \bigl(
+            \|m_v\|^2 + \|L_v\|_F^2 - M
+            - 2 \sum_i \log |[L_v]_{ii}|
+        \bigr).
+        $$
 
         The ``prior_cov`` argument is accepted for signature parity with
-        :meth:`FullRankGuide.kl_divergence` and
-        :meth:`MeanFieldGuide.kl_divergence`, but is ignored — the
+        `FullRankGuide.kl_divergence` and
+        `MeanFieldGuide.kl_divergence`, but is ignored — the
         whitened prior is the standard normal regardless of ``K_{ZZ}``.
         """
         del prior_cov
@@ -431,7 +433,7 @@ class WhitenedGuide(Guide):
         K_zz_op: lx.AbstractLinearOperator,
         K_xx_diag: Float[Array, " N"],
     ) -> tuple[Float[Array, " N"], Float[Array, " N"]]:
-        """Predictive ``(mean, variance)`` via :func:`gaussx.whitened_svgp_predict`."""
+        """Predictive ``(mean, variance)`` via `gaussx.whitened_svgp_predict`."""
         return whitened_svgp_predict(
             K_zz_op, K_xz, self.mean, self.scale_tril, K_xx_diag
         )
@@ -440,37 +442,37 @@ class WhitenedGuide(Guide):
 class NaturalGuide(Guide):
     r"""Natural-parameter Gaussian variational posterior over inducing values.
 
-    Parameterizes :math:`q(u) = \mathcal{N}(m, S)` in *natural form*
+    Parameterizes $q(u) = \mathcal{N}(m, S)$ in *natural form*
     with parameters
 
-    .. math::
+    $$
+    \eta_1 = S^{-1} m, \qquad
+    \eta_2 = -\tfrac{1}{2} S^{-1}.
+    $$
 
-        \eta_1 = S^{-1} m, \qquad
-        \eta_2 = -\tfrac{1}{2} S^{-1}.
-
-    The moments are recovered on demand via :attr:`mean` and
-    :attr:`covariance`, which delegate to :func:`gaussx.natural_to_mean_cov`.
+    The moments are recovered on demand via `mean` and
+    `covariance`, which delegate to `gaussx.natural_to_mean_cov`.
 
     The natural form is the parameterization of choice for *natural-
     gradient* and *conjugate-computation variational inference* (CVI)
     workflows: when the true posterior is in the same exponential family
     as the prior, the natural-gradient direction equals the difference
-    in natural parameters. :meth:`natural_update` exposes that step
+    in natural parameters. `natural_update` exposes that step
     with a damping factor ``rho`` and delegates to
-    :func:`gaussx.damped_natural_update` so the same primitive is shared
+    `gaussx.damped_natural_update` so the same primitive is shared
     with future natural-gradient EP / VI / Newton workflows.
 
     Attributes:
         nat1: First natural parameter ``eta_1`` of shape ``(M,)``.
         nat2: Second natural parameter ``eta_2`` of shape ``(M, M)``,
             symmetric negative-definite.
-        solver: Optional :class:`gaussx.AbstractSolverStrategy` used for
+        solver: Optional `gaussx.AbstractSolverStrategy` used for
             ``solve`` and ``logdet`` against the precision operator
             ``Lambda = -2 nat2``. ``sample`` and ``log_prob`` route
-            through :class:`gaussx.MultivariateNormalPrecision` with
+            through `gaussx.MultivariateNormalPrecision` with
             this solver — efficient because the precision form avoids
-            ever materializing :math:`\Sigma`. ``None`` defaults to
-            :class:`gaussx.DenseSolver`.
+            ever materializing $\Sigma$. ``None`` defaults to
+            `gaussx.DenseSolver`.
     """
 
     nat1: Float[Array, " M"]
@@ -488,7 +490,7 @@ class NaturalGuide(Guide):
         """Construct a guide initialized to ``N(0, scale^2 I)`` in moment space.
 
         Mapped to natural form this is ``eta_1 = 0`` and
-        ``eta_2 = -1 / (2 scale^2) * I`` — see :meth:`FullRankGuide.init`
+        ``eta_2 = -1 / (2 scale^2) * I`` — see `FullRankGuide.init`
         for the dtype convention.
         """
         n = num_inducing
@@ -503,7 +505,7 @@ class NaturalGuide(Guide):
     def _moment_mean(self) -> Float[Array, " M"]:
         """Moment-form mean via one structured solve — no covariance build.
 
-        :func:`gaussx.natural_to_mean_cov` returns the covariance as a
+        `gaussx.natural_to_mean_cov` returns the covariance as a
         *lazy* inverse operator, so discarding it here is free.
         """
         nat2_op = _negsemi_cov_operator(self.nat2)
@@ -513,7 +515,7 @@ class NaturalGuide(Guide):
         return m
 
     def _moments(self) -> tuple[Float[Array, " M"], Float[Array, "M M"]]:
-        """Return ``(mean, cov_array)`` via :func:`gaussx.natural_to_mean_cov`."""
+        """Return ``(mean, cov_array)`` via `gaussx.natural_to_mean_cov`."""
         nat2_op = _negsemi_cov_operator(self.nat2)
         m, cov_op = natural_to_mean_cov(
             self.nat1, nat2_op, solver=_resolve_solver(self.solver)
@@ -521,7 +523,7 @@ class NaturalGuide(Guide):
         return m, symmetrize(cov_op.as_matrix())
 
     def _mvn(self) -> MultivariateNormalPrecision:
-        """Wrap the natural form as a :class:`gaussx.MultivariateNormalPrecision`.
+        """Wrap the natural form as a `gaussx.MultivariateNormalPrecision`.
 
         Carries the precision operator directly, so ``sample`` /
         ``log_prob`` never materialize the covariance.
@@ -543,7 +545,7 @@ class NaturalGuide(Guide):
         return self._moment_mean()
 
     def sample(self, key: Array) -> Float[Array, " M"]:
-        r"""Draw ``u \sim q`` via :class:`gaussx.MultivariateNormalPrecision`.
+        r"""Draw ``u \sim q`` via `gaussx.MultivariateNormalPrecision`.
 
         Uses the precision Cholesky directly: ``L = chol(\Lambda)``,
         ``y = L^{-T} \epsilon``, ``u = m + y``. No moment-space
@@ -563,7 +565,7 @@ class NaturalGuide(Guide):
     def kl_divergence(self, prior_cov: lx.AbstractLinearOperator) -> Float[Array, ""]:
         r"""``KL(q(u) || p(u))`` against an inducing prior with zero mean.
 
-        Falls back to :func:`gaussx.dist_kl_divergence` in moment form —
+        Falls back to `gaussx.dist_kl_divergence` in moment form —
         ``dist_kl_divergence`` does not yet take an explicit solver, but
         it dispatches on operator structure for the trace and logdet
         terms.
@@ -588,15 +590,15 @@ class NaturalGuide(Guide):
         nat2_hat: Float[Array, "M M"],
         rho: float | Float[Array, ""] = 1.0,
     ) -> NaturalGuide:
-        r"""Damped natural-parameter update via :func:`gaussx.damped_natural_update`.
+        r"""Damped natural-parameter update via `gaussx.damped_natural_update`.
 
-        Returns a new :class:`NaturalGuide` whose natural parameters are
+        Returns a new `NaturalGuide` whose natural parameters are
         the convex combination
 
-        .. math::
-
-            \eta_i \leftarrow (1 - \rho)\,\eta_i + \rho\,\hat{\eta}_i,
-            \quad i \in \{1, 2\}.
+        $$
+        \eta_i \leftarrow (1 - \rho)\,\eta_i + \rho\,\hat{\eta}_i,
+        \quad i \in \{1, 2\}.
+        $$
 
         The damping factor ``rho`` interpolates between the current
         guide (``rho=0``) and the candidate update
@@ -623,15 +625,15 @@ class NaturalGuide(Guide):
 class DeltaGuide(Guide):
     r"""Point-mass (MAP-style) variational posterior over inducing values.
 
-    .. math::
-
-        q(u) = \delta(u - \text{loc}),
+    $$
+    q(u) = \delta(u - \text{loc}),
+    $$
 
     so all the variational mass concentrates on a single point. Pairs
     with the same SVGP ELBO infrastructure as the Gaussian guides but
     reduces it to MAP estimation: when ``ELL - kl_divergence`` is the
-    objective, :meth:`kl_divergence` returns the loc-dependent
-    :math:`-\log p(\text{loc})` so the objective becomes the joint
+    objective, `kl_divergence` returns the loc-dependent
+    $-\log p(\text{loc})$ so the objective becomes the joint
     log-density ``log p(y, loc) = ELL(loc) + log p(loc)``, recovering
     standard MAP estimation of the inducing values.
 
@@ -639,11 +641,11 @@ class DeltaGuide(Guide):
         loc: The point at which the variational mass concentrates,
             shape ``(M,)``. This is also the MAP estimate of the
             inducing values when used inside a maximization loop.
-        solver: Optional :class:`gaussx.AbstractSolverStrategy` passed
-            to :func:`gaussx.gaussian_log_prob` when computing
+        solver: Optional `gaussx.AbstractSolverStrategy` passed
+            to `gaussx.gaussian_log_prob` when computing
             ``-log p(loc)`` against the prior covariance in
-            :meth:`kl_divergence`. ``None`` defaults to
-            :class:`gaussx.DenseSolver`.
+            `kl_divergence`. ``None`` defaults to
+            `gaussx.DenseSolver`.
     """
 
     loc: Float[Array, " M"]
@@ -657,7 +659,7 @@ class DeltaGuide(Guide):
         solver: AbstractSolverStrategy | None = None,
     ) -> DeltaGuide:
         """Construct a guide initialized to ``loc = 0`` — see
-        :meth:`FullRankGuide.init` for the dtype convention."""
+        `FullRankGuide.init` for the dtype convention."""
         return cls(loc=jnp.zeros(num_inducing), solver=solver)
 
     def sample(self, key: Array) -> Float[Array, " M"]:
@@ -672,7 +674,7 @@ class DeltaGuide(Guide):
         ``-inf`` everywhere else, which carries no useful gradient
         information. Returning ``0`` matches the Pyro / NumPyro
         ``AutoDelta`` convention: the differentiable MAP signal lives
-        entirely in :meth:`kl_divergence`.
+        entirely in `kl_divergence`.
         """
         del u
         return jnp.zeros((), dtype=self.loc.dtype)
@@ -684,17 +686,17 @@ class DeltaGuide(Guide):
         ``+inf``, but the only loc-dependent piece is the negative log
         prior density at ``loc``,
 
-        .. math::
-
-            -\log p(\text{loc}) =
-                \tfrac{1}{2} \text{loc}^\top K^{-1} \text{loc}
-                + \tfrac{1}{2} \log |K|
-                + \tfrac{M}{2} \log(2\pi),
+        $$
+        -\log p(\text{loc}) =
+            \tfrac{1}{2} \text{loc}^\top K^{-1} \text{loc}
+            + \tfrac{1}{2} \log |K|
+            + \tfrac{M}{2} \log(2\pi),
+        $$
 
         so we return that. With this convention the standard ELBO
         ``ELL - kl_divergence`` reduces to the joint log-density
         ``log p(y, loc)``, which is exactly the MAP objective. Computed
-        via :func:`gaussx.gaussian_log_prob` so the same solver / logdet
+        via `gaussx.gaussian_log_prob` so the same solver / logdet
         primitives back this path as the rest of the GP surface.
         """
         loc = self.loc
@@ -716,14 +718,14 @@ class DeltaGuide(Guide):
         reduction ``k(x, x) - K_{xZ} K_{ZZ}^{-1} K_{Zx}`` *exactly* —
         no posterior-uncertainty contribution and no Cholesky jitter.
 
-        Implemented by calling :func:`gaussx.whitened_svgp_predict`
+        Implemented by calling `gaussx.whitened_svgp_predict`
         directly with the whitened mean ``L_{ZZ}^{-1} loc`` and a zero
         whitened Cholesky factor. The shared
-        :func:`_svgp_predict_unwhitened` helper would route the zero
-        variational covariance through :func:`gaussx.safe_cholesky`,
+        `_svgp_predict_unwhitened` helper would route the zero
+        variational covariance through `gaussx.safe_cholesky`,
         which injects jitter to make the input PD and would add a tiny
         spurious variance term. Bypassing that path keeps the
-        :class:`DeltaGuide` predictive numerically equal to the prior
+        `DeltaGuide` predictive numerically equal to the prior
         conditional.
         """
         m_size = self.loc.shape[0]

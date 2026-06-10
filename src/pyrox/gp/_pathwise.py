@@ -5,15 +5,15 @@ surfaces. Each sampled path can be evaluated repeatedly at arbitrary
 inputs without refactorizing a test-set covariance.
 
 The zero-mean prior path is drawn via the shared random-Fourier-feature
-primitives in :mod:`pyrox._basis._rff` (:func:`draw_rff_cosine_basis` /
-:func:`evaluate_rff_cosine_paths`); this module then adds the posterior
+primitives in `pyrox._basis._rff` (`draw_rff_cosine_basis` /
+`evaluate_rff_cosine_paths`); this module then adds the posterior
 correction and the optional prior mean.
 
-Scope: RBF and Matern kernels; point-inducing :class:`SparseGPPrior`.
-Inducing-feature priors (:class:`pyrox.gp.FourierInducingFeatures`,
-:class:`pyrox.gp.SphericalHarmonicInducingFeatures`,
-:class:`pyrox.gp.LaplacianInducingFeatures`) are not yet covered —
-:class:`DecoupledPathwiseSampler` raises on construction when
+Scope: RBF and Matern kernels; point-inducing `SparseGPPrior`.
+Inducing-feature priors (`pyrox.gp.FourierInducingFeatures`,
+`pyrox.gp.SphericalHarmonicInducingFeatures`,
+`pyrox.gp.LaplacianInducingFeatures`) are not yet covered —
+`DecoupledPathwiseSampler` raises on construction when
 ``prior.Z is None`` so the limitation surfaces before a long sample
 loop.
 """
@@ -59,7 +59,7 @@ def _frozen_kernel_fn(
     This helper closes over the captured scalars and calls the pure math
     primitive directly, bypassing the ``pyrox_sample`` layer entirely.
     Only RBF and Matern are supported — same scope as
-    :func:`pyrox._basis._rff.draw_rff_cosine_basis`.
+    `pyrox._basis._rff.draw_rff_cosine_basis`.
     """
     if isinstance(kernel, RBF):
 
@@ -98,15 +98,15 @@ class PathwiseFunction(eqx.Module):
     against either the training inputs (exact) or the inducing inputs
     (sparse). Calling the instance on test points ``X_star`` evaluates
 
-    .. math::
+    $$
+    f_{\\text{post}}(x_*) =
+        \\tilde{f}(x_*)
+        + K(x_*,\\, X_{\\mathrm{corr}})\\,\\alpha
+        + \\mu(x_*),
+    $$
 
-        f_{\\text{post}}(x_*) =
-            \\tilde{f}(x_*)
-            + K(x_*,\\, X_{\\mathrm{corr}})\\,\\alpha
-            + \\mu(x_*),
-
-    where :math:`\\tilde f` is the stored RFF prior draw and
-    :math:`X_{\\mathrm{corr}}` is either the training set (exact) or
+    where $\\tilde f$ is the stored RFF prior draw and
+    $X_{\\mathrm{corr}}$ is either the training set (exact) or
     the inducing set (sparse).
 
     The kernel enters only as a frozen ``(X1, X2) -> K`` callable with
@@ -114,14 +114,14 @@ class PathwiseFunction(eqx.Module):
     repeated evaluations stay consistent with the original RFF draw
     even for Pattern B/C kernels that register hyperparameter priors.
 
-    Example:
+    Examples:
         >>> prior = GPPrior(kernel=RBF(), X=X)
         >>> posterior = prior.condition(y, noise_var=jnp.array(0.05))
         >>> sampler = PathwiseSampler(posterior, n_features=512)
         >>> paths = sampler.sample_paths(key, n_paths=8)
         >>> samples = paths(X_star)
 
-    Example:
+    Examples:
         >>> sparse_prior = SparseGPPrior(kernel=RBF(), Z=Z)
         >>> guide = FullRankGuide.init(Z.shape[0])
         >>> paths = DecoupledPathwiseSampler(sparse_prior, guide).sample_paths(key)
@@ -161,25 +161,25 @@ class PathwiseFunction(eqx.Module):
 class PathwiseSampler(eqx.Module):
     """Exact-GP pathwise posterior sampler using Matheron's rule.
 
-    Given a :class:`ConditionedGP`, draws a zero-mean RFF prior path
+    Given a `ConditionedGP`, draws a zero-mean RFF prior path
     ``f_tilde`` and an iid noise draw ``eps_tilde`` at the training
     inputs, forms the residual ``y - mu(X) - f_tilde(X) - eps_tilde``,
     solves it against the cached noisy operator ``K + (jitter + sigma^2)I``,
     and stores the result as posterior correction weights. The returned
-    :class:`PathwiseFunction` is callable at any ``X_*`` in
-    :math:`\\mathcal{O}(N_* \\cdot F \\cdot D + N_* \\cdot N)` per path,
+    `PathwiseFunction` is callable at any ``X_*`` in
+    $\\mathcal{O}(N_* \\cdot F \\cdot D + N_* \\cdot N)$ per path,
     where ``N`` is the number of training (correction) points: the RFF
     prior term recomputes features over ``X_*`` each call
     (``N_* · F · D``), and the correction term forms a fresh
     ``K(X_*, X)`` block (``N_* · N``).
 
-    Example:
+    Examples:
         >>> posterior = GPPrior(kernel=RBF(), X=X).condition(y, jnp.array(0.05))
         >>> sampler = PathwiseSampler(posterior, n_features=512)
         >>> paths = sampler.sample_paths(key, n_paths=32)
         >>> draws = paths(X_star)
 
-    Example:
+    Examples:
         >>> sampler = PathwiseSampler(posterior, n_features=1024)
         >>> thompson = sampler.sample_paths(key, n_paths=1)
         >>> values = thompson(X_candidates)
@@ -273,15 +273,15 @@ class DecoupledPathwiseSampler(eqx.Module):
     the inducing-point basis, so each sampled path stays callable at arbitrary
     inputs after a one-time inducing solve.
 
-    Supported for point-inducing :class:`SparseGPPrior` (``Z=...``);
+    Supported for point-inducing `SparseGPPrior` (``Z=...``);
     inducing-feature priors (``inducing=...``) are rejected at
     construction with a clear error.
 
-    Handles :class:`WhitenedGuide` automatically: whitened guide draws
+    Handles `WhitenedGuide` automatically: whitened guide draws
     ``v ~ q(v)`` are unwhitened to inducing values ``u = L_ZZ v`` via
-    :func:`gaussx.unwhiten` before forming the inducing-space residual.
+    `gaussx.unwhiten` before forming the inducing-space residual.
 
-    Example:
+    Examples:
         >>> prior = SparseGPPrior(kernel=RBF(), Z=Z)
         >>> guide = FullRankGuide.init(Z.shape[0])
         >>> sampler = DecoupledPathwiseSampler(prior, guide, n_features=512)
@@ -308,7 +308,7 @@ class DecoupledPathwiseSampler(eqx.Module):
         ``key`` is split into three subkeys: one for the RFF basis, one
         for ``n_paths`` independent guide draws, and one for the
         jitter-augmentation of the prior inducing draw. The RFF basis
-        draw and the :math:`K_{zz}` assembly share a single
+        draw and the $K_{zz}$ assembly share a single
         ``_kernel_context`` so kernels with hyperparameter priors
         (Pattern B / C) sample ``(variance, lengthscale)`` once.
 

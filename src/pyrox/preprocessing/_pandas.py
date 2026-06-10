@@ -1,8 +1,8 @@
 """Pandas-side helpers for fitting BNF feature layers.
 
 Pandas usage is isolated to preprocessing and estimator-facing facades.
-The output here is always a JAX-only PyTree (an :class:`equinox.Module`
-tree), so downstream :mod:`pyrox.nn` layers stay pandas-free.
+The output here is always a JAX-only PyTree (an `equinox.Module`
+tree), so downstream `pyrox.nn` layers stay pandas-free.
 """
 
 from __future__ import annotations
@@ -30,16 +30,16 @@ class SpatiotemporalFit(eqx.Module):
     PyTree so the whole bundle is JIT-friendly and picklable.
 
     Attributes:
-        standardize_layer: :class:`Standardization` layer applied to the
+        standardize_layer: `Standardization` layer applied to the
             feature columns at predict time.
-        fourier_layer: :class:`FourierFeatures` layer (may have all-zero
+        fourier_layer: `FourierFeatures` layer (may have all-zero
             degrees if the user opted out of Fourier features).
-        seasonal_layer: :class:`SeasonalFeatures` layer (zero-period if
+        seasonal_layer: `SeasonalFeatures` layer (zero-period if
             the user opted out of seasonal features).
-        interaction_layer: :class:`InteractionFeatures` layer
+        interaction_layer: `InteractionFeatures` layer
             (zero-pair if the user opted out).
         time_min: Minimum time value across the training set, used as
-            an offset by :func:`encode_time_column`.
+            an offset by `encode_time_column`.
         time_scale: Multiplicative factor applied to ``(t - time_min)``
             to produce the array passed to the seasonal layer (typically
             ``1.0`` for ``int`` time columns and a unit-conversion
@@ -65,17 +65,17 @@ def fit_standardization(
     *,
     eps: float = 1e-12,
 ) -> Standardization:
-    """Build a :class:`Standardization` layer from per-column mean / std.
+    """Build a `Standardization` layer from per-column mean / std.
 
     Args:
         df: Source DataFrame.
         columns: Columns to standardize, in the order they will appear
-            in the array passed to :meth:`Standardization.__call__`.
+            in the array passed to `Standardization.__call__`.
         eps: Floor for the standard deviation; protects against
             division by zero on constant columns.
 
     Returns:
-        :class:`Standardization` layer.
+        `Standardization` layer.
     """
     sub = df[list(columns)]
     mu = jnp.asarray(sub.mean().to_numpy(), dtype=jnp.float32)
@@ -186,14 +186,14 @@ def fit_spatiotemporal(
     standardize: Sequence[str] | None = None,
     time_col: int = 0,
 ) -> SpatiotemporalFit:
-    """Build a complete :class:`SpatiotemporalFit` from a DataFrame.
+    """Build a complete `SpatiotemporalFit` from a DataFrame.
 
-    The training-side workflow is::
+    The training-side workflow is:
 
         fit = fit_spatiotemporal(df, feature_cols=..., target_col=...)
 
     and the predict-side workflow re-uses the *same* ``fit`` to encode
-    new data — concretely, by calling :func:`encode_time_column` with
+    new data — concretely, by calling `encode_time_column` with
     the stored ``time_min`` and applying the layers stored on the
     bundle.
 
@@ -204,7 +204,7 @@ def fit_spatiotemporal(
             seasonal features.
         target_col: Name of the target column.
         timetype: ``"int"`` or ``"datetime"`` — see
-            :func:`encode_time_column`.
+            `encode_time_column`.
         freq: Optional unit string for ``datetime`` time columns.
         seasonality_periods: Periods (in time-unit) for seasonal
             features. Empty ⇒ no seasonal features.
@@ -220,7 +220,7 @@ def fit_spatiotemporal(
             defaults to 0.
 
     Returns:
-        Fitted :class:`SpatiotemporalFit` bundle.
+        Fitted `SpatiotemporalFit` bundle.
     """
     feature_cols_list = list(feature_cols)
     time_col_name = feature_cols_list[time_col]

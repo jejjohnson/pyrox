@@ -80,7 +80,7 @@ with `autoguide`, and flip `set_mode("model" | "guide")`.
 
 Inter-domain inducing-feature families used to build scalable sparse GPs
 where the inducing-prior covariance ``K_uu`` becomes diagonal. Pass any
-of these to :class:`SparseGPPrior` via the ``inducing=`` keyword in
+of these to `SparseGPPrior` via the ``inducing=`` keyword in
 place of a raw point matrix ``Z``.
 
 ```python
@@ -183,7 +183,7 @@ per latent process (the projections delegate to `gaussx.oilmm_project`
 ## Pathwise posterior samplers (#39)
 
 Callable posterior function draws via Matheron's rule. Each sampled
-path is a :class:`PathwiseFunction` that evaluates in
+path is a `PathwiseFunction` that evaluates in
 ``O(N_* · F · D + N_* · N_corr)`` per path — ``N_* · F · D`` for the
 RFF prior draw and ``N_* · N_corr`` for the kernel correction against
 the ``N_corr`` training (exact) or inducing (decoupled) points — so the

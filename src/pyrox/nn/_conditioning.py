@@ -2,25 +2,25 @@
 
 The deterministic conditioners (``ConcatConditioner``, ``AffineModulation``,
 ``HyperLinear``) and the ``ConditionedINR`` / ``HyperSIREN`` composites now
-live in :mod:`geonnax` and are re-exported via :mod:`pyrox.nn._geonnax`.
+live in `geonnax` and are re-exported via `pyrox.nn._geonnax`.
 This module keeps the Bayesian variants whose forward passes register
 NumPyro sample sites — those cannot live in ``geonnax`` because they
 depend on the pyrox ``PyroxModule`` / ``pyrox_sample`` machinery.
 
-Bayesian variants (:class:`BayesianConcatConditioner`,
-:class:`BayesianAffineModulation`, :class:`BayesianHyperLinear`) put
+Bayesian variants (`BayesianConcatConditioner`,
+`BayesianAffineModulation`, `BayesianHyperLinear`) put
 Normal priors on the **generator** weights only — never on ``h``, ``z``,
 or the inner network — so prior cost scales with the generator size, not
 the target size. This is the architectural advantage of doing Bayesian
 amortised inference via hypernetworks (NIF, MetaSDF) rather than directly
 over the target weights.
 
-Each Bayesian wrapper holds a frozen :mod:`geonnax` core, samples the
+Each Bayesian wrapper holds a frozen `geonnax` core, samples the
 generator's ``(W, b)`` once per ``model()`` call, swaps the sampled
-arrays into the core's ``eqx.nn.Linear`` via :func:`eqx.tree_at`, and
+arrays into the core's ``eqx.nn.Linear`` via `eqx.tree_at`, and
 then ``jax.vmap`` s the core forward across the batch axis. The
-:class:`HyperFourierFeatures` and :class:`ConditionedRFFNet` follow the
-same pattern, using :func:`geonnax.rff_forward` as the per-example
+`HyperFourierFeatures` and `ConditionedRFFNet` follow the
+same pattern, using `geonnax.rff_forward` as the per-example
 feature kernel.
 """
 
@@ -52,18 +52,18 @@ from pyrox.nn._batching import vmap_over_flat_batch
 
 
 class BayesianConcatConditioner(PyroxModule):
-    """:class:`geonnax.ConcatConditioner` with Normal priors on the projection.
+    """`geonnax.ConcatConditioner` with Normal priors on the projection.
 
     Registers two NumPyro sample sites — ``{scope}.proj_W`` and
     ``{scope}.proj_b`` — under ``Normal(0, prior_std)``. Total of two
     sites per forward call; nothing is sampled from the inner ``h`` or
     the context ``z``.
 
-    Holds a frozen :class:`geonnax.ConcatConditioner` core whose
+    Holds a frozen `geonnax.ConcatConditioner` core whose
     ``proj`` weights are swapped with the sampled arrays each call.
 
     Attributes:
-        core: Frozen :class:`geonnax.ConcatConditioner` carrying the
+        core: Frozen `geonnax.ConcatConditioner` carrying the
             single-example forward.
         num_features: Output channels.
         cond_dim: Context dimension.
@@ -86,7 +86,7 @@ class BayesianConcatConditioner(PyroxModule):
         prior_std: float = 1.0,
         pyrox_name: str | None = None,
     ) -> BayesianConcatConditioner:
-        """Build a :class:`BayesianConcatConditioner`.
+        """Build a `BayesianConcatConditioner`.
 
         Args:
             num_features: Output channels.
@@ -157,18 +157,18 @@ class BayesianConcatConditioner(PyroxModule):
 
 
 class BayesianAffineModulation(PyroxModule):
-    """:class:`geonnax.AffineModulation` with Normal priors on the FiLM generator.
+    """`geonnax.AffineModulation` with Normal priors on the FiLM generator.
 
     Registers two sites — ``{scope}.gen_W`` and ``{scope}.gen_b`` —
     under ``Normal(0, prior_std)``. The ``γ`` activation is fixed by
     construction (default ``"one_plus_tanh"``) so the prior over the raw
     generator output induces a well-defined prior over ``γ``, ``β``.
 
-    Holds a frozen :class:`geonnax.AffineModulation` core whose
+    Holds a frozen `geonnax.AffineModulation` core whose
     ``generator`` weights are swapped with the sampled arrays each call.
 
     Attributes:
-        core: Frozen :class:`geonnax.AffineModulation` carrying the
+        core: Frozen `geonnax.AffineModulation` carrying the
             single-example forward.
         num_features: Output channels.
         cond_dim: Context dimension.
@@ -194,7 +194,7 @@ class BayesianAffineModulation(PyroxModule):
         prior_std: float = 1.0,
         pyrox_name: str | None = None,
     ) -> BayesianAffineModulation:
-        """Build a :class:`BayesianAffineModulation`."""
+        """Build a `BayesianAffineModulation`."""
         if num_features <= 0 or cond_dim <= 0:
             raise ValueError(
                 "num_features and cond_dim must be positive; got "
@@ -262,7 +262,7 @@ class BayesianAffineModulation(PyroxModule):
 
 
 class BayesianHyperLinear(PyroxModule):
-    """:class:`geonnax.HyperLinear` with Normal priors on the generator only.
+    """`geonnax.HyperLinear` with Normal priors on the generator only.
 
     Two sites: ``{scope}.gen_W`` and ``{scope}.gen_b``. The target
     weights ``(W_target, b_target)`` are *generated* — not sampled — so
@@ -272,7 +272,7 @@ class BayesianHyperLinear(PyroxModule):
     Bayesian amortised inference via hypernetworks.
 
     Attributes:
-        core: Frozen :class:`geonnax.HyperLinear` carrying the
+        core: Frozen `geonnax.HyperLinear` carrying the
             single-example forward.
         target_in: Inner ``Linear``'s input dim ``C_in``.
         target_out: Inner ``Linear``'s output dim ``C_out``.
@@ -300,7 +300,7 @@ class BayesianHyperLinear(PyroxModule):
         prior_std: float = 1.0,
         pyrox_name: str | None = None,
     ) -> BayesianHyperLinear:
-        """Build a :class:`BayesianHyperLinear`."""
+        """Build a `BayesianHyperLinear`."""
         if target_in <= 0 or target_out <= 0 or cond_dim <= 0:
             raise ValueError(
                 "target_in, target_out, and cond_dim must all be positive; got "
@@ -371,23 +371,25 @@ class BayesianHyperLinear(PyroxModule):
 class HyperFourierFeatures(PyroxModule):
     r"""Random Fourier features with ``(W, b, log_lengthscale)`` from a parameter net.
 
-    The deterministic counterpart :class:`pyrox.nn.RBFFourierFeatures`
+    The deterministic counterpart `pyrox.nn.RBFFourierFeatures`
     *samples* its frequencies and lengthscale from priors. This layer
     instead amortises them over a context vector ``z`` via a user-supplied
     ``parameter_net``:
 
-    .. math::
-
-        (W(z), b(z), \log\ell(z)) &= \text{unflatten}(\text{parameter\_net}(z)) \\
-        \phi(x; z) &= \sqrt{1/n_{\text{features}}}\;
-            \bigl[\cos(W(z)^\top x / \ell(z) + b(z)),\;
-                  \sin(W(z)^\top x / \ell(z) + b(z))\bigr]
+    $$
+    \begin{aligned}
+    (W(z), b(z), \log\ell(z)) &= \text{unflatten}(\text{parameter\_net}(z)) \\
+    \phi(x; z) &= \sqrt{1/n_{\text{features}}}\;
+        \bigl[\cos(W(z)^\top x / \ell(z) + b(z)),\;
+              \sin(W(z)^\top x / \ell(z) + b(z))\bigr]
+    \end{aligned}
+    $$
 
     Two execution modes are supported:
 
     * **Shared mode** (``z.ndim == 1``): the parameter net runs once
       and the generated features are reused across all rows of ``x``
-      — same efficiency trick as :class:`HyperLinear`'s shared path.
+      — same efficiency trick as `HyperLinear`'s shared path.
     * **Per-sample mode** (``z.ndim == 2``): a distinct
       ``(W, b, log_lengthscale)`` is generated per row of ``z`` via
       ``jax.vmap`` and applied with ``einx.dot``. This is
@@ -403,14 +405,14 @@ class HyperFourierFeatures(PyroxModule):
     Attributes:
         parameter_net: Callable ``(K,) -> (P,)`` producing the flat
             feature parameters from the context. Typically a small MLP
-            or any :class:`PyroxModule`.
+            or any `PyroxModule`.
         in_features: Coordinate dimension (``D_in``).
         n_features: Number of frequency pairs; output dim is
             ``2 * n_features``.
         cond_dim: Context dimension expected by ``parameter_net``.
         pyrox_name: Optional explicit scope name.
 
-    Example:
+    Examples:
         >>> import jax.random as jr, jax.numpy as jnp
         >>> import equinox as eqx
         >>> key = jr.key(0)
@@ -440,7 +442,7 @@ class HyperFourierFeatures(PyroxModule):
         cond_dim: int,
         pyrox_name: str | None = None,
     ) -> HyperFourierFeatures:
-        """Build :class:`HyperFourierFeatures`.
+        """Build `HyperFourierFeatures`.
 
         ``parameter_net`` is **not** invoked at construction time, so
         Bayesian / numpyro-aware parameter nets that rely on
@@ -467,7 +469,7 @@ class HyperFourierFeatures(PyroxModule):
         """Split ``parameter_net(z)`` into ``(W, b, log_l)``.
 
         ``W`` is returned with shape ``(in_features, n_features)`` to
-        match the layout expected by :func:`geonnax.rff_forward`.
+        match the layout expected by `geonnax.rff_forward`.
         """
         flat = self.parameter_net(z)  # ty: ignore[call-non-callable]
         w_size = self.in_features * self.n_features
@@ -484,7 +486,7 @@ class HyperFourierFeatures(PyroxModule):
         b: Float[Array, " n"],
         log_l: Float[Array, ""],
     ) -> Float[Array, " D_rff"]:
-        """Per-example RFF with phase ``b``; mirrors :func:`geonnax.rff_forward`."""
+        """Per-example RFF with phase ``b``; mirrors `geonnax.rff_forward`."""
         proj = einx.dot("d, d n -> n", x, W) * jnp.exp(-log_l) + b  # (n,)
         scale = jnp.sqrt(1.0 / self.n_features)
         return scale * jnp.concatenate([jnp.cos(proj), jnp.sin(proj)], axis=-1)
@@ -521,26 +523,26 @@ class HyperFourierFeatures(PyroxModule):
 
 
 class ConditionedRFFNet(PyroxModule):
-    """Conditional analogue of :class:`pyrox.nn.RandomKitchenSinks`.
+    """Conditional analogue of `pyrox.nn.RandomKitchenSinks`.
 
-    Composes a :class:`HyperFourierFeatures` feature map with a learnable
+    Composes a `HyperFourierFeatures` feature map with a learnable
     linear readout. The full forward is
 
-    .. math::
+    $$
+    y(x; z) = \\phi(x; z)\\, \\beta + b_{\\text{out}}
+    $$
 
-        y(x; z) = \\phi(x; z)\\, \\beta + b_{\\text{out}}
-
-    where :math:`\\phi(x; z)` is the ``HyperFourierFeatures`` output and
+    where $\\phi(x; z)$ is the ``HyperFourierFeatures`` output and
     ``(beta, b_out)`` are the readout's deterministic weights. For the
     Bayesian variant, wrap ``readout`` in a ``DenseReparameterization`` and
     move the priors there — this composite stays minimal.
 
     Attributes:
-        feat: A :class:`HyperFourierFeatures` instance.
+        feat: A `HyperFourierFeatures` instance.
         readout: ``eqx.nn.Linear`` mapping ``2 * n_features -> out_features``.
         pyrox_name: Optional explicit scope name.
 
-    Example:
+    Examples:
         >>> import jax.random as jr, jax.numpy as jnp
         >>> import equinox as eqx
         >>> key = jr.key(0)
@@ -569,7 +571,7 @@ class ConditionedRFFNet(PyroxModule):
         key: Array,
         pyrox_name: str | None = None,
     ) -> ConditionedRFFNet:
-        """Build :class:`ConditionedRFFNet` with a default linear readout."""
+        """Build `ConditionedRFFNet` with a default linear readout."""
         if out_features <= 0:
             raise ValueError(f"out_features must be > 0; got {out_features}.")
         readout = eqx.nn.Linear(2 * feat.n_features, out_features, key=key)

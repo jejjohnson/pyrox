@@ -1,7 +1,7 @@
 """Deep Variational SSGP — Bayesian wrapper around the geonnax core.
 
-The deterministic ``DeepVSSGPCore`` lives in :mod:`geonnax`; this module
-hosts only the pyrox-specific :class:`DeepVSSGP` wrapper that swaps the
+The deterministic ``DeepVSSGPCore`` lives in `geonnax`; this module
+hosts only the pyrox-specific `DeepVSSGP` wrapper that swaps the
 core's per-layer ``W_freqs`` / ``W_projs`` / ``lengthscales`` for
 ``pyrox_sample`` sites with appropriate priors.
 """
@@ -22,59 +22,61 @@ from pyrox.nn._batching import vmap_over_flat_batch
 class DeepVSSGP(PyroxModule):
     r"""Deep Random Feature Expansion for Variational SSGP (Cutajar et al. 2017).
 
-    A stack of :math:`L` variational SSGP layers, each with random
-    spectral frequencies :math:`\Omega_l` and random projection weights
-    :math:`W_l`:
+    A stack of $L$ variational SSGP layers, each with random
+    spectral frequencies $\Omega_l$ and random projection weights
+    $W_l$:
 
-    .. math::
-
-        F_0 &= X, \\
-        F_{l+1} &= \Phi_l(F_l;\, \Omega_l, \ell_l)\, W_l,
-            \quad l = 0, \ldots, L-1, \\
-        \Phi_l(F;\, \Omega_l, \ell_l) &=
-            \sqrt{1/M}\,
-            [\cos(F\,\Omega_l/\ell_l), \sin(F\,\Omega_l/\ell_l)].
+    $$
+    \begin{aligned}
+    F_0 &= X, \\
+    F_{l+1} &= \Phi_l(F_l;\, \Omega_l, \ell_l)\, W_l,
+        \quad l = 0, \ldots, L-1, \\
+    \Phi_l(F;\, \Omega_l, \ell_l) &=
+        \sqrt{1/M}\,
+        [\cos(F\,\Omega_l/\ell_l), \sin(F\,\Omega_l/\ell_l)].
+    \end{aligned}
+    $$
 
     Each layer registers three sample sites:
 
-    - ``layer_{l}.W_freq`` — RFF frequencies, prior :math:`\mathcal{N}(0, 1)`
+    - ``layer_{l}.W_freq`` — RFF frequencies, prior $\mathcal{N}(0, 1)$
       (RBF spectral density in lengthscale-1 units).
     - ``layer_{l}.lengthscale`` — kernel lengthscale, prior
-      :math:`\mathrm{LogNormal}(\log \ell_{\mathrm{init}}, 1)`.
+      $\mathrm{LogNormal}(\log \ell_{\mathrm{init}}, 1)$.
     - ``layer_{l}.W_proj`` — projection weights, prior
-      :math:`\mathcal{N}(0, \sigma_W^2)`.
+      $\mathcal{N}(0, \sigma_W^2)$.
 
     Under SVI an
-    :class:`~numpyro.infer.autoguide.AutoNormal` learns mean-field
-    Gaussian posteriors over all :math:`3L` sites — one MC sample per
+    `AutoNormal` learns mean-field
+    Gaussian posteriors over all $3L$ sites — one MC sample per
     forward pass gives the doubly-stochastic reparameterised ELBO of
     Cutajar et al. (2017).
 
     At ``depth=1`` this reduces to a single VSSGP layer mapping
     ``in_features -> out_features`` via the RFF basis (same model class
-    as :class:`VariationalFourierFeatures` followed by a
-    :class:`DenseReparameterization` head). Stacking adds
+    as `VariationalFourierFeatures` followed by a
+    `DenseReparameterization` head). Stacking adds
     non-stationarity at the cost of a non-Gaussian aggregate likelihood
     — the layer-wise marginalisation that makes single-layer SSGP
     closed-form is no longer available, hence the variational
     treatment.
 
     Attributes:
-        in_features: Input dimension :math:`D_{\mathrm{in}}`.
-        hidden_features: Inter-layer dimension :math:`D_h` (constant
+        in_features: Input dimension $D_{\mathrm{in}}$.
+        hidden_features: Inter-layer dimension $D_h$ (constant
             across hidden layers).
-        out_features: Output dimension :math:`D_{\mathrm{out}}`.
-        n_features: Per-layer Fourier-feature pair count :math:`M` (so
-            each layer's hidden state is :math:`2M`-dim before
+        out_features: Output dimension $D_{\mathrm{out}}$.
+        n_features: Per-layer Fourier-feature pair count $M$ (so
+            each layer's hidden state is $2M$-dim before
             projection).
-        depth: Total number of stacked SSGP layers :math:`L`. Must
-            be :math:`\ge 1`.
+        depth: Total number of stacked SSGP layers $L$. Must
+            be $\ge 1$.
         init_lengthscale: Prior location for each layer's lengthscale.
         prior_std: Standard deviation of the per-layer projection
-            prior :math:`\mathcal{N}(0, \sigma_W^2)`.
+            prior $\mathcal{N}(0, \sigma_W^2)$.
         pyrox_name: Explicit scope name for NumPyro site registration.
 
-    Example:
+    Examples:
         >>> import jax.random as jr, jax.numpy as jnp
         >>> from numpyro import handlers
         >>> net = DeepVSSGP.init(in_features=2, hidden_features=4,
@@ -124,30 +126,30 @@ class DeepVSSGP(PyroxModule):
         prior_std: float = 1.0,
         pyrox_name: str | None = None,
     ) -> DeepVSSGP:
-        """Construct a :class:`DeepVSSGP`.
+        """Construct a `DeepVSSGP`.
 
         Args:
-            in_features: Input dimension. Must be :math:`\\ge 1`.
-            hidden_features: Hidden dimension. Must be :math:`\\ge 1`.
-            out_features: Output dimension. Must be :math:`\\ge 1`.
+            in_features: Input dimension. Must be $\\ge 1$.
+            hidden_features: Hidden dimension. Must be $\\ge 1$.
+            out_features: Output dimension. Must be $\\ge 1$.
             depth: Total stacked SSGP layers (including readout).
-                Must be :math:`\\ge 1`.
+                Must be $\\ge 1$.
             n_features: Per-layer Fourier-feature pair count. Must be
-                :math:`\\ge 1`.
+                $\\ge 1$.
             lengthscale: Prior location for each layer's lengthscale.
-                Must be :math:`> 0`.
+                Must be $> 0$.
             prior_std: Per-layer projection prior standard deviation.
-                Must be :math:`> 0`.
+                Must be $> 0$.
             pyrox_name: Optional explicit scope name for NumPyro site
                 registration.
 
         Returns:
-            Initialised :class:`DeepVSSGP`.
+            Initialised `DeepVSSGP`.
 
         Raises:
             ValueError: If ``depth``, any feature dimension, or
-                ``n_features`` is :math:`< 1`, or if ``lengthscale`` /
-                ``prior_std`` is :math:`\\le 0`.
+                ``n_features`` is $< 1$, or if ``lengthscale`` /
+                ``prior_std`` is $\\le 0$.
         """
         if depth < 1:
             raise ValueError(f"depth must be >= 1, got {depth}.")

@@ -1,32 +1,32 @@
 """Sparse variational Markov-GP — inducing time points on top of an SDE prior.
 
-:class:`SparseMarkovGPPrior` is the sparse analogue of
-:class:`pyrox.gp.MarkovGPPrior`: it wraps an :class:`SDEKernel` and a
+`SparseMarkovGPPrior` is the sparse analogue of
+`pyrox.gp.MarkovGPPrior`: it wraps an `SDEKernel` and a
 sorted inducing time grid ``Z`` of length ``M``, exposing the SVGP
 building blocks ``(K_{ZZ}, K_{xZ}, \\mathrm{diag}\\,K_{xx})`` derived
 from the SDE autocovariance
 
-.. math::
+$$
+k(\\tau) = H\\,\\exp(F\\,|\\tau|)\\,P_\\infty\\,H^\\top.
+$$
 
-    k(\\tau) = H\\,\\exp(F\\,|\\tau|)\\,P_\\infty\\,H^\\top.
-
-The class duck-types :class:`pyrox.gp.SparseGPPrior` so it composes
-with the existing variational guides (:class:`pyrox.gp.FullRankGuide`,
-:class:`pyrox.gp.MeanFieldGuide`, :class:`pyrox.gp.WhitenedGuide`) and
-the :func:`pyrox.gp.svgp_elbo` / :func:`pyrox.gp.svgp_factor`
+The class duck-types `pyrox.gp.SparseGPPrior` so it composes
+with the existing variational guides (`pyrox.gp.FullRankGuide`,
+`pyrox.gp.MeanFieldGuide`, `pyrox.gp.WhitenedGuide`) and
+the `pyrox.gp.svgp_elbo` / `pyrox.gp.svgp_factor`
 infrastructure.
 
-Cost: this surface is :math:`O(M^3 + N M)` per ELBO evaluation — the
-inducing prior is built dense in :math:`M` and the guide owns a dense
-:math:`M\\times M` covariance. A truly linear-in-:math:`N` Kalman-aware
+Cost: this surface is $O(M^3 + N M)$ per ELBO evaluation — the
+inducing prior is built dense in $M$ and the guide owns a dense
+$M\\times M$ covariance. A truly linear-in-$N$ Kalman-aware
 ELBO that exploits the Markov factorisation of ``q(u)`` is a follow-up
 (BayesNewton / MarkovFlow style); this surface is the SVGP-style
 foundation it will build on.
 
 Predictions at arbitrary test times use the same dense SVGP formula via
-:meth:`SparseConditionedMarkovGP.predict`. For mean-only predictions
+`SparseConditionedMarkovGP.predict`. For mean-only predictions
 on a long evaluation grid, the merged-grid Kalman trick from
-:mod:`pyrox.gp._markov` is asymptotically cheaper, but is not yet
+`pyrox.gp._markov` is asymptotically cheaper, but is not yet
 wired in here.
 """
 
@@ -64,18 +64,18 @@ def _psd_operator(K: Float[Array, "M M"]) -> lx.AbstractLinearOperator:
 class SparseMarkovGPPrior(eqx.Module):
     r"""Sparse variational GP prior over an SDE kernel and inducing time grid.
 
-    Equivalent role to :class:`pyrox.gp.SparseGPPrior` but the
+    Equivalent role to `pyrox.gp.SparseGPPrior` but the
     covariance is derived from the state-space autocovariance
-    :math:`k(\tau) = H \exp(F\tau) P_\infty H^\top` of an
-    :class:`SDEKernel`. Predictions and the SVGP ELBO go through the
-    same :meth:`predictive_blocks` contract as the dense
-    :class:`SparseGPPrior`, so the existing variational guides
-    (:class:`pyrox.gp.FullRankGuide`, :class:`pyrox.gp.MeanFieldGuide`,
-    :class:`pyrox.gp.WhitenedGuide`) and :func:`pyrox.gp.svgp_elbo`
+    $k(\tau) = H \exp(F\tau) P_\infty H^\top$ of an
+    `SDEKernel`. Predictions and the SVGP ELBO go through the
+    same `predictive_blocks` contract as the dense
+    `SparseGPPrior`, so the existing variational guides
+    (`pyrox.gp.FullRankGuide`, `pyrox.gp.MeanFieldGuide`,
+    `pyrox.gp.WhitenedGuide`) and `pyrox.gp.svgp_elbo`
     work as-is.
 
     Attributes:
-        sde_kernel: Any :class:`SDEKernel` (Matern, Periodic, Cosine,
+        sde_kernel: Any `SDEKernel` (Matern, Periodic, Cosine,
             Sum/Product compositions, ...).
         Z: Sorted, strictly increasing inducing times of shape ``(M,)``.
         mean_fn: Optional callable ``times -> (N,)`` global mean.
@@ -117,7 +117,7 @@ class SparseMarkovGPPrior(eqx.Module):
 
     @property
     def num_inducing(self) -> int:
-        """Number of inducing time points :math:`M`."""
+        """Number of inducing time points $M$."""
         return self.Z.shape[0]
 
     def mean(self, times: Float[Array, " N"]) -> Float[Array, " N"]:
@@ -148,7 +148,7 @@ class SparseMarkovGPPrior(eqx.Module):
         return sde_autocovariance(self.sde_kernel, diffs)
 
     def kernel_diag(self, times: Float[Array, " N"]) -> Float[Array, " N"]:
-        r"""Prior diagonal :math:`\mathrm{diag}\,K(X, X)`.
+        r"""Prior diagonal $\mathrm{diag}\,K(X, X)$.
 
         Constant for stationary SDE kernels — equal to ``H P_inf H^T``.
         """
@@ -164,16 +164,16 @@ class SparseMarkovGPPrior(eqx.Module):
     ]:
         r"""Return ``(K_zz_op, K_xz, K_xx_diag)`` for the SVGP predictive math.
 
-        Mirrors :meth:`SparseGPPrior.predictive_blocks`. Delegates to the
+        Mirrors `SparseGPPrior.predictive_blocks`. Delegates to the
         three independent accessors:
 
-        * :meth:`inducing_operator` — ``K_{ZZ} + \\text{jitter}\\,I``
-          wrapped as a PSD :mod:`lineax` operator.
-        * :meth:`cross_covariance` — pairwise SDE autocov ``K_{XZ}``.
-        * :meth:`kernel_diag` — prior marginal variance, constant for
+        * `inducing_operator` — ``K_{ZZ} + \\text{jitter}\\,I``
+          wrapped as a PSD `lineax` operator.
+        * `cross_covariance` — pairwise SDE autocov ``K_{XZ}``.
+        * `kernel_diag` — prior marginal variance, constant for
           stationary SDE kernels.
 
-        Each accessor calls :meth:`SDEKernel.sde_params` independently;
+        Each accessor calls `SDEKernel.sde_params` independently;
         these calls are cheap (parameter unpacking, not a kernel build)
         so no shared-state caching is performed.
         """
@@ -188,7 +188,7 @@ class SparseMarkovGPPrior(eqx.Module):
     def log_prob(self, u: Float[Array, " M"]) -> Float[Array, ""]:
         r"""Log-density under the inducing prior.
 
-        :math:`p(u) = \mathcal{N}(0,\, K_{ZZ} + \text{jitter}\,I)`.
+        $p(u) = \mathcal{N}(0,\, K_{ZZ} + \text{jitter}\,I)$.
         """
         m = jnp.zeros(self.num_inducing, dtype=u.dtype)
         return gaussian_log_prob(
@@ -196,7 +196,7 @@ class SparseMarkovGPPrior(eqx.Module):
         )
 
     def sample(self, key: Array) -> Float[Array, " M"]:
-        r"""Draw :math:`u \sim p(u)` from the inducing prior."""
+        r"""Draw $u \sim p(u)$ from the inducing prior."""
         op = self.inducing_operator()
         loc = jnp.zeros(self.num_inducing, dtype=op.out_structure().dtype)
         mvn = MultivariateNormal(loc, op, solver=self._resolved_solver())
@@ -209,18 +209,18 @@ class SparseMarkovGPPrior(eqx.Module):
 class SparseConditionedMarkovGP(eqx.Module):
     """Sparse Markov GP fitted to a guide.
 
-    Bundles the :class:`SparseMarkovGPPrior` and a fitted
-    :class:`pyrox.gp.Guide` so that ``predict(t_star)`` can be called
+    Bundles the `SparseMarkovGPPrior` and a fitted
+    `pyrox.gp.Guide` so that ``predict(t_star)`` can be called
     against arbitrary test times. The math is the standard SVGP
     predictive
 
-    .. math::
+    $$
+    \\mu_*(t) = K_{*Z} K_{ZZ}^{-1} m_q + \\mu(t),\\qquad
+    \\sigma_*^2(t) = k(t, t) - K_{*Z} K_{ZZ}^{-1} K_{Z*}
+                    + K_{*Z} K_{ZZ}^{-1} S_q K_{ZZ}^{-1} K_{Z*}.
+    $$
 
-        \\mu_*(t) = K_{*Z} K_{ZZ}^{-1} m_q + \\mu(t),\\qquad
-        \\sigma_*^2(t) = k(t, t) - K_{*Z} K_{ZZ}^{-1} K_{Z*}
-                        + K_{*Z} K_{ZZ}^{-1} S_q K_{ZZ}^{-1} K_{Z*}.
-
-    Cost is :math:`O(M^3 + |t_*|\\,M)` per call.
+    Cost is $O(M^3 + |t_*|\\,M)$ per call.
     """
 
     prior: SparseMarkovGPPrior
@@ -247,27 +247,27 @@ def sparse_markov_elbo(
     *,
     integrator: AbstractIntegrator | None = None,
 ) -> Float[Array, ""]:
-    r"""Sparse variational ELBO for :class:`SparseMarkovGPPrior`.
+    r"""Sparse variational ELBO for `SparseMarkovGPPrior`.
 
-    Mirrors :func:`pyrox.gp.svgp_elbo` for the SDE-derived sparse
+    Mirrors `pyrox.gp.svgp_elbo` for the SDE-derived sparse
     Markov prior. Builds the SVGP predictive blocks
-    :math:`(K_{ZZ}, K_{XZ}, \mathrm{diag}\,K_{XX})` from the prior, asks
+    $(K_{ZZ}, K_{XZ}, \mathrm{diag}\,K_{XX})$ from the prior, asks
     the guide for the predictive marginals
-    :math:`(\mu_n, \sigma_n^2) = q(f_n)`, and combines them with a closed-form
+    $(\mu_n, \sigma_n^2) = q(f_n)$, and combines them with a closed-form
     Gaussian or quadrature-based expected log-likelihood and the
     inducing KL term:
 
-    .. math::
+    $$
+    \mathcal{L} = \sum_n \mathbb{E}_{q(f_n)}[\log p(y_n \mid f_n)]
+                - \mathrm{KL}[q(u) \\| p(u)].
+    $$
 
-        \mathcal{L} = \sum_n \mathbb{E}_{q(f_n)}[\log p(y_n \mid f_n)]
-                    - \mathrm{KL}[q(u) \\| p(u)].
-
-    Unlike :func:`pyrox.gp.svgp_elbo`, ``times`` stays as a 1-D vector
+    Unlike `pyrox.gp.svgp_elbo`, ``times`` stays as a 1-D vector
     of shape ``(N,)`` — the SDE-pair autocov works on raw 1-D times and
     has no need for a feature dimension.
 
     Args:
-        prior: :class:`SparseMarkovGPPrior` over an SDE kernel and
+        prior: `SparseMarkovGPPrior` over an SDE kernel and
             inducing time grid.
         guide: Variational guide over inducing values.
         likelihood: Observation model.
@@ -275,7 +275,7 @@ def sparse_markov_elbo(
         y: Observations of shape ``(N,)``.
         integrator: ``gaussx`` integrator for non-conjugate
             likelihoods. ``None`` is fine for
-            :class:`pyrox.gp.GaussianLikelihood`.
+            `pyrox.gp.GaussianLikelihood`.
 
     Returns:
         Scalar ELBO value (higher is better).
@@ -321,7 +321,7 @@ def sparse_markov_factor(
     *,
     integrator: AbstractIntegrator | None = None,
 ) -> None:
-    """Register :func:`sparse_markov_elbo` as a NumPyro factor site."""
+    """Register `sparse_markov_elbo` as a NumPyro factor site."""
     numpyro.factor(
         name,
         sparse_markov_elbo(prior, guide, likelihood, times, y, integrator=integrator),

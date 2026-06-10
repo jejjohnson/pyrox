@@ -2,16 +2,16 @@
 
 Three paths, all sharing the same likelihood + guide + prior surface:
 
-* :func:`svgp_elbo` — pure-function ELBO returning a differentiable
+* `svgp_elbo` — pure-function ELBO returning a differentiable
   scalar. Use with ``optax`` / ``equinox`` for optimization outside
   NumPyro.
-* :func:`svgp_factor` — wraps :func:`svgp_elbo` in
+* `svgp_factor` — wraps `svgp_elbo` in
   ``numpyro.factor`` so it plugs into ``numpyro.infer.SVI`` +
   ``Trace_ELBO``. NumPyro sees one factor site; the *actual* ELBO uses
   the efficient structured computation.
-* :class:`ConjugateVI` — natural-gradient / CVI update loop. Operates
+* `ConjugateVI` — natural-gradient / CVI update loop. Operates
   in natural-parameter space via
-  :meth:`NaturalGuide.natural_update`; not NumPyro-coupled.
+  `NaturalGuide.natural_update`; not NumPyro-coupled.
 
 All Gaussian linear algebra delegates to ``gaussx``.
 """
@@ -49,7 +49,7 @@ def _ell_numerical(
 ) -> Float[Array, ""]:
     r"""Per-point numerical ELL for non-conjugate likelihoods.
 
-    Integrates :math:`\mathbb{E}_{q(f_n)}[\log p(y_n \mid f_n)]`
+    Integrates $\mathbb{E}_{q(f_n)}[\log p(y_n \mid f_n)]$
     for each data point via the gaussx integrator, then sums.
     """
 
@@ -84,30 +84,30 @@ def svgp_elbo(
 ) -> Float[Array, ""]:
     r"""Structured SVGP ELBO as a differentiable scalar.
 
-    .. math::
+    $$
+    \mathcal{L} = \sum_n \mathbb{E}_{q(f_n)}
+                  [\log p(y_n \mid f_n)]
+                - \mathrm{KL}[q(u) \| p(u)]
+    $$
 
-        \mathcal{L} = \sum_n \mathbb{E}_{q(f_n)}
-                      [\log p(y_n \mid f_n)]
-                    - \mathrm{KL}[q(u) \| p(u)]
-
-    For :class:`GaussianLikelihood` the expected log-likelihood has a
+    For `GaussianLikelihood` the expected log-likelihood has a
     closed form and no integrator is needed:
 
-    .. code-block:: python
-
-        loss = svgp_elbo(prior, guide, GaussianLikelihood(0.1), X, y)
-        grad = eqx.filter_grad(lambda g: -svgp_elbo(prior, g, ...))(guide)
+    ```python
+    loss = svgp_elbo(prior, guide, GaussianLikelihood(0.1), X, y)
+    grad = eqx.filter_grad(lambda g: -svgp_elbo(prior, g, ...))(guide)
+    ```
 
     For non-conjugate likelihoods supply a gaussx integrator:
 
-    .. code-block:: python
-
-        from gaussx import GaussHermiteIntegrator
-        loss = svgp_elbo(
-            prior, guide,
-            DistLikelihood(lambda f: dist.Bernoulli(logits=f)),
-            X, y, integrator=GaussHermiteIntegrator(order=20),
-        )
+    ```python
+    from gaussx import GaussHermiteIntegrator
+    loss = svgp_elbo(
+        prior, guide,
+        DistLikelihood(lambda f: dist.Bernoulli(logits=f)),
+        X, y, integrator=GaussHermiteIntegrator(order=20),
+    )
+    ```
 
     Args:
         prior: Sparse GP prior (kernel + inducing inputs).
@@ -117,7 +117,7 @@ def svgp_elbo(
         y: Training targets, shape ``(N,)``.
         integrator: gaussx integrator for the per-point ELL. Required
             for non-conjugate likelihoods; ignored for
-            :class:`GaussianLikelihood`.
+            `GaussianLikelihood`.
 
     Returns:
         Scalar ELBO value (higher is better).
@@ -165,17 +165,17 @@ def svgp_factor(
 ) -> None:
     """Register the structured SVGP ELBO as a NumPyro factor site.
 
-    Wraps :func:`svgp_elbo` in ``numpyro.factor`` so it plugs into
+    Wraps `svgp_elbo` in ``numpyro.factor`` so it plugs into
     ``numpyro.infer.SVI`` + ``Trace_ELBO``. NumPyro sees one
     deterministic factor site — the *actual* ELBO uses the efficient
     closed-form KL + structured ELL computation.
 
-    .. code-block:: python
+    ```python
+    def model(X, y):
+        svgp_factor("elbo", prior, guide, lik, X, y)
 
-        def model(X, y):
-            svgp_factor("elbo", prior, guide, lik, X, y)
-
-        svi = SVI(model, lambda X, y: None, Adam(1e-3), Trace_ELBO())
+    svi = SVI(model, lambda X, y: None, Adam(1e-3), Trace_ELBO())
+    ```
     """
     numpyro.factor(
         name,
@@ -186,30 +186,30 @@ def svgp_factor(
 class ConjugateVI:
     r"""Natural-gradient / CVI update for sparse variational GPs.
 
-    Operates in natural-parameter space: each :meth:`step` computes the
+    Operates in natural-parameter space: each `step` computes the
     per-point expected gradients and Hessians of the log-likelihood
-    under :math:`q(f_n)`, projects them into the inducing-value natural
+    under $q(f_n)$, projects them into the inducing-value natural
     parameters, and applies a damped update via
-    :meth:`NaturalGuide.natural_update`.
+    `NaturalGuide.natural_update`.
 
-    For :class:`GaussianLikelihood` the gradients and Hessians are
+    For `GaussianLikelihood` the gradients and Hessians are
     analytical. For non-conjugate likelihoods an integrator is required
     to evaluate the expectations numerically.
 
-    .. code-block:: python
+    ```python
+    guide = NaturalGuide.init(num_inducing=M)
+    cvi = ConjugateVI(damping=0.5)
 
-        guide = NaturalGuide.init(num_inducing=M)
-        cvi = ConjugateVI(damping=0.5)
-
-        for epoch in range(100):
-            guide = cvi.step(prior, guide, GaussianLikelihood(0.1), X, y)
+    for epoch in range(100):
+        guide = cvi.step(prior, guide, GaussianLikelihood(0.1), X, y)
+    ```
 
     Attributes:
-        damping: Learning rate / damping factor :math:`\rho \in (0, 1]`.
+        damping: Learning rate / damping factor $\rho \in (0, 1]$.
             ``1.0`` replaces the natural parameters with the target;
             ``< 1`` interpolates for stability.
         integrator: gaussx integrator for non-conjugate expected
-            gradients. ``None`` is fine for :class:`GaussianLikelihood`.
+            gradients. ``None`` is fine for `GaussianLikelihood`.
     """
 
     damping: float
@@ -237,18 +237,20 @@ class ConjugateVI:
 
         1. Predict ``(f_loc, f_var) = guide.predict(...)``
         2. Compute per-point natural-gradient targets
-           :math:`(\lambda_n^{(1)}, \Lambda_n^{(2)})`.
+           $(\lambda_n^{(1)}, \Lambda_n^{(2)})$.
         3. Project into inducing space:
 
-        .. math::
+        $$
+        \begin{aligned}
+        \hat{\eta}_1 &= \eta_1^{\text{prior}}
+            + K_{ZZ}^{-1} K_{ZX}\, \lambda^{(1)}, \\
+        \hat{\eta}_2 &= \eta_2^{\text{prior}}
+            + K_{ZZ}^{-1} K_{ZX}\,
+              \mathrm{diag}(\Lambda^{(2)})\, K_{XZ} K_{ZZ}^{-1}.
+        \end{aligned}
+        $$
 
-            \hat{\eta}_1 &= \eta_1^{\text{prior}}
-                + K_{ZZ}^{-1} K_{ZX}\, \lambda^{(1)}, \\
-            \hat{\eta}_2 &= \eta_2^{\text{prior}}
-                + K_{ZZ}^{-1} K_{ZX}\,
-                  \mathrm{diag}(\Lambda^{(2)})\, K_{XZ} K_{ZZ}^{-1}.
-
-        4. Damped update via :meth:`NaturalGuide.natural_update`.
+        4. Damped update via `NaturalGuide.natural_update`.
 
         Args:
             prior: Sparse GP prior.
@@ -258,7 +260,7 @@ class ConjugateVI:
             y: Training targets, shape ``(N,)``.
 
         Returns:
-            Updated :class:`NaturalGuide`.
+            Updated `NaturalGuide`.
         """
         with _kernel_context(prior.kernel):
             K_zz_op, K_xz, K_xx_diag = prior.predictive_blocks(X)
@@ -307,11 +309,11 @@ class ConjugateVI:
         r"""Per-point ELL gradients w.r.t. the marginal mean.
 
         Returns ``(grad1, grad2)`` where ``grad1[n]`` is
-        :math:`\partial / \partial \mu_n \,
-        \mathbb{E}_{q(f_n)}[\log p(y_n \mid f_n)]` and ``grad2[n]``
+        $\partial / \partial \mu_n \,
+        \mathbb{E}_{q(f_n)}[\log p(y_n \mid f_n)]$ and ``grad2[n]``
         is the second derivative.
 
-        For :class:`GaussianLikelihood` these are analytical. For
+        For `GaussianLikelihood` these are analytical. For
         non-conjugate likelihoods they are computed via JAX autodiff
         through the per-point ELL.
         """

@@ -1,13 +1,13 @@
 """User-facing sklearn-style estimator facades.
 
-* :class:`EstimatorBase` — minimal immutable facade. Subclasses declare
+* `EstimatorBase` — minimal immutable facade. Subclasses declare
   ``feature_cols`` / ``target_col`` plus model-specific hyperparameters;
-  override ``fit`` to return a :class:`FittedEstimator`.
-* :class:`FittedEstimator` — output of ``fit``. Holds the fitted
+  override ``fit`` to return a `FittedEstimator`.
+* `FittedEstimator` — output of ``fit``. Holds the fitted
   parameters and implements ``predict``.
-* :class:`BNFEstimator` family — concrete BNF estimators
+* `BNFEstimator` family — concrete BNF estimators
   (``BNFEstimator``, ``BNFEstimatorMLE``, ``BNFEstimatorVI``) +
-  :class:`FittedBNF`.
+  `FittedBNF`.
 """
 
 from pyrox.api._bnf import (

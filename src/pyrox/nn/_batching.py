@@ -23,7 +23,7 @@ def vmap_over_flat_batch(
     """Apply a single-example callable over arbitrary leading batch dims.
 
     Flattens ``x`` from ``(*batch, D)`` to ``(B, D)``, maps ``fn`` with
-    :func:`jax.vmap`, and restores ``(*batch, ...)`` on every output leaf,
+    `jax.vmap`, and restores ``(*batch, ...)`` on every output leaf,
     so pytree outputs such as ``(mean, var)`` are restored leaf-wise.
     Unbatched ``(D,)`` inputs round-trip to unbatched outputs.
 

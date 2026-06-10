@@ -6,9 +6,9 @@ multi-output surface exposes the coregionalization matrices and the
 Kronecker-style factors that later solvers can exploit.
 
 The ``*_operator`` methods return structure-preserving
-:class:`lineax.AbstractLinearOperator` objects built from ``gaussx``
-primitives (:class:`gaussx.Kronecker`, :class:`gaussx.SumOperator`,
-:class:`gaussx.BlockDiag`) so downstream solvers and log-determinant
+`lineax.AbstractLinearOperator` objects built from ``gaussx``
+primitives (`gaussx.Kronecker`, `gaussx.SumOperator`,
+`gaussx.BlockDiag`) so downstream solvers and log-determinant
 strategies can exploit the block / Kronecker structure. Each method also
 exposes a dense counterpart (``cross_covariance``, ``K_uu``, ...) for
 users who want the materialized matrix.
@@ -47,16 +47,16 @@ def _validate_kernel_count(kernels: tuple[Kernel, ...], num_latents: int) -> Non
 
 
 def _validate_kernel_scopes_unique(kernels: tuple[Kernel, ...]) -> None:
-    """Reject distinct :class:`PyroxModule` kernels that share a pyrox scope.
+    """Reject distinct `PyroxModule` kernels that share a pyrox scope.
 
     Multi-output kernel collections accept a tuple of latent kernels.
-    Two distinct :class:`pyrox.PyroxModule`-based kernels that share the
+    Two distinct `pyrox.PyroxModule`-based kernels that share the
     same ``pyrox_name`` (e.g. two ``RBF()`` instances both defaulting to
     ``"RBF"``) collide on **two** kinds of NumPyro sites:
 
-    * :func:`pyrox_sample` (priors): identical ``RBF.variance`` site
+    * `pyrox_sample` (priors): identical ``RBF.variance`` site
       names raise the NumPyro duplicate-site error in a single trace.
-    * :func:`pyrox_param` (deterministic hyperparameters): identical
+    * `pyrox_param` (deterministic hyperparameters): identical
       ``RBF.lengthscale`` ``numpyro.param`` registrations are silently
       *tied* by the param store — the second registration receives the
       first kernel's value, corrupting any multi-latent fit (SVI, MAP)
@@ -64,9 +64,9 @@ def _validate_kernel_scopes_unique(kernels: tuple[Kernel, ...]) -> None:
 
     The second failure mode is silent and the more dangerous one, so
     this validator does **not** require priors to be set. Any two
-    distinct :class:`PyroxModule` instances sharing a scope are
+    distinct `PyroxModule` instances sharing a scope are
     flagged. Reusing the same instance across slots (intentional
-    hyperparameter tying) is fine. Pure :class:`equinox.Module` kernels
+    hyperparameter tying) is fine. Pure `equinox.Module` kernels
     (no ``_pyrox_scope_name``) are silently allowed since they cannot
     register NumPyro sites.
 
@@ -111,12 +111,12 @@ def _validate_kernel_scopes_unique(kernels: tuple[Kernel, ...]) -> None:
 def _require_all_zero_concrete(arr: Float[Array, " ..."], *, name: str) -> None:
     """Require that ``arr`` is concretely all zero; raise otherwise.
 
-    Used to reject :class:`ICMKernel` with a non-zero ``kappa`` in
+    Used to reject `ICMKernel` with a non-zero ``kappa`` in
     constructors that drop the ``diag(kappa)`` term (e.g.
-    :meth:`MultiOutputInducingVariables.from_kernel`). Under
+    `MultiOutputInducingVariables.from_kernel`). Under
     ``jax.jit`` / ``jax.vmap`` the array is a tracer and cannot be
     materialized — in that case we skip the check (consistent with
-    :func:`_check_nonnegative_concrete`).
+    `_check_nonnegative_concrete`).
     """
     try:
         concrete = np.asarray(arr)
@@ -135,7 +135,7 @@ def _require_all_zero_concrete(arr: Float[Array, " ..."], *, name: str) -> None:
 def _check_nonnegative_concrete(arr: Float[Array, " ..."], *, name: str) -> None:
     """Best-effort nonnegativity check for an array that may be traced.
 
-    Materializes the value via :func:`numpy.asarray` and asserts no
+    Materializes the value via `numpy.asarray` and asserts no
     entry is negative. Under ``jax.jit`` / ``jax.vmap`` the array is a
     tracer and cannot be materialized — in that case we silently skip
     the check; the caller is responsible for keeping the value valid
@@ -325,7 +325,7 @@ class ICMKernel(eqx.Module):
             # ``B`` out of PSD and silently break Cholesky-based solver
             # paths. Reject at construction when the value is concrete;
             # under ``jax.jit`` the check is a no-op (see
-            # :func:`_check_nonnegative_concrete`).
+            # `_check_nonnegative_concrete`).
             _check_nonnegative_concrete(self.kappa, name="ICMKernel.kappa")
 
     @property
@@ -373,7 +373,7 @@ class ICMKernel(eqx.Module):
         """Return ``Cov[vec(F(X1)), vec(F(X2))]`` as a ``Kronecker`` operator.
 
         The ``kron(B, K)`` structure lets downstream solvers apply
-        :func:`gaussx.kronecker_mll` and related Kronecker-exact routines
+        `gaussx.kronecker_mll` and related Kronecker-exact routines
         instead of materializing a ``(P*N1, P*N2)`` matrix.
         """
         B, K = self.kronecker_factors(X1, X2)
@@ -412,7 +412,7 @@ class OILMMKernel(eqx.Module):
     The latent GP kernels stay independent. Orthogonal mixing makes it
     possible to project observations into latent space and run ``Q`` scalar
     GP problems instead of one monolithic multi-output solve. Observation
-    noise lives in a separate :class:`pyrox.gp.Likelihood`; this class
+    noise lives in a separate `pyrox.gp.Likelihood`; this class
     returns noise-free signal covariance, matching the LMC/ICM convention.
 
     Pass ``check_orthogonal=True`` to verify ``W^T W ≈ I`` at
@@ -470,7 +470,7 @@ class OILMMKernel(eqx.Module):
     ) -> tuple[Float[Array, "N Q"], Float[Array, " Q"]]:
         """Project observations to latent space + per-latent noise variances.
 
-        Delegates to :func:`gaussx.oilmm_project`. Returns
+        Delegates to `gaussx.oilmm_project`. Returns
         ``(Y_latent, noise_latent)`` with shapes ``(N, Q)`` and ``(Q,)``;
         the per-latent noise is ``noise_latent = (W**2).T @ noise_var``.
         """
@@ -487,7 +487,7 @@ class OILMMKernel(eqx.Module):
     ) -> tuple[Float[Array, "N P"], Float[Array, "N P"]]:
         """Back-project latent GP predictive ``(means, vars)`` to output space.
 
-        Delegates to :func:`gaussx.oilmm_back_project`.
+        Delegates to `gaussx.oilmm_back_project`.
         """
         return oilmm_back_project(f_means, f_vars, self.mixing)
 
@@ -503,7 +503,7 @@ class OILMMKernel(eqx.Module):
         """Return the latent signal factors before any observation noise.
 
         All latent kernel evaluations share one per-call context per
-        unique kernel instance, mirroring :meth:`LMCKernel.kronecker_factors`.
+        unique kernel instance, mirroring `LMCKernel.kronecker_factors`.
         """
         with _kernel_contexts(self.kernels):
             return tuple(
@@ -635,13 +635,13 @@ class SharedInducingPoints(eqx.Module):
 
         Pairs the per-latent ``K(Z, Z)`` and ``K(Z, X)`` evaluations so
         Pattern B/C kernels with priored hyperparameters register their
-        :func:`pyrox_sample` sites once across the K_uu/K_uf pair.
-        Calling :meth:`latent_covariances` and :meth:`cross_covariances`
+        `pyrox_sample` sites once across the K_uu/K_uf pair.
+        Calling `latent_covariances` and `cross_covariances`
         sequentially would close and reopen each kernel's per-call
         context between the two calls, clearing the sample-site cache
         and tripping duplicate-site registration under a NumPyro trace
         (or resampling inconsistent hyperparameters under
-        :func:`numpyro.handlers.seed`).
+        `numpyro.handlers.seed`).
         """
         if not kernels:
             raise ValueError("kernels must be non-empty.")
@@ -658,7 +658,7 @@ class MultiOutputInducingVariables(eqx.Module):
     """Shared inducing-point structure for LMC-style sparse workflows.
 
     ``mixing[p, q]`` is the weight with which latent process ``q`` enters
-    output ``p``; the block layout of :meth:`K_uf` matches that convention.
+    output ``p``; the block layout of `K_uf` matches that convention.
     ``ICMKernel`` with non-zero ``kappa`` cannot be represented here —
     the extra diagonal does not fit the per-latent factorization.
     """
@@ -679,14 +679,14 @@ class MultiOutputInducingVariables(eqx.Module):
 
         Avoids the footgun of maintaining two independent ``mixing``
         copies that can silently disagree between ``K_ff`` and ``K_uf``.
-        Only :class:`LMCKernel` and :class:`ICMKernel` are accepted;
-        :class:`OILMMKernel` is rejected because the sparse inducing
+        Only `LMCKernel` and `ICMKernel` are accepted;
+        `OILMMKernel` is rejected because the sparse inducing
         workflow does not currently exploit orthogonal projection.
 
-        :class:`ICMKernel` with non-zero ``kappa`` is rejected: the
-        sparse blocks assembled downstream (:meth:`K_uu` / :meth:`K_uf`)
+        `ICMKernel` with non-zero ``kappa`` is rejected: the
+        sparse blocks assembled downstream (`K_uu` / `K_uf`)
         do not carry the ``diag(kappa)`` contribution that is present
-        in :meth:`ICMKernel.K_ff`, so accepting it here would silently
+        in `ICMKernel.K_ff`, so accepting it here would silently
         produce inconsistent covariance terms and underestimate output
         variance. Users who need the ``kappa`` contribution should use
         the dense multi-output solve.
@@ -754,16 +754,16 @@ class MultiOutputInducingVariables(eqx.Module):
     ) -> tuple[BlockDiag, Float[Array, "QM PN"]]:
         """Return ``(K_uu_op, K_uf)`` under one shared kernel context.
 
-        Use this in place of separate :meth:`K_uu_operator` /
-        :meth:`K_uf` calls when assembling an SVGP-style sparse
+        Use this in place of separate `K_uu_operator` /
+        `K_uf` calls when assembling an SVGP-style sparse
         predictive: it shares one per-call context per unique kernel
         instance across both blocks, so Pattern B/C kernels with priored
-        hyperparameters register their :func:`pyrox_sample` sites
+        hyperparameters register their `pyrox_sample` sites
         exactly once and the two blocks see the same hyperparameter
         draw. Sequential calls would close the per-call context between
         ``K_uu`` and ``K_uf``, which would re-register sites under a
         NumPyro trace (or resample inconsistent hyperparameters under
-        :func:`numpyro.handlers.seed`).
+        `numpyro.handlers.seed`).
         """
         _validate_kernel_count(kernels, self.num_latents)
         K_uu_blocks, K_uf_blocks = self.inducing.inducing_blocks(X, kernels)

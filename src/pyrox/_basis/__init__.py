@@ -4,37 +4,37 @@ Both `pyrox.nn.HSGPFeatures` (NN-side, weight-space scalable GP) and
 `pyrox.gp.FourierInducingFeatures` (GP-side, inter-domain inducing features)
 evaluate the same Laplacian eigenfunctions on a bounded box. The spatial
 basis zoo (eigenfunction, localized, overcomplete, and data-driven bases)
-lives in :mod:`geonnax.basis` and is re-exported here so pyrox code keeps a
+lives in `geonnax.basis` and is re-exported here so pyrox code keeps a
 single import surface; only the kernel-aware pieces stay local:
 
-- :func:`spectral_density` — kernel spectral density evaluated at frequency
+- `spectral_density` — kernel spectral density evaluated at frequency
   magnitudes (reads pyrox GP kernel hyperparameters).
-- :func:`draw_rff_cosine_basis` / :func:`evaluate_rff_cosine_paths` — pure
+- `draw_rff_cosine_basis` / `evaluate_rff_cosine_paths` — pure
   random-Fourier-feature prior draws for RBF/Matern kernels, shared by
-  :mod:`pyrox.gp._pathwise`.
+  `pyrox.gp._pathwise`.
 
-Re-exported from :mod:`geonnax.basis`:
+Re-exported from `geonnax.basis`:
 
-- :func:`fourier_basis_1d` / :func:`fourier_eigenvalues_1d` — 1D Dirichlet
-  eigenpairs of :math:`-d^2/dx^2` on :math:`[-L, L]`.
-- :func:`fourier_basis` / :func:`fourier_eigenvalues` — tensor-product
-  extension to :math:`[-L, L]^D`.
-- :func:`real_spherical_harmonics` / :func:`harmonic_degrees` — real SHs on
+- `fourier_basis_1d` / `fourier_eigenvalues_1d` — 1D Dirichlet
+  eigenpairs of $-d^2/dx^2$ on $[-L, L]$.
+- `fourier_basis` / `fourier_eigenvalues` — tensor-product
+  extension to $[-L, L]^D$.
+- `real_spherical_harmonics` / `harmonic_degrees` — real SHs on
   the unit 2-sphere.
-- :class:`SlepianCapBasis` and the ``slepian_*`` constructors — band-limited
+- `SlepianCapBasis` and the ``slepian_*`` constructors — band-limited
   spherical-cap concentration bases.
-- :func:`graph_laplacian_eigpairs` — smallest eigenpairs of a graph Laplacian.
-- :func:`rbf_basis` / :func:`spherical_rbf_basis` (+ :func:`wendland_c2` /
-  :func:`wendland_c4`) — placeable Gaussian / compact-support bumps in
+- `graph_laplacian_eigpairs` — smallest eigenpairs of a graph Laplacian.
+- `rbf_basis` / `spherical_rbf_basis` (+ `wendland_c2` /
+  `wendland_c4`) — placeable Gaussian / compact-support bumps in
   Euclidean or geodesic distance.
-- :func:`gabor_frame` / :func:`gabor_frame_grid` — overcomplete multiscale
+- `gabor_frame` / `gabor_frame_grid` — overcomplete multiscale
   Gabor dictionaries.
-- :func:`wavelet_basis_1d` / :func:`wavelet_basis_2d` — orthonormal DWT
+- `wavelet_basis_1d` / `wavelet_basis_2d` — orthonormal DWT
   synthesis matrices.
-- :func:`divfree_basis` — divergence-free 2D vector basis from stream
+- `divfree_basis` — divergence-free 2D vector basis from stream
   functions.
-- :func:`eof_basis` — data-driven empirical orthogonal functions (PCA).
-- :func:`gaussian_window_features` — Gaussian-window localized time gates.
+- `eof_basis` — data-driven empirical orthogonal functions (PCA).
+- `gaussian_window_features` — Gaussian-window localized time gates.
 """
 
 from geonnax.basis import (

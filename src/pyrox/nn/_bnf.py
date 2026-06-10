@@ -1,20 +1,20 @@
 r"""Bayesian Neural Field (BNF) layers — port of Google's bayesnf.
 
 Five layers wrapping the pure-JAX feature helpers in
-:mod:`pyrox.nn._features` behind the :class:`PyroxModule` PyTree
+`pyrox.nn._features` behind the `PyroxModule` PyTree
 contract:
 
-* :class:`Standardization` — affine normalization with fixed mean/std.
-* :class:`FourierFeatures` — dyadic-frequency cos/sin basis per input.
-* :class:`SeasonalFeatures` — period-and-harmonic cos/sin basis on a
+* `Standardization` — affine normalization with fixed mean/std.
+* `FourierFeatures` — dyadic-frequency cos/sin basis per input.
+* `SeasonalFeatures` — period-and-harmonic cos/sin basis on a
   scalar time axis.
-* :class:`InteractionFeatures` — element-wise products on selected
+* `InteractionFeatures` — element-wise products on selected
   pairs of input columns.
-* :class:`BayesianNeuralField` — the full BNF MLP: input rescaling +
+* `BayesianNeuralField` — the full BNF MLP: input rescaling +
   feature concatenation + gain-modulated MLP with mixed
   ``elu`` / ``tanh`` activation. Every learnable leaf carries a
-  :math:`\mathrm{Logistic}(0, 1)` prior registered via
-  :meth:`PyroxModule.pyrox_sample`.
+  $\mathrm{Logistic}(0, 1)$ prior registered via
+  `PyroxModule.pyrox_sample`.
 
 Reference
 ---------
@@ -43,12 +43,12 @@ from pyrox._core.pyrox_module import PyroxModule, pyrox_method
 class Standardization(PyroxModule):
     r"""Apply a fixed-coefficient affine standardization.
 
-    .. math::
-
-        \tilde x \;=\; \frac{x - \mu}{\sigma}.
+    $$
+    \tilde x \;=\; \frac{x - \mu}{\sigma}.
+    $$
 
     Both ``mu`` and ``std`` are static (fit-time) constants, not
-    learned. Use :func:`pyrox.preprocessing.fit_standardization` to
+    learned. Use `pyrox.preprocessing.fit_standardization` to
     construct from a pandas DataFrame.
 
     Attributes:
@@ -71,10 +71,10 @@ class FourierFeatures(PyroxModule):
     r"""Per-input dyadic-frequency Fourier basis.
 
     For each input column, evaluates ``2 * degree`` Fourier features at
-    frequencies :math:`2\pi \cdot 2^d` for :math:`d \in \{0, \dots,
-    \text{degree} - 1\}`. Concatenated across all columns.
+    frequencies $2\pi \cdot 2^d$ for $d \in \{0, \dots,
+    \text{degree} - 1\}$. Concatenated across all columns.
 
-    Wraps :func:`pyrox.nn._features.fourier_features` per input
+    Wraps `pyrox.nn._features.fourier_features` per input
     dimension.
 
     Attributes:
@@ -106,11 +106,11 @@ class FourierFeatures(PyroxModule):
 class SeasonalFeatures(PyroxModule):
     r"""Period-and-harmonic cos/sin basis on a scalar time axis.
 
-    For each period :math:`\tau_p` with :math:`H_p` harmonics, emits
-    ``2 * H_p`` cos/sin columns. Total output width is :math:`2 \sum_p
-    H_p`.
+    For each period $\tau_p$ with $H_p$ harmonics, emits
+    ``2 * H_p`` cos/sin columns. Total output width is $2 \sum_p
+    H_p$.
 
-    Wraps :func:`pyrox.nn._features.seasonal_features`. Periods and
+    Wraps `pyrox.nn._features.seasonal_features`. Periods and
     harmonics are kept as Python tuples (static) so the inner shape
     structure is known at trace time.
 
@@ -135,7 +135,7 @@ class SeasonalFeatures(PyroxModule):
 class InteractionFeatures(PyroxModule):
     r"""Element-wise products on selected pairs of input columns.
 
-    Wraps :func:`pyrox.nn._features.interaction_features`.
+    Wraps `pyrox.nn._features.interaction_features`.
 
     Attributes:
         pairs: Index pairs, ``tuple[tuple[int, int], ...]``. Empty
@@ -164,17 +164,17 @@ class BayesianNeuralField(PyroxModule):
        Fourier features, seasonal features, interaction products.
     3. Per-block ``softplus(feature_gain)`` modulation.
     4. A depth-``L`` MLP whose layers are
-       :math:`h_{\ell+1} = \sigma_\alpha\bigl(g_\ell \cdot W_\ell\, h_\ell
-       / \sqrt{\lvert h_\ell \rvert}\bigr)`, where :math:`\sigma_\alpha
+       $h_{\ell+1} = \sigma_\alpha\bigl(g_\ell \cdot W_\ell\, h_\ell
+       / \sqrt{\lvert h_\ell \rvert}\bigr)$, where $\sigma_\alpha
        = \mathrm{sig}(\beta) \cdot \mathrm{elu} + (1 - \mathrm{sig}(\beta))
-       \cdot \mathrm{tanh}` is a learned mixed activation.
+       \cdot \mathrm{tanh}$ is a learned mixed activation.
     5. A final linear layer scaled by ``softplus(output_gain)``.
 
     All weights, biases, gains, scales, and the activation logit carry
-    independent :math:`\mathrm{Logistic}(0, 1)` priors registered via
-    :meth:`PyroxModule.pyrox_sample`.
+    independent $\mathrm{Logistic}(0, 1)$ priors registered via
+    `PyroxModule.pyrox_sample`.
 
-    The :math:`1/\sqrt{\text{fan-in}}` pre-normalization is the
+    The $1/\sqrt{\text{fan-in}}$ pre-normalization is the
     standard NTK-scaling trick — it makes the layer-wise prior
     predictive a fan-in-independent Gaussian process in the
     infinite-width limit (Lee et al., 2018).

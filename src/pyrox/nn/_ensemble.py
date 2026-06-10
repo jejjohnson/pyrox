@@ -1,15 +1,15 @@
 """Ensemble-style layers for ``pyrox.nn``.
 
-* :class:`DenseRank1` — rank-1 ensemble dense layer (Wen et al., 2020;
-  Dusenberry et al., 2020). A shared full-rank kernel :math:`W` plus
-  per-ensemble-member rank-1 multiplicative perturbations :math:`r_i`,
-  :math:`s_i`. Available in two modes via the ``bayesian`` flag:
-  deterministic BatchEnsemble (point-estimate :math:`r, s`) and rank-1
-  BNN (Gaussian priors on :math:`r, s` centered at per-member inits).
-* :class:`LayerNormEnsemble` — per-ensemble-member LayerNorm. Required
+* `DenseRank1` — rank-1 ensemble dense layer (Wen et al., 2020;
+  Dusenberry et al., 2020). A shared full-rank kernel $W$ plus
+  per-ensemble-member rank-1 multiplicative perturbations $r_i$,
+  $s_i$. Available in two modes via the ``bayesian`` flag:
+  deterministic BatchEnsemble (point-estimate $r, s$) and rank-1
+  BNN (Gaussian priors on $r, s$ centered at per-member inits).
+* `LayerNormEnsemble` — per-ensemble-member LayerNorm. Required
   drop-in replacement for ``LayerNorm`` inside BatchEnsemble / Rank1
   architectures.
-* :class:`MultiHeadAttentionBE` — multi-head attention with
+* `MultiHeadAttentionBE` — multi-head attention with
   BatchEnsemble per-member rank-1 perturbations on each of the four
   Q / K / V / O projections. Output gains a leading ensemble axis.
 """
@@ -38,7 +38,7 @@ def _vmap_collapsed(core_fn, x: Float[Array, ...]) -> Float[Array, ...]:
     """Apply a single-example ``core_fn`` over arbitrary leading batch dims.
 
     Delegates the flatten / vmap / restore dance to
-    :func:`vmap_over_flat_batch`, then moves the per-example ensemble
+    `vmap_over_flat_batch`, then moves the per-example ensemble
     axis ``M`` to the front because the geonnax cores are
     single-example BatchEnsemble layers.
     """
@@ -51,32 +51,32 @@ class DenseRank1(PyroxModule):
 
     Implements the BatchEnsemble (Wen et al., 2020) / rank-1 BNN
     (Dusenberry et al., 2020) parameterization: a single shared kernel
-    :math:`W \in \mathbb{R}^{D_\mathrm{in} \times D_\mathrm{out}}` and
+    $W \in \mathbb{R}^{D_\mathrm{in} \times D_\mathrm{out}}$ and
     per-member rank-1 multiplicative perturbations
-    :math:`s_i \in \mathbb{R}^{D_\mathrm{in}}`,
-    :math:`r_i \in \mathbb{R}^{D_\mathrm{out}}` for
-    :math:`i = 1, \ldots, M`. The per-member effective weight is
+    $s_i \in \mathbb{R}^{D_\mathrm{in}}$,
+    $r_i \in \mathbb{R}^{D_\mathrm{out}}$ for
+    $i = 1, \ldots, M$. The per-member effective weight is
 
-    .. math::
+    $$
+    W_i = (s_i \otimes r_i) \circ W,
+    $$
 
-        W_i = (s_i \otimes r_i) \circ W,
+    and the efficient forward pass avoids materialising $W_i$:
 
-    and the efficient forward pass avoids materialising :math:`W_i`:
-
-    .. math::
-
-        y_i = \bigl((x \circ s_i)\, W\bigr) \circ r_i + b_i.
+    $$
+    y_i = \bigl((x \circ s_i)\, W\bigr) \circ r_i + b_i.
+    $$
 
     Two modes via the ``bayesian`` flag:
 
-    * ``bayesian=False`` (default) — BatchEnsemble. :math:`r, s, W, b`
+    * ``bayesian=False`` (default) — BatchEnsemble. $r, s, W, b$
       are all deterministic ``pyrox_param`` sites and per-member
       diversity comes purely from the random initialisation of
-      :math:`r_i, s_i`. Use this for ensemble training under a single
+      $r_i, s_i$. Use this for ensemble training under a single
       shared SGD trajectory.
-    * ``bayesian=True`` — rank-1 BNN. :math:`r, s` are
+    * ``bayesian=True`` — rank-1 BNN. $r, s$ are
       ``pyrox_sample`` sites with Normal priors centered at the
-      per-member init values; :math:`W, b` remain deterministic. Plug
+      per-member init values; $W, b$ remain deterministic. Plug
       into NumPyro's SVI machinery (an ``AutoNormal`` guide on
       ``r, s`` recovers Dusenberry et al., 2020).
 
@@ -84,24 +84,24 @@ class DenseRank1(PyroxModule):
         Identical to other pyrox Bayesian dense layers — call this
         layer **outside** ``numpyro.plate("data", ..., subsample_size=...)``
         and only plate the observation likelihood. The model log
-        density picks up :math:`\log p(r_i)` and :math:`\log p(s_i)`
+        density picks up $\log p(r_i)$ and $\log p(s_i)$
         once per layer (not once per example) under the canonical
         pattern.
 
     Attributes:
-        in_features: Input dimension :math:`D_\mathrm{in}`.
-        out_features: Output dimension :math:`D_\mathrm{out}`.
-        ensemble_size: Number of ensemble members :math:`M`.
+        in_features: Input dimension $D_\mathrm{in}$.
+        out_features: Output dimension $D_\mathrm{out}$.
+        ensemble_size: Number of ensemble members $M$.
         bias: Whether to include a per-member bias.
-        bayesian: If ``True``, place Normal priors on :math:`r, s`.
-        prior_scale: Std of the Bayesian priors on :math:`r, s`. Only
+        bayesian: If ``True``, place Normal priors on $r, s$.
+        prior_scale: Std of the Bayesian priors on $r, s$. Only
             used when ``bayesian=True``.
         W_init: Shared kernel init, shape ``(D_in, D_out)``.
         r_init: Per-member output-side init, shape ``(M, D_out)``.
         s_init: Per-member input-side init, shape ``(M, D_in)``.
         pyrox_name: Explicit scope name for NumPyro site registration.
 
-    Example:
+    Examples:
         >>> import jax.random as jr
         >>> import jax.numpy as jnp
         >>> from numpyro import handlers
@@ -220,21 +220,21 @@ class LayerNormEnsemble(PyroxModule):
     Drop-in replacement for ``LayerNorm`` inside BatchEnsemble / Rank1
     architectures. Computes the standard LayerNorm normalisation over
     the trailing feature dimension and applies a *per-member* affine
-    transform — each ensemble member :math:`i \in \{1, \ldots, M\}`
-    gets its own learnable scale :math:`\gamma_i \in \mathbb{R}^D`
-    and bias :math:`\beta_i \in \mathbb{R}^D`:
+    transform — each ensemble member $i \in \{1, \ldots, M\}$
+    gets its own learnable scale $\gamma_i \in \mathbb{R}^D$
+    and bias $\beta_i \in \mathbb{R}^D$:
 
-    .. math::
+    $$
+    \hat{x}_i = \frac{x_i - \mu(x_i)}{\sqrt{\sigma^2(x_i) + \epsilon}},
+    \qquad
+    y_i = \gamma_i \odot \hat{x}_i + \beta_i,
+    $$
 
-        \hat{x}_i = \frac{x_i - \mu(x_i)}{\sqrt{\sigma^2(x_i) + \epsilon}},
-        \qquad
-        y_i = \gamma_i \odot \hat{x}_i + \beta_i,
-
-    where :math:`\mu` and :math:`\sigma^2` are the empirical mean and
+    where $\mu$ and $\sigma^2$ are the empirical mean and
     variance over the trailing feature axis (computed independently
     for each member-batch slice). Without per-member scale/bias,
     sharing a single LayerNorm across the ensemble would couple all
-    members and erase the diversity introduced by :class:`DenseRank1`
+    members and erase the diversity introduced by `DenseRank1`
     or any other BatchEnsemble layer upstream.
 
     Input is expected to carry a leading ensemble axis of size
@@ -243,14 +243,14 @@ class LayerNormEnsemble(PyroxModule):
     are supported and pass through unchanged.
 
     Attributes:
-        ensemble_size: Number of ensemble members :math:`M`.
-        feature_dim: Trailing feature dimension :math:`D` over which
+        ensemble_size: Number of ensemble members $M$.
+        feature_dim: Trailing feature dimension $D$ over which
             the normalisation is computed.
         eps: Small positive constant added to the variance for
             numerical stability.
         pyrox_name: Explicit scope name for NumPyro site registration.
 
-    Example:
+    Examples:
         >>> import jax.numpy as jnp
         >>> from numpyro import handlers
         >>> ln = LayerNormEnsemble(
@@ -343,19 +343,19 @@ class MultiHeadAttentionBE(PyroxModule):
     four linear projections — query, key, value, and output — uses a
     BatchEnsemble parameterisation: a shared full-rank kernel plus
     per-ensemble-member rank-1 multiplicative perturbations. So for
-    member :math:`i \in \{1, \ldots, M\}` and projection
-    :math:`P \in \{Q, K, V, O\}`,
+    member $i \in \{1, \ldots, M\}$ and projection
+    $P \in \{Q, K, V, O\}$,
 
-    .. math::
-
-        W_i^{(P)} = (s_i^{(P)} \otimes r_i^{(P)}) \circ W^{(P)},
+    $$
+    W_i^{(P)} = (s_i^{(P)} \otimes r_i^{(P)}) \circ W^{(P)},
+    $$
 
     and the attention itself is the usual
 
-    .. math::
-
-        \mathrm{Attn}(Q, K, V) = \mathrm{softmax}\!
-            \Bigl(\frac{Q K^\top}{\sqrt{d_k}}\Bigr) V.
+    $$
+    \mathrm{Attn}(Q, K, V) = \mathrm{softmax}\!
+        \Bigl(\frac{Q K^\top}{\sqrt{d_k}}\Bigr) V.
+    $$
 
     The forward consumes un-ensembled inputs (``query``, ``key``,
     ``value`` of shape ``(T, D)`` / ``(S, D)``), adds the ensemble
@@ -366,7 +366,7 @@ class MultiHeadAttentionBE(PyroxModule):
     their outputs.
 
     Plate semantics:
-        Same convention as :class:`DenseRank1` and the rest of the
+        Same convention as `DenseRank1` and the rest of the
         ``pyrox.nn`` ensemble / Bayesian dense family — call this
         layer **outside** ``numpyro.plate("data", ..., subsample_size=...)``
         and only plate the observation likelihood. All four projections
@@ -376,19 +376,19 @@ class MultiHeadAttentionBE(PyroxModule):
         subsampled plate.
 
     Attributes:
-        embed_dim: Total feature dimension :math:`D` of query / key /
+        embed_dim: Total feature dimension $D$ of query / key /
             value (must be divisible by ``num_heads``).
-        num_heads: Number of attention heads :math:`H`. Each head sees
+        num_heads: Number of attention heads $H$. Each head sees
             ``embed_dim // num_heads`` features.
-        ensemble_size: Number of ensemble members :math:`M`.
+        ensemble_size: Number of ensemble members $M$.
         bias: Whether each of the four projections includes a
             per-member bias. When ``False``, no bias param sites are
             registered for any of Q / K / V / O.
         q_init / k_init / v_init / o_init: Per-projection
-            BatchEnsemble init arrays. Build via :meth:`init`.
+            BatchEnsemble init arrays. Build via `init`.
         pyrox_name: Explicit scope name for NumPyro site registration.
 
-    Example:
+    Examples:
         >>> import jax.random as jr
         >>> import jax.numpy as jnp
         >>> from numpyro import handlers

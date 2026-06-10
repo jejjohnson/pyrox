@@ -10,7 +10,7 @@ import numpyro.distributions as dist
 def _biject_to(constraint: Any) -> Any:
     """Return the bijective transform from unconstrained to constrained space.
 
-    Thin wrapper over :func:`numpyro.distributions.biject_to`. Kept here so
+    Thin wrapper over `numpyro.distributions.biject_to`. Kept here so
     the rest of ``pyrox._core`` can depend on a single local import point.
     """
     return dist.biject_to(constraint)

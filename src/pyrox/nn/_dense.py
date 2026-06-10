@@ -1,26 +1,26 @@
 """Bayesian / uncertainty-aware dense layers.
 
 This module hosts the dense Bayesian layer family that used to live in
-:mod:`pyrox.nn._layers`. The deterministic forward kernel (single
+`pyrox.nn._layers`. The deterministic forward kernel (single
 ``... din @ din dout -> ... dout`` contraction) is implemented inline via
-:mod:`einx` — the geonnax single-example RFF cores are not used here
+`einx` — the geonnax single-example RFF cores are not used here
 because a Bayesian dense layer's forward is literally a matmul, not a
 feature map. The Bayesian site-registration logic (priors on ``W`` and
 ``b``, ``pyrox_sample`` calls) stays in the wrapper exactly as before.
 
 Provides:
 
-* :class:`DenseReparameterization` — weight-space Bayesian linear via
+* `DenseReparameterization` — weight-space Bayesian linear via
   the reparameterization trick.
-* :class:`DenseFlipout` — variance-reduced Bayesian linear via Flipout.
-* :class:`DenseVariational` — user-supplied prior factory.
-* :class:`DenseVariationalDropout` — sparse variational dropout (kept
+* `DenseFlipout` — variance-reduced Bayesian linear via Flipout.
+* `DenseVariational` — user-supplied prior factory.
+* `DenseVariationalDropout` — sparse variational dropout (kept
   bespoke; no geonnax core).
-* :class:`DenseHierarchical` — multiplicative local + global shrinkage.
-* :class:`DenseDVI` — analytic moment propagation (kept bespoke).
-* :class:`DenseNCP` — deterministic backbone + scaled stochastic
+* `DenseHierarchical` — multiplicative local + global shrinkage.
+* `DenseDVI` — analytic moment propagation (kept bespoke).
+* `DenseNCP` — deterministic backbone + scaled stochastic
   perturbation.
-* :class:`NCPNormalOutput` — output-side NCP KL regulariser.
+* `NCPNormalOutput` — output-side NCP KL regulariser.
 """
 
 from __future__ import annotations
@@ -48,11 +48,11 @@ class DenseReparameterization(PyroxModule):
     forward pass. Registers NumPyro sample sites so the KL between the
     variational posterior and the prior is tracked by the ELBO.
 
-    .. math::
-
-        W \sim \mathcal{N}(\mu_W, \sigma_W^2), \quad
-        b \sim \mathcal{N}(\mu_b, \sigma_b^2), \quad
-        y = x W + b.
+    $$
+    W \sim \mathcal{N}(\mu_W, \sigma_W^2), \quad
+    b \sim \mathcal{N}(\mu_b, \sigma_b^2), \quad
+    y = x W + b.
+    $$
 
     Attributes:
         in_features: Input dimension.
@@ -95,7 +95,7 @@ class DenseFlipout(PyroxModule):
     decorrelate gradient estimates across minibatch examples.
 
     In model mode (no guide) this is equivalent to
-    :class:`DenseReparameterization` — the Flipout variance reduction
+    `DenseReparameterization` — the Flipout variance reduction
     activates when a guide provides a posterior centered at a learned
     mean.
 
@@ -173,13 +173,13 @@ class DenseNCP(PyroxModule):
     Decomposes a dense layer into a prior-regularized backbone plus a
     scaled stochastic perturbation:
 
-    .. math::
-
-        y = \underbrace{x W_d + b_d}_{\text{backbone}}
-          + \underbrace{\sigma \cdot (x W_s + b_s)}_{\text{perturbation}},
+    $$
+    y = \underbrace{x W_d + b_d}_{\text{backbone}}
+      + \underbrace{\sigma \cdot (x W_s + b_s)}_{\text{perturbation}},
+    $$
 
     where all weights are ``pyrox_sample`` sites with Gaussian priors
-    and :math:`\sigma` has a ``LogNormal`` prior. The backbone carries
+    and $\sigma$ has a ``LogNormal`` prior. The backbone carries
     the bulk of the signal; the perturbation branch adds calibrated
     uncertainty that can be trained via a noise contrastive objective.
 
@@ -187,7 +187,7 @@ class DenseNCP(PyroxModule):
         in_features: Input dimension.
         out_features: Output dimension.
         init_scale: Initial value for the perturbation scale
-            :math:`\sigma`.
+            $\sigma$.
         pyrox_name: Explicit scope name for NumPyro site registration.
     """
 
@@ -256,45 +256,45 @@ class NCPNormalOutput(PyroxModule):
     r"""Output-side Noise Contrastive Prior layer (Hafner et al., 2018).
 
     Completes the NCP pattern in ``pyrox.nn``: pair with
-    :class:`NCPContinuousPerturb` at the input and a heteroscedastic
+    `NCPContinuousPerturb` at the input and a heteroscedastic
     network (e.g. an MLP terminating in a mean head and a positive-std
     head — a softplus or ``exp`` of a learned log-scale) so the
     network produces predictions for both the *clean* batch and the
     input-perturbed *noisy* batch. Given the noisy batch's predictive
-    distribution :math:`\mathcal{N}(\hat{y}_n, \hat{\sigma}_n^2)`,
+    distribution $\mathcal{N}(\hat{y}_n, \hat{\sigma}_n^2)$,
     this layer adds the analytic NCP regulariser
 
-    .. math::
+    $$
+    \mathcal{L}_\mathrm{NCP} =
+    \sum_{n} \mathrm{KL}\!\bigl[\mathcal{N}(\hat{y}_n, \hat{\sigma}_n^2)
+        \;\big\|\; \mathcal{N}(\mu_\mathrm{prior}, \sigma_\mathrm{prior}^2)\bigr]
+    $$
 
-        \mathcal{L}_\mathrm{NCP} =
-        \sum_{n} \mathrm{KL}\!\bigl[\mathcal{N}(\hat{y}_n, \hat{\sigma}_n^2)
-            \;\big\|\; \mathcal{N}(\mu_\mathrm{prior}, \sigma_\mathrm{prior}^2)\bigr]
-
-    to the model log density via :func:`numpyro.factor`. Pulling the
+    to the model log density via `numpyro.factor`. Pulling the
     noisy-input predictive distribution toward the fixed prior away
     from the training distribution gives the network calibrated
     out-of-distribution uncertainty, which is the central claim of NCP.
 
     The closed-form Gaussian KL used here is
 
-    .. math::
-
-        \mathrm{KL}\bigl[\mathcal{N}(\mu, \sigma^2)
-            \,\|\, \mathcal{N}(\mu_p, \sigma_p^2)\bigr]
-        = \log\frac{\sigma_p}{\sigma} +
-          \frac{\sigma^2 + (\mu - \mu_p)^2}{2\sigma_p^2} - \tfrac{1}{2}.
+    $$
+    \mathrm{KL}\bigl[\mathcal{N}(\mu, \sigma^2)
+        \,\|\, \mathcal{N}(\mu_p, \sigma_p^2)\bigr]
+    = \log\frac{\sigma_p}{\sigma} +
+      \frac{\sigma^2 + (\mu - \mu_p)^2}{2\sigma_p^2} - \tfrac{1}{2}.
+    $$
 
     Plate semantics:
         Unlike pyrox's *weight-prior* KL terms, the NCP KL is
         **data-dependent** — every input row contributes its own
-        :math:`\mathrm{KL}_n` term. Internally the layer emits the
-        :func:`numpyro.factor` site as a *per-example* vector
+        $\mathrm{KL}_n$ term. Internally the layer emits the
+        `numpyro.factor` site as a *per-example* vector
         (shape ``(*batch,)``) rather than a pre-summed scalar; that
         lets NumPyro's plate machinery sum over the batch axis and
         apply the subsample scaling automatically.
 
         The canonical training pattern is to emit the layer **inside**
-        ``numpyro.plate("data", N, subsample_size=B)``::
+        ``numpyro.plate("data", N, subsample_size=B)``:
 
             def model(x_clean, y_clean, x_noisy):
                 clean_mean, _clean_std = network(x_clean)
@@ -314,12 +314,12 @@ class NCPNormalOutput(PyroxModule):
         you train on the whole dataset at once.
 
     Attributes:
-        prior_mean: Prior predictive mean :math:`\mu_\mathrm{prior}`.
-        prior_std: Prior predictive std :math:`\sigma_\mathrm{prior}`
+        prior_mean: Prior predictive mean $\mu_\mathrm{prior}$.
+        prior_std: Prior predictive std $\sigma_\mathrm{prior}$
             (must be positive).
         pyrox_name: Explicit scope name for NumPyro site registration.
 
-    Example:
+    Examples:
         >>> import jax.numpy as jnp
         >>> from numpyro import handlers
         >>> ncp = NCPNormalOutput(
@@ -435,36 +435,36 @@ class DenseVariationalDropout(PyroxModule):
     automatic sparsification via per-weight learnable dropout rates.
     The variational posterior on weights is
 
-    .. math::
-
-        q(W_{ij} \mid \theta_{ij}, \alpha_{ij}) =
-        \mathcal{N}\!\bigl(\theta_{ij},\; \alpha_{ij}\,\theta_{ij}^2\bigr).
+    $$
+    q(W_{ij} \mid \theta_{ij}, \alpha_{ij}) =
+    \mathcal{N}\!\bigl(\theta_{ij},\; \alpha_{ij}\,\theta_{ij}^2\bigr).
+    $$
 
     Forward passes use the *local reparameterization trick* — the
     pre-activation distribution is closed-form and the noise is sampled
     once per output unit per batch element rather than once per weight:
 
-    .. math::
-
-        \gamma = X\theta, \quad
-        \delta = X^{\circ 2}\,(\alpha \circ \theta^{\circ 2}), \quad
-        Y = \gamma + \sqrt{\delta} \circ \epsilon, \quad
-        \epsilon \sim \mathcal{N}(0, I).
+    $$
+    \gamma = X\theta, \quad
+    \delta = X^{\circ 2}\,(\alpha \circ \theta^{\circ 2}), \quad
+    Y = \gamma + \sqrt{\delta} \circ \epsilon, \quad
+    \epsilon \sim \mathcal{N}(0, I).
+    $$
 
     The KL between the posterior and the log-uniform prior is
     approximated analytically (Molchanov et al., 2017) and added to the
-    NumPyro trace via :func:`numpyro.factor`. SVI then optimizes
+    NumPyro trace via `numpyro.factor`. SVI then optimizes
 
-    .. math::
-
-        \mathcal{L} = \mathbb{E}_q[\log p(y \mid f)] - \mathrm{KL}\bigl[q\,\|\,p\bigr].
+    $$
+    \mathcal{L} = \mathbb{E}_q[\log p(y \mid f)] - \mathrm{KL}\bigl[q\,\|\,p\bigr].
+    $$
 
     Weights with ``log_alpha > threshold`` (default 3.0, dropout rate
     ~0.95) are effectively pruned; inspect the trained pattern via
-    :meth:`sparsity`.
+    `sparsity`.
 
     Plate semantics:
-        The KL contribution is registered via :func:`numpyro.factor`,
+        The KL contribution is registered via `numpyro.factor`,
         which is itself a sample-type site and therefore subject to
         ``numpyro.plate`` scaling. To keep the per-layer KL counted
         once (not scaled by the data-plate's subsample ratio), call
@@ -472,7 +472,7 @@ class DenseVariationalDropout(PyroxModule):
         block — the standard pyrox / NumPyro convention for global
         Bayesian parameters. Plate only the observation likelihood.
 
-        Correct (forward outside the data plate)::
+        Correct (forward outside the data plate):
 
             def model(x, y=None):
                 layer = DenseVariationalDropout(in_features=D, out_features=1)
@@ -481,7 +481,7 @@ class DenseVariationalDropout(PyroxModule):
                     numpyro.sample("obs", dist.Normal(f, 0.5), obs=y)
 
         Incorrect (forward inside a subsampled data plate scales KL by
-        ``N / subsample_size``)::
+        ``N / subsample_size``):
 
             def model(x, y=None):
                 with numpyro.plate("data", N, subsample_size=B) as idx:
@@ -497,7 +497,7 @@ class DenseVariationalDropout(PyroxModule):
         threshold: ``log_alpha`` threshold for declaring a weight pruned.
         pyrox_name: Explicit scope name for NumPyro site registration.
 
-    Example:
+    Examples:
         >>> import jax
         >>> import jax.numpy as jnp
         >>> from numpyro import handlers
@@ -569,32 +569,32 @@ class DenseHierarchical(PyroxModule):
     r"""Hierarchical Bayesian dense layer with multiplicative shrinkage.
 
     Decomposes the effective weight matrix into a deterministic base
-    :math:`\theta \in \mathbb{R}^{D_\mathrm{in} \times D_\mathrm{out}}`
+    $\theta \in \mathbb{R}^{D_\mathrm{in} \times D_\mathrm{out}}$
     multiplied row-wise by a per-input-unit local scale
-    :math:`z^{(\mathrm{loc})} \in \mathbb{R}^{D_\mathrm{in}}` and an
-    overall global scale :math:`z^{(\mathrm{glob})} \in \mathbb{R}`,
+    $z^{(\mathrm{loc})} \in \mathbb{R}^{D_\mathrm{in}}$ and an
+    overall global scale $z^{(\mathrm{glob})} \in \mathbb{R}$,
 
-    .. math::
-
-        W_{ij} = \theta_{ij} \cdot z_i^{(\mathrm{loc})}
-                 \cdot z^{(\mathrm{glob})},
+    $$
+    W_{ij} = \theta_{ij} \cdot z_i^{(\mathrm{loc})}
+             \cdot z^{(\mathrm{glob})},
+    $$
 
     with isotropic Gaussian priors centred at one,
 
-    .. math::
-
-        z_i^{(\mathrm{loc})} \sim \mathcal{N}(1, \sigma_\mathrm{loc}^2),
-        \qquad
-        z^{(\mathrm{glob})} \sim \mathcal{N}(1, \sigma_\mathrm{glob}^2).
+    $$
+    z_i^{(\mathrm{loc})} \sim \mathcal{N}(1, \sigma_\mathrm{loc}^2),
+    \qquad
+    z^{(\mathrm{glob})} \sim \mathcal{N}(1, \sigma_\mathrm{glob}^2).
+    $$
 
     The local scale prunes individual input units (a column of
-    :math:`\theta` whose ``z_loc`` posterior concentrates near zero is
+    $\theta$ whose ``z_loc`` posterior concentrates near zero is
     effectively switched off) while the global scale modulates the
     overall layer activation — the same hierarchical-shrinkage
     structure used by horseshoe-style BNNs (Louizos et al., 2017).
     Both scales are ``pyrox_sample`` sites so any standard NumPyro
     guide (``AutoNormal``, etc.) drives the variational posterior; the
-    deterministic base :math:`\theta` and bias are ``pyrox_param``.
+    deterministic base $\theta$ and bias are ``pyrox_param``.
 
     Plate semantics:
         Same as the rest of ``pyrox.nn``'s Bayesian dense layers — call
@@ -604,16 +604,16 @@ class DenseHierarchical(PyroxModule):
         get scaled by the subsample ratio.
 
     Attributes:
-        in_features: Input dimension :math:`D_\mathrm{in}`.
-        out_features: Output dimension :math:`D_\mathrm{out}`.
+        in_features: Input dimension $D_\mathrm{in}$.
+        out_features: Output dimension $D_\mathrm{out}$.
         bias: Whether to include a deterministic bias term.
-        prior_local_scale: Std :math:`\sigma_\mathrm{loc}` of the local
+        prior_local_scale: Std $\sigma_\mathrm{loc}$ of the local
             scale prior.
-        prior_global_scale: Std :math:`\sigma_\mathrm{glob}` of the
+        prior_global_scale: Std $\sigma_\mathrm{glob}$ of the
             global scale prior.
         pyrox_name: Explicit scope name for NumPyro site registration.
 
-    Example:
+    Examples:
         >>> import jax.numpy as jnp
         >>> from numpyro import handlers
         >>> layer = DenseHierarchical(
@@ -674,21 +674,21 @@ class DenseDVI(PyroxModule):
 
     Propagates a *Gaussian distribution* through the linear layer
     analytically — there is no Monte Carlo sampling. The input is a
-    diagonal-covariance Gaussian :math:`(\mu_x, \sigma_x^2)`, the
-    output is the (still-diagonal) Gaussian :math:`(\mu_y, \sigma_y^2)`
+    diagonal-covariance Gaussian $(\mu_x, \sigma_x^2)$, the
+    output is the (still-diagonal) Gaussian $(\mu_y, \sigma_y^2)$
     induced by an independent-Gaussian variational posterior
-    :math:`q(W) = \mathcal{N}(M, S)` over the weights and a separate
+    $q(W) = \mathcal{N}(M, S)$ over the weights and a separate
     diagonal posterior on the bias.
 
-    With weight posterior mean :math:`M`
-    (shape :math:`D_\mathrm{in}\times D_\mathrm{out}`) and per-element
-    posterior variance :math:`S` (same shape):
+    With weight posterior mean $M$
+    (shape $D_\mathrm{in}\times D_\mathrm{out}$) and per-element
+    posterior variance $S$ (same shape):
 
-    .. math::
-
-        \mu_y = \mu_x M, \qquad
-        \sigma_y^2 = \sigma_x^2 (M \circ M)
-                   + (\mu_x^{\circ 2} + \sigma_x^2)\,S,
+    $$
+    \mu_y = \mu_x M, \qquad
+    \sigma_y^2 = \sigma_x^2 (M \circ M)
+               + (\mu_x^{\circ 2} + \sigma_x^2)\,S,
+    $$
 
     plus the bias mean / variance if enabled. Compared to MC
     estimators, DVI gives zero-variance gradients of the ELBO at the
@@ -697,17 +697,17 @@ class DenseDVI(PyroxModule):
     a single DVI layer in a sampling stack just adds bookkeeping).
 
     The KL between the diagonal-Gaussian variational posterior and a
-    fixed isotropic Gaussian prior :math:`p(W) = \mathcal{N}(0, \pi^2)`
-    is closed-form and is registered with :func:`numpyro.factor` so
+    fixed isotropic Gaussian prior $p(W) = \mathcal{N}(0, \pi^2)$
+    is closed-form and is registered with `numpyro.factor` so
     SVI's ``Trace_ELBO`` picks it up:
 
-    .. math::
-
-        \mathrm{KL}\!\bigl[\mathcal{N}(M, S) \,\big\|\, \mathcal{N}(0, \pi^2)\bigr]
-        = \sum_{ij}\Bigl[
-            \log \pi - \tfrac12\log S_{ij}
-            + \frac{S_{ij} + M_{ij}^2}{2\pi^2} - \tfrac12
-          \Bigr].
+    $$
+    \mathrm{KL}\!\bigl[\mathcal{N}(M, S) \,\big\|\, \mathcal{N}(0, \pi^2)\bigr]
+    = \sum_{ij}\Bigl[
+        \log \pi - \tfrac12\log S_{ij}
+        + \frac{S_{ij} + M_{ij}^2}{2\pi^2} - \tfrac12
+      \Bigr].
+    $$
 
     Plate semantics:
         Same as the rest of the pyrox Bayesian dense family — call
@@ -720,7 +720,7 @@ class DenseDVI(PyroxModule):
         same over-counting trap that affects every per-layer
         ``numpyro.factor``. Keep this layer at the top of the model
         (or outside any data plate) and only plate the observation
-        likelihood::
+        likelihood:
 
             def model(x, y=None):
                 mean, var = dvi(x_mean, x_var)        # KL emitted here
@@ -729,15 +729,15 @@ class DenseDVI(PyroxModule):
                         dist.Normal(mean, jnp.sqrt(var)), obs=y)
 
     Attributes:
-        in_features: Input dimension :math:`D_\mathrm{in}`.
-        out_features: Output dimension :math:`D_\mathrm{out}`.
+        in_features: Input dimension $D_\mathrm{in}$.
+        out_features: Output dimension $D_\mathrm{out}$.
         bias: Whether to include a diagonal-Gaussian bias.
-        prior_scale: Std :math:`\pi` of the isotropic Gaussian prior.
+        prior_scale: Std $\pi$ of the isotropic Gaussian prior.
         init_log_var: Initial value for the log posterior variance
             (a small negative number keeps initial draws tight).
         pyrox_name: Explicit scope name for NumPyro site registration.
 
-    Example:
+    Examples:
         >>> import jax.numpy as jnp
         >>> from numpyro import handlers
         >>> dvi = DenseDVI(in_features=3, out_features=2, pyrox_name="dvi")

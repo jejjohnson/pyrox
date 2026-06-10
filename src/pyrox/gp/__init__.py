@@ -1,28 +1,28 @@
 """Gaussian process building blocks.
 
-* Pure kernel *functions* in :mod:`pyrox.gp._src.kernels` — closed-form
+* Pure kernel *functions* in `pyrox.gp._src.kernels` — closed-form
   math primitives (RBF, Matern, Periodic, Linear, RationalQuadratic,
   Polynomial, Cosine, White, Constant).
-* :class:`Parameterized` kernel classes that wrap those functions with
+* `Parameterized` kernel classes that wrap those functions with
   constraints, priors, and guide metadata — re-exported from this
   module.
-* Multi-output GP structures — :class:`LMCKernel`, :class:`ICMKernel`,
-  :class:`OILMMKernel`, and shared inducing-point helpers for explicit
+* Multi-output GP structures — `LMCKernel`, `ICMKernel`,
+  `OILMMKernel`, and shared inducing-point helpers for explicit
   cross-output structure without monolithic model classes.
-* Abstract protocols (:class:`Kernel`, :class:`Guide`,
-  :class:`Likelihood`) plus five concrete sparse
-  variational guides — :class:`FullRankGuide`, :class:`MeanFieldGuide`,
-  :class:`WhitenedGuide`, :class:`NaturalGuide`, :class:`DeltaGuide`.
+* Abstract protocols (`Kernel`, `Guide`,
+  `Likelihood`) plus five concrete sparse
+  variational guides — `FullRankGuide`, `MeanFieldGuide`,
+  `WhitenedGuide`, `NaturalGuide`, `DeltaGuide`.
   Natural-parameter conversion and damped-update primitives live in
-  ``gaussx`` (:func:`gaussx.mean_cov_to_natural`,
-  :func:`gaussx.natural_to_mean_cov`,
-  :func:`gaussx.damped_natural_update`) — :class:`NaturalGuide`
+  ``gaussx`` (`gaussx.mean_cov_to_natural`,
+  `gaussx.natural_to_mean_cov`,
+  `gaussx.damped_natural_update`) — `NaturalGuide`
   delegates its math there, and so will the future natural-gradient /
   CVI inference paths.
-* Model-facing entry points — :class:`GPPrior`, :class:`ConditionedGP`,
-  :class:`SparseGPPrior`, :class:`PathwiseSampler`,
-  :class:`DecoupledPathwiseSampler`, :func:`gp_factor`,
-  :func:`gp_sample` — the NumPyro-aware shell on top of gaussx linear
+* Model-facing entry points — `GPPrior`, `ConditionedGP`,
+  `SparseGPPrior`, `PathwiseSampler`,
+  `DecoupledPathwiseSampler`, `gp_factor`,
+  `gp_sample` — the NumPyro-aware shell on top of gaussx linear
   algebra.
 
 *Scalable matrix construction* and *solver strategies* — numerically
@@ -32,7 +32,7 @@ accept any ``gaussx.AbstractSolverStrategy``; the default is
 ``gaussx.DenseSolver()``.
 """
 
-# State-space (SDE) kernels live in :mod:`gaussx._ssm` since gaussx
+# State-space (SDE) kernels live in `gaussx._ssm` since gaussx
 # 0.0.11; re-export the public names here so ``pyrox.gp.MaternSDE`` etc.
 # keep resolving for downstream callers.
 from gaussx import (

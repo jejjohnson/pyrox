@@ -74,7 +74,7 @@ class GPPrior(eqx.Module):
     stability on otherwise-singular prior covariances.
 
     Attributes:
-        kernel: Any :class:`pyrox.gp.Kernel` — evaluated on ``X``.
+        kernel: Any `pyrox.gp.Kernel` — evaluated on ``X``.
         X: Training inputs of shape ``(N, D)``.
         mean_fn: Callable ``X -> (N,)`` or ``None`` for the zero mean.
         solver: Any ``gaussx.AbstractSolverStrategy``. Defaults to
@@ -82,7 +82,7 @@ class GPPrior(eqx.Module):
             ``BBMMSolver``, ``ComposedSolver(solve=..., logdet=...)``, etc.
         jitter: Diagonal regularization added to the prior covariance
             for numerical stability. Not a noise model — use
-            ``noise_var`` on :meth:`condition` for that.
+            ``noise_var`` on `condition` for that.
     """
 
     kernel: Kernel
@@ -113,8 +113,8 @@ class GPPrior(eqx.Module):
     def log_prob(self, f: Float[Array, " N"]) -> Float[Array, ""]:
         r"""Marginal log-density of ``f`` under the GP prior.
 
-        Computes :math:`\log \mathcal{N}(f \mid \mu(X), K(X, X) + \text{jitter}\,I)`
-        using :func:`gaussx.log_marginal_likelihood`, so any solver strategy
+        Computes $\log \mathcal{N}(f \mid \mu(X), K(X, X) + \text{jitter}\,I)$
+        using `gaussx.log_marginal_likelihood`, so any solver strategy
         on this prior applies.
         """
         return log_marginal_likelihood(
@@ -127,9 +127,9 @@ class GPPrior(eqx.Module):
     def sample(self, key: Array) -> Float[Array, " N"]:
         r"""Draw ``f \sim p(f) = \mathcal{N}(\mu(X), K + \text{jitter}\,I)``.
 
-        Wraps the prior in a :class:`gaussx.MultivariateNormal` with
-        the configured :attr:`solver`. This is the non-NumPyro analogue
-        of :func:`gp_sample` — useful for tests, diagnostics, and
+        Wraps the prior in a `gaussx.MultivariateNormal` with
+        the configured `solver`. This is the non-NumPyro analogue
+        of `gp_sample` — useful for tests, diagnostics, and
         prior-sample initialization without registering a sample site.
         """
         op = self._prior_operator()
@@ -146,18 +146,18 @@ class GPPrior(eqx.Module):
 
         Precomputes
         ``alpha = (K + (jitter + noise_var) * I)^{-1} (y - mu(X))`` and
-        caches it in the returned :class:`ConditionedGP`. The same
+        caches it in the returned `ConditionedGP`. The same
         ``jitter`` regularization configured on this prior is included
         alongside ``noise_var`` in the conditioned operator and solve, so
         every downstream predict / sample call sees the regularized
         covariance.
 
         The operator construction and any subsequent hyperparameter
-        capture share one :func:`_kernel_context`, so for Pattern B/C
+        capture share one `_kernel_context`, so for Pattern B/C
         kernels with priors the cached operator and the resolved
-        hyperparameters on the returned :class:`ConditionedGP` come from
+        hyperparameters on the returned `ConditionedGP` come from
         the same draw. Downstream consumers (notably
-        :class:`pyrox.gp.PathwiseSampler`) reuse those values to stay
+        `pyrox.gp.PathwiseSampler`) reuse those values to stay
         consistent with the cached operator.
         """
         with _kernel_context(self.kernel):
@@ -187,17 +187,17 @@ class GPPrior(eqx.Module):
 
         Convenience that forwards to ``strategy.fit(self, likelihood, y)``.
         Pick any of the site-based strategies in
-        :mod:`pyrox.gp._inference_nongauss`:
-        :class:`pyrox.gp.LaplaceInference`,
-        :class:`pyrox.gp.GaussNewtonInference`,
-        :class:`pyrox.gp.PosteriorLinearization`,
-        :class:`pyrox.gp.ExpectationPropagation`, or
-        :class:`pyrox.gp.QuasiNewtonInference`. Returns a
-        :class:`pyrox.gp.NonGaussConditionedGP` with the same
+        `pyrox.gp._inference_nongauss`:
+        `pyrox.gp.LaplaceInference`,
+        `pyrox.gp.GaussNewtonInference`,
+        `pyrox.gp.PosteriorLinearization`,
+        `pyrox.gp.ExpectationPropagation`, or
+        `pyrox.gp.QuasiNewtonInference`. Returns a
+        `pyrox.gp.NonGaussConditionedGP` with the same
         ``predict`` / ``predict_mean`` / ``predict_var`` API as the
-        Gaussian-likelihood :class:`ConditionedGP`.
+        Gaussian-likelihood `ConditionedGP`.
 
-        Example::
+        Examples:
 
             from pyrox.gp import (
                 BernoulliLikelihood,
@@ -221,14 +221,14 @@ def _resolve_kernel_hyperparams(
 ) -> tuple[Float[Array, ""], Float[Array, ""]] | None:
     """Capture ``(variance, lengthscale)`` for kernels that expose them.
 
-    Must be called inside the same :func:`_kernel_context` as the
+    Must be called inside the same `_kernel_context` as the
     kernel evaluation that downstream code wants to stay consistent
     with — Pattern B/C kernels register their priors per call, and a
     fresh outer context would resample.
 
     Returns ``None`` for kernels without those names so callers fall
     back to whatever default the consumer expects (e.g.
-    :func:`pyrox._basis.draw_rff_cosine_basis` will read them itself).
+    `pyrox._basis.draw_rff_cosine_basis` will read them itself).
     """
     get_param = getattr(kernel, "get_param", None)
     if get_param is None:
@@ -245,7 +245,7 @@ class ConditionedGP(eqx.Module):
     """GP conditioned on Gaussian-likelihood training observations.
 
     Holds the precomputed training solve ``alpha`` (via
-    :class:`gaussx.PredictionCache`) and the noisy covariance operator so
+    `gaussx.PredictionCache`) and the noisy covariance operator so
     predictions at multiple test sets reuse the training solve.
     """
 
@@ -257,7 +257,7 @@ class ConditionedGP(eqx.Module):
     resolved_hyperparams: tuple[Float[Array, ""], Float[Array, ""]] | None = None
 
     def predict_mean(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
-        r""":math:`\mu_* = \mu(X_*) + K_{*f}\,\alpha`."""
+        r"""$\mu_* = \mu(X_*) + K_{*f}\,\alpha$."""
         with _kernel_context(self.prior.kernel):
             K_cross = self.prior.kernel(X_star, self.prior.X)
         return self.prior.mean(X_star) + predict_mean(self.cache, K_cross)
@@ -265,9 +265,10 @@ class ConditionedGP(eqx.Module):
     def predict_var(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
         r"""Diagonal predictive variance at ``X_*``.
 
-        .. math::
-            \sigma^2_{*,i} = k(x_{*,i}, x_{*,i})
-                - K_{*f}[i,:] \cdot (K + \sigma^2 I)^{-1} K_{f*}[:,i]
+        $$
+        \sigma^2_{*,i} = k(x_{*,i}, x_{*,i})
+            - K_{*f}[i,:] \cdot (K + \sigma^2 I)^{-1} K_{f*}[:,i]
+        $$
 
         ``K_cross`` and ``K_diag`` are computed under one shared kernel
         context so Pattern B / C kernels with prior'd hyperparameters
@@ -290,7 +291,7 @@ class ConditionedGP(eqx.Module):
         """Return ``(mean, variance)`` at ``X_*`` as a tuple.
 
         Both kernel evaluations share a single kernel context; see
-        :meth:`predict_var`.
+        `predict_var`.
         """
         with _kernel_context(self.prior.kernel):
             return self.predict_mean(X_star), self.predict_var(X_star)
@@ -307,7 +308,7 @@ class ConditionedGP(eqx.Module):
         samples from the full predictive covariance are not covered by
         the Wave 2 dense surface. For correlated samples, build the full
         predictive covariance explicitly and draw from
-        :class:`gaussx.MultivariateNormal`.
+        `gaussx.MultivariateNormal`.
         """
         with _kernel_context(self.prior.kernel):
             mean = self.predict_mean(X_star)
@@ -330,7 +331,7 @@ def gp_factor(
     ``log p(y | X, theta) = log N(y | mu, K + (jitter + sigma^2) I)``
     to the NumPyro trace as ``numpyro.factor(name, ...)``. The prior's
     ``jitter`` is included in addition to the observation noise variance
-    so the covariance matches what :meth:`GPPrior.condition` builds. Use
+    so the covariance matches what `GPPrior.condition` builds. Use
     this inside a NumPyro model when the likelihood is Gaussian and you
     want the latent function marginalized analytically.
     """
@@ -363,7 +364,7 @@ def gp_sample(
       Cholesky factor of ``K + jitter I``. This reparameterization is the
       standard fix for mean-field SVI on GP-correlated latents
       (Murray & Adams, 2010): a NumPyro auto-guide such as
-      :class:`numpyro.infer.autoguide.AutoNormal` then approximates the
+      `numpyro.infer.autoguide.AutoNormal` then approximates the
       well-conditioned isotropic posterior over ``u`` instead of the
       ill-conditioned correlated posterior over ``f``.
     * ``guide`` provided — delegate to ``guide.register(name, prior)``.

@@ -4,10 +4,10 @@ Three layers, exposed publicly so users can pick their level of control:
 
 **Layer 1 — Functional primitives (free functions, pure):**
 
-* :func:`ensemble_init` — initialize ``E`` ensemble members + per-member
+* `ensemble_init` — initialize ``E`` ensemble members + per-member
   optimizer states by ``vmap``-ing ``init_fn`` over split keys.
-* :func:`ensemble_step` — one ensemble update step on a batch.
-* :func:`ensemble_loss` — vmapped negative-log-joint from a user-supplied
+* `ensemble_step` — one ensemble update step on a batch.
+* `ensemble_loss` — vmapped negative-log-joint from a user-supplied
   ``log_joint``. Useful when the user wants to compose their own
   loss-and-grad outside ``ensemble_step``.
 
@@ -16,17 +16,17 @@ schedules, custom batching, callbacks, early stopping, etc.
 
 **Layer 2 — NumPyro-like inference ops (eqx.Module classes):**
 
-* :class:`EnsembleMAP` — wraps Layer 1 with ``init`` / ``update`` / ``run``
-  methods, mirroring :class:`numpyro.infer.SVI`'s API.
-* :class:`EnsembleVI` — analogous wrapper around
-  :class:`numpyro.infer.SVI` so VI surrogates fit the same shape.
+* `EnsembleMAP` — wraps Layer 1 with ``init`` / ``update`` / ``run``
+  methods, mirroring `numpyro.infer.SVI`'s API.
+* `EnsembleVI` — analogous wrapper around
+  `numpyro.infer.SVI` so VI surrogates fit the same shape.
 
 **Layer 3 — One-shot sugar (top-level functions):**
 
-* :func:`ensemble_map` — instantiate :class:`EnsembleMAP` and call
+* `ensemble_map` — instantiate `EnsembleMAP` and call
   ``.run`` in one line.
-* :func:`ensemble_vi` — same for :class:`EnsembleVI`.
-* :func:`ensemble_predict` — ``vmap`` a scalar-in predictive over the
+* `ensemble_vi` — same for `EnsembleVI`.
+* `ensemble_predict` — ``vmap`` a scalar-in predictive over the
   leading ensemble axis.
 
 ``optax`` is required for the MAP path (``pip install pyrox[optax]``).
@@ -73,7 +73,7 @@ class EnsembleState(NamedTuple):
     Attributes:
         params: Stacked parameter PyTree. Array leaves carry a leading
             ``(E,)`` axis; non-array leaves (e.g. captured activation
-            functions inside an :class:`equinox.Module`) are shared.
+            functions inside an `equinox.Module`) are shared.
         opt_state: Stacked optax optimizer state with the same axis
             convention.
     """
@@ -83,7 +83,7 @@ class EnsembleState(NamedTuple):
 
 
 class EnsembleResult(NamedTuple):
-    """Output of a full :meth:`EnsembleMAP.run` / :meth:`EnsembleVI.run`.
+    """Output of a full `EnsembleMAP.run` / `EnsembleVI.run`.
 
     Attributes:
         params: Final stacked parameters with leading ``(E,)`` axis.
@@ -110,7 +110,7 @@ def ensemble_init(
         seed: PRNG key, split into ``E`` per-member init keys.
 
     Returns:
-        :class:`EnsembleState` with stacked ``params`` and ``opt_state``.
+        `EnsembleState` with stacked ``params`` and ``opt_state``.
         Array leaves carry a leading ``(E,)`` axis.
     """
     keys = jr.split(seed, ensemble_size)
@@ -139,10 +139,10 @@ def ensemble_loss(
     Returns a function ``loss_fn(params, x_batch, y_batch) -> (loss, grads)``
     that computes
 
-    .. math::
-
-        \mathcal{L}(\theta) = -\, \text{scale} \cdot \log p(y \mid x, \theta)
-            \;-\; w_{\text{prior}} \cdot \log p(\theta).
+    $$
+    \mathcal{L}(\theta) = -\, \text{scale} \cdot \log p(y \mid x, \theta)
+        \;-\; w_{\text{prior}} \cdot \log p(\theta).
+    $$
 
     ``prior_weight=0`` short-circuits the prior term so the user may
     return a placeholder ``0.0`` for ``logprior``.
@@ -186,12 +186,12 @@ def ensemble_step(
     advances its optax state, and returns the updated params + state.
 
     Args:
-        state: Current :class:`EnsembleState`.
+        state: Current `EnsembleState`.
         x_batch: Inputs.
         y_batch: Targets.
         log_joint: ``(params, x, y) -> (loglik, logprior)``.
         optimizer: Same ``optax.GradientTransformation`` passed to
-            :func:`ensemble_init`. Stateless transforms can be re-built
+            `ensemble_init`. Stateless transforms can be re-built
             per call; stateful schedules need to share the same
             instance.
         prior_weight: Weight on ``logprior``; ``0`` ⇒ MLE.
@@ -226,21 +226,21 @@ def ensemble_step(
 class EnsembleMAP(eqx.Module):
     r"""NumPyro-like ensemble MAP/MLE runner.
 
-    Mirrors :class:`numpyro.infer.SVI`'s ``init`` / ``update`` / ``run``
+    Mirrors `numpyro.infer.SVI`'s ``init`` / ``update`` / ``run``
     triplet, but every operation is ensembled by ``vmap`` over the
     leading ``(E,)`` axis.
 
     Per-member objective is the tempered negative log-posterior
 
-    .. math::
+    $$
+    \mathcal{L}_e(\theta_e) = -\frac{N}{|B|}\sum_{i \in B}
+        \log p(y_i \mid x_i, \theta_e)
+        \;-\; w_{\text{prior}} \cdot \log p(\theta_e),
+    $$
 
-        \mathcal{L}_e(\theta_e) = -\frac{N}{|B|}\sum_{i \in B}
-            \log p(y_i \mid x_i, \theta_e)
-            \;-\; w_{\text{prior}} \cdot \log p(\theta_e),
+    where $w_{\text{prior}}$ is `prior_weight`.
 
-    where :math:`w_{\text{prior}}` is :attr:`prior_weight`.
-
-    Example:
+    Examples:
         >>> runner = EnsembleMAP(
         ...     log_joint=log_joint,
         ...     init_fn=init_fn,
@@ -284,7 +284,7 @@ class EnsembleMAP(eqx.Module):
         """One ensemble update step. Mirrors ``numpyro.infer.SVI.update``.
 
         Args:
-            state: Current :class:`EnsembleState`.
+            state: Current `EnsembleState`.
             x_batch: Batch inputs.
             y_batch: Batch targets.
             scale: ``N / |B|`` for mini-batch unbiased SGD-MAP. Defaults
@@ -311,9 +311,9 @@ class EnsembleMAP(eqx.Module):
     ) -> EnsembleResult:
         """Fit the ensemble end-to-end. Mirrors ``numpyro.infer.SVI.run``.
 
-        Internally drives :func:`ensemble_step` via ``lax.scan`` for
+        Internally drives `ensemble_step` via ``lax.scan`` for
         speed; equivalent to a hand-written Python loop over
-        :meth:`update`.
+        `update`.
 
         Args:
             seed: PRNG key used for both init and (when applicable)
@@ -324,7 +324,7 @@ class EnsembleMAP(eqx.Module):
             batch_size: Optional mini-batch size. ``None`` ⇒ full-batch.
 
         Returns:
-            :class:`EnsembleResult` with stacked final params + loss
+            `EnsembleResult` with stacked final params + loss
             history of shape ``(E, num_epochs)``.
         """
         n = y.shape[0]
@@ -379,18 +379,18 @@ class EnsembleMAP(eqx.Module):
 class EnsembleVI(eqx.Module):
     r"""NumPyro-like ensemble variational-inference runner.
 
-    Wraps :class:`numpyro.infer.SVI` + :class:`numpyro.infer.Trace_ELBO`
-    with the same ensemble surface as :class:`EnsembleMAP`.
+    Wraps `numpyro.infer.SVI` + `numpyro.infer.Trace_ELBO`
+    with the same ensemble surface as `EnsembleMAP`.
 
     Per-member objective is the tempered ELBO
 
-    .. math::
+    $$
+    \mathrm{ELBO}(\phi_e) = \mathbb{E}_{q_{\phi_e}}\!
+        \bigl[\log p(y \mid x, \theta)\bigr]
+        - \beta\, \mathrm{KL}\!\bigl(q_{\phi_e}\,\|\,p\bigr),
+    $$
 
-        \mathrm{ELBO}(\phi_e) = \mathbb{E}_{q_{\phi_e}}\!
-            \bigl[\log p(y \mid x, \theta)\bigr]
-            - \beta\, \mathrm{KL}\!\bigl(q_{\phi_e}\,\|\,p\bigr),
-
-    where :math:`\beta` is :attr:`kl_weight`.
+    where $\beta$ is `kl_weight`.
     """
 
     model_fn: Callable[..., None]
@@ -555,7 +555,7 @@ def ensemble_map(
     prior_weight: float = 1.0,
     optimizer: optax.GradientTransformation | None = None,
 ) -> tuple[PyTree, Float[Array, "E T"]]:
-    """One-shot wrapper around :class:`EnsembleMAP`.
+    """One-shot wrapper around `EnsembleMAP`.
 
     Equivalent to ``EnsembleMAP(log_joint, init_fn, optimizer,
     ensemble_size=E, prior_weight=w).run(seed, num_epochs, *data,
@@ -579,7 +579,7 @@ def ensemble_map(
         ``(params_stacked, losses)`` — leading ``(E,)`` axis on
         ``params``; ``losses`` shape ``(E, num_epochs)``.
 
-    Example:
+    Examples:
         >>> params, losses = ensemble_map(
         ...     log_joint, init_fn,
         ...     ensemble_size=16, num_epochs=2000,
@@ -612,7 +612,7 @@ def ensemble_vi(
     optimizer: Any = None,
     num_particles: int = 1,
 ) -> tuple[PyTree, Float[Array, "E T"]]:
-    """One-shot wrapper around :class:`EnsembleVI`.
+    """One-shot wrapper around `EnsembleVI`.
 
     Args:
         model_fn: NumPyro model ``(x, y) -> None``.
@@ -653,15 +653,15 @@ def ensemble_predict(
 ) -> Array:
     """Vmap ``predict_fn`` over the leading ensemble axis of params.
 
-    Uses :func:`equinox.filter_vmap` so it works whether
+    Uses `equinox.filter_vmap` so it works whether
     ``params_stacked`` is a pure-array PyTree or an
-    :class:`equinox.Module` containing non-array leaves (e.g. captured
+    `equinox.Module` containing non-array leaves (e.g. captured
     ``jax.nn.tanh``). Array leaves are mapped over axis 0; non-array
     leaves are broadcast.
 
     Args:
-        params_stacked: PyTree returned by :func:`ensemble_map` /
-            :func:`ensemble_vi` / :class:`EnsembleMAP.run`; every array
+        params_stacked: PyTree returned by `ensemble_map` /
+            `ensemble_vi` / `EnsembleMAP.run`; every array
             leaf has a leading ``(E,)`` axis.
         predict_fn: ``(params, x) -> y``.
         x_new: Inputs to predict at; shared across all members.

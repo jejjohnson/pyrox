@@ -1,12 +1,12 @@
 """Spectral-Normalized Gaussian Process (SNGP) output layer.
 
-* :class:`RandomFeatureGaussianProcess` — SNGP output head (Liu et al.,
-  2020). RFF feature map :math:`\\phi(x)` plus a linear mean head and
+* `RandomFeatureGaussianProcess` — SNGP output head (Liu et al.,
+  2020). RFF feature map $\\phi(x)$ plus a linear mean head and
   a Laplace covariance over the linear weights.
 
 The Laplace-approximation covariance container
 (``LaplaceRandomFeatureCovariance``) lives in ``geonnax`` and is
-re-exported from :mod:`pyrox.nn._geonnax` for backwards-compatible
+re-exported from `pyrox.nn._geonnax` for backwards-compatible
 imports.
 
 This module implements *just the SNGP head* — spectral normalisation
@@ -39,26 +39,26 @@ class RandomFeatureGaussianProcess(PyroxModule):
 
     Forward (mean):
 
-    .. math::
+    $$
+    \phi(x) = \sqrt{\tfrac{2}{D}}\,\cos\!\bigl(W\, x / \ell + b\bigr),
+    \qquad \mu(x) = \phi(x)\, H + b_H.
+    $$
 
-        \phi(x) = \sqrt{\tfrac{2}{D}}\,\cos\!\bigl(W\, x / \ell + b\bigr),
-        \qquad \mu(x) = \phi(x)\, H + b_H.
-
-    The frequencies :math:`W` and bias :math:`b` of the RFF map are
+    The frequencies $W$ and bias $b$ of the RFF map are
     *frozen* (they implicitly define the kernel approximation): they
     are registered as ``pyrox_param`` sites for substitution and
-    checkpointing, then guarded with :func:`jax.lax.stop_gradient`
-    inside :meth:`feature_map` so SGD-style optimisers leave them
-    untouched. The lengthscale :math:`\ell`, the linear head
-    :math:`H, b_H`, and the Laplace precision are the trainable /
+    checkpointing, then guarded with `jax.lax.stop_gradient`
+    inside `feature_map` so SGD-style optimisers leave them
+    untouched. The lengthscale $\ell$, the linear head
+    $H, b_H$, and the Laplace precision are the trainable /
     updated quantities.
 
-    Predictive variance — when :math:`\hat{\Lambda}` is the current
+    Predictive variance — when $\hat{\Lambda}$ is the current
     precision matrix:
 
-    .. math::
-
-        \sigma^2(x_*) = \phi(x_*)^\top \hat{\Lambda}^{-1}\, \phi(x_*).
+    $$
+    \sigma^2(x_*) = \phi(x_*)^\top \hat{\Lambda}^{-1}\, \phi(x_*).
+    $$
 
     Training pattern (one minibatch):
 
@@ -67,7 +67,7 @@ class RandomFeatureGaussianProcess(PyroxModule):
        step on the SVI parameter store as usual.
     2. After the gradient step, call
        ``new_layer = layer.update_precision(features)`` where
-       ``features`` is the result of :meth:`feature_map` evaluated on
+       ``features`` is the result of `feature_map` evaluated on
        the same minibatch using the *updated* parameters. This returns
        a new layer with the LRFC's precision EMA-updated.
 
@@ -81,17 +81,17 @@ class RandomFeatureGaussianProcess(PyroxModule):
         plate the observation likelihood.
 
     Attributes:
-        in_features: Input dimension :math:`D_\mathrm{in}`.
-        num_features: Number of random Fourier features :math:`D`.
-        out_features: Output dimension :math:`D_\mathrm{out}`.
-        init_lengthscale: Initial lengthscale :math:`\ell`. Optimised
+        in_features: Input dimension $D_\mathrm{in}$.
+        num_features: Number of random Fourier features $D$.
+        out_features: Output dimension $D_\mathrm{out}$.
+        init_lengthscale: Initial lengthscale $\ell$. Optimised
             during training as a positive ``pyrox_param``.
         W_init: Frozen RFF frequencies, shape ``(D_in, D)``, drawn from
             a standard Normal (the RBF spectral density).
         bias_init: Frozen RFF biases, shape ``(D,)``, drawn from
             ``Uniform(0, 2 pi)``.
         output_linear_init: Init for the linear head, shape ``(D, D_out)``.
-        covariance: The :class:`LaplaceRandomFeatureCovariance` instance.
+        covariance: The `LaplaceRandomFeatureCovariance` instance.
         pyrox_name: Explicit scope name for NumPyro site registration.
 
     References:
@@ -172,7 +172,7 @@ class RandomFeatureGaussianProcess(PyroxModule):
         Only the frequency/bias/lengthscale arrays are needed for the
         feature map; the linear-head params are registered inside
         ``__call__`` so disabled branches (e.g. pure feature-map usage
-        via :meth:`feature_map`) don't materialise unused sites.
+        via `feature_map`) don't materialise unused sites.
         """
         W = jax.lax.stop_gradient(self.pyrox_param("W", self.core.W))
         b = jax.lax.stop_gradient(self.pyrox_param("bias", self.core.bias))
@@ -189,10 +189,10 @@ class RandomFeatureGaussianProcess(PyroxModule):
 
     @pyrox_method
     def feature_map(self, x: Float[Array, "*batch D_in"]) -> Float[Array, "*batch D"]:
-        r"""Random Fourier feature map: :math:`\phi(x) = \sqrt{2/D}\,\cos(Wx/\ell + b)`.
+        r"""Random Fourier feature map: $\phi(x) = \sqrt{2/D}\,\cos(Wx/\ell + b)$.
 
         Frequencies and bias are registered as ``pyrox_param`` sites for
-        substitution / checkpointing, but :func:`jax.lax.stop_gradient`
+        substitution / checkpointing, but `jax.lax.stop_gradient`
         is applied so SVI's gradient-based optimisers leave them
         frozen at their init values. The lengthscale is the active
         bandwidth control and is constrained positive.
@@ -240,7 +240,7 @@ class RandomFeatureGaussianProcess(PyroxModule):
         """Return a new layer with an EMA-updated Laplace precision.
 
         Pure-functional: ``self`` is unchanged. Pass features computed
-        on the current minibatch (e.g. via :meth:`feature_map`) — the
+        on the current minibatch (e.g. via `feature_map`) — the
         update folds the empirical second moment into the EMA. Call
         this once per training batch *after* the gradient step.
         """

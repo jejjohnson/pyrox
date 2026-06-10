@@ -3,14 +3,14 @@
 After the ``geonnax`` split, ``pyrox.nn`` consists of:
 
 * **Deterministic primitives** (re-exported from ``geonnax`` via
-  :mod:`pyrox.nn._geonnax`): SIREN, MFN, conditioning bases, encoders,
+  `pyrox.nn._geonnax`): SIREN, MFN, conditioning bases, encoders,
   Slepian, orthogonal RFF, SNGP covariance container, etc.
 * **Bayesian wrappers** (per-family modules): ``_dense``, ``_features``,
   ``_siren``, ``_mfn``, ``_vssgp``, ``_heteroscedastic``, ``_ensemble``,
   ``_sngp``, ``_conditioning``, ``_bnf``, ``_slepian``. Each holds a
   ``geonnax`` core and registers NumPyro sample / param sites.
-* **BNF + pandas-free helpers** (:mod:`pyrox.nn._bnf`,
-  :mod:`pyrox.nn._features`).
+* **BNF + pandas-free helpers** (`pyrox.nn._bnf`,
+  `pyrox.nn._features`).
 
 ``MCDropout`` and ``LinearCore`` were dropped — use
 ``equinox.nn.Dropout(p=rate, inference=False)`` and

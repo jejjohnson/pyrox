@@ -1,19 +1,19 @@
 """Heteroscedastic output layers (Collier et al., 2021).
 
-* :class:`MCSoftmaxDenseFA` — multi-class output with input-dependent
+* `MCSoftmaxDenseFA` — multi-class output with input-dependent
   low-rank-plus-diagonal logit noise, MC-averaged softmax probabilities.
-* :class:`MCSigmoidDenseFA` — same noise model, sigmoid output for
+* `MCSigmoidDenseFA` — same noise model, sigmoid output for
   multi-label / binary classification.
 
 Both share the same heteroscedastic logit-noise model — given an
-input-dependent low-rank factor :math:`V(x) \\in \\mathbb{R}^{C \\times r}`
-and diagonal :math:`\\sigma(x) \\in \\mathbb{R}^C`,
+input-dependent low-rank factor $V(x) \\in \\mathbb{R}^{C \\times r}$
+and diagonal $\\sigma(x) \\in \\mathbb{R}^C$,
 
-.. math::
-
-    \\eta(x) = W_\\mu x + b_\\mu + \\epsilon, \\qquad
-    \\Sigma(x) = V(x) V(x)^\\top + \\mathrm{diag}\\!\\bigl(\\sigma^2(x)\\bigr),
-    \\;\\; \\epsilon \\sim \\mathcal{N}(0, \\Sigma(x)).
+$$
+\\eta(x) = W_\\mu x + b_\\mu + \\epsilon, \\qquad
+\\Sigma(x) = V(x) V(x)^\\top + \\mathrm{diag}\\!\\bigl(\\sigma^2(x)\\bigr),
+\\;\\; \\epsilon \\sim \\mathcal{N}(0, \\Sigma(x)).
+$$
 
 Predictions average a small number of Monte Carlo softmax / sigmoid
 samples.
@@ -101,7 +101,7 @@ class _HeteroscedasticBase(PyroxModule):
         Each of the six arrays (``W_loc``/``b_loc``/``W_scale``/
         ``b_scale``/``W_diag``/``b_diag``) is registered once per
         ``model()`` call using the core's stored value as the init,
-        then folded back into a new core via :func:`equinox.tree_at`.
+        then folded back into a new core via `equinox.tree_at`.
         """
         W_loc = self.pyrox_param("W_loc", self.core.W_loc)
         b_loc = self.pyrox_param("b_loc", self.core.b_loc)
@@ -145,21 +145,21 @@ class MCSoftmaxDenseFA(_HeteroscedasticBase):
     Implements Collier et al. (2021): the logit covariance is
     input-dependent low-rank-plus-diagonal,
 
-    .. math::
+    $$
+    \eta(x) = W_\mu x + b_\mu + \epsilon, \qquad
+    \Sigma(x) = V(x) V(x)^\top + \operatorname{diag}\!\bigl(\sigma^2(x)\bigr),
+    \;\; \epsilon \sim \mathcal{N}(0, \Sigma(x)),
+    $$
 
-        \eta(x) = W_\mu x + b_\mu + \epsilon, \qquad
-        \Sigma(x) = V(x) V(x)^\top + \operatorname{diag}\!\bigl(\sigma^2(x)\bigr),
-        \;\; \epsilon \sim \mathcal{N}(0, \Sigma(x)),
-
-    where :math:`V(x) = \mathrm{reshape}(W_V x + b_V, [C, r])` and
-    :math:`\sigma(x) = \exp(W_\sigma x + b_\sigma)`. Output is the
+    where $V(x) = \mathrm{reshape}(W_V x + b_V, [C, r])$ and
+    $\sigma(x) = \exp(W_\sigma x + b_\sigma)$. Output is the
     Monte Carlo average of softmaxed perturbed logits
 
-    .. math::
-
-        \hat{p}(y = k \mid x) \approx
-        \frac{1}{S}\sum_{s=1}^{S}
-        \mathrm{softmax}_k\!\bigl(\eta(x) + \epsilon_s\bigr).
+    $$
+    \hat{p}(y = k \mid x) \approx
+    \frac{1}{S}\sum_{s=1}^{S}
+    \mathrm{softmax}_k\!\bigl(\eta(x) + \epsilon_s\bigr).
+    $$
 
     All linear factors are deterministic ``pyrox_param`` sites — the
     layer is heteroscedastic but not Bayesian over its weights. Use it
@@ -173,17 +173,17 @@ class MCSoftmaxDenseFA(_HeteroscedasticBase):
         ``numpyro.prng_key()``.
 
     Attributes:
-        in_features: Input dimension :math:`D_\mathrm{in}`.
-        num_classes: Number of classes :math:`C`.
-        rank: Rank :math:`r` of the low-rank factor :math:`V(x)`.
-        num_mc_samples: Number of MC softmax samples :math:`S` per
+        in_features: Input dimension $D_\mathrm{in}$.
+        num_classes: Number of classes $C$.
+        rank: Rank $r$ of the low-rank factor $V(x)$.
+        num_mc_samples: Number of MC softmax samples $S$ per
             forward call.
         diag_init_bias: Initial value for the diagonal-scale bias
             ``b_diag`` (a small negative number keeps initial noise
             small).
         pyrox_name: Explicit scope name for NumPyro site registration.
 
-    Example:
+    Examples:
         >>> import jax.random as jr
         >>> import jax.numpy as jnp
         >>> from numpyro import handlers
@@ -219,18 +219,18 @@ class MCSigmoidDenseFA(_HeteroscedasticBase):
     r"""Heteroscedastic multi-label output layer (FA noise + sigmoid).
 
     Identical low-rank-plus-diagonal logit-noise model as
-    :class:`MCSoftmaxDenseFA`, but the per-class outputs are
+    `MCSoftmaxDenseFA`, but the per-class outputs are
     independent Bernoullis — final probabilities are the MC average of
     *element-wise* sigmoids, not a softmax. Use this for multi-label
     classification or independent binary heads.
 
-    .. math::
+    $$
+    \hat{p}(y_k = 1 \mid x) \approx
+    \frac{1}{S}\sum_{s=1}^{S}
+    \sigma\!\bigl(\eta(x) + \epsilon_s\bigr)_k.
+    $$
 
-        \hat{p}(y_k = 1 \mid x) \approx
-        \frac{1}{S}\sum_{s=1}^{S}
-        \sigma\!\bigl(\eta(x) + \epsilon_s\bigr)_k.
-
-    See :class:`MCSoftmaxDenseFA` for the noise model, plate semantics,
+    See `MCSoftmaxDenseFA` for the noise model, plate semantics,
     init API, and references.
     """
 
