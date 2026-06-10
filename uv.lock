@@ -617,8 +617,8 @@ dependencies = [
 
 [[package]]
 name = "geonnax"
-version = "0.0.2"
-source = { git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.2#37e1d428fb07a2da23c3f8198a8e76b0cf410513" }
+version = "0.0.5"
+source = { git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.5#4ba4e4b22a43106249636e103d00570eb4ceb7d2" }
 dependencies = [
     { name = "einops" },
     { name = "einx" },
@@ -1954,7 +1954,7 @@ requires-dist = [
     { name = "einx", specifier = ">=0.4.3" },
     { name = "equinox", specifier = ">=0.13.8" },
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=cc59a6c3c51f342279d3d27c6175061da8608677" },
-    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.2" },
+    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.5" },
     { name = "jax", specifier = ">=0.10" },
     { name = "lineax", specifier = ">=0.1.1" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },

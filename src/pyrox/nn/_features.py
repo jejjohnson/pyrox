@@ -5,8 +5,9 @@ This module hosts two related groups:
 1. *Pure-JAX feature helpers* — :func:`fourier_features`,
    :func:`seasonal_frequencies`, :func:`seasonal_features`,
    :func:`interaction_features`, :func:`standardize`,
-   :func:`unstandardize`. Stateless functions used by the deterministic
-   coordinate-encoder layers in :mod:`pyrox.nn._layers`.
+   :func:`unstandardize`. Stateless functions re-exported from
+   :mod:`geonnax.basis` (the implementations moved there with the
+   package split) for the deterministic coordinate-encoder layers.
 2. *Bayesian random-feature layers* — :class:`RBFFourierFeatures`,
    :class:`MaternFourierFeatures`, :class:`LaplaceFourierFeatures`,
    :class:`RandomKitchenSinks`, :class:`RBFCosineFeatures`,
@@ -30,191 +31,30 @@ project convention.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 import einx
 import equinox as eqx
 import geonnax
-import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
-from jaxtyping import Array, Float, Int
+
+# Pure-JAX feature transforms moved to geonnax with the package split;
+# re-export them (self-alias form marks them as intentional re-exports)
+# so `from pyrox.nn._features import fourier_features` keeps working.
+from geonnax.basis import (
+    fourier_features as fourier_features,
+    interaction_features as interaction_features,
+    seasonal_features as seasonal_features,
+    seasonal_frequencies as seasonal_frequencies,
+    standardize as standardize,
+    unstandardize as unstandardize,
+)
+from jaxtyping import Array, Float
 
 from pyrox._basis import fourier_basis, spectral_density
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
 from pyrox.gp._context import _kernel_context
 from pyrox.gp._protocols import Kernel
-
-
-def fourier_features(
-    x: Float[Array, " N"],
-    max_degree: int,
-    *,
-    rescale: bool = False,
-) -> Float[Array, "N two_max_degree"]:
-    r"""Cos/sin Fourier basis at dyadic frequencies.
-
-    For each input element and each degree :math:`d \in \{0, \dots,
-    D-1\}`, evaluates
-
-    .. math::
-
-        \phi_{d, \cos}(x) = \cos(2\pi \cdot 2^d \cdot x), \qquad
-        \phi_{d, \sin}(x) = \sin(2\pi \cdot 2^d \cdot x).
-
-    Returns the columns concatenated as ``[cos_0, ..., cos_{D-1},
-    sin_0, ..., sin_{D-1}]``, matching Google's bayesnf layout.
-
-    Args:
-        x: Length-``N`` input vector.
-        max_degree: Number of dyadic frequencies ``D``. Output has
-            ``2 * max_degree`` columns.
-        rescale: If ``True``, divide each ``(cos_d, sin_d)`` pair by
-            ``d + 1`` to bias the prior toward lower-frequency basis
-            functions.
-
-    Returns:
-        Array of shape ``(N, 2 * max_degree)``.
-    """
-    degrees = jnp.arange(max_degree)
-    # Broadcast x to (N, D) frequencies without an explicit reshape.
-    z = einx.id("n -> n d", x, d=max_degree) * (2.0 * jnp.pi * 2.0**degrees)
-    feats = jnp.concatenate([jnp.cos(z), jnp.sin(z)], axis=-1)
-    if rescale:
-        denom = jnp.concatenate([degrees + 1, degrees + 1])
-        feats = feats / denom
-    return feats
-
-
-def seasonal_frequencies(
-    periods: Sequence[float],
-    harmonics: Sequence[int],
-) -> tuple[list[int], list[float]]:
-    r"""Flatten ``(period, harmonic_count)`` pairs into Python lists.
-
-    For each period :math:`\tau_p` with :math:`H_p` harmonics, emits
-    frequencies :math:`f_{p, h} = h / \tau_p` for :math:`h = 1, \dots,
-    H_p`. The total length is :math:`F = \sum_p H_p`.
-
-    Inputs are **Python sequences**, not JAX arrays, so this helper
-    runs at trace time and never triggers a concretization error under
-    ``jax.jit``. Most callers won't use it directly; it's exposed for
-    symmetry with :func:`seasonal_features`.
-
-    Args:
-        periods: Period values.
-        harmonics: Number of harmonics per period.
-
-    Returns:
-        ``(period_index, frequency)``: two Python lists of length
-        :math:`F = \sum_p H_p`.
-    """
-    period_index: list[int] = []
-    freqs: list[float] = []
-    for p_idx, (period, n_h) in enumerate(zip(periods, harmonics, strict=True)):
-        for h in range(1, int(n_h) + 1):
-            period_index.append(p_idx)
-            freqs.append(float(h) / float(period))
-    return period_index, freqs
-
-
-def seasonal_features(
-    x: Float[Array, " N"],
-    periods: Sequence[float],
-    harmonics: Sequence[int],
-    *,
-    rescale: bool = False,
-) -> Float[Array, "N two_F"]:
-    r"""Cos/sin features at multiples of :math:`2\pi / \tau_p`.
-
-    For each period :math:`\tau_p` with :math:`H_p` harmonics, evaluates
-
-    .. math::
-
-        \phi_{p, h, \cos}(x) = \cos(2\pi h x / \tau_p), \qquad
-        \phi_{p, h, \sin}(x) = \sin(2\pi h x / \tau_p),
-
-    for :math:`h = 1, \dots, H_p`. Returns the cos columns concatenated
-    with the sin columns, length :math:`F = \sum_p H_p` each.
-
-    ``periods`` and ``harmonics`` are **Python sequences** (tuples,
-    lists, or 0-d JAX arrays wrapped at the call site). Keeping them as
-    Python values lets the function run cleanly under ``jax.jit`` and
-    ``lax.scan`` without triggering a concretization error.
-
-    Args:
-        x: Time/index input, shape ``(N,)``.
-        periods: Period values.
-        harmonics: Harmonics per period.
-        rescale: If ``True``, divide each ``(cos, sin)`` pair by its
-            within-period harmonic index, biasing the prior toward
-            longer-wavelength modes within each period.
-
-    Returns:
-        Array of shape ``(N, 2 * F)``.
-    """
-    _, freq_list = seasonal_frequencies(periods, harmonics)
-    if not freq_list:
-        return jnp.zeros((x.shape[0], 0), dtype=x.dtype)
-    freqs = jnp.asarray(freq_list, dtype=jnp.float32)
-    z = einx.id("n -> n f", x, f=freqs.shape[0]) * (2.0 * jnp.pi * freqs)
-    feats = jnp.concatenate([jnp.cos(z), jnp.sin(z)], axis=-1)
-    if rescale:
-        # Rescale by within-period harmonic index (1, 2, ..., H_p).
-        h_within_list: list[float] = []
-        for n_h in harmonics:
-            h_within_list.extend(range(1, int(n_h) + 1))
-        h_within = jnp.asarray(h_within_list, dtype=jnp.float32)
-        denom = jnp.concatenate([h_within, h_within])
-        feats = feats / denom
-    return feats
-
-
-def interaction_features(
-    x: Float[Array, "N D"],
-    pairs: Int[Array, "K 2"],
-) -> Float[Array, "N K"]:
-    r"""Element-wise products on selected pairs of input columns.
-
-    For each pair :math:`(i, j)` and each row :math:`n`, computes
-    :math:`x_{n, i} \cdot x_{n, j}`.
-
-    Args:
-        x: Input matrix, shape ``(N, D)``.
-        pairs: Index pairs, shape ``(K, 2)``. Empty pairs yield an
-            ``(N, 0)`` output.
-
-    Returns:
-        Array of shape ``(N, K)`` of pairwise products.
-    """
-    if pairs.shape[0] == 0:
-        return jnp.zeros((x.shape[0], 0), dtype=x.dtype)
-    # x[:, pairs] has shape (N, K, 2); reduce the paired axis with prod.
-    selected = x[:, pairs]
-    return einx.prod("n k [two]", selected)
-
-
-def standardize(
-    x: Float[Array, "*shape"],
-    mu: Float[Array, "*shape"],
-    std: Float[Array, "*shape"],
-) -> Float[Array, "*shape"]:
-    """Affine standardize: ``(x - mu) / std``.
-
-    Broadcasts ``mu`` and ``std`` against ``x`` per the JAX broadcasting
-    rules. ``std`` is *not* clamped; pass a positive value or guard
-    upstream.
-    """
-    return (x - mu) / std
-
-
-def unstandardize(
-    z: Float[Array, "*shape"],
-    mu: Float[Array, "*shape"],
-    std: Float[Array, "*shape"],
-) -> Float[Array, "*shape"]:
-    """Inverse of :func:`standardize`: ``z * std + mu``."""
-    return z * std + mu
+from pyrox.nn._batching import vmap_over_flat_batch
 
 
 # ---------------------------------------------------------------------------
@@ -239,18 +79,13 @@ def _vmap_rff_forward(
 ) -> Float[Array, "*batch D_rff"]:
     """Vmap ``geonnax.rff_forward`` over the leading batch axis of ``x``.
 
-    The geonnax core is single-example ``(D_in,) -> (D_rff,)``; here we
-    flatten arbitrary leading batch dims to ``(B, D_in)``, vmap, then
-    restore the batch shape. This preserves the documented support for
+    The geonnax core is single-example ``(D_in,) -> (D_rff,)``;
+    :func:`vmap_over_flat_batch` preserves the documented support for
     both unbatched ``(D_in,)`` and batched ``(*batch, D_in)`` callers.
     """
-    D_in = x.shape[-1]
-    batch_shape = x.shape[:-1]
-    flat = x.reshape(-1, D_in)
-    out_flat = jax.vmap(lambda xi: geonnax.rff_forward(W, lengthscale, n_features, xi))(
-        flat
+    return vmap_over_flat_batch(
+        lambda xi: geonnax.rff_forward(W, lengthscale, n_features, xi), x
     )
-    return out_flat.reshape((*batch_shape, out_flat.shape[-1]))
 
 
 def _vmap_rff_cosine_forward(
@@ -262,13 +97,9 @@ def _vmap_rff_cosine_forward(
 ) -> Float[Array, "*batch n_features"]:
     """Vmap ``geonnax.rff_cosine_forward`` with the same flatten/restore
     pattern as :func:`_vmap_rff_forward`."""
-    D_in = x.shape[-1]
-    batch_shape = x.shape[:-1]
-    flat = x.reshape(-1, D_in)
-    out_flat = jax.vmap(
-        lambda xi: geonnax.rff_cosine_forward(W, b, lengthscale, n_features, xi)
-    )(flat)
-    return out_flat.reshape((*batch_shape, out_flat.shape[-1]))
+    return vmap_over_flat_batch(
+        lambda xi: geonnax.rff_cosine_forward(W, b, lengthscale, n_features, xi), x
+    )
 
 
 class RBFFourierFeatures(PyroxModule):

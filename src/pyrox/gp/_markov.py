@@ -360,15 +360,15 @@ def _dense_sde_gram(
     # Pairwise absolute time lags |tᵢ - tⱼ| as an (N, N) grid.
     diffs = jnp.abs(einx.subtract("i, j -> i j", times, times))
     # Vectorise H exp(F |dt|) P_inf H^T over the (N, N) lag grid.
-    flat_dt = einx.rearrange("i j -> (i j)", diffs)
+    flat_dt = einx.id("i j -> (i j)", diffs)
 
     def _k(tau: Float[Array, ""]) -> Float[Array, ""]:
         return (H @ jax.scipy.linalg.expm(F * tau) @ P_inf @ H.T)[0, 0]
 
     K_flat = jax.vmap(_k)(flat_dt)
-    # einx.rearrange is typed as possibly returning a tuple (multi-output
+    # einx.id is typed as possibly returning a tuple (multi-output
     # patterns); narrow back to a single array for the typechecker.
-    K_grid = jnp.asarray(einx.rearrange("(i j) -> i j", K_flat, i=times.shape[0]))
+    K_grid = jnp.asarray(einx.id("(i j) -> i j", K_flat, i=times.shape[0]))
     K = gaussx.symmetrize(K_grid)
     return K.at[jnp.diag_indices_from(K)].add(1e-8)
 

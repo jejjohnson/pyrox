@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import einx
 import equinox as eqx
 import geonnax
 import jax
@@ -25,6 +26,7 @@ from geonnax import Rank1ProjInit
 from jaxtyping import Array, Float, PRNGKeyArray
 
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
+from pyrox.nn._batching import vmap_over_flat_batch
 
 
 # Pre-refactor private alias retained for tests / external callers that imported
@@ -35,20 +37,13 @@ _Rank1ProjInit = Rank1ProjInit
 def _vmap_collapsed(core_fn, x: Float[Array, ...]) -> Float[Array, ...]:
     """Apply a single-example ``core_fn`` over arbitrary leading batch dims.
 
-    Flattens ``x`` from ``(*batch, D)`` to ``(B, D)``, runs
-    ``jax.vmap(core_fn)``, then restores the batch dims. Output gains
-    a leading ensemble axis ``M`` because the geonnax cores are
+    Delegates the flatten / vmap / restore dance to
+    :func:`vmap_over_flat_batch`, then moves the per-example ensemble
+    axis ``M`` to the front because the geonnax cores are
     single-example BatchEnsemble layers.
     """
-    feature_dim = x.shape[-1]
-    batch_shape = x.shape[:-1]
-    flat = x.reshape(-1, feature_dim)
-    out_flat = jax.vmap(core_fn)(flat)  # (B, M, D_out)
-    # Move ensemble axis to the front: (B, M, D_out) -> (M, B, D_out).
-    out_flat = jnp.swapaxes(out_flat, 0, 1)
-    M = out_flat.shape[0]
-    out_features = out_flat.shape[-1]
-    return out_flat.reshape((M, *batch_shape, out_features))
+    out = vmap_over_flat_batch(core_fn, x)  # (*batch, M, D_out)
+    return einx.id("b... m k -> m b... k", out)
 
 
 class DenseRank1(PyroxModule):
@@ -334,13 +329,11 @@ class LayerNormEnsemble(PyroxModule):
         # Core takes (M, D) → (M, D); collapse arbitrary intermediate batch
         # dims to a single leading axis, vmap over it, then restore. The
         # ensemble axis stays at position 0 because the core is per-member.
-        M = self.ensemble_size
-        D = self.feature_dim
         batch_shape = x.shape[1:-1]
-        flat = x.reshape(M, -1, D)  # (M, B, D)
+        flat = einx.id("m b... d -> m (b...) d", x)  # (M, B, D)
         # vmap over the B axis (position 1 on both input and output).
         out = jax.vmap(new_core, in_axes=1, out_axes=1)(flat)  # (M, B, D)
-        return out.reshape((M, *batch_shape, D))
+        return einx.id("m (b...) d -> m b... d", out, b=batch_shape)
 
 
 class MultiHeadAttentionBE(PyroxModule):

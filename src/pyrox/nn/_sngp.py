@@ -16,6 +16,7 @@ Tier 2 ``spectral_norm`` gap) and the user is responsible for that.
 
 from __future__ import annotations
 
+import einx
 import equinox as eqx
 import geonnax
 import jax
@@ -24,6 +25,7 @@ import numpyro.distributions as dist
 from jaxtyping import Array, Float, PRNGKeyArray
 
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
+from pyrox.nn._batching import vmap_over_flat_batch
 
 
 class RandomFeatureGaussianProcess(PyroxModule):
@@ -196,13 +198,8 @@ class RandomFeatureGaussianProcess(PyroxModule):
         bandwidth control and is constrained positive.
         """
         new_core = self._swap_feature_core()
-        # geonnax feature_map is single-example `(D_in,) -> (D,)`. Flatten
-        # arbitrary leading batch dims, vmap, then restore.
-        D_in = x.shape[-1]
-        batch_shape = x.shape[:-1]
-        flat = x.reshape(-1, D_in)
-        out = jax.vmap(new_core.feature_map)(flat)
-        return out.reshape((*batch_shape, self.num_features))
+        # geonnax feature_map is single-example `(D_in,) -> (D,)`.
+        return vmap_over_flat_batch(new_core.feature_map, x)
 
     @pyrox_method
     def __call__(
@@ -226,24 +223,16 @@ class RandomFeatureGaussianProcess(PyroxModule):
             (H, b_out),
         )
 
-        # geonnax `__call__` is single-example `(D_in,)`. Flatten leading
-        # batch dims, vmap, restore. `return_cov=False` keeps the output
-        # a plain array; `return_cov=True` returns (mean, var) per example
-        # and we restore the per-batch axes on both.
-        D_in = x.shape[-1]
-        batch_shape = x.shape[:-1]
-        flat = x.reshape(-1, D_in)
-
+        # geonnax `__call__` is single-example `(D_in,)`. `return_cov=False`
+        # keeps the output a plain array; `return_cov=True` returns
+        # (mean, var) per example and the helper restores both leaves.
         if return_cov:
-            mean_flat, var_flat = jax.vmap(lambda xi: new_core(xi, return_cov=True))(
-                flat
+            mean, var = vmap_over_flat_batch(
+                lambda xi: new_core(xi, return_cov=True), x
             )
-            mean = mean_flat.reshape((*batch_shape, self.out_features))
-            var = var_flat.reshape(batch_shape)
             return mean, var
 
-        mean_flat = jax.vmap(new_core)(flat)
-        return mean_flat.reshape((*batch_shape, self.out_features))
+        return vmap_over_flat_batch(new_core, x)
 
     def update_precision(
         self, features: Float[Array, "*batch D"]
@@ -257,6 +246,6 @@ class RandomFeatureGaussianProcess(PyroxModule):
         """
         # Flatten any leading batch dims down to the single batch axis the
         # geonnax `update_precision` expects.
-        flat = features.reshape(-1, self.num_features)
+        flat = einx.id("b... d -> (b...) d", features)
         new_core = self.core.update_precision(flat)
         return eqx.tree_at(lambda layer: layer.core, self, new_core)
