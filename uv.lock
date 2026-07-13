@@ -1909,7 +1909,7 @@ wheels = [
 
 [[package]]
 name = "pyrox"
-version = "0.0.1"
+version = "0.1.0"
 source = { editable = "packages/pyrox" }
 dependencies = [
     { name = "einx" },
@@ -1943,7 +1943,7 @@ provides-extras = ["optax", "colab"]
 
 [[package]]
 name = "pyrox-gp"
-version = "0.0.1"
+version = "0.1.0"
 source = { editable = "packages/pyrox-gp" }
 dependencies = [
     { name = "einx" },
@@ -2050,7 +2050,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.42" }]
 
 [[package]]
 name = "pyrox-nn"
-version = "0.0.1"
+version = "0.1.0"
 source = { editable = "packages/pyrox-nn" }
 dependencies = [
     { name = "einx" },

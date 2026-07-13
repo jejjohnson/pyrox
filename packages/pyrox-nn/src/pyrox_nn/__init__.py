@@ -102,7 +102,7 @@ from pyrox_nn._sngp import RandomFeatureGaussianProcess
 from pyrox_nn._vssgp import DeepVSSGP
 
 
-__version__ = "0.0.1"  # x-release-please-version
+__version__ = "0.1.0"  # x-release-please-version
 
 __all__ = [
     "SIREN",
