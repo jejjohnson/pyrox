@@ -154,7 +154,7 @@ precommit: ## 🪝 Run pre-commit hooks on all files
 
 build: ## 🏗️  Build Python wheel and sdist
 	@printf "$(YELLOW)>>> Building package...$(RESET)\n"
-	uv build
+	uv build --all-packages
 	@printf "$(GREEN)>>> ✅ Build complete — see dist/$(RESET)\n"
 
 clean: ## 🗑️  Remove build artefacts and cache directories
@@ -170,10 +170,10 @@ clean: ## 🗑️  Remove build artefacts and cache directories
 # ===========================================================================
 
 docs: ## 📖 Build documentation with mkdocs
-	uv run --group docs --extra bnf mkdocs build
+	uv run --group docs --group dev mkdocs build
 
 docs-serve: ## 🌐 Serve documentation locally
-	uv run --group docs --extra bnf mkdocs serve
+	uv run --group docs --group dev mkdocs serve
 
 docs-deploy: ## 🚀 Deploy documentation to GitHub Pages
-	uv run --group docs --extra bnf mkdocs gh-deploy --force
+	uv run --group docs --group dev mkdocs gh-deploy --force

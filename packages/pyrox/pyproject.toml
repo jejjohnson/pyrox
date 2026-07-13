@@ -31,6 +31,14 @@ dependencies = [
 optax = [
     "optax>=0.2",
 ]
+# `pip install pyrox[colab]` bundles what the example notebooks need to run
+# top-to-bottom in Google Colab — matplotlib for plots, watermark for an
+# explicit version readout at the top of each notebook.
+colab = [
+    "matplotlib>=3.10.9",
+    "watermark>=2.6.0",
+    "pandas>=3.0.3",
+]
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/pyrox"

@@ -1910,6 +1910,11 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+colab = [
+    { name = "matplotlib" },
+    { name = "pandas" },
+    { name = "watermark" },
+]
 optax = [
     { name = "optax" },
 ]
@@ -1919,10 +1924,13 @@ requires-dist = [
     { name = "einx", specifier = ">=0.4.3" },
     { name = "equinox", specifier = ">=0.13.8" },
     { name = "jax", specifier = ">=0.10" },
+    { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
     { name = "numpyro", specifier = ">=0.21" },
     { name = "optax", marker = "extra == 'optax'", specifier = ">=0.2" },
+    { name = "pandas", marker = "extra == 'colab'", specifier = ">=3.0.3" },
+    { name = "watermark", marker = "extra == 'colab'", specifier = ">=2.6.0" },
 ]
-provides-extras = ["optax"]
+provides-extras = ["optax", "colab"]
 
 [[package]]
 name = "pyrox-gp"
@@ -1942,6 +1950,9 @@ colab = [
     { name = "pandas" },
     { name = "watermark" },
 ]
+optax = [
+    { name = "optax" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1950,11 +1961,12 @@ requires-dist = [
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.5" },
     { name = "lineax", specifier = ">=0.1.1" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
+    { name = "optax", marker = "extra == 'optax'", specifier = ">=0.2" },
     { name = "pandas", marker = "extra == 'colab'", specifier = ">=3.0.3" },
     { name = "pyrox", editable = "packages/pyrox" },
     { name = "watermark", marker = "extra == 'colab'", specifier = ">=2.6.0" },
 ]
-provides-extras = ["colab"]
+provides-extras = ["optax", "colab"]
 
 [[package]]
 name = "pyrox-monorepo"
