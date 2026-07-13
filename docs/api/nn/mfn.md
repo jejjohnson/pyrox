@@ -11,7 +11,7 @@ z_{i+1} = g_{i+1}(x) \odot \bigl(W_i z_i + b_i\bigr), \qquad
 y = W_L z_L + b_L.
 $$
 
-Two filter families ship in `pyrox.nn`:
+Two filter families ship in `pyrox_nn`:
 
 - **FourierNet** — $g_i(x) = \sin(\Omega_i x + \varphi_i)$, frequency-domain filters.
   Products of sinusoids span exponentially many frequencies with depth $L$.
@@ -19,16 +19,16 @@ Two filter families ship in `pyrox.nn`:
   Gabor atoms with learned frequency $\Omega_i$, phase $\varphi_i$, location $\mu_i$,
   and bandwidth $\gamma_i$.
 
-**Connection to [`RBFFourierFeatures`][pyrox.nn.RBFFourierFeatures]:**
+**Connection to [`RBFFourierFeatures`][pyrox_nn.RBFFourierFeatures]:**
 A `GaborNet` with `depth=1` and $\mu = 0$ is a localized variant of random Fourier features.
 As $\gamma \to 0$ (very wide envelope) it recovers the plain RBF-RFF feature map.
-See [`HSGPFeatures`][pyrox.nn.HSGPFeatures] for the related Hilbert-space GP basis.
+See [`HSGPFeatures`][pyrox_nn.HSGPFeatures] for the related Hilbert-space GP basis.
 
 ## Quick example
 
 ```python
 import jax.random as jr
-from pyrox.nn import GaborNet
+from pyrox_nn import GaborNet
 from numpyro import handlers
 
 key = jr.PRNGKey(0)
@@ -41,7 +41,7 @@ x = jnp.ones((100, 2))
 y = net(x)          # (100, 1)
 
 # Bayesian GaborNet — sample sites registered for every parameter
-from pyrox.nn import BayesianGaborNet
+from pyrox_nn import BayesianGaborNet
 bnet = BayesianGaborNet.init(
     in_features=2, hidden_features=64, out_features=1, depth=3, key=key,
     pyrox_name="gabor",
@@ -52,22 +52,22 @@ with handlers.seed(rng_seed=1):
 
 ## Filter primitives
 
-::: pyrox.nn.FourierFilter
+::: pyrox_nn.FourierFilter
 
-::: pyrox.nn.GaborFilter
+::: pyrox_nn.GaborFilter
 
 ## Composite networks
 
-::: pyrox.nn.FourierNet
+::: pyrox_nn.FourierNet
 
-::: pyrox.nn.GaborNet
+::: pyrox_nn.GaborNet
 
 ## Bayesian variants
 
-::: pyrox.nn.BayesianFourierNet
+::: pyrox_nn.BayesianFourierNet
 
-::: pyrox.nn.BayesianGaborNet
+::: pyrox_nn.BayesianGaborNet
 
 ## Pure-JAX helper
 
-::: pyrox.nn.mfn_forward
+::: pyrox_nn.mfn_forward

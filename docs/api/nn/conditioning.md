@@ -1,6 +1,6 @@
 # Conditioning
 
-A *conditioner* is a layer `c(h, z) → y` that transforms an inner activation `h` based on a context vector `z`. `pyrox.nn` ships three concrete conditioners that cover the literature in one consistent API, plus Bayesian variants and a composite that wraps any inner network with per-layer conditioning.
+A *conditioner* is a layer `c(h, z) → y` that transforms an inner activation `h` based on a context vector `z`. `pyrox_nn` ships three concrete conditioners that cover the literature in one consistent API, plus Bayesian variants and a composite that wraps any inner network with per-layer conditioning.
 
 ## Decision rubric
 
@@ -17,7 +17,7 @@ The Bayesian variants put `Normal(0, prior_std)` priors on the **generator** wei
 ```python
 import jax.random as jr
 import jax.numpy as jnp
-from pyrox.nn import SIREN, AffineModulation, ConditionedINR, HyperSIREN
+from pyrox_nn import SIREN, AffineModulation, ConditionedINR, HyperSIREN
 
 key = jr.key(0)
 
@@ -44,36 +44,36 @@ For a hands-on walkthrough see the [Conditional Neural Fields notebook](../../no
 
 ## Protocol
 
-::: pyrox.nn.AbstractConditioner
+::: pyrox_nn.AbstractConditioner
 
 ## Concrete conditioners
 
-::: pyrox.nn.ConcatConditioner
+::: pyrox_nn.ConcatConditioner
 
-::: pyrox.nn.AffineModulation
+::: pyrox_nn.AffineModulation
 
-::: pyrox.nn.FiLM
+::: pyrox_nn.FiLM
 
-::: pyrox.nn.HyperLinear
+::: pyrox_nn.HyperLinear
 
 ## Bayesian variants
 
-::: pyrox.nn.BayesianConcatConditioner
+::: pyrox_nn.BayesianConcatConditioner
 
-::: pyrox.nn.BayesianAffineModulation
+::: pyrox_nn.BayesianAffineModulation
 
-::: pyrox.nn.BayesianHyperLinear
+::: pyrox_nn.BayesianHyperLinear
 
 ## Spectral hyper-conditioning
 
 `HyperFourierFeatures` is the conditional analogue of `RBFFourierFeatures`: instead of sampling the random Fourier features' `(W, b, lengthscale)` from a fixed prior, a user-supplied parameter network produces them from the context vector. `ConditionedRFFNet` adds a learnable linear readout — the conditional analogue of `RandomKitchenSinks`.
 
-::: pyrox.nn.HyperFourierFeatures
+::: pyrox_nn.HyperFourierFeatures
 
-::: pyrox.nn.ConditionedRFFNet
+::: pyrox_nn.ConditionedRFFNet
 
 ## Composites
 
-::: pyrox.nn.ConditionedINR
+::: pyrox_nn.ConditionedINR
 
-::: pyrox.nn.HyperSIREN
+::: pyrox_nn.HyperSIREN

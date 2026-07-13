@@ -1,6 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
-  "include-component-in-tag": false,
+  "include-component-in-tag": true,
+  "separate-pull-requests": false,
   "changelog-sections": [
     {"type": "feat", "section": "Features", "hidden": false},
     {"type": "fix", "section": "Bug Fixes", "hidden": false},
@@ -15,15 +16,37 @@
     {"type": "chore", "section": "Miscellaneous", "hidden": true}
   ],
   "packages": {
-    ".": {
+    "packages/pyrox": {
       "release-type": "python",
       "package-name": "pyrox",
+      "component": "pyrox",
       "changelog-path": "CHANGELOG.md",
-      "bump-minor-pre-major": true,
+      "bump-minor-pre-major": false,
       "bump-patch-for-minor-pre-major": true,
-      "initial-version": "0.0.1",
       "extra-files": [
-        "pyproject.toml"
+        "src/pyrox/__init__.py"
+      ]
+    },
+    "packages/pyrox-gp": {
+      "release-type": "python",
+      "package-name": "pyrox-gp",
+      "component": "pyrox-gp",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": false,
+      "bump-patch-for-minor-pre-major": true,
+      "extra-files": [
+        "src/pyrox_gp/__init__.py"
+      ]
+    },
+    "packages/pyrox-nn": {
+      "release-type": "python",
+      "package-name": "pyrox-nn",
+      "component": "pyrox-nn",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": false,
+      "bump-patch-for-minor-pre-major": true,
+      "extra-files": [
+        "src/pyrox_nn/__init__.py"
       ]
     }
   }

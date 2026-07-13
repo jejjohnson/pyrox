@@ -1,59 +1,59 @@
 # NN API
 
-The `pyrox.nn` subpackage ships uncertainty-aware neural network layers in four families:
+The `pyrox_nn` subpackage ships uncertainty-aware neural network layers in four families:
 
 1. **Geographic / spherical encoders** (re-exported from `geonnax`) — degree/radian, lon/lat, cyclic, spherical-harmonic, and Slepian preprocessing for geophysical inputs.
-2. **Dense / Bayesian-linear layers** (`pyrox.nn._dense`) — reparameterization, Flipout, hierarchical, NCP, DVI, rank-1 ensemble, and variational-dropout variants of `Wx + b`.
+2. **Dense / Bayesian-linear layers** (`pyrox_nn._dense`) — reparameterization, Flipout, hierarchical, NCP, DVI, rank-1 ensemble, and variational-dropout variants of `Wx + b`.
 3. **Spectral / GP-flavoured layers** — random-feature kernel maps, SNGP and VSSGP heads, deep random-feature expansions.
 4. **Ensembles & output heads** — BatchEnsemble layers, heteroscedastic Monte-Carlo output heads.
-5. **Bayesian Neural Field stack** (`pyrox.nn._bnf`) — five layers that together implement the BNF architecture (Saad et al., Nat. Comms. 2024).
+5. **Bayesian Neural Field stack** (`pyrox_nn._bnf`) — five layers that together implement the BNF architecture (Saad et al., Nat. Comms. 2024).
 6. **Pure-JAX feature helpers** (re-exported from `geonnax.basis`) — pandas-free building blocks the BNF layers wrap.
 
 See also: [Geo encoders](nn/geo_encoders.md) for the longitude/latitude and spherical-harmonic API surface.
 
 ## Dense / Bayesian-linear layers
 
-::: pyrox.nn.DenseReparameterization
+::: pyrox_nn.DenseReparameterization
 
-::: pyrox.nn.DenseFlipout
+::: pyrox_nn.DenseFlipout
 
-::: pyrox.nn.DenseVariational
+::: pyrox_nn.DenseVariational
 
-::: pyrox.nn.DenseDVI
+::: pyrox_nn.DenseDVI
 
-::: pyrox.nn.DenseHierarchical
+::: pyrox_nn.DenseHierarchical
 
-::: pyrox.nn.DenseVariationalDropout
+::: pyrox_nn.DenseVariationalDropout
 
-::: pyrox.nn.DenseNCP
+::: pyrox_nn.DenseNCP
 
-::: pyrox.nn.NCPContinuousPerturb
+::: pyrox_nn.NCPContinuousPerturb
 
-::: pyrox.nn.NCPNormalOutput
+::: pyrox_nn.NCPNormalOutput
 
-::: pyrox.nn.RBFFourierFeatures
+::: pyrox_nn.RBFFourierFeatures
 
-::: pyrox.nn.RBFCosineFeatures
+::: pyrox_nn.RBFCosineFeatures
 
-::: pyrox.nn.MaternFourierFeatures
+::: pyrox_nn.MaternFourierFeatures
 
-::: pyrox.nn.MaternCosineFeatures
+::: pyrox_nn.MaternCosineFeatures
 
-::: pyrox.nn.LaplaceFourierFeatures
+::: pyrox_nn.LaplaceFourierFeatures
 
-::: pyrox.nn.LaplaceCosineFeatures
+::: pyrox_nn.LaplaceCosineFeatures
 
-::: pyrox.nn.ArcCosineFourierFeatures
+::: pyrox_nn.ArcCosineFourierFeatures
 
-::: pyrox.nn.RandomKitchenSinks
+::: pyrox_nn.RandomKitchenSinks
 
 ## Wave-4 spectral layers (#41)
 
-::: pyrox.nn.VariationalFourierFeatures
+::: pyrox_nn.VariationalFourierFeatures
 
-::: pyrox.nn.OrthogonalRandomFeatures
+::: pyrox_nn.OrthogonalRandomFeatures
 
-::: pyrox.nn.HSGPFeatures
+::: pyrox_nn.HSGPFeatures
 
 ## SIREN — Sinusoidal Representation Networks
 
@@ -76,7 +76,7 @@ Typical choice: `ω₀ = ω = 30` for image / high-frequency INR tasks.
 
 ```python
 import jax.random as jr, jax.numpy as jnp
-from pyrox.nn import SirenDense, SIREN, BayesianSIREN
+from pyrox_nn import SirenDense, SIREN, BayesianSIREN
 
 # Single layer
 layer = SirenDense.init(3, 64, key=jr.PRNGKey(0), layer_type="first")
@@ -98,11 +98,11 @@ with handlers.seed(rng_seed=0):
     backbones: SIREN composes nonlinearities deeply, while MFN uses a product
     of Gabor filters.  Choose based on the signal's smoothness profile.
 
-::: pyrox.nn.SirenDense
+::: pyrox_nn.SirenDense
 
-::: pyrox.nn.SIREN
+::: pyrox_nn.SIREN
 
-::: pyrox.nn.BayesianSIREN
+::: pyrox_nn.BayesianSIREN
 
 ## SNGP — spectral-normalised GP head
 
@@ -111,13 +111,13 @@ whose posterior covariance comes from a Laplace approximation
 (`LaplaceRandomFeatureCovariance`, re-exported from `geonnax`), giving
 distance-aware uncertainty from a single deterministic forward pass.
 
-::: pyrox.nn.RandomFeatureGaussianProcess
+::: pyrox_nn.RandomFeatureGaussianProcess
 
-::: pyrox.nn.LaplaceRandomFeatureCovariance
+::: pyrox_nn.LaplaceRandomFeatureCovariance
 
 ## Deep spectral GPs
 
-::: pyrox.nn.DeepVSSGP
+::: pyrox_nn.DeepVSSGP
 
 ## Ensembles — BatchEnsemble / rank-1
 
@@ -125,43 +125,43 @@ Efficient deep ensembles that share one weight matrix and learn
 per-member rank-1 perturbations (Wen et al., 2020; Dusenberry et al.,
 2020).
 
-::: pyrox.nn.DenseRank1
+::: pyrox_nn.DenseRank1
 
-::: pyrox.nn.LayerNormEnsemble
+::: pyrox_nn.LayerNormEnsemble
 
-::: pyrox.nn.MultiHeadAttentionBE
+::: pyrox_nn.MultiHeadAttentionBE
 
 ## Heteroscedastic output heads
 
 Monte-Carlo sigmoid / softmax output layers with factor-analysis noise
 (Collier et al., 2021) for input-dependent label noise.
 
-::: pyrox.nn.MCSigmoidDenseFA
+::: pyrox_nn.MCSigmoidDenseFA
 
-::: pyrox.nn.MCSoftmaxDenseFA
+::: pyrox_nn.MCSoftmaxDenseFA
 
 ## Bayesian Neural Field stack
 
-::: pyrox.nn.Standardization
+::: pyrox_nn.Standardization
 
-::: pyrox.nn.FourierFeatures
+::: pyrox_nn.FourierFeatures
 
-::: pyrox.nn.SeasonalFeatures
+::: pyrox_nn.SeasonalFeatures
 
-::: pyrox.nn.InteractionFeatures
+::: pyrox_nn.InteractionFeatures
 
-::: pyrox.nn.BayesianNeuralField
+::: pyrox_nn.BayesianNeuralField
 
 ## Pure-JAX feature helpers
 
-::: pyrox.nn.fourier_features
+::: pyrox_nn.fourier_features
 
-::: pyrox.nn.seasonal_features
+::: pyrox_nn.seasonal_features
 
-::: pyrox.nn.seasonal_frequencies
+::: pyrox_nn.seasonal_frequencies
 
-::: pyrox.nn.interaction_features
+::: pyrox_nn.interaction_features
 
-::: pyrox.nn.standardize
+::: pyrox_nn.standardize
 
-::: pyrox.nn.unstandardize
+::: pyrox_nn.unstandardize

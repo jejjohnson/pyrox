@@ -8,7 +8,7 @@ version: 0.2.0
 **Subject:** Concrete `InferenceStrategy` implementations sourced from BayesNewton's
 unified Newton framework, GPyTorch variational strategies, and MarkovFlow.
 
-**Date:** 2026-04-02  
+**Date:** 2026-04-02
 **Updated:** 2026-04-03
 
 ---

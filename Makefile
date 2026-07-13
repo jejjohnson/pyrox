@@ -36,7 +36,9 @@ PKG_VERSION := $(shell grep -E '^version\s*=' pyproject.toml 2>/dev/null \
 # ---------------------------------------------------------------------------
 # Paths (override via .env or command line)
 # ---------------------------------------------------------------------------
-PKGROOT ?= src/pyrox
+PKGROOTS ?= packages/pyrox/src/pyrox \
+            packages/pyrox-gp/src/pyrox_gp \
+            packages/pyrox-nn/src/pyrox_nn
 
 # ---------------------------------------------------------------------------
 # ANSI colours
@@ -120,7 +122,7 @@ format: ## 🖊️  Format code with ruff (format + auto-fix) — entire repo
 
 typecheck: ## 🔬 Type-check with ty
 	@printf "$(YELLOW)>>> Running type checks...$(RESET)\n"
-	uv run --group typecheck ty check $(PKGROOT)
+	uv run --group typecheck ty check $(PKGROOTS)
 	@printf "$(GREEN)>>> ✅ Type check passed!$(RESET)\n"
 
 # ===========================================================================

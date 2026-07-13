@@ -1,0 +1,56 @@
+[project]
+name = "pyrox-gp"
+version = "0.0.1"
+description = "Gaussian process building blocks on top of pyrox: kernels, guides, likelihoods, Markov/sparse GPs, and pathwise sampling."
+authors = [
+    {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
+]
+license = { file = "../../LICENSE" }
+readme = "README.md"
+keywords = ["jax", "equinox", "numpyro", "gaussian-processes", "probabilistic"]
+requires-python = ">=3.12"
+classifiers = [
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Natural Language :: English",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Science/Research",
+    "Development Status :: 2 - Pre-Alpha",
+]
+dependencies = [
+    "pyrox",
+    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@cd6264c92d32f433515d3efb06a0672a02280339",
+    "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.5",
+    "lineax>=0.1.1",
+    "einx>=0.4.3",
+]
+
+[project.optional-dependencies]
+# `pip install pyrox-gp[colab]` bundles what the example notebooks need to run
+# top-to-bottom in Google Colab — matplotlib for plots, watermark for an
+# explicit version readout at the top of each notebook.
+colab = [
+    "matplotlib>=3.10.9",
+    "watermark>=2.6.0",
+    "pandas>=3.0.3",
+]
+
+[project.urls]
+Repository = "https://github.com/jejjohnson/pyrox"
+
+[tool.uv.sources]
+# gaussx is not yet on PyPI; resolve from GitHub until the first release.
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", rev = "cd6264c92d32f433515d3efb06a0672a02280339" }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+# gaussx/geonnax are declared via PEP 508 direct URLs until they ship to PyPI.
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pyrox_gp"]

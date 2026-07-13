@@ -35,33 +35,41 @@ Equinox gives JAX clean, immutable modules. NumPyro gives JAX a high-quality pro
 
 ## 📦 Package Layout
 
-```
-pyrox/
-├── _core/     # Equinox-to-NumPyro bridge (PyroxModule, PyroxParam, PyroxSample, Parameterized)
-├── gp/        # Gaussian process building blocks and protocols (Wave 2+)
-└── nn/        # Bayesian and uncertainty-aware neural network layers (Wave 3+)
-```
+pyrox is a uv workspace of three packages under `packages/`:
 
-Wave 1 (Core) ships `pyrox._core`. GP and NN subpackages are scaffolded as placeholders until their dedicated waves land — see the [GitHub issue tracker](https://github.com/jejjohnson/pyrox/issues) for the wave roadmap. The core surface is designed so that later waves can add kernels, solvers, variational guides, and uncertainty-aware layers *on top of* the bridge, not next to it.
+| Package    | Import name | Purpose |
+|------------|-------------|---------|
+| `pyrox`    | `pyrox`     | Equinox-to-NumPyro bridge (`_core`) + ensemble inference (`inference`) |
+| `pyrox-gp` | `pyrox_gp`  | GP building blocks: kernels, guides, likelihoods, Markov/sparse GPs, pathwise sampling, spectral bases |
+| `pyrox-nn` | `pyrox_nn`  | Bayesian/uncertainty-aware NN layers + BNF estimator API (`pyrox_nn.api`, `pyrox_nn.preprocessing`) |
+
+Dependency order: `pyrox-nn` → `pyrox-gp` → `pyrox`. The workspace
+root ships no code — only the per-package wheels under `packages/*`
+are published.
 
 ---
 
 ## 🚀 Installation
 
+Each package installs independently and pulls in what it needs:
+
 ```bash
-pip install pyrox
+pip install pyrox        # bridge + ensemble inference only
+pip install pyrox-gp     # + GP building blocks
+pip install pyrox-nn     # + Bayesian NN layers and the BNF stack
 ```
 
 Or with `uv`:
 
 ```bash
-uv add pyrox
+uv add pyrox-gp
 ```
 
 ### Runtime dependencies
 
-- Required: `jax`, `equinox`, `numpyro`, `gaussx`, `lineax`
-- Optional: `optax` (install via `pip install 'pyrox[optax]'`)
+- `pyrox`: `jax`, `equinox`, `numpyro`, `einx`; optional `optax` (`pip install 'pyrox[optax]'`)
+- `pyrox-gp`: adds `gaussx`, `geonnax`, `lineax`
+- `pyrox-nn`: adds `geonnax`; optional `pandas`/`optax` via `pip install 'pyrox-nn[bnf]'`
 
 ### From source
 
@@ -159,7 +167,7 @@ Switch `kernel.set_mode("guide")` to draw variational params instead of sampling
 
 ### Composing pyrox modules with NumPyro handlers
 
-Because `pyrox_param` and `pyrox_sample` are thin wrappers over `numpyro.param` / `numpyro.sample`, every NumPyro handler composes transparently: `handlers.trace` captures sites, `handlers.substitute` and `handlers.condition` replace or observe them, `handlers.scope` and `handlers.block` control visibility, and `handlers.reparam` rewrites sites in place. The same modules drop into `MCMC(NUTS(model))`, `SVI(model, AutoNormal(model), …)`, and `Predictive(model, ...)` with no extra glue. See `tests/test_core_numpyro_integration.py` for a worked inventory across the handler and inference surface.
+Because `pyrox_param` and `pyrox_sample` are thin wrappers over `numpyro.param` / `numpyro.sample`, every NumPyro handler composes transparently: `handlers.trace` captures sites, `handlers.substitute` and `handlers.condition` replace or observe them, `handlers.scope` and `handlers.block` control visibility, and `handlers.reparam` rewrites sites in place. The same modules drop into `MCMC(NUTS(model))`, `SVI(model, AutoNormal(model), …)`, and `Predictive(model, ...)` with no extra glue. See `packages/pyrox/tests/test_core_numpyro_integration.py` for a worked inventory across the handler and inference surface.
 
 ---
 
@@ -170,7 +178,7 @@ make install              # Install all deps (uv sync --all-groups) + pre-commit
 make test                 # Run tests
 make format               # Auto-fix formatting and lint
 make lint                 # Lint entire repo
-make typecheck            # Type check src/pyrox
+make typecheck            # Type check all workspace packages
 make precommit            # Run pre-commit on all files
 make docs-serve           # Local docs server
 ```
@@ -181,7 +189,10 @@ make docs-serve           # Local docs server
 uv run pytest -v                              # Tests
 uv run --group lint ruff check .              # Lint — ENTIRE repo
 uv run --group lint ruff format --check .     # Format — ENTIRE repo
-uv run --group typecheck ty check src/pyrox   # Typecheck — package only
+uv run --group typecheck ty check \
+    packages/pyrox/src/pyrox \
+    packages/pyrox-gp/src/pyrox_gp \
+    packages/pyrox-nn/src/pyrox_nn             # Typecheck — packages only
 ```
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full contributor workflow and [`AGENTS.md`](AGENTS.md) for AI agent guidance.

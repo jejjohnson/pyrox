@@ -31,7 +31,7 @@
 
 "area:testing":
   - changed-files:
-    - any-glob-to-any-file: "tests/**"
+    - any-glob-to-any-file: "packages/*/tests/**"
 
 # Catch-all for source changes that don't match a specific layer scope.
 # Ensures every `src/**` PR receives at least one area label.
@@ -39,36 +39,36 @@
   - changed-files:
     - any-glob-to-any-file: "src/**"
 
-# --- Layer scopes — aligned to pyrox.gp's documented layout ---------------
+# --- Layer scopes — aligned to pyrox_gp's documented layout ---------------
 # See `design_docs/pyrox/architecture.md` for the full layer stack.
-# Layer 0 primitives live under `src/pyrox/gp/_src/`; higher-level GP
+# Layer 0 primitives live under `packages/pyrox-gp/src/pyrox_gp/_src/`; higher-level GP
 # components and public models/entry points sit in dedicated subpackages
-# under `src/pyrox/gp/`.
+# under `packages/pyrox-gp/src/pyrox_gp/`.
 
 "layer:0-primitives":
   - changed-files:
     - any-glob-to-any-file:
-      - "src/pyrox/gp/_src/**"
+      - "packages/pyrox-gp/src/pyrox_gp/_src/**"
 
 "layer:1-components":
   - changed-files:
     - any-glob-to-any-file:
-      - "src/pyrox/gp/kernels/**"
-      - "src/pyrox/gp/covs/**"
-      - "src/pyrox/gp/solvers/**"
-      - "src/pyrox/gp/integrators/**"
-      - "src/pyrox/gp/inducing_features/**"
-      - "src/pyrox/gp/multi_output/**"
-      - "src/pyrox/gp/sampling/**"
-      - "src/pyrox/gp/temporal/**"
-      - "src/pyrox/gp/guides/**"
+      - "packages/pyrox-gp/src/pyrox_gp/kernels/**"
+      - "packages/pyrox-gp/src/pyrox_gp/covs/**"
+      - "packages/pyrox-gp/src/pyrox_gp/solvers/**"
+      - "packages/pyrox-gp/src/pyrox_gp/integrators/**"
+      - "packages/pyrox-gp/src/pyrox_gp/inducing_features/**"
+      - "packages/pyrox-gp/src/pyrox_gp/multi_output/**"
+      - "packages/pyrox-gp/src/pyrox_gp/sampling/**"
+      - "packages/pyrox-gp/src/pyrox_gp/temporal/**"
+      - "packages/pyrox-gp/src/pyrox_gp/guides/**"
 
 "layer:2-models":
   - changed-files:
     - any-glob-to-any-file:
-      - "src/pyrox/gp/priors/**"
-      - "src/pyrox/gp/inference/**"
-      - "src/pyrox/gp/ops.py"
+      - "packages/pyrox-gp/src/pyrox_gp/priors/**"
+      - "packages/pyrox-gp/src/pyrox_gp/inference/**"
+      - "packages/pyrox-gp/src/pyrox_gp/ops.py"
 
 # --- Default / legacy labels retained for Dependabot compatibility ---------
 

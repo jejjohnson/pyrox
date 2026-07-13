@@ -21,9 +21,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: uv sync --group dev --extra optax --extra bnf
+        run: uv sync --group dev
       - name: Run tests with coverage
-        run: uv run --extra optax --extra bnf pytest -v -m "not slow"
+        run: uv run pytest -v -m "not slow"
       - name: Upload coverage report
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@v7
