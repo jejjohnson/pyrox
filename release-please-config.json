@@ -21,7 +21,7 @@
       "package-name": "pyrox",
       "component": "pyrox",
       "changelog-path": "CHANGELOG.md",
-      "bump-minor-pre-major": false,
+      "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "extra-files": [
         "src/pyrox/__init__.py"
@@ -32,7 +32,7 @@
       "package-name": "pyrox-gp",
       "component": "pyrox-gp",
       "changelog-path": "CHANGELOG.md",
-      "bump-minor-pre-major": false,
+      "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "extra-files": [
         "src/pyrox_gp/__init__.py"
@@ -43,7 +43,7 @@
       "package-name": "pyrox-nn",
       "component": "pyrox-nn",
       "changelog-path": "CHANGELOG.md",
-      "bump-minor-pre-major": false,
+      "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "extra-files": [
         "src/pyrox_nn/__init__.py"
