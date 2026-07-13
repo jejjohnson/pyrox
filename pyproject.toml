@@ -37,14 +37,14 @@ dev = [
     "pyrox-gp",
     "pyrox-nn",
     # Optional-extra backends exercised by the test suites.
-    "optax>=0.2",
+    "optax>=0.2.8",
     "pandas>=3.0.3",
 ]
 lint = [
-    "ruff>=0.15.12",
+    "ruff>=0.15.15",
 ]
 typecheck = [
-    "ty>=0.0.38",
+    "ty>=0.0.42",
 ]
 docs = [
     "mkdocs>=1.6.1",
@@ -68,7 +68,7 @@ docs = [
 examples = [
     "matplotlib>=3.10.9",
     "numpy>=2.4.6",
-    "scikit-learn>=1.8.0",
+    "scikit-learn>=1.9.0",
 ]
 
 [tool.ruff]

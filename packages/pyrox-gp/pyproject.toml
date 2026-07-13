@@ -31,7 +31,7 @@ dependencies = [
 # `pip install pyrox-gp[optax]` enables the quasi-Newton non-Gaussian
 # inference path (`QuasiNewtonInference`), which uses `optax.lbfgs`.
 optax = [
-    "optax>=0.2",
+    "optax>=0.2.8",
 ]
 # `pip install pyrox-gp[colab]` bundles what the example notebooks need to run
 # top-to-bottom in Google Colab — matplotlib for plots, watermark for an

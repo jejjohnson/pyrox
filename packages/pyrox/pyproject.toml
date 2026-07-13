@@ -20,7 +20,7 @@ classifiers = [
     "Development Status :: 2 - Pre-Alpha",
 ]
 dependencies = [
-    "jax>=0.10",
+    "jax>=0.10.1",
     "equinox>=0.13.8",
     "numpyro>=0.21",
     "einx>=0.4.3",
@@ -29,7 +29,7 @@ dependencies = [
 [project.optional-dependencies]
 # `pip install pyrox[optax]` enables the ensemble-of-MAP inference path.
 optax = [
-    "optax>=0.2",
+    "optax>=0.2.8",
 ]
 # `pip install pyrox[colab]` bundles what the example notebooks need to run
 # top-to-bottom in Google Colab — matplotlib for plots, watermark for an
