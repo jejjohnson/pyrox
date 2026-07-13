@@ -26,7 +26,7 @@ Cholesky / CG / BBMM / LSMR / SLQ) live in
 ```python
 import jax.numpy as jnp
 import numpyro
-from pyrox.gp import GPPrior, RBF, gp_factor, gp_sample
+from pyrox_gp import GPPrior, RBF, gp_factor, gp_sample
 
 def regression_model(X, y):
     """Collapsed Gaussian-likelihood GP regression."""
@@ -55,10 +55,10 @@ prior = GPPrior(
 )
 ```
 
-::: pyrox.gp.GPPrior
-::: pyrox.gp.ConditionedGP
-::: pyrox.gp.gp_factor
-::: pyrox.gp.gp_sample
+::: pyrox_gp.GPPrior
+::: pyrox_gp.ConditionedGP
+::: pyrox_gp.gp_factor
+::: pyrox_gp.gp_sample
 
 ## Concrete kernels
 
@@ -66,15 +66,15 @@ Each `Parameterized` kernel registers its hyperparameters with positivity
 constraints where appropriate. Attach priors with `set_prior`, autoguides
 with `autoguide`, and flip `set_mode("model" | "guide")`.
 
-::: pyrox.gp.RBF
-::: pyrox.gp.Matern
-::: pyrox.gp.Periodic
-::: pyrox.gp.Linear
-::: pyrox.gp.RationalQuadratic
-::: pyrox.gp.Polynomial
-::: pyrox.gp.Cosine
-::: pyrox.gp.White
-::: pyrox.gp.Constant
+::: pyrox_gp.RBF
+::: pyrox_gp.Matern
+::: pyrox_gp.Periodic
+::: pyrox_gp.Linear
+::: pyrox_gp.RationalQuadratic
+::: pyrox_gp.Polynomial
+::: pyrox_gp.Cosine
+::: pyrox_gp.White
+::: pyrox_gp.Constant
 
 ## Sparse-GP inducing features (#49)
 
@@ -84,24 +84,24 @@ of these to `SparseGPPrior` via the ``inducing=`` keyword in
 place of a raw point matrix ``Z``.
 
 ```python
-from pyrox.gp import RBF, FourierInducingFeatures, SparseGPPrior
+from pyrox_gp import RBF, FourierInducingFeatures, SparseGPPrior
 
 kernel   = RBF(init_lengthscale=0.3, init_variance=1.0)
 features = FourierInducingFeatures.init(in_features=1, num_basis_per_dim=64, L=5.0)
 prior    = SparseGPPrior(kernel=kernel, inducing=features)   # K_uu is diagonal!
 ```
 
-::: pyrox.gp.InducingFeatures
-::: pyrox.gp.FourierInducingFeatures
-::: pyrox.gp.SphericalHarmonicInducingFeatures
-::: pyrox.gp.SlepianInducingFeatures
-::: pyrox.gp.LaplacianInducingFeatures
-::: pyrox.gp.DecoupledInducingFeatures
-::: pyrox.gp.funk_hecke_coefficients
+::: pyrox_gp.InducingFeatures
+::: pyrox_gp.FourierInducingFeatures
+::: pyrox_gp.SphericalHarmonicInducingFeatures
+::: pyrox_gp.SlepianInducingFeatures
+::: pyrox_gp.LaplacianInducingFeatures
+::: pyrox_gp.DecoupledInducingFeatures
+::: pyrox_gp.funk_hecke_coefficients
 
 ## Sparse GP prior
 
-::: pyrox.gp.SparseGPPrior
+::: pyrox_gp.SparseGPPrior
 
 ## Variational guides
 
@@ -114,11 +114,11 @@ SVGP ELBO. `WhitenedGuide` parameterizes in whitened coordinates
 `NaturalGuide` parameterizes in natural form for natural-gradient / CVI
 workflows; `DeltaGuide` is a point mass for MAP-style training.
 
-::: pyrox.gp.FullRankGuide
-::: pyrox.gp.MeanFieldGuide
-::: pyrox.gp.WhitenedGuide
-::: pyrox.gp.NaturalGuide
-::: pyrox.gp.DeltaGuide
+::: pyrox_gp.FullRankGuide
+::: pyrox_gp.MeanFieldGuide
+::: pyrox_gp.WhitenedGuide
+::: pyrox_gp.NaturalGuide
+::: pyrox_gp.DeltaGuide
 
 ## Likelihoods
 
@@ -126,13 +126,13 @@ Observation models for latent-GP workflows. Each maps latent function
 values to a summed log-density `log_prob(f, y)`; `DistLikelihood` wraps
 any `numpyro.distributions.Distribution` factory for one-off models.
 
-::: pyrox.gp.GaussianLikelihood
-::: pyrox.gp.HeteroscedasticGaussianLikelihood
-::: pyrox.gp.BernoulliLikelihood
-::: pyrox.gp.PoissonLikelihood
-::: pyrox.gp.SoftmaxLikelihood
-::: pyrox.gp.StudentTLikelihood
-::: pyrox.gp.DistLikelihood
+::: pyrox_gp.GaussianLikelihood
+::: pyrox_gp.HeteroscedasticGaussianLikelihood
+::: pyrox_gp.BernoulliLikelihood
+::: pyrox_gp.PoissonLikelihood
+::: pyrox_gp.SoftmaxLikelihood
+::: pyrox_gp.StudentTLikelihood
+::: pyrox_gp.DistLikelihood
 
 ## SVGP inference
 
@@ -141,9 +141,9 @@ NumPyro registration (`svgp_factor`), and the natural-gradient / CVI
 update loop (`ConjugateVI`) that exploits the `NaturalGuide`
 parameterization for conjugate-style coordinate ascent.
 
-::: pyrox.gp.svgp_elbo
-::: pyrox.gp.svgp_factor
-::: pyrox.gp.ConjugateVI
+::: pyrox_gp.svgp_elbo
+::: pyrox_gp.svgp_factor
+::: pyrox_gp.ConjugateVI
 
 ## Non-Gaussian inference strategies
 
@@ -157,12 +157,12 @@ distribution (EP), or L-BFGS to the MAP with a Laplace covariance at
 convergence (quasi-Newton). Each `fit(prior, likelihood, y)` returns a
 `NonGaussConditionedGP` that quacks like `ConditionedGP`.
 
-::: pyrox.gp.LaplaceInference
-::: pyrox.gp.GaussNewtonInference
-::: pyrox.gp.PosteriorLinearization
-::: pyrox.gp.ExpectationPropagation
-::: pyrox.gp.QuasiNewtonInference
-::: pyrox.gp.NonGaussConditionedGP
+::: pyrox_gp.LaplaceInference
+::: pyrox_gp.GaussNewtonInference
+::: pyrox_gp.PosteriorLinearization
+::: pyrox_gp.ExpectationPropagation
+::: pyrox_gp.QuasiNewtonInference
+::: pyrox_gp.NonGaussConditionedGP
 
 ## Multi-output GPs
 
@@ -174,11 +174,11 @@ one latent kernel, and the orthogonal instantaneous linear mixing model
 per latent process (the projections delegate to `gaussx.oilmm_project`
 / `gaussx.oilmm_back_project`).
 
-::: pyrox.gp.LMCKernel
-::: pyrox.gp.ICMKernel
-::: pyrox.gp.OILMMKernel
-::: pyrox.gp.MultiOutputInducingVariables
-::: pyrox.gp.SharedInducingPoints
+::: pyrox_gp.LMCKernel
+::: pyrox_gp.ICMKernel
+::: pyrox_gp.OILMMKernel
+::: pyrox_gp.MultiOutputInducingVariables
+::: pyrox_gp.SharedInducingPoints
 
 ## Pathwise posterior samplers (#39)
 
@@ -192,7 +192,7 @@ test-set covariance. Standard enabler for Thompson sampling, Bayesian
 optimization, and posterior visualization.
 
 ```python
-from pyrox.gp import (
+from pyrox_gp import (
     RBF,
     GPPrior,
     PathwiseSampler,
@@ -220,9 +220,9 @@ samples = paths(X_star)
 Currently supports RBF and Matern kernels. Point-inducing
 ``SparseGPPrior`` only — inducing-feature priors raise at construction.
 
-::: pyrox.gp.PathwiseSampler
-::: pyrox.gp.DecoupledPathwiseSampler
-::: pyrox.gp.PathwiseFunction
+::: pyrox_gp.PathwiseSampler
+::: pyrox_gp.DecoupledPathwiseSampler
+::: pyrox_gp.PathwiseFunction
 
 ## State-space (SDE) kernels
 
@@ -234,7 +234,7 @@ for downstream Kalman / RTS use.
 
 ```python
 import jax.numpy as jnp
-from pyrox.gp import (
+from pyrox_gp import (
     ConstantSDE, CosineSDE, MaternSDE, PeriodicSDE,
     ProductSDE, QuasiPeriodicSDE, SumSDE,
 )
@@ -255,19 +255,19 @@ damped = ProductSDE(matern, cos)                  # state dim = 2 * 2 = 4
 qp = QuasiPeriodicSDE(matern, per)                # state dim = 2 * 15 = 30
 ```
 
-::: pyrox.gp.SDEKernel
-::: pyrox.gp.SDEParams
-::: pyrox.gp.MaternSDE
-::: pyrox.gp.ConstantSDE
-::: pyrox.gp.CosineSDE
-::: pyrox.gp.PeriodicSDE
-::: pyrox.gp.SumSDE
-::: pyrox.gp.ProductSDE
-::: pyrox.gp.QuasiPeriodicSDE
+::: pyrox_gp.SDEKernel
+::: pyrox_gp.SDEParams
+::: pyrox_gp.MaternSDE
+::: pyrox_gp.ConstantSDE
+::: pyrox_gp.CosineSDE
+::: pyrox_gp.PeriodicSDE
+::: pyrox_gp.SumSDE
+::: pyrox_gp.ProductSDE
+::: pyrox_gp.QuasiPeriodicSDE
 
 ## Markov GP — Kalman / RTS workflow
 
-`MarkovGPPrior` consumes any [`SDEKernel`][pyrox.gp.SDEKernel] over a sorted
+`MarkovGPPrior` consumes any [`SDEKernel`][pyrox_gp.SDEKernel] over a sorted
 1-D grid and gives `O(N d^3)` marginal likelihood (forward Kalman filter)
 and posterior smoothing (backward RTS), where `d` is the SDE state
 dimension. Use it for temporal GP regression / forecasting when the
@@ -278,7 +278,7 @@ test points masked out of the update step.
 
 ```python
 import jax.numpy as jnp
-from pyrox.gp import MaternSDE, MarkovGPPrior, markov_gp_factor
+from pyrox_gp import MaternSDE, MarkovGPPrior, markov_gp_factor
 
 times = jnp.linspace(0.0, 5.0, 200)
 y     = jnp.sin(times) + 0.05 * jnp.cos(7.0 * times)
@@ -298,7 +298,7 @@ Inside a NumPyro model, swap `gp_factor` for `markov_gp_factor`:
 import jax.numpy as jnp
 import numpyro
 from numpyro import distributions as dist
-from pyrox.gp import MarkovGPPrior, MaternSDE, markov_gp_factor
+from pyrox_gp import MarkovGPPrior, MaternSDE, markov_gp_factor
 
 def temporal_model(times, y):
     sigma2 = numpyro.sample("variance",  dist.LogNormal(0.0, 1.0))
@@ -312,10 +312,10 @@ For non-Gaussian likelihoods on the Markov path, see the
 [Markov non-Gaussian strategies](#non-gaussian-inference-markov) below;
 for inducing-grid scalability, the [sparse Markov GP](#sparse-markov-gp).
 
-::: pyrox.gp.MarkovGPPrior
-::: pyrox.gp.ConditionedMarkovGP
-::: pyrox.gp.markov_gp_factor
-::: pyrox.gp.markov_gp_sample
+::: pyrox_gp.MarkovGPPrior
+::: pyrox_gp.ConditionedMarkovGP
+::: pyrox_gp.markov_gp_factor
+::: pyrox_gp.markov_gp_sample
 
 ## Non-Gaussian inference (Markov)
 
@@ -326,11 +326,11 @@ the Kalman filter / RTS smoother in `O(N d^3)` instead of a dense
 `NonGaussConditionedMarkovGP` with the same `predict` API as the
 Gaussian-likelihood `ConditionedMarkovGP`.
 
-::: pyrox.gp.LaplaceMarkovInference
-::: pyrox.gp.GaussNewtonMarkovInference
-::: pyrox.gp.PosteriorLinearizationMarkov
-::: pyrox.gp.ExpectationPropagationMarkov
-::: pyrox.gp.NonGaussConditionedMarkovGP
+::: pyrox_gp.LaplaceMarkovInference
+::: pyrox_gp.GaussNewtonMarkovInference
+::: pyrox_gp.PosteriorLinearizationMarkov
+::: pyrox_gp.ExpectationPropagationMarkov
+::: pyrox_gp.NonGaussConditionedMarkovGP
 
 ## Sparse Markov GP
 
@@ -338,10 +338,10 @@ Sparse variational GP over an SDE kernel and an inducing *time* grid:
 the variational family lives on the inducing times while predictions
 exploit the Markov structure between them.
 
-::: pyrox.gp.SparseMarkovGPPrior
-::: pyrox.gp.SparseConditionedMarkovGP
-::: pyrox.gp.sparse_markov_elbo
-::: pyrox.gp.sparse_markov_factor
+::: pyrox_gp.SparseMarkovGPPrior
+::: pyrox_gp.SparseConditionedMarkovGP
+::: pyrox_gp.sparse_markov_elbo
+::: pyrox_gp.sparse_markov_factor
 
 ## Component protocols
 
@@ -352,15 +352,15 @@ Monte Carlo) come from `gaussx.AbstractIntegrator` and its concrete
 subclasses; solver strategies live in
 [`gaussx`](https://github.com/jejjohnson/gaussx).
 
-::: pyrox.gp.Kernel
-::: pyrox.gp.Guide
-::: pyrox.gp.Likelihood
+::: pyrox_gp.Kernel
+::: pyrox_gp.Guide
+::: pyrox_gp.Likelihood
 
 ## Math primitives
 
 Pure JAX kernel functions. Stateless, differentiable, composable —
 ``(Array, ..., hyperparams) -> Gram``. No NumPyro, no protocols.
 
-::: pyrox.gp._src.kernels
+::: pyrox_gp._src.kernels
     options:
       show_root_heading: false

@@ -1,0 +1,60 @@
+[project]
+name = "pyrox-nn"
+version = "0.0.1"
+description = "Bayesian and uncertainty-aware neural network layers on top of pyrox and pyrox-gp, plus the BNF estimator API."
+authors = [
+    {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
+]
+license = { file = "../../LICENSE" }
+readme = "README.md"
+keywords = ["jax", "equinox", "numpyro", "bayesian-neural-networks", "probabilistic"]
+requires-python = ">=3.12"
+classifiers = [
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Natural Language :: English",
+    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: Science/Research",
+    "Development Status :: 2 - Pre-Alpha",
+]
+dependencies = [
+    "pyrox",
+    "pyrox-gp",
+    "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.5",
+    "einx>=0.4.3",
+]
+
+[project.optional-dependencies]
+optax = [
+    "optax>=0.2",
+]
+# `pip install pyrox-nn[bnf]` bundles what the Bayesian Neural Field stack needs:
+# pandas for `pyrox_nn.preprocessing` and optax for the SGD-MAP / SVI inference.
+bnf = [
+    "pandas>=3.0.3",
+    "optax>=0.2",
+]
+# `pip install pyrox-nn[colab]` bundles what the example notebooks need to run
+# top-to-bottom in Google Colab — matplotlib for plots, watermark for an
+# explicit version readout at the top of each notebook.
+colab = [
+    "matplotlib>=3.10.9",
+    "watermark>=2.6.0",
+    "pandas>=3.0.3",
+]
+
+[project.urls]
+Repository = "https://github.com/jejjohnson/pyrox"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+# geonnax is declared via a PEP 508 direct URL until it ships to PyPI.
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pyrox_nn"]

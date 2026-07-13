@@ -1,62 +1,44 @@
 [project]
-name = "pyrox"
-version = "0.0.14"
-description = "Probabilistic modeling with Equinox and NumPyro: Bayesian neural networks, Gaussian processes, and composable GP building blocks."
+name = "pyrox-monorepo"
+version = "0.0.0"
+description = "Pyrox monorepo workspace root (not published — see packages/* for shipped libraries)."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
 ]
 license = { file = "LICENSE" }
 readme = "README.md"
-keywords = ["jax", "equinox", "numpyro", "gaussian-processes", "bayesian-neural-networks", "probabilistic"]
 requires-python = ">=3.12"
-classifiers = [
-    "Topic :: Scientific/Engineering",
-    "Topic :: Software Development :: Libraries",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
-    "Natural Language :: English",
-    "License :: OSI Approved :: MIT License",
-    "Intended Audience :: Science/Research",
-    "Development Status :: 2 - Pre-Alpha",
-]
-dependencies = [
-    "jax>=0.10",
-    "equinox>=0.13.8",
-    "numpyro>=0.21",
-    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@cd6264c92d32f433515d3efb06a0672a02280339",
-    "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.5",
-    "lineax>=0.1.1",
-    "einops>=0.8.2",
-    "einx>=0.4.3",
-]
+classifiers = ["Private :: Do Not Upload"]
+dependencies = []
 
-[project.optional-dependencies]
-optax = [
-    "optax>=0.2",
-]
-# `pip install pyrox[bnf]` bundles what the Bayesian Neural Field stack needs:
-# pandas for `pyrox.preprocessing` and optax for the SGD-MAP / SVI inference.
-bnf = [
-    "pandas>=3.0.3",
-    "optax>=0.2",
-]
-# `pip install pyrox[colab]` bundles what the example notebooks need to run
-# top-to-bottom in Google Colab — matplotlib for plots, watermark for an
-# explicit version readout at the top of each notebook.
-colab = [
-    "matplotlib>=3.10.9",
-    "watermark>=2.6.0",
-    "pandas>=3.0.3",
-]
+[tool.uv.workspace]
+members = ["packages/*"]
 
-[project.urls]
-Repository = "https://github.com/jejjohnson/pyrox"
+[tool.uv.sources]
+pyrox = { workspace = true }
+pyrox-gp = { workspace = true }
+pyrox-nn = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+# Workspace root ships no code; the per-package wheels live under packages/*.
+bypass-selection = true
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
     "pre-commit>=4.6.0",
+    # Workspace members are dev-installed so tests can import them.
+    "pyrox",
+    "pyrox-gp",
+    "pyrox-nn",
+    # Optional-extra backends exercised by the test suites.
+    "optax>=0.2",
+    "pandas>=3.0.3",
 ]
 lint = [
     "ruff>=0.15.12",
@@ -89,21 +71,6 @@ examples = [
     "scikit-learn>=1.8.0",
 ]
 
-[tool.uv.sources]
-# gaussx is not yet on PyPI; resolve from GitHub until the first release.
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", rev = "cd6264c92d32f433515d3efb06a0672a02280339" }
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.metadata]
-# gaussx is declared via a PEP 508 direct URL until it ships to PyPI.
-allow-direct-references = true
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/pyrox"]
-
 [tool.ruff]
 target-version = "py312"
 line-length = 88
@@ -115,24 +82,16 @@ ignore = ["E402", "E721", "E731", "E741"]
 
 [tool.ruff.lint.per-file-ignores]
 # F722 clashes with jaxtyping's string-based shape annotations (Array, "N D").
-# Scope the suppression to the jaxtyping-using GP layer, its tests, and the
-# example notebooks that demonstrate the same patterns.
 # RUF001/002/003 flag Greek letters, sub/superscripts, primes, and the
 # multiplication sign in strings/docstrings/comments. These are intentional
 # math notation throughout the array-heavy modules (einx specs, shape
 # annotations, and Unicode equations), so suppress them there.
-"src/pyrox/_basis/**" = ["F722", "RUF001", "RUF002", "RUF003"]
-"src/pyrox/gp/**" = ["F722", "RUF001", "RUF002", "RUF003"]
-"src/pyrox/nn/**" = ["F722", "RUF001", "RUF002", "RUF003"]
-"src/pyrox/inference/**" = ["F722", "RUF001", "RUF002", "RUF003"]
-"src/pyrox/api/**" = ["F722"]
-"src/pyrox/preprocessing/**" = ["F722"]
-"tests/basis/**" = ["F722"]
-"tests/gp/**" = ["F722"]
-"tests/nn/**" = ["F722", "RUF001", "RUF002", "RUF003"]
-"tests/inference/**" = ["F722"]
-"tests/api/**" = ["F722"]
-"tests/preprocessing/**" = ["F722"]
+"packages/pyrox/src/pyrox/inference/**" = ["F722", "RUF001", "RUF002", "RUF003"]
+"packages/pyrox-gp/src/pyrox_gp/**" = ["F722", "RUF001", "RUF002", "RUF003"]
+"packages/pyrox-nn/src/pyrox_nn/**" = ["F722", "RUF001", "RUF002", "RUF003"]
+"packages/pyrox/tests/inference/**" = ["F722"]
+"packages/pyrox-gp/tests/**" = ["F722"]
+"packages/pyrox-nn/tests/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "docs/notebooks/**" = [
     "F722",
     "B905",
@@ -152,15 +111,23 @@ lines-after-imports = 2
 python-version = "3.12"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "--cov=src/pyrox --cov-report=term-missing --cov-report=xml:coverage.xml"
+testpaths = [
+    "packages/pyrox/tests",
+    "packages/pyrox-gp/tests",
+    "packages/pyrox-nn/tests",
+]
+addopts = "--cov --cov-report=term-missing --cov-report=xml:coverage.xml"
 markers = [
     "slow: long-running tests (convergence / integration); skip with `-m 'not slow'`",
 ]
 
 [tool.coverage.run]
-source = ["src/pyrox"]
-omit = ["tests/*"]
+source = [
+    "packages/pyrox/src",
+    "packages/pyrox-gp/src",
+    "packages/pyrox-nn/src",
+]
+omit = ["**/tests/*"]
 
 [tool.coverage.report]
 show_missing = true

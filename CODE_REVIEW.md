@@ -39,7 +39,7 @@ git --no-pager diff --no-prefix --unified=100000 --minimal "$BASE_BRANCH"...HEAD
 - Logical code organization and flow
 - Avoidance of deeply nested structures
 - Linting via **ruff** (`uv run --group lint ruff check .`) — lint the **entire repo**, not just the package
-- Type-hint checking via **ty** (`uv run --group typecheck ty check src/pyrox`)
+- Type-hint checking via **ty** (`uv run --group typecheck ty check packages/pyrox/src/pyrox packages/pyrox-gp/src/pyrox_gp packages/pyrox-nn/src/pyrox_nn`)
 
 > **Rule of thumb**: Sacrifice *cleverness* for *clarity*. Sacrifice *brevity* for *explicitness*.
 > Don't worry about formatting — our CI pipeline (ruff format, pre-commit) handles that automatically.

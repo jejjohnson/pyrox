@@ -18,6 +18,10 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install typecheck dependencies
-        run: uv sync --group typecheck --extra optax --extra bnf
+        run: uv sync --group typecheck --group dev
       - name: Run ty check
-        run: uv run --group typecheck --extra optax --extra bnf ty check src/pyrox
+        run: |
+          uv run --group typecheck ty check \
+            packages/pyrox/src/pyrox \
+            packages/pyrox-gp/src/pyrox_gp \
+            packages/pyrox-nn/src/pyrox_nn

@@ -31,7 +31,7 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
-          paths: [src]
+          paths: [packages/pyrox/src, packages/pyrox-gp/src, packages/pyrox-nn/src]
           options:
             docstring_style: google
             docstring_section_style: table
@@ -47,7 +47,7 @@ plugins:
             merge_init_into_class: false
             filters: ["!^_"]
             # The GP API re-exports several gaussx symbols (SDEKernel,
-            # MaternSDE, ConstantSDE, …) and ``pyrox.nn`` re-exports
+            # MaternSDE, ConstantSDE, …) and ``pyrox_nn`` re-exports
             # deterministic NN primitives from geonnax (SIREN, MFN,
             # conditioners, encoders, etc.). griffe must preload both
             # external packages to resolve those aliases; without this

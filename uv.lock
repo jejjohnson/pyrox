@@ -13,6 +13,14 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
+[manifest]
+members = [
+    "pyrox",
+    "pyrox-gp",
+    "pyrox-monorepo",
+    "pyrox-nn",
+]
+
 [[package]]
 name = "absl-py"
 version = "2.4.0"
@@ -1892,24 +1900,16 @@ wheels = [
 
 [[package]]
 name = "pyrox"
-version = "0.0.14"
-source = { editable = "." }
+version = "0.0.1"
+source = { editable = "packages/pyrox" }
 dependencies = [
-    { name = "einops" },
     { name = "einx" },
     { name = "equinox" },
-    { name = "gaussx" },
-    { name = "geonnax" },
     { name = "jax" },
-    { name = "lineax" },
     { name = "numpyro" },
 ]
 
 [package.optional-dependencies]
-bnf = [
-    { name = "optax" },
-    { name = "pandas" },
-]
 colab = [
     { name = "matplotlib" },
     { name = "pandas" },
@@ -1919,9 +1919,68 @@ optax = [
     { name = "optax" },
 ]
 
+[package.metadata]
+requires-dist = [
+    { name = "einx", specifier = ">=0.4.3" },
+    { name = "equinox", specifier = ">=0.13.8" },
+    { name = "jax", specifier = ">=0.10" },
+    { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
+    { name = "numpyro", specifier = ">=0.21" },
+    { name = "optax", marker = "extra == 'optax'", specifier = ">=0.2" },
+    { name = "pandas", marker = "extra == 'colab'", specifier = ">=3.0.3" },
+    { name = "watermark", marker = "extra == 'colab'", specifier = ">=2.6.0" },
+]
+provides-extras = ["optax", "colab"]
+
+[[package]]
+name = "pyrox-gp"
+version = "0.0.1"
+source = { editable = "packages/pyrox-gp" }
+dependencies = [
+    { name = "einx" },
+    { name = "gaussx" },
+    { name = "geonnax" },
+    { name = "lineax" },
+    { name = "pyrox" },
+]
+
+[package.optional-dependencies]
+colab = [
+    { name = "matplotlib" },
+    { name = "pandas" },
+    { name = "watermark" },
+]
+optax = [
+    { name = "optax" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "einx", specifier = ">=0.4.3" },
+    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=cd6264c92d32f433515d3efb06a0672a02280339" },
+    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.5" },
+    { name = "lineax", specifier = ">=0.1.1" },
+    { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
+    { name = "optax", marker = "extra == 'optax'", specifier = ">=0.2" },
+    { name = "pandas", marker = "extra == 'colab'", specifier = ">=3.0.3" },
+    { name = "pyrox", editable = "packages/pyrox" },
+    { name = "watermark", marker = "extra == 'colab'", specifier = ">=2.6.0" },
+]
+provides-extras = ["optax", "colab"]
+
+[[package]]
+name = "pyrox-monorepo"
+version = "0.0.0"
+source = { editable = "." }
+
 [package.dev-dependencies]
 dev = [
+    { name = "optax" },
+    { name = "pandas" },
     { name = "pre-commit" },
+    { name = "pyrox" },
+    { name = "pyrox-gp" },
+    { name = "pyrox-nn" },
     { name = "pytest" },
     { name = "pytest-cov" },
 ]
@@ -1949,27 +2008,15 @@ typecheck = [
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "einops", specifier = ">=0.8.2" },
-    { name = "einx", specifier = ">=0.4.3" },
-    { name = "equinox", specifier = ">=0.13.8" },
-    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=cd6264c92d32f433515d3efb06a0672a02280339" },
-    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.5" },
-    { name = "jax", specifier = ">=0.10" },
-    { name = "lineax", specifier = ">=0.1.1" },
-    { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
-    { name = "numpyro", specifier = ">=0.21" },
-    { name = "optax", marker = "extra == 'bnf'", specifier = ">=0.2" },
-    { name = "optax", marker = "extra == 'optax'", specifier = ">=0.2" },
-    { name = "pandas", marker = "extra == 'bnf'", specifier = ">=3.0.3" },
-    { name = "pandas", marker = "extra == 'colab'", specifier = ">=3.0.3" },
-    { name = "watermark", marker = "extra == 'colab'", specifier = ">=2.6.0" },
-]
-provides-extras = ["optax", "bnf", "colab"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "optax", specifier = ">=0.2" },
+    { name = "pandas", specifier = ">=3.0.3" },
     { name = "pre-commit", specifier = ">=4.6.0" },
+    { name = "pyrox", editable = "packages/pyrox" },
+    { name = "pyrox-gp", editable = "packages/pyrox-gp" },
+    { name = "pyrox-nn", editable = "packages/pyrox-nn" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
 ]
@@ -1991,6 +2038,46 @@ examples = [
 ]
 lint = [{ name = "ruff", specifier = ">=0.15.12" }]
 typecheck = [{ name = "ty", specifier = ">=0.0.38" }]
+
+[[package]]
+name = "pyrox-nn"
+version = "0.0.1"
+source = { editable = "packages/pyrox-nn" }
+dependencies = [
+    { name = "einx" },
+    { name = "geonnax" },
+    { name = "pyrox" },
+    { name = "pyrox-gp" },
+]
+
+[package.optional-dependencies]
+bnf = [
+    { name = "optax" },
+    { name = "pandas" },
+]
+colab = [
+    { name = "matplotlib" },
+    { name = "pandas" },
+    { name = "watermark" },
+]
+optax = [
+    { name = "optax" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "einx", specifier = ">=0.4.3" },
+    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.5" },
+    { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
+    { name = "optax", marker = "extra == 'bnf'", specifier = ">=0.2" },
+    { name = "optax", marker = "extra == 'optax'", specifier = ">=0.2" },
+    { name = "pandas", marker = "extra == 'bnf'", specifier = ">=3.0.3" },
+    { name = "pandas", marker = "extra == 'colab'", specifier = ">=3.0.3" },
+    { name = "pyrox", editable = "packages/pyrox" },
+    { name = "pyrox-gp", editable = "packages/pyrox-gp" },
+    { name = "watermark", marker = "extra == 'colab'", specifier = ">=2.6.0" },
+]
+provides-extras = ["optax", "bnf", "colab"]
 
 [[package]]
 name = "pytest"
