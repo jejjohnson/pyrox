@@ -13,7 +13,7 @@ from pyrox._core import (
     PyroxSample,
     pyrox_method,
 )
-from pyrox._core.pyrox_module import _Context
+from pyrox._core.pyrox_module import _MISSING, _Context
 
 
 # --- _Context ---------------------------------------------------------------
@@ -24,7 +24,7 @@ def test_context_clears_on_outermost_exit():
     with ctx:
         ctx.set("a", 1)
         assert ctx.get("a") == 1
-    assert ctx.get("a") is None
+    assert ctx.get("a") is _MISSING
 
 
 def test_context_reentrant_preserves_cache_in_nested_scope():
@@ -37,13 +37,22 @@ def test_context_reentrant_preserves_cache_in_nested_scope():
         # inner exit must not clear while outer still active
         assert ctx.get("a") == 1
         assert ctx.get("b") == 2
-    assert ctx.get("a") is None
+    assert ctx.get("a") is _MISSING
 
 
 def test_context_inactive_set_is_noop():
     ctx = _Context()
     ctx.set("a", 1)
-    assert ctx.get("a") is None
+    assert ctx.get("a") is _MISSING
+
+
+def test_context_caches_none_value_as_hit():
+    """A legitimately cached ``None`` must count as a cache hit, not a miss."""
+    ctx = _Context()
+    with ctx:
+        ctx.set("a", None)
+        assert ctx.get("a") is None
+        assert ctx.get("a") is not _MISSING
 
 
 # --- Pattern B: PyroxModule -------------------------------------------------
@@ -94,6 +103,50 @@ def test_pyrox_method_deduplicates_repeated_sample_access():
     assert a == b
     # Exactly one site registered for two references.
     assert sum(k == "TwiceReferenced.w" for k in tr) == 1
+
+
+def test_lookup_mode_param_cached_once():
+    """``pyrox_param(name, None)`` (lookup mode) returns ``None`` outside a
+    substitute handler, but the two references inside one call must still
+    register the site exactly once — the cache must treat ``None`` as a hit.
+    """
+
+    class LookupParam(PyroxModule):
+        pyrox_name = "LookupParam"
+
+        @pyrox_method
+        def __call__(self):
+            a = self.pyrox_param("w", None)
+            b = self.pyrox_param("w", None)
+            return a, b
+
+    m = LookupParam()
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        a, b = m()
+    assert a is None and b is None
+    assert sum(k == "LookupParam.w" for k in tr) == 1
+
+
+def test_duplicate_pyrox_name_raises_under_trace():
+    """Two instances sharing a ``pyrox_name`` collide on site names; under a
+    trace NumPyro must reject the duplicate loudly (documented contract).
+    """
+
+    class Dup(PyroxModule):
+        pyrox_name = "Dup"
+
+        @pyrox_method
+        def __call__(self):
+            return self.pyrox_sample("w", dist.Normal(0.0, 1.0))
+
+    a, b = Dup(), Dup()
+    with (
+        pytest.raises(AssertionError, match="unique names"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+    ):
+        a()
+        b()
 
 
 def test_dependent_prior_resolves_callable():

@@ -35,9 +35,9 @@ from .pyrox_module import PyroxModule
 from .utils import _biject_to, _is_real_support
 
 
-GuideType = Literal["delta", "normal", "mvn"]
+GuideType = Literal["delta", "normal"]
 Mode = Literal["model", "guide"]
-_VALID_GUIDES: frozenset[str] = frozenset({"delta", "normal", "mvn"})
+_VALID_GUIDES: frozenset[str] = frozenset({"delta", "normal"})
 
 
 @dataclass
@@ -141,13 +141,77 @@ class Parameterized(PyroxModule):
     def _guide_param(self, name: str, entry: _Entry) -> Any:
         guide = entry.guide_type
         if guide == "delta":
-            return self.pyrox_param(name, entry.init_value, constraint=entry.constraint)
+            self._reserve_aux(name, ("_loc",))
+            return self._guide_delta(name, entry)
         if guide == "normal":
+            self._reserve_aux(name, ("_loc", "_scale"))
             return self._guide_normal(name, entry)
         raise NotImplementedError(
             f"guide_type {guide!r} is not yet supported at the "
             "get_param level; materialize via a dedicated guide layer."
         )
+
+    def _reserve_aux(self, name: str, suffixes: tuple[str, ...]) -> None:
+        """Fail loudly if a guide's auxiliary site name collides with a
+        user-registered parameter.
+
+        The ``normal`` / ``delta`` guides materialize backing sites named
+        ``{name}_loc`` (and ``{name}_scale``). If the user also registered a
+        parameter with that exact name, the two would share a fully-qualified
+        site name and silently clobber each other via the per-call cache (or
+        trip NumPyro's duplicate-site check). Reject it at guide time with an
+        actionable message rather than let it corrupt inference.
+        """
+        params = self._state().params
+        for suffix in suffixes:
+            aux = f"{name}{suffix}"
+            if aux in params:
+                raise ValueError(
+                    f"the guide for parameter {name!r} needs an auxiliary "
+                    f"site named {aux!r}, but a parameter with that name is "
+                    "already registered; rename one of them to avoid the "
+                    "collision."
+                )
+
+    def _guide_delta(self, name: str, entry: _Entry) -> Any:
+        """Point-estimate (MAP) guide — a constrained param replayed as a Delta.
+
+        Mirrors `numpyro.infer.autoguide.AutoDelta`: the value is a
+        `numpyro.param` in the **prior's** support, wrapped in a
+        `numpyro.distributions.Delta` **sample** site. NumPyro's ``replay``
+        handler conditions the model only on guide *sample* sites, so a bare
+        param under the latent's name is invisible to SVI and raises
+        ``RuntimeError: Site ... must be sampled in trace``.
+
+        Support and event rank are taken from the resolved prior — matching
+        the model site — rather than from the registered ``constraint``:
+
+        * The point estimate must live in the model prior's support, or
+          ``replay`` evaluates the prior's log-density outside its domain and
+          SVI diverges (a positive prior on an unconstrained-registered param
+          would otherwise let ``{name}_loc`` slide to <= 0).
+        * The Delta's ``event_dim`` is the prior's, so batched priors keep
+          their plate dimensions instead of collapsing the whole value into a
+          single event (which would mis-expand under ``numpyro.plate`` /
+          block subsampling of the backing param).
+        """
+        prior = entry.prior
+        if callable(prior) and not isinstance(prior, dist.Distribution):
+            prior = prior(self)
+        if isinstance(prior, dist.Distribution):
+            support = prior.support
+            event_dim = prior.event_dim
+        else:  # non-distribution prior (deterministic value): fall back.
+            support = entry.constraint
+            event_dim = 0
+        loc = self.pyrox_param(
+            f"{name}_loc",
+            entry.init_value,
+            constraint=support,
+            event_dim=event_dim,
+        )
+        loc = jnp.asarray(loc)
+        return self.pyrox_sample(name, dist.Delta(loc, event_dim=event_dim))
 
     def _guide_normal(self, name: str, entry: _Entry) -> Any:
         """Mean-field normal guide in unconstrained space.
@@ -168,11 +232,19 @@ class Parameterized(PyroxModule):
             )
             return self.pyrox_sample(name, dist.Normal(loc, scale))
         transform = _biject_to(entry.constraint)
-        loc = self.pyrox_param(f"{name}_loc", transform.inv(init))
+        # loc AND scale live in unconstrained space. For shape-changing
+        # transforms (e.g. StickBreaking for a simplex: K -> K-1) the
+        # unconstrained shape differs from ``init``; sizing scale from
+        # ``init`` would fail to broadcast against ``transform.inv(init)``.
+        unconstrained = transform.inv(init)
+        loc = self.pyrox_param(f"{name}_loc", unconstrained)
         scale = self.pyrox_param(
             f"{name}_scale",
-            jnp.ones_like(init) * 0.1,
+            jnp.full_like(unconstrained, 0.1),
             constraint=dist.constraints.positive,
         )
-        base = dist.Normal(loc, scale)
+        # Promote the base to the transform's domain event rank so the
+        # TransformedDistribution's event structure matches the constrained
+        # support (a no-op for element-wise transforms like Exp/Sigmoid).
+        base = dist.Normal(loc, scale).to_event(transform.domain.event_dim)
         return self.pyrox_sample(name, dist.TransformedDistribution(base, transform))
