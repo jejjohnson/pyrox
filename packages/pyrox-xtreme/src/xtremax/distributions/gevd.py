@@ -20,8 +20,10 @@ from xtremax.primitives.gev import (
     gev_cdf,
     gev_icdf,
     gev_log_prob,
+    gev_log_survival,
     gev_mean,
     gev_return_level,
+    gev_survival,
 )
 
 
@@ -422,22 +424,9 @@ class GeneralizedExtremeValueDistribution(dist.Distribution):
         Returns:
             Survival probabilities
         """
-        shape = jnp.asarray(self.concentration)
-        is_gumbel = jnp.abs(shape) < self._gumbel_threshold
-        xi = jnp.where(is_gumbel, 1.0, shape)
-        z = (value - self.loc) / self.scale
-
-        gumbel = -jnp.expm1(-jnp.exp(-z))
-
-        t = 1.0 + xi * z
-        valid = t > 0.0
-        t_safe = jnp.where(valid, t, 1.0)
-        log_cdf = -jnp.power(t_safe, -1.0 / xi)
-        gev_inside = -jnp.expm1(log_cdf)
-        boundary = jnp.where(shape > 0, 1.0, 0.0)
-        gevd = jnp.where(valid, gev_inside, boundary)
-
-        return jnp.where(is_gumbel, gumbel, gevd)
+        # Delegate to the stable primitive so the class and functional APIs
+        # share the smooth ξ→0 handling (no threshold to drift against).
+        return gev_survival(value, self.loc, self.scale, self.concentration)
 
     def log_survival_function(self, value: jnp.ndarray) -> jnp.ndarray:
         """
@@ -449,22 +438,8 @@ class GeneralizedExtremeValueDistribution(dist.Distribution):
         Returns:
             Survival probabilities
         """
-        shape = jnp.asarray(self.concentration)
-        is_gumbel = jnp.abs(shape) < self._gumbel_threshold
-        xi = jnp.where(is_gumbel, 1.0, shape)
-        z = (value - self.loc) / self.scale
-
-        gumbel = jnp.log(-jnp.expm1(-jnp.exp(-z)))
-
-        t = 1.0 + xi * z
-        valid = t > 0.0
-        t_safe = jnp.where(valid, t, 1.0)
-        log_cdf = -jnp.power(t_safe, -1.0 / xi)
-        gev_inside = jnp.log(-jnp.expm1(log_cdf))
-        boundary = jnp.where(shape > 0, 0.0, -jnp.inf)
-        gevd = jnp.where(valid, gev_inside, boundary)
-
-        return jnp.where(is_gumbel, gumbel, gevd)
+        # Delegate to the stable primitive (smooth ξ→0, matches the class cdf).
+        return gev_log_survival(value, self.loc, self.scale, self.concentration)
 
     def hazard_rate(self, value: jnp.ndarray) -> jnp.ndarray:
         """

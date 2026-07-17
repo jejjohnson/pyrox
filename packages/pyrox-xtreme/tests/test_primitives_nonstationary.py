@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import pytest
 
 from xtremax import (
     assemble_nonstationary_gev_fields,
@@ -87,6 +88,7 @@ class TestSurvival:
         """`1 - cdf` cancels to 0 in the deep tail; `gev_survival` does not."""
         from jax import config
 
+        prior_x64 = config.read("jax_enable_x64")
         config.update("jax_enable_x64", True)
         try:
             x = jnp.asarray(40.0, dtype=jnp.float64)  # Gumbel, S ~ e^-40 ~ 4e-18
@@ -97,7 +99,9 @@ class TestSurvival:
             # The naive form has lost all precision (rounds to exactly 0).
             assert float(naive) == 0.0
         finally:
-            config.update("jax_enable_x64", False)
+            # Restore the prior setting rather than forcing float32, so a suite
+            # run under JAX_ENABLE_X64=1 is not silently downgraded afterward.
+            config.update("jax_enable_x64", prior_x64)
 
     def test_out_of_support_boundaries(self):
         # Fréchet (ξ>0): below lower endpoint S = 1.
@@ -204,6 +208,42 @@ class TestNonStationary:
         assert out.shape == (loc.shape[1],)
         assert jnp.all(jnp.isfinite(out))
 
+    def test_stationary_large_period_uses_stable_path(self):
+        """Stationary mode must route through the stable return-level path so a
+        large period does not round ``1 - 1/T`` to 1 (returning an endpoint)."""
+        period = float(2**25)
+        stat = nonstationary_return_level(period, 0.0, 1.0, 0.1, time_axis=None)
+        assert jnp.isfinite(stat)
+        assert jnp.allclose(stat, gev_return_level(period, 0.0, 1.0, 0.1), rtol=1e-6)
+
+    def test_reverse_mode_grad_matches_finite_difference(self):
+        """The non-stationary solve is reverse-mode differentiable via the
+        implicit function theorem (issue #47): the bracketing ``while_loop``
+        used to raise under ``jax.grad``, and bisection alone gives 0 gradient.
+        """
+        loc, scale, shape = self._fields()
+
+        def z_of_scale(factor):
+            return nonstationary_return_level(
+                100.0, loc, factor * scale, shape, time_axis=0
+            )[0]
+
+        grad = float(jax.grad(z_of_scale)(1.0))
+        h = 1e-4
+        fd = float(z_of_scale(1.0 + h) - z_of_scale(1.0 - h)) / (2 * h)
+        assert jnp.isfinite(grad)
+        assert abs(grad) > 1e-3
+        assert grad == pytest.approx(fd, rel=1e-3)
+
+        def z_of_shape(xi):
+            return nonstationary_return_level(
+                100.0, loc, scale, jnp.full_like(shape, xi), time_axis=0
+            )[0]
+
+        grad_xi = float(jax.grad(z_of_shape)(0.1))
+        fd_xi = float(z_of_shape(0.1 + h) - z_of_shape(0.1 - h)) / (2 * h)
+        assert grad_xi == pytest.approx(fd_xi, rel=1e-3)
+
 
 class TestSpatial:
     def test_pairwise_distances(self):
@@ -213,6 +253,20 @@ class TestSpatial:
         assert jnp.allclose(jnp.diag(d), 0.0)
         assert jnp.allclose(d[0, 1], 5.0)
         assert jnp.allclose(d, d.T)
+
+    def test_pairwise_distances_grad_finite(self):
+        """The zero diagonal made ‖Δ‖'s Δ/‖Δ‖ gradient 0/0 → all-NaN (#48)."""
+        coords = jnp.array([[0.0, 0.0], [1.0, 1.0], [2.0, 0.5]])
+        g = jax.grad(lambda c: pairwise_distances(c).sum())(coords)
+        assert jnp.all(jnp.isfinite(g))
+
+    def test_pairwise_distances_propagates_nan_coord(self):
+        """A NaN coordinate must surface as NaN distances, not be masked to a
+        zero (coincident) distance that fakes a perfect correlation."""
+        coords = jnp.array([[0.0, 0.0], [1.0, 0.0], [jnp.nan, 0.0]])
+        d = pairwise_distances(coords)
+        assert jnp.isnan(d[2, 0]) and jnp.isnan(d[0, 2])
+        assert float(d[0, 1]) == pytest.approx(1.0)  # valid pair unaffected
 
     def test_design_matrix(self):
         cov = jnp.array([[1.0, 2.0], [3.0, 4.0]])

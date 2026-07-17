@@ -12,8 +12,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
-
-_EULER_GAMMA = 0.5772156649015329
+from xtremax.primitives._common import EULER_GAMMA
 
 
 def gumbel_log_prob(
@@ -50,7 +49,7 @@ def gumbel_mean(
     scale: Float[Array, ...],
 ) -> Float[Array, ...]:
     r"""Gumbel mean: :math:`\mu + \sigma\gamma_E`."""
-    return loc + scale * _EULER_GAMMA
+    return loc + scale * EULER_GAMMA
 
 
 def gumbel_return_level(

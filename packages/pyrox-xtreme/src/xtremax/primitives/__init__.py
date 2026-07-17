@@ -31,8 +31,10 @@ from xtremax.primitives.gpd import (
     gpd_cdf,
     gpd_icdf,
     gpd_log_prob,
+    gpd_log_survival,
     gpd_mean,
     gpd_return_level,
+    gpd_survival,
 )
 from xtremax.primitives.gumbel import (
     gumbel_cdf,
@@ -83,8 +85,10 @@ __all__ = [
     "gpd_cdf",
     "gpd_icdf",
     "gpd_log_prob",
+    "gpd_log_survival",
     "gpd_mean",
     "gpd_return_level",
+    "gpd_survival",
     # Gumbel (GEV, ξ = 0)
     "gumbel_cdf",
     "gumbel_icdf",

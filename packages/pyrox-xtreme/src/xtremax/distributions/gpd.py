@@ -22,8 +22,10 @@ from xtremax.primitives.gpd import (
     gpd_cdf,
     gpd_icdf,
     gpd_log_prob,
+    gpd_log_survival,
     gpd_mean,
     gpd_return_level,
+    gpd_survival,
 )
 
 
@@ -387,26 +389,9 @@ class GeneralizedParetoDistribution(dist.Distribution):
         Returns:
             Survival probabilities
         """
-        scale = jnp.asarray(self.scale)
-        shape = jnp.asarray(self.concentration)
-        value = jnp.asarray(value)
-        is_exponential = jnp.abs(shape) < self._exponential_threshold
-        safe_shape = jnp.where(is_exponential, jnp.ones_like(shape), shape)
-
-        # Below the lower support bound x < 0, survival is exactly 1.
-        value_in_support = value >= 0.0
-
-        exponential = jnp.exp(-jnp.maximum(value, 0.0) / scale)
-
-        t = 1.0 + safe_shape * value / scale
-        valid = t > 0.0
-        t_safe = jnp.where(valid, t, 1.0)
-        pareto_inside = jnp.power(t_safe, -1.0 / safe_shape)
-        boundary = jnp.where(shape < 0, 0.0, 1.0)
-        pareto = jnp.where(valid, pareto_inside, boundary)
-
-        survival = jnp.where(is_exponential, exponential, pareto)
-        return jnp.where(value_in_support, survival, 1.0)
+        # Delegate to the stable primitive so the class and functional APIs
+        # share the same smooth ξ→0 handling (no threshold to drift against).
+        return gpd_survival(value, self.scale, self.concentration)
 
     def hazard_rate(self, value: jnp.ndarray) -> jnp.ndarray:
         """
@@ -451,23 +436,8 @@ class GeneralizedParetoDistribution(dist.Distribution):
         Returns:
             Cumulative hazard rate values
         """
-        scale = jnp.asarray(self.scale)
-        shape = jnp.asarray(self.concentration)
-        value = jnp.asarray(value)
-        is_exponential = jnp.abs(shape) < self._exponential_threshold
-        safe_shape = jnp.where(is_exponential, jnp.ones_like(shape), shape)
-
-        exponential = jnp.maximum(value, 0.0) / scale
-
-        t = 1.0 + safe_shape * value / scale
-        valid = t > 0.0
-        t_safe = jnp.where(valid, t, 1.0)
-        pareto_inside = jnp.log(t_safe) / safe_shape
-        boundary = jnp.where(shape < 0, jnp.inf, 0.0)
-        pareto = jnp.where(valid, pareto_inside, boundary)
-
-        cumulative_hazard = jnp.where(is_exponential, exponential, pareto)
-        return jnp.where(value >= 0.0, cumulative_hazard, 0.0)
+        # Λ(x) = -log S(x); delegate to the stable log-survival primitive.
+        return -gpd_log_survival(value, self.scale, self.concentration)
 
     def return_level(self, return_period: float | jnp.ndarray) -> jnp.ndarray:
         """Return level. Thin wrapper for ``gpd_return_level``."""
