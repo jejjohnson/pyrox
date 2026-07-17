@@ -36,6 +36,12 @@ import numpyro
 import numpyro.distributions as dist
 
 
+# Sentinel for "no cached value" so a legitimately cached ``None`` (e.g. the
+# result of ``pyrox_param(name, None)`` lookup mode outside a substitute
+# handler) is still treated as a cache hit rather than a miss.
+_MISSING: Any = object()
+
+
 class _Context:
     """Per-call site cache with re-entrant scope depth tracking.
 
@@ -62,8 +68,8 @@ class _Context:
     def active(self) -> bool:
         return self._depth > 0
 
-    def get(self, name: str) -> Any | None:
-        return self._cache.get(name)
+    def get(self, name: str) -> Any:
+        return self._cache.get(name, _MISSING)
 
     def set(self, name: str, value: Any) -> Any:
         if self._depth > 0:
@@ -104,6 +110,15 @@ class PyroxModule(eqx.Module):
         register distinct sites within a single trace. The id-based
         fallback is stable within a Python process but not across runs —
         set ``pyrox_name`` explicitly for checkpoint-portable names.
+
+        ``pyrox_name`` must be **unique among the instances participating
+        in a single trace**: two modules that share a ``pyrox_name`` and
+        register the same site name collide. Under ``handlers.trace`` this
+        raises loudly ("all sites must have unique names"); under a bare
+        ``handlers.seed`` (no trace) there is no uniqueness check, so the
+        two instances silently draw independent values. Give sibling
+        instances distinct ``pyrox_name`` values (or omit it and rely on
+        the id-based fallback).
         """
         name = getattr(self, "pyrox_name", None)
         if isinstance(name, str) and name:
@@ -125,7 +140,7 @@ class PyroxModule(eqx.Module):
         fullname = self._pyrox_fullname(name)
         if ctx.active:
             cached = ctx.get(fullname)
-            if cached is not None:
+            if cached is not _MISSING:
                 return cached
         kwargs: dict[str, Any] = {}
         if constraint is not None:
@@ -140,7 +155,7 @@ class PyroxModule(eqx.Module):
         fullname = self._pyrox_fullname(name)
         if ctx.active:
             cached = ctx.get(fullname)
-            if cached is not None:
+            if cached is not _MISSING:
                 return cached
         resolved = (
             prior(self)

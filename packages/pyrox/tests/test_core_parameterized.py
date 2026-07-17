@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import jax.numpy as jnp
+import numpyro
 import numpyro.distributions as dist
 import pytest
 from numpyro import handlers
@@ -68,13 +69,102 @@ def test_model_mode_with_prior_registers_sample_site():
     assert tr["RBFKernel.lengthscale"]["type"] == "param"
 
 
-def test_guide_mode_delta_uses_param_site():
+def test_guide_mode_delta_registers_param_backed_delta_sample():
+    """The `delta` guide must expose the latent as a *sample* site (a
+    ``Delta`` backed by a constrained ``{name}_loc`` param) so NumPyro's
+    ``replay`` handler conditions the model on it. A bare param site is
+    invisible to SVI. Regression for #182.
+    """
     k = RBFKernel()
     k.set_mode("guide")
     X = jnp.array([[0.0], [1.0]])
     with handlers.trace() as tr, handlers.seed(rng_seed=0):
         _ = k(X, X)
-    assert tr["RBFKernel.variance"]["type"] == "param"
+    # variance has a prior → delta guide: param-backed Delta sample site.
+    assert tr["RBFKernel.variance"]["type"] == "sample"
+    assert isinstance(tr["RBFKernel.variance"]["fn"], dist.Delta)
+    assert tr["RBFKernel.variance_loc"]["type"] == "param"
+    # lengthscale has no prior → stays a plain param in guide mode too.
+    assert tr["RBFKernel.lengthscale"]["type"] == "param"
+
+
+def test_svi_delta_guide_converges_to_posterior_mode():
+    """Real SVI with the default `delta` guide must run and recover the
+    posterior mode — the bug in #182 crashed on the first step.
+    """
+    import jax
+
+    class K(Parameterized):
+        pyrox_name = "K"
+
+        @pyrox_method
+        def __call__(self):
+            return self.get_param("mu")
+
+        def setup(self):
+            self.register_param("mu", jnp.array(0.0))
+            self.set_prior("mu", dist.Normal(0.0, 10.0))
+            self.autoguide("mu", "delta")
+
+    from numpyro.infer import SVI, Trace_ELBO
+
+    k = K()
+    y = jnp.full((200,), 3.0)
+
+    def model(y):
+        k.set_mode("model")
+        numpyro.sample("obs", dist.Normal(k(), 1.0), obs=y)
+
+    def guide(y):
+        k.set_mode("guide")
+        k()
+
+    svi = SVI(model, guide, numpyro.optim.Adam(0.05), Trace_ELBO())
+    res = svi.run(jax.random.PRNGKey(0), 2000, y, progress_bar=False)
+    assert bool(jnp.isfinite(res.losses[-1]))
+    # posterior mode of Normal-Normal ≈ data mean (prior is near-flat)
+    assert float(res.params["K.mu_loc"]) == pytest.approx(3.0, abs=0.05)
+
+
+def test_svi_delta_guide_respects_constraint():
+    """A positive-constrained delta point estimate stays in support."""
+    import jax
+
+    class K(Parameterized):
+        pyrox_name = "K"
+
+        @pyrox_method
+        def __call__(self):
+            return self.get_param("sigma")
+
+        def setup(self):
+            self.register_param(
+                "sigma", jnp.array(1.0), constraint=dist.constraints.positive
+            )
+            self.set_prior("sigma", dist.LogNormal(0.0, 1.0))
+            self.autoguide("sigma", "delta")
+
+    from numpyro.infer import SVI, Trace_ELBO
+
+    k = K()
+    y = jax.random.normal(jax.random.PRNGKey(1), (400,)) * 2.5
+
+    def model(y):
+        k.set_mode("model")
+        numpyro.sample("obs", dist.Normal(0.0, k()), obs=y)
+
+    def guide(y):
+        k.set_mode("guide")
+        k()
+
+    svi = SVI(model, guide, numpyro.optim.Adam(0.05), Trace_ELBO())
+    res = svi.run(jax.random.PRNGKey(0), 2000, y, progress_bar=False)
+    assert bool(jnp.isfinite(res.losses[-1]))
+    # The Delta point estimate is drawn in-support at every step.
+    k.set_mode("guide")
+    with handlers.trace() as tr, handlers.seed(rng_seed=0), k._get_context():
+        k.load_pyro_samples()
+    assert float(tr["K.sigma"]["value"]) > 0.0
 
 
 def test_guide_mode_normal_adds_variational_params():
@@ -148,23 +238,93 @@ def test_set_mode_rejects_unknown_mode():
         k.set_mode("bogus")  # type: ignore[arg-type]
 
 
-def test_mvn_guide_raises_not_implemented_at_get_param():
-    class MK(Parameterized):
-        pyrox_name = "MK"
+def test_autoguide_rejects_mvn_at_declaration():
+    """`mvn` is not implemented; it must be rejected at ``autoguide()`` time
+    (with a clear message) rather than deep inside a trace. Regression for
+    the #185 late-failure nit.
+    """
+    k = RBFKernel()
+    with pytest.raises(ValueError, match="guide_type must be"):
+        k.autoguide("variance", "mvn")  # type: ignore[arg-type]
+
+
+def test_guide_mode_normal_simplex_constraint():
+    """The `normal` guide must handle shape-changing constraints (simplex:
+    K -> K-1 in unconstrained space). Regression for #183 — the old code
+    sized the variational scale from the constrained init and failed to
+    broadcast against the unconstrained loc.
+    """
+
+    class SK(Parameterized):
+        pyrox_name = "SK"
 
         @pyrox_method
         def __call__(self):
-            return self.get_param("v")
+            return self.get_param("probs")
 
         def setup(self):
-            self.register_param("v", jnp.array(1.0))
-            self.set_prior("v", dist.Normal(0.0, 1.0))
-            self.autoguide("v", "mvn")
+            self.register_param(
+                "probs",
+                jnp.ones(3) / 3,
+                constraint=dist.constraints.simplex,
+            )
+            self.set_prior("probs", dist.Dirichlet(jnp.ones(3)))
+            self.autoguide("probs", "normal")
 
-    k = MK()
+    k = SK()
     k.set_mode("guide")
-    with pytest.raises(NotImplementedError), handlers.seed(rng_seed=0):
-        _ = k()
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        out = k()
+    # Guide draw lands on the simplex: shape (3,), positive, sums to 1.
+    assert out.shape == (3,)
+    assert bool(jnp.all(out > 0.0))
+    assert float(out.sum()) == pytest.approx(1.0, abs=1e-5)
+    # Latent site is the TransformedDistribution over the simplex.
+    assert isinstance(tr["SK.probs"]["fn"], dist.TransformedDistribution)
+    # Variational params live in unconstrained space: shape (2,), not (3,).
+    assert tr["SK.probs_loc"]["value"].shape == (2,)
+    assert tr["SK.probs_scale"]["value"].shape == (2,)
+
+
+def test_svi_normal_guide_simplex_end_to_end():
+    """One SVI.run through a simplex `normal` guide must produce finite
+    losses — guards against event_dim mistakes that only surface in the
+    Trace_ELBO log-density reduction.
+    """
+    import jax
+    from numpyro.infer import SVI, Trace_ELBO
+
+    class SK(Parameterized):
+        pyrox_name = "SK"
+
+        @pyrox_method
+        def __call__(self):
+            return self.get_param("probs")
+
+        def setup(self):
+            self.register_param(
+                "probs",
+                jnp.ones(3) / 3,
+                constraint=dist.constraints.simplex,
+            )
+            self.set_prior("probs", dist.Dirichlet(jnp.ones(3)))
+            self.autoguide("probs", "normal")
+
+    k = SK()
+    counts = jnp.array([12, 30, 8])
+    total = int(counts.sum())  # concrete, captured outside the traced model
+
+    def model(counts):
+        k.set_mode("model")
+        numpyro.sample("obs", dist.Multinomial(total, k()), obs=counts)
+
+    def guide(counts):
+        k.set_mode("guide")
+        k()
+
+    svi = SVI(model, guide, numpyro.optim.Adam(0.05), Trace_ELBO())
+    res = svi.run(jax.random.PRNGKey(0), 300, counts, progress_bar=False)
+    assert bool(jnp.isfinite(res.losses[-1]))
 
 
 # --- load_pyro_samples -----------------------------------------------------

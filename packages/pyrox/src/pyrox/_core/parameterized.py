@@ -35,9 +35,9 @@ from .pyrox_module import PyroxModule
 from .utils import _biject_to, _is_real_support
 
 
-GuideType = Literal["delta", "normal", "mvn"]
+GuideType = Literal["delta", "normal"]
 Mode = Literal["model", "guide"]
-_VALID_GUIDES: frozenset[str] = frozenset({"delta", "normal", "mvn"})
+_VALID_GUIDES: frozenset[str] = frozenset({"delta", "normal"})
 
 
 @dataclass
@@ -141,13 +141,31 @@ class Parameterized(PyroxModule):
     def _guide_param(self, name: str, entry: _Entry) -> Any:
         guide = entry.guide_type
         if guide == "delta":
-            return self.pyrox_param(name, entry.init_value, constraint=entry.constraint)
+            return self._guide_delta(name, entry)
         if guide == "normal":
             return self._guide_normal(name, entry)
         raise NotImplementedError(
             f"guide_type {guide!r} is not yet supported at the "
             "get_param level; materialize via a dedicated guide layer."
         )
+
+    def _guide_delta(self, name: str, entry: _Entry) -> Any:
+        """Point-estimate (MAP) guide — a constrained param replayed as a Delta.
+
+        Mirrors `numpyro.infer.autoguide.AutoDelta`: the value is a
+        `numpyro.param` in the constraint's support, wrapped in a
+        `numpyro.distributions.Delta` **sample** site. NumPyro's ``replay``
+        handler conditions the model only on guide *sample* sites, so a bare
+        param under the latent's name is invisible to SVI and raises
+        ``RuntimeError: Site ... must be sampled in trace``. The Delta's
+        ``event_dim`` spans the full parameter shape so its (zero) log-density
+        reduces to a scalar, matching the MAP objective.
+        """
+        loc = self.pyrox_param(
+            f"{name}_loc", entry.init_value, constraint=entry.constraint
+        )
+        loc = jnp.asarray(loc)
+        return self.pyrox_sample(name, dist.Delta(loc).to_event(jnp.ndim(loc)))
 
     def _guide_normal(self, name: str, entry: _Entry) -> Any:
         """Mean-field normal guide in unconstrained space.
@@ -168,11 +186,19 @@ class Parameterized(PyroxModule):
             )
             return self.pyrox_sample(name, dist.Normal(loc, scale))
         transform = _biject_to(entry.constraint)
-        loc = self.pyrox_param(f"{name}_loc", transform.inv(init))
+        # loc AND scale live in unconstrained space. For shape-changing
+        # transforms (e.g. StickBreaking for a simplex: K -> K-1) the
+        # unconstrained shape differs from ``init``; sizing scale from
+        # ``init`` would fail to broadcast against ``transform.inv(init)``.
+        unconstrained = transform.inv(init)
+        loc = self.pyrox_param(f"{name}_loc", unconstrained)
         scale = self.pyrox_param(
             f"{name}_scale",
-            jnp.ones_like(init) * 0.1,
+            jnp.full_like(unconstrained, 0.1),
             constraint=dist.constraints.positive,
         )
-        base = dist.Normal(loc, scale)
+        # Promote the base to the transform's domain event rank so the
+        # TransformedDistribution's event structure matches the constrained
+        # support (a no-op for element-wise transforms like Exp/Sigmoid).
+        base = dist.Normal(loc, scale).to_event(transform.domain.event_dim)
         return self.pyrox_sample(name, dist.TransformedDistribution(base, transform))
