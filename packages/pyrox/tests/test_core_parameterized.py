@@ -238,6 +238,93 @@ def test_set_mode_rejects_unknown_mode():
         k.set_mode("bogus")  # type: ignore[arg-type]
 
 
+def test_delta_guide_uses_prior_support_not_registered_constraint():
+    """The delta point estimate must live in the *prior's* support, even when
+    the param was registered without a matching constraint — otherwise SVI
+    replays the model prior outside its domain and diverges. Regression for
+    the #186 Codex review (finding: constrain Delta to the prior support).
+    """
+    import jax
+    from numpyro.infer import SVI, Trace_ELBO
+
+    class K(Parameterized):
+        pyrox_name = "K"
+
+        @pyrox_method
+        def __call__(self):
+            return self.get_param("sigma")
+
+        def setup(self):
+            self.register_param("sigma", jnp.array(1.0))  # no constraint
+            self.set_prior("sigma", dist.LogNormal(0.0, 1.0))  # positive support
+            self.autoguide("sigma", "delta")
+
+    k = K()
+    y = jax.random.normal(jax.random.PRNGKey(1), (400,)) * 2.5
+
+    def model(y):
+        k.set_mode("model")
+        numpyro.sample("obs", dist.Normal(0.0, k()), obs=y)
+
+    def guide(y):
+        k.set_mode("guide")
+        k()
+
+    svi = SVI(model, guide, numpyro.optim.Adam(0.05), Trace_ELBO())
+    res = svi.run(jax.random.PRNGKey(0), 1500, y, progress_bar=False)
+    # No NaN divergence, and the point estimate stays in the positive support.
+    assert bool(jnp.isfinite(res.losses[-1]))
+    assert float(res.params["K.sigma_loc"]) > 0.0
+    # Recovers roughly the data scale (MLE ≈ 2.5, prior near-flat there).
+    assert float(res.params["K.sigma_loc"]) == pytest.approx(2.5, abs=0.5)
+
+
+def test_delta_guide_preserves_prior_event_dim():
+    """The Delta's ``event_dim`` must match the prior's, so batched priors keep
+    their plate/batch dimensions instead of collapsing the whole value into a
+    single event. Regression for the #186 Codex review (finding: preserve
+    prior batch dimensions in Delta guides).
+    """
+
+    class Batched(Parameterized):
+        pyrox_name = "Batched"
+
+        @pyrox_method
+        def __call__(self):
+            return self.get_param("w")
+
+        def setup(self):
+            self.register_param("w", jnp.zeros(5))
+            self.set_prior("w", dist.Normal(jnp.zeros(5), 1.0))  # event_dim 0
+            self.autoguide("w", "delta")
+
+    k = Batched()
+    k.set_mode("guide")
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        out = k()
+    assert out.shape == (5,)
+    assert tr["Batched.w"]["fn"].event_dim == 0  # matches batched prior
+    assert tr["Batched.w_loc"]["value"].shape == (5,)
+
+    class Joint(Parameterized):
+        pyrox_name = "Joint"
+
+        @pyrox_method
+        def __call__(self):
+            return self.get_param("w")
+
+        def setup(self):
+            self.register_param("w", jnp.zeros(3))
+            self.set_prior("w", dist.Normal(jnp.zeros(3), 1.0).to_event(1))
+            self.autoguide("w", "delta")
+
+    j = Joint()
+    j.set_mode("guide")
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        _ = j()
+    assert tr["Joint.w"]["fn"].event_dim == 1  # matches to_event(1) prior
+
+
 def test_autoguide_rejects_mvn_at_declaration():
     """`mvn` is not implemented; it must be rejected at ``autoguide()`` time
     (with a clear message) rather than deep inside a trace. Regression for

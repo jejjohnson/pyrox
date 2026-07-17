@@ -153,19 +153,41 @@ class Parameterized(PyroxModule):
         """Point-estimate (MAP) guide — a constrained param replayed as a Delta.
 
         Mirrors `numpyro.infer.autoguide.AutoDelta`: the value is a
-        `numpyro.param` in the constraint's support, wrapped in a
+        `numpyro.param` in the **prior's** support, wrapped in a
         `numpyro.distributions.Delta` **sample** site. NumPyro's ``replay``
         handler conditions the model only on guide *sample* sites, so a bare
         param under the latent's name is invisible to SVI and raises
-        ``RuntimeError: Site ... must be sampled in trace``. The Delta's
-        ``event_dim`` spans the full parameter shape so its (zero) log-density
-        reduces to a scalar, matching the MAP objective.
+        ``RuntimeError: Site ... must be sampled in trace``.
+
+        Support and event rank are taken from the resolved prior — matching
+        the model site — rather than from the registered ``constraint``:
+
+        * The point estimate must live in the model prior's support, or
+          ``replay`` evaluates the prior's log-density outside its domain and
+          SVI diverges (a positive prior on an unconstrained-registered param
+          would otherwise let ``{name}_loc`` slide to <= 0).
+        * The Delta's ``event_dim`` is the prior's, so batched priors keep
+          their plate dimensions instead of collapsing the whole value into a
+          single event (which would mis-expand under ``numpyro.plate`` /
+          block subsampling of the backing param).
         """
+        prior = entry.prior
+        if callable(prior) and not isinstance(prior, dist.Distribution):
+            prior = prior(self)
+        if isinstance(prior, dist.Distribution):
+            support = prior.support
+            event_dim = prior.event_dim
+        else:  # non-distribution prior (deterministic value): fall back.
+            support = entry.constraint
+            event_dim = 0
         loc = self.pyrox_param(
-            f"{name}_loc", entry.init_value, constraint=entry.constraint
+            f"{name}_loc",
+            entry.init_value,
+            constraint=support,
+            event_dim=event_dim,
         )
         loc = jnp.asarray(loc)
-        return self.pyrox_sample(name, dist.Delta(loc).to_event(jnp.ndim(loc)))
+        return self.pyrox_sample(name, dist.Delta(loc, event_dim=event_dim))
 
     def _guide_normal(self, name: str, entry: _Entry) -> Any:
         """Mean-field normal guide in unconstrained space.

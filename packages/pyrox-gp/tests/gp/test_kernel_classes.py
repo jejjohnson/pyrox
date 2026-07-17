@@ -176,13 +176,19 @@ def test_kernel_with_prior_samples_in_model_mode():
     assert tr["RBF.lengthscale"]["type"] == "param"
 
 
-def test_kernel_with_prior_delta_guide_uses_param():
+def test_kernel_with_prior_delta_guide_registers_param_backed_delta():
+    """The `delta` guide exposes the latent as a param-backed ``Delta``
+    *sample* site (``{name}_loc`` param + ``{name}`` sample) so NumPyro's
+    ``replay`` handler conditions the model on it under SVI. See pyrox #182.
+    """
     k = RBF()
     k.set_prior("variance", dist.LogNormal(0.0, 1.0))
     k.set_mode("guide")
     with handlers.trace() as tr, handlers.seed(rng_seed=0):
         _ = k(X, X)
-    assert tr["RBF.variance"]["type"] == "param"
+    assert tr["RBF.variance"]["type"] == "sample"
+    assert isinstance(tr["RBF.variance"]["fn"], dist.Delta)
+    assert tr["RBF.variance_loc"]["type"] == "param"
 
 
 # --- Sibling instances must not collide ----------------------------------
