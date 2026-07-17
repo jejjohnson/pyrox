@@ -325,6 +325,34 @@ def test_delta_guide_preserves_prior_event_dim():
     assert tr["Joint.w"]["fn"].event_dim == 1  # matches to_event(1) prior
 
 
+def test_guide_aux_name_collision_is_rejected():
+    """A guide's ``{name}_loc`` backing site must not silently collide with a
+    user-registered ``{name}_loc`` param. Regression for the #186 Codex
+    review (finding: avoid colliding with registered `_loc` parameters).
+    """
+
+    class Clash(Parameterized):
+        pyrox_name = "Clash"
+
+        @pyrox_method
+        def __call__(self):
+            return self.get_param("x")
+
+        def setup(self):
+            self.register_param("x", jnp.array(1.0))
+            self.register_param("x_loc", jnp.array(0.0))  # collides with aux
+            self.set_prior("x", dist.Normal(0.0, 1.0))
+            self.autoguide("x", "delta")
+
+    k = Clash()
+    k.set_mode("guide")
+    with (
+        pytest.raises(ValueError, match="already registered"),
+        handlers.seed(rng_seed=0),
+    ):
+        _ = k()
+
+
 def test_autoguide_rejects_mvn_at_declaration():
     """`mvn` is not implemented; it must be rejected at ``autoguide()`` time
     (with a clear message) rather than deep inside a trace. Regression for

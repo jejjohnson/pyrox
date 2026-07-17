@@ -141,13 +141,37 @@ class Parameterized(PyroxModule):
     def _guide_param(self, name: str, entry: _Entry) -> Any:
         guide = entry.guide_type
         if guide == "delta":
+            self._reserve_aux(name, ("_loc",))
             return self._guide_delta(name, entry)
         if guide == "normal":
+            self._reserve_aux(name, ("_loc", "_scale"))
             return self._guide_normal(name, entry)
         raise NotImplementedError(
             f"guide_type {guide!r} is not yet supported at the "
             "get_param level; materialize via a dedicated guide layer."
         )
+
+    def _reserve_aux(self, name: str, suffixes: tuple[str, ...]) -> None:
+        """Fail loudly if a guide's auxiliary site name collides with a
+        user-registered parameter.
+
+        The ``normal`` / ``delta`` guides materialize backing sites named
+        ``{name}_loc`` (and ``{name}_scale``). If the user also registered a
+        parameter with that exact name, the two would share a fully-qualified
+        site name and silently clobber each other via the per-call cache (or
+        trip NumPyro's duplicate-site check). Reject it at guide time with an
+        actionable message rather than let it corrupt inference.
+        """
+        params = self._state().params
+        for suffix in suffixes:
+            aux = f"{name}{suffix}"
+            if aux in params:
+                raise ValueError(
+                    f"the guide for parameter {name!r} needs an auxiliary "
+                    f"site named {aux!r}, but a parameter with that name is "
+                    "already registered; rename one of them to avoid the "
+                    "collision."
+                )
 
     def _guide_delta(self, name: str, entry: _Entry) -> Any:
         """Point-estimate (MAP) guide — a constrained param replayed as a Delta.
