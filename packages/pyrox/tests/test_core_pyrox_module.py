@@ -312,6 +312,42 @@ def test_param_ownership_does_not_leak_across_traces():
     assert list(tr) == ["ParamLayer.b"]
 
 
+def test_param_sibling_collision_detected_under_handlers_lift():
+    """handlers.lift converts params to samples and serves a cached draw for
+    a name it already lifted — the second registration leaves no trace
+    footprint, so the diff-based detection sees nothing. The backstop must
+    still reject the un-owned duplicate instead of silently sharing the
+    first draw. Regression for the #187 Codex lift finding.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    prior = dist.Normal(0.0, 1.0).expand([2]).to_event(1)
+    a, b = ParamLayer(), ParamLayer()
+    with (
+        pytest.raises(ValueError, match="different module instance"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+        handlers.lift(prior={"ParamLayer.b": prior}),
+    ):
+        b(a(jnp.zeros(2)))
+
+    # Same instance re-using its own lifted draw across calls stays allowed.
+    c = ParamLayer()
+    with (
+        handlers.trace() as tr,
+        handlers.seed(rng_seed=0),
+        handlers.lift(prior={"ParamLayer.b": prior}),
+    ):
+        y1 = c(jnp.zeros(2))
+        y2 = c(jnp.zeros(2))
+    assert list(tr) == ["ParamLayer.b"]
+    assert jnp.allclose(y1, y2)
+
+
 def test_same_instance_param_reuse_across_calls_stays_allowed():
     """Calling one module twice in one trace re-uses its own param site
     (legitimate weight sharing) — the duplicate-scope guard must only fire

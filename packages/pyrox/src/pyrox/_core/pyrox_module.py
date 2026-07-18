@@ -223,6 +223,24 @@ class PyroxModule(eqx.Module):
                         "each a distinct pyrox_name."
                     )
                 owned.add(final_name)
+            if not changed and fullname in active_trace and fullname not in owned:
+                # The registration left no trace footprint at all: a handler
+                # served a cached value for a name it already processed —
+                # ``handlers.lift`` does this when a second instance re-uses
+                # a lifted param name, silently sharing the first draw. The
+                # raw fullname matching an un-owned trace entry is exactly
+                # that duplicate. (If a name-rewriting handler like ``scope``
+                # is *also* active, the recorded name differs from the raw
+                # fullname and this backstop cannot see it — the lift∩scope
+                # intersection remains undetectable.)
+                raise ValueError(
+                    f"param site {fullname!r} was already registered in "
+                    "this trace by a different module instance (served "
+                    "from a handler cache, e.g. handlers.lift). Two "
+                    f"instances of {type(self).__name__} are sharing the "
+                    f"scope {self._pyrox_scope_name()!r} — give each a "
+                    "distinct pyrox_name."
+                )
         return ctx.set(fullname, value)
 
     def pyrox_sample(self, name: str, prior: Any) -> Any:
