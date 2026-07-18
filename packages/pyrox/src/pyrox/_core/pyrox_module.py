@@ -43,49 +43,60 @@ import numpyro.distributions as dist
 _MISSING: Any = object()
 
 
-def _active_traces() -> list[dict[str, Any]]:
-    """Return every active ``handlers.trace`` mapping, innermost first.
+def _visible_traces(fullname: str) -> list[tuple[dict[str, Any], str]]:
+    """Predict which traces will record a param ``fullname``, and as what.
 
     Used by the duplicate-scope guard in `PyroxModule.pyrox_param`:
     NumPyro's trace only asserts name uniqueness for *sample* sites, so
     two modules silently sharing a scope would alias their *param* sites
-    (shared weights under SVI/MAP) without this check. Every active trace
-    records every site, so a duplicate hidden from an inner trace (e.g.
-    siblings called under separate inner traces) is still visible in the
-    outer one — all of them must be checked.
+    (shared weights under SVI/MAP) without a check. The guard cannot rely
+    on inspecting the registration's side effects (``handlers.lift``
+    serves cached duplicates without re-recording), so this walks
+    NumPyro's handler stack the way ``apply_stack`` processes a param
+    message — innermost handler first:
+
+    * ``handlers.trace`` — collected; every reached trace records the
+      message (with its **final** name, since the message dict is
+      mutated in place before any trace postprocesses it).
+    * ``handlers.scope`` — folds its prefix into the name
+      (``outer/inner/name``), unless ``hide_types`` exempts params.
+    * ``handlers.block`` — if its ``hide_fn`` hides this message, the
+      walk stops: handlers outside the block (traces *and* scopes)
+      never see it.
+
+    Returns ``(trace_mapping, recorded_name)`` pairs — the recorded name
+    is identical for every reached trace. Empty when no trace is active
+    or the message is blocked before reaching one.
     """
     from numpyro.primitives import _PYRO_STACK
 
-    traces = []
+    name = fullname
+    traces: list[dict[str, Any]] = []
     for handler in reversed(_PYRO_STACK):
         if isinstance(handler, numpyro.handlers.trace):
             tr = getattr(handler, "trace", None)
             if tr is not None:
                 traces.append(tr)
-    return traces
-
-
-def _candidate_site_name(fullname: str) -> str:
-    """Predict the site name the active traces will record for ``fullname``.
-
-    ``handlers.scope`` rewrites message names during the process phase
-    (innermost scope applied first: ``outer/inner/name``), and the traces
-    record the rewritten name. Folding the active scope prefixes over the
-    raw fullname reproduces that name, so the duplicate guard can compare
-    against trace contents even when the registration itself leaves no
-    footprint (``handlers.lift`` serves cached draws without re-recording).
-    ``scope`` is NumPyro's only param-name-rewriting handler.
-    """
-    from numpyro.primitives import _PYRO_STACK
-
-    name = fullname
-    for handler in reversed(_PYRO_STACK):
-        if isinstance(handler, numpyro.handlers.scope):
+        elif isinstance(handler, numpyro.handlers.scope):
+            hide_types = getattr(handler, "hide_types", None) or ()
             prefix = getattr(handler, "prefix", None)
-            divider = getattr(handler, "divider", "/")
-            if prefix:
+            if prefix and "param" not in hide_types:
+                divider = getattr(handler, "divider", "/")
                 name = f"{prefix}{divider}{name}"
-    return name
+        elif isinstance(handler, numpyro.handlers.block):
+            hide_fn = getattr(handler, "hide_fn", None)
+            if hide_fn is None:
+                continue
+            try:
+                hidden = bool(hide_fn({"type": "param", "name": name}))
+            except Exception:
+                # A hide_fn needing more message context than we can
+                # synthesize: assume it hides, which only *narrows* the
+                # guard (a missed exotic collision, never a false alarm).
+                hidden = True
+            if hidden:
+                break
+    return [(tr, name) for tr in traces]
 
 
 class _Context:
@@ -232,29 +243,25 @@ class PyroxModule(eqx.Module):
         # a guard, two instances sharing a scope (e.g. unnamed siblings of
         # one class under the class-name fallback) would silently alias
         # their parameters under SVI/MAP. The guard pre-checks the
-        # scope-folded candidate name against EVERY active trace: nested
-        # traces all record every site, and caching handlers
-        # (``handlers.lift``) serve duplicates without re-recording, so
-        # neither an innermost-only nor a post-registration check covers
-        # all compositions. Same-instance re-registration across calls in
+        # predicted recorded name against every trace this message will
+        # actually reach (see `_visible_traces` for the handler-stack
+        # semantics: nested traces, scope prefixes incl. hide_types, and
+        # block visibility). Same-instance re-registration across calls in
         # one trace (weight sharing) stays allowed via the per-trace
         # ownership sets; ownership does not leak across traces.
-        traces = _active_traces()
-        if traces:
-            candidate = _candidate_site_name(fullname)
-            for tr in traces:
-                if candidate in tr and candidate not in ctx.trace_owned(tr):
-                    raise ValueError(
-                        f"param site {candidate!r} was already registered "
-                        "in this trace by a different module instance. Two "
-                        f"instances of {type(self).__name__} are sharing "
-                        f"the scope {self._pyrox_scope_name()!r} — give "
-                        "each a distinct pyrox_name."
-                    )
+        visible = _visible_traces(fullname)
+        for tr, recorded in visible:
+            if recorded in tr and recorded not in ctx.trace_owned(tr):
+                raise ValueError(
+                    f"param site {recorded!r} was already registered "
+                    "in this trace by a different module instance. Two "
+                    f"instances of {type(self).__name__} are sharing "
+                    f"the scope {self._pyrox_scope_name()!r} — give "
+                    "each a distinct pyrox_name."
+                )
         value = numpyro.param(fullname, init_value, **kwargs)
-        if traces:
-            for tr in traces:
-                ctx.trace_owned(tr).add(candidate)
+        for tr, recorded in visible:
+            ctx.trace_owned(tr).add(recorded)
         return ctx.set(fullname, value)
 
     def pyrox_sample(self, name: str, prior: Any) -> Any:

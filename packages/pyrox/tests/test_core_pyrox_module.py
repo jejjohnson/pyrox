@@ -406,6 +406,49 @@ def test_param_sibling_collision_detected_across_nested_traces():
     assert list(outer) == ["ParamLayer.b"]
 
 
+def test_param_sibling_collision_detected_under_scope_hide_types():
+    """``scope(hide_types=["param"])`` deliberately leaves param names
+    unprefixed — the guard's predicted name must respect that, or scoped
+    prediction diverges from the recorded raw name and the collision is
+    missed. Regression for the #187 Codex hide_types finding.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    a, b = ParamLayer(), ParamLayer()
+    with (
+        pytest.raises(ValueError, match="different module instance"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+        handlers.scope(prefix="enc", hide_types=["param"]),
+    ):
+        b(a(jnp.zeros(2)))
+
+
+def test_block_hidden_param_sibling_is_not_a_false_positive():
+    """A sibling deliberately wrapped in ``handlers.block(hide=[...])`` never
+    reaches the outer trace, so registering it is legitimate handler
+    composition — the guard must only consider traces the message will
+    actually reach and must NOT raise. Regression for the #187 Codex
+    block finding (a false positive would break correct user code).
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    a, b = ParamLayer(), ParamLayer()
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        a(jnp.zeros(2))
+        with handlers.block(hide=["ParamLayer.b"]):
+            b(jnp.zeros(2))  # hidden from the outer trace: no collision
+    assert list(tr) == ["ParamLayer.b"]
+
+
 def test_same_instance_param_reuse_across_calls_stays_allowed():
     """Calling one module twice in one trace re-uses its own param site
     (legitimate weight sharing) — the duplicate-scope guard must only fire
