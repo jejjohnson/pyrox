@@ -67,6 +67,17 @@ def _visible_traces(fullname: str) -> list[tuple[dict[str, Any], str]]:
     Returns ``(trace_mapping, recorded_name)`` pairs — the recorded name
     is identical for every reached trace. Empty when no trace is active
     or the message is blocked before reaching one.
+
+    Known best-effort boundary: ``handlers.lift`` converts a param
+    message to a *sample* mid-stack, so type-sensitive predicates
+    evaluated outside the lift (``scope(hide_types=["param"])``,
+    ``block(hide_fn=lambda s: s["type"] == "param")``) see ``"sample"``
+    on the real message while this predictor models ``"param"``.
+    Collisions inside such lift-and-type-sensitive-handler compositions
+    can therefore be missed. By construction the guard only ever
+    *under*-detects in these corners — it never raises on a legitimate
+    registration — and a missed detection is exactly the pre-guard
+    behavior for all param collisions.
     """
     from numpyro.primitives import _PYRO_STACK
 
@@ -80,7 +91,10 @@ def _visible_traces(fullname: str) -> list[tuple[dict[str, Any], str]]:
         elif isinstance(handler, numpyro.handlers.scope):
             hide_types = getattr(handler, "hide_types", None) or ()
             prefix = getattr(handler, "prefix", None)
-            if prefix and "param" not in hide_types:
+            # scope rewrites unconditionally, including an EMPTY prefix
+            # (scope() records "/name") — only skip when the attr is
+            # absent entirely or params are exempted via hide_types.
+            if prefix is not None and "param" not in hide_types:
                 divider = getattr(handler, "divider", "/")
                 name = f"{prefix}{divider}{name}"
         elif isinstance(handler, numpyro.handlers.block):

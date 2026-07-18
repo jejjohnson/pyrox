@@ -428,6 +428,27 @@ def test_param_sibling_collision_detected_under_scope_hide_types():
         b(a(jnp.zeros(2)))
 
 
+def test_param_sibling_collision_detected_under_empty_prefix_scope():
+    """``scope()`` with the default empty prefix still rewrites names to
+    ``/name`` — the guard's prediction must fold empty prefixes too.
+    Regression for the #187 Codex empty-prefix finding.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    a, b = ParamLayer(), ParamLayer()
+    with (
+        pytest.raises(ValueError, match="different module instance"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+        handlers.scope(prefix=""),
+    ):
+        b(a(jnp.zeros(2)))
+
+
 def test_block_hidden_param_sibling_is_not_a_false_positive():
     """A sibling deliberately wrapped in ``handlers.block(hide=[...])`` never
     reaches the outer trace, so registering it is legitimate handler
