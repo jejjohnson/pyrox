@@ -87,6 +87,25 @@ def gev_log_prob(
 
     # Density vanishes at x = ±inf; NaN input propagates.
     result = jnp.where(jnp.isfinite(x) & valid, log_pdf, -jnp.inf)
+    # Exact finite endpoint (1 + ξz = 0): the extended-real density limit is
+    # ξ-dependent on the Weibull branch — 1/σ at ξ = -1 (the uniform-like
+    # case), +inf for ξ < -1 (density diverges toward the endpoint), and 0
+    # for -1 < ξ. The support mask alone would report -inf everywhere, which
+    # disagrees with the closed upper endpoint the class layer advertises.
+    # Tolerance of a few ulps: standardizing the advertised endpoint
+    # x = μ - σ/ξ rounds through several float ops, so ξ·z lands near — not
+    # exactly on — -1 for ordinary parameter values. Snapping the band to the
+    # endpoint limit is benign: the interior density approaches that same
+    # limit continuously on both branches.
+    at_endpoint = (jnp.abs(shape * z + 1.0) <= 8.0 * jnp.finfo(z.dtype).eps) & (
+        jnp.isfinite(x)
+    )
+    endpoint_val = jnp.where(
+        shape == -1.0,
+        -jnp.log(scale),
+        jnp.where(shape < -1.0, jnp.inf, -jnp.inf),
+    )
+    result = jnp.where(at_endpoint, endpoint_val, result)
     return jnp.where(jnp.isnan(x), jnp.nan, result)
 
 

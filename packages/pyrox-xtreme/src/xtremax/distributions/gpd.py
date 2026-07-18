@@ -18,6 +18,7 @@ from numpyro.distributions import constraints
 from numpyro.distributions.util import promote_shapes, validate_sample
 
 from xtremax._rng import check_prng_key
+from xtremax.distributions._support import concrete_sign
 from xtremax.primitives.gpd import (
     gpd_cdf,
     gpd_icdf,
@@ -161,9 +162,6 @@ class GeneralizedParetoDistribution(dist.Distribution):
             jnp.shape(self.scale), jnp.shape(self.concentration)
         )
 
-        # Numerical threshold for exponential approximation (ξ ≈ 0)
-        self._exponential_threshold = 1e-8
-
         super().__init__(batch_shape=batch_shape, validate_args=validate_args)
 
     def sample(self, key: jnp.ndarray, sample_shape: tuple = ()) -> jnp.ndarray:
@@ -218,16 +216,24 @@ class GeneralizedParetoDistribution(dist.Distribution):
 
         Returns:
             Constraint object reflecting the shape-dependent support:
-            - ξ ≥ 0: [0, +∞)
-            - ξ < 0: [0, -σ/ξ]
+            - ξ ≥ 0: [0, +∞) → ``nonnegative``
+            - ξ < 0: [0, -σ/ξ] → ``interval(0, upper_bound)``
 
-        ``constraints.interval(0, upper_bound)`` resolves to nonnegative
-        semantics when the upper bound is +∞ (ξ ≥ 0) and to a proper
-        bounded interval when ξ < 0 — so ``validate_args=True`` actually
-        rejects samples above the finite upper endpoint instead of
-        silently deferring to ``log_prob`` returning -∞.
+        Only the ξ < 0 case uses ``interval`` — its bounds are finite, so
+        ``biject_to`` maps it to a well-behaved ``Sigmoid ∘ Affine``. For
+        ξ ≥ 0 the old ``interval(0, inf)`` construction made ``biject_to``
+        return inf, breaking NUTS/SVI models with a GPD latent site;
+        ``constraints.nonnegative`` has a registered exp-bijector and
+        accepts the closed endpoint x = 0.
+
+        When the concentration is traced (inside ``jit``/inference) or a
+        mixed-sign batch, the support falls back to ``nonnegative`` — the
+        lower bound is parameter-independent, and points above a finite
+        ξ < 0 upper endpoint are handled by ``log_prob`` returning -inf.
         """
-        return constraints.interval(jnp.zeros_like(self.scale), self.upper_bound())
+        if concrete_sign(self.concentration) == -1:
+            return constraints.interval(jnp.zeros_like(self.scale), self.upper_bound())
+        return constraints.nonnegative
 
     def upper_bound(self) -> jnp.ndarray:
         """
@@ -265,13 +271,18 @@ class GeneralizedParetoDistribution(dist.Distribution):
         """
         Compute the mode of the GPD.
 
-        The mode is always 0 for the GPD, representing the threshold
-        (most likely exceedance is just above the threshold).
+        For ξ > -1 the density is monotone decreasing from x = 0, so the
+        mode is 0 (the threshold). For ξ < -1 the density *increases*
+        toward the finite upper endpoint -σ/ξ, so the mode is the upper
+        endpoint itself (at ξ = -1, the uniform case, every point is
+        modal and 0 is returned by convention).
 
         Returns:
-            Mode (always 0)
+            Mode: 0 for ξ ≥ -1, the upper endpoint -σ/ξ for ξ < -1
         """
-        return jnp.zeros_like(self.scale)
+        return jnp.where(
+            self.concentration < -1.0, self.upper_bound(), jnp.zeros_like(self.scale)
+        )
 
     @property
     def variance(self) -> jnp.ndarray:
@@ -316,18 +327,16 @@ class GeneralizedParetoDistribution(dist.Distribution):
         # Kurtosis exists for ξ < 1/4
         kurt_exists = shape < 0.25
 
-        # Handle exponential case (ξ = 0) separately
-        is_exponential = jnp.abs(shape) < self._exponential_threshold
-        exponential_kurtosis = 6.0  # Known value for exponential distribution
-
-        # General formula for ξ ≠ 0
+        # The rational formula is exact and smooth at ξ = 0 (evaluating to
+        # the exponential value 6), so no separate branch or threshold is
+        # needed — the old class-local 1e-8 threshold is gone.
         numerator = 3.0 * (1.0 - 2.0 * shape) * (2.0 * shape**2 + shape + 3.0)
         denominator = (1.0 - 3.0 * shape) * (1.0 - 4.0 * shape)
-        general_kurtosis = numerator / denominator - 3.0
+        kurtosis_val = numerator / denominator - 3.0
 
-        kurtosis_val = jnp.where(is_exponential, exponential_kurtosis, general_kurtosis)
-
-        return jnp.where(kurt_exists, kurtosis_val, jnp.inf)
+        # NaN, not inf: beyond ξ = 1/4 the standardized fourth moment is
+        # undefined, unlike the variance which genuinely diverges to +inf.
+        return jnp.where(kurt_exists, kurtosis_val, jnp.nan)
 
     def skew(self) -> jnp.ndarray:
         """
@@ -345,18 +354,16 @@ class GeneralizedParetoDistribution(dist.Distribution):
         # Skewness exists for ξ < 1/3
         skew_exists = shape < 1.0 / 3.0
 
-        # Handle exponential case
-        is_exponential = jnp.abs(shape) < self._exponential_threshold
-        exponential_skewness = 2.0  # Known value for exponential distribution
-
-        # General formula
+        # The closed-form expression is exact and smooth at ξ = 0
+        # (evaluating to the exponential value 2), so no separate branch or
+        # threshold is needed — the old class-local 1e-8 threshold is gone.
         numerator = 2.0 * (1.0 + shape) * jnp.sqrt(1.0 - 2.0 * shape)
         denominator = 1.0 - 3.0 * shape
-        general_skewness = numerator / denominator
+        skewness_val = numerator / denominator
 
-        skewness_val = jnp.where(is_exponential, exponential_skewness, general_skewness)
-
-        return jnp.where(skew_exists, skewness_val, jnp.inf)
+        # NaN, not inf: beyond ξ = 1/3 the standardized third moment is
+        # undefined, unlike the variance which genuinely diverges to +inf.
+        return jnp.where(skew_exists, skewness_val, jnp.nan)
 
     def entropy(self) -> jnp.ndarray:
         """
@@ -536,6 +543,11 @@ class GeneralizedParetoDistribution(dist.Distribution):
 
         Computes Hill estimator: α̂_k = (1/k) * Σᵢ₌₁ᵏ log(X_{n-i+1,n} / X_{n-k,n})
 
+        Vectorized over ``k_values`` via a cumulative sum of log order
+        statistics, so it is safe under ``jax.jit`` (the previous Python
+        loop branched on traced values and raised a ``TracerBoolConversion``
+        error). Invalid ``k`` (≤ 0 or ≥ n) yield NaN.
+
         Args:
             order_statistics: Sorted sample in descending order
             k_values: Numbers of upper order statistics to use
@@ -543,33 +555,32 @@ class GeneralizedParetoDistribution(dist.Distribution):
         Returns:
             Dictionary with Hill plot data
         """
-        n = len(order_statistics)
+        order_statistics = jnp.asarray(order_statistics)
+        k_arr = jnp.asarray(k_values)
+        n = order_statistics.shape[0]
 
-        hill_estimates = []
-        for k in k_values:
-            if k >= n or k <= 0:
-                hill_estimates.append(jnp.nan)
-                continue
-
-            # Hill estimator
-            log_ratios = jnp.log(order_statistics[:k] / order_statistics[k])
-            hill_est = jnp.mean(log_ratios)
-            hill_estimates.append(1.0 / hill_est if hill_est > 0 else jnp.inf)
+        # (1/k)·Σ_{i<k} log X_i − log X_k, for every k at once.
+        logs = jnp.log(order_statistics)
+        cumsum = jnp.cumsum(logs)
+        valid = (k_arr > 0) & (k_arr < n)
+        k_safe = jnp.clip(k_arr, 1, max(n - 1, 1))
+        mean_log_top = cumsum[k_safe - 1] / k_safe
+        hill_est = mean_log_top - logs[k_safe]
+        estimates = jnp.where(hill_est > 0, 1.0 / hill_est, jnp.inf)
+        estimates = jnp.where(valid, estimates, jnp.nan)
 
         return {
             "k_values": k_values,
-            "hill_estimates": jnp.array(hill_estimates),
+            "hill_estimates": estimates,
             "theoretical_tail_index": self.tail_index(),
         }
 
     def expand(self, batch_shape: tuple[int, ...]) -> dist.Distribution:
         """Expand to ``batch_shape`` by reconstructing via ``__init__``.
 
-        We deliberately go through the constructor so every cached
-        attribute set by ``__init__`` (e.g. ``_exponential_threshold``) is
-        present on the returned distribution. Bypassing ``__init__`` (as
-        an earlier version did) broke ``cdf``/``skew``/``kurtosis`` on
-        expanded instances.
+        We deliberately go through the constructor (rather than an
+        ``ExpandedDistribution`` wrapper) so every EVT method stays
+        available on the returned distribution.
         """
         batch_shape = tuple(batch_shape)
         if batch_shape == self.batch_shape:

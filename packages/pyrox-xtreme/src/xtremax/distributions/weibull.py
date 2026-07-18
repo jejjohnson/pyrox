@@ -200,10 +200,15 @@ class WeibullType3GEVD(dist.Distribution):
         Return the support constraint for Weibull Type III GEVD.
 
         Returns:
-            Constraint representing x ≤ μ - σ/ξ (upper bounded)
+            ``less_than_eq(μ - σ/ξ)`` — upper-bounded, closed at the
+            endpoint (the endpoint density is finite at ξ = -1 and diverges
+            for ξ < -1, so the endpoint is a genuine support point). The old
+            ``interval(-inf, hi)`` construction made ``biject_to(support)``
+            return nan/inf, breaking NUTS/SVI models with a Weibull latent
+            site; ``less_than_eq`` has a registered bijector that handles
+            the unbounded lower tail.
         """
-        upper_bound = self.upper_bound()
-        return constraints.interval(self.lower_bound(), upper_bound)
+        return constraints.less_than_eq(self.upper_bound())
 
     def upper_bound(self) -> jnp.ndarray:
         """
@@ -322,7 +327,9 @@ class WeibullType3GEVD(dist.Distribution):
         mu2 = g2 - g1**2
         mu3 = g3 - 3.0 * g1 * g2 + 2.0 * g1**3
 
-        return mu3 / jnp.power(mu2, 1.5)
+        # X = μ + (σ/ξ)(W − 1) with ξ < 0 statically: the (σ/ξ)³ factor in the
+        # third central moment flips the sign of the standardized skew.
+        return -mu3 / jnp.power(mu2, 1.5)
 
     def entropy(self) -> jnp.ndarray:
         """
@@ -477,24 +484,30 @@ class WeibullType3GEVD(dist.Distribution):
         # the truncated mass `(1-ε) - F(u)`.
         n_grid = 1024
         p0 = self.cdf(threshold_arr)
+        # Joint batch of threshold and parameters; per-batch quantities are
+        # broadcast to it before gaining the trailing grid axis.
+        batch = jnp.shape(p0)
         s_u = 1.0 - p0
         # Cap away from 1.0 so p_grid stays strictly in (0, 1). See
         # GEVD.conditional_excess_mean.
         s_u_safe = jnp.clip(s_u, 1e-12, 1.0 - 1e-6)
         log_s_u = jnp.log(s_u_safe)
         # Lower log-y endpoint: step ~20 e-folds below log_s_u so the
-        # grid always captures the bulk of the tail-integrand mass
-        # AND stays strictly ascending. A fixed floor like log(1e-6)
-        # would run backward when S(u) < 1e-6 (near the upper
-        # endpoint) and trapezoid would sign-flip. The
+        # grid always captures the bulk of the tail-integrand mass AND
+        # stays strictly ascending. A fixed floor like log(1e-6) would
+        # run backward when S(u) < 1e-6 (near the upper endpoint) and
+        # trapezoid would sign-flip. The tiny truncated remainder is
+        # added back analytically below (negligible for ξ < 0 but kept
+        # for structural parity with the heavy-tailed classes). The
         # ``-jnp.log1p(-y)`` step below is accurate to subnormals in
-        # float32. See GEVD.conditional_excess_mean for details.
+        # float32. See GEVD.conditional_excess_mean.
+        shape = self.concentration
         span = jnp.asarray(20.0, dtype=log_s_u.dtype)
         log_y_min = log_s_u - span
 
         unit = jnp.linspace(0.0, 1.0, n_grid)
         log_s_u_exp = jnp.expand_dims(log_s_u, axis=-1)
-        log_y_min_exp = jnp.expand_dims(log_y_min, axis=-1)
+        log_y_min_exp = jnp.expand_dims(jnp.broadcast_to(log_y_min, batch), axis=-1)
         v_grid = log_y_min_exp * (1.0 - unit) + log_s_u_exp * unit
         y_grid = jnp.exp(v_grid)
         # Compute ``x = F⁻¹(1 - y)`` directly from ``y`` using
@@ -503,12 +516,32 @@ class WeibullType3GEVD(dist.Distribution):
         # ``log(p)`` inside ``weibull_icdf`` loses that entirely. See
         # GEVD.conditional_excess_mean for details. ξ < 0 is enforced
         # by ``arg_constraints``, so the Gumbel branch is unreachable.
-        shape = self.concentration
+        # Parameters are broadcast to the joint batch and given the same
+        # trailing grid axis — batched (batch,) parameters against a
+        # (..., n_grid) grid otherwise raise a broadcasting error.
         neg_log_q = -jnp.log1p(-y_grid)
-        x_grid = self.loc + (self.scale / shape) * (jnp.power(neg_log_q, -shape) - 1.0)
+        loc_e = jnp.expand_dims(jnp.broadcast_to(self.loc, batch), axis=-1)
+        scale_e = jnp.expand_dims(jnp.broadcast_to(self.scale, batch), axis=-1)
+        shape_e = jnp.expand_dims(jnp.broadcast_to(shape, batch), axis=-1)
+        x_grid = loc_e + (scale_e / shape_e) * (jnp.power(neg_log_q, -shape_e) - 1.0)
 
         integrand = x_grid * y_grid
         numerator = jnp.trapezoid(integrand, x=v_grid, axis=-1)
+
+        # Closed-form remainder for the truncated (0, y_c] tail with
+        # y_c = S(u)·e⁻²⁰, where x(y) ≈ (μ - σ/ξ) + (σ/ξ)·y^{-ξ}:
+        #   ∫₀^{y_c} x dy = (μ - σ/ξ)·y_c + (σ/ξ)·y_c^{1-ξ}/(1-ξ).
+        # Negligible for ξ < 0 (1-ξ > 1 makes it decay faster than y_c)
+        # but kept for parity with the heavy-tailed classes.
+        loc_b = jnp.broadcast_to(self.loc, batch)
+        scale_b = jnp.broadcast_to(self.scale, batch)
+        shape_b = jnp.broadcast_to(shape, batch)
+        y_c = jnp.exp(log_y_min)
+        remainder = (loc_b - scale_b / shape_b) * y_c + (scale_b / shape_b) * jnp.power(
+            y_c, 1.0 - shape_b
+        ) / (1.0 - shape_b)
+        numerator = numerator + remainder
+
         mean_conditional = numerator / s_u_safe
         mean_excess = mean_conditional - threshold_arr
 

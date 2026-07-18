@@ -13,17 +13,11 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import scipy.special as _sp_special
-from jax import lax
 from jax.scipy.special import gammaln
-from numpyro.distributions import constraints
-from numpyro.distributions.util import promote_shapes, validate_sample
 
 from xtremax._rng import check_prng_key
 from xtremax.primitives.gumbel import (
-    gumbel_cdf,
-    gumbel_icdf,
     gumbel_log_prob,
-    gumbel_mean,
     gumbel_return_level,
 )
 
@@ -39,9 +33,18 @@ def _host_complex_loggamma(z: np.ndarray) -> np.ndarray:
     return np.asarray(_sp_special.loggamma(z), dtype=z.dtype)
 
 
-class GumbelType1GEVD(dist.Distribution):
+class GumbelType1GEVD(dist.Gumbel):
     """
     Gumbel Type I Generalized Extreme Value Distribution for NumPyro.
+
+    The distribution core — ``sample``/``log_prob``/``cdf``/``icdf``/
+    ``mean``/``variance``/``support`` — is inherited directly from
+    :class:`numpyro.distributions.Gumbel` (parameter-for-parameter
+    identical), so sampling uses numpyro's native tail-accurate
+    ``jax.random.gumbel`` path and the class inherits numpyro's batching
+    and KL registrations for free. This subclass adds the EVT sugar:
+    return levels, moments beyond variance, hazard/survival methods, the
+    characteristic function, and probability-paper utilities.
 
     The Gumbel Type I is the GEVD with shape parameter ξ = 0, characterized by
     exponential tails and unbounded support. This distribution is the limiting
@@ -125,15 +128,15 @@ class GumbelType1GEVD(dist.Distribution):
         >>> print(f"50-year return level: {return_50yr:.2f}°C")
     """
 
-    # NumPyro distribution interface requirements
-    arg_constraints = {"loc": constraints.real, "scale": constraints.positive}
-    reparametrized_params = ["loc", "scale"]
-
     def __init__(
         self, loc: float = 0.0, scale: float = 1.0, validate_args: bool | None = None
     ):
         """
         Initialize the Gumbel Type I GEVD.
+
+        The core distribution machinery is delegated to
+        :class:`numpyro.distributions.Gumbel`; only the mathematical
+        constants used by the EVT sugar methods are set up here.
 
         Args:
             loc: Location parameter μ (mode of distribution)
@@ -143,70 +146,23 @@ class GumbelType1GEVD(dist.Distribution):
         Raises:
             ValueError: If scale <= 0
         """
-        self.loc, self.scale = promote_shapes(loc, scale)
-
-        # Determine batch shape from broadcasted parameters
-        batch_shape = lax.broadcast_shapes(jnp.shape(self.loc), jnp.shape(self.scale))
-
         # Mathematical constants for Gumbel distribution
         self._euler_gamma = 0.5772156649015329  # Euler-Mascheroni constant
         self._pi_squared_over_six = (jnp.pi**2) / 6.0  # π²/6 for variance
         self._gumbel_skewness = 1.1395470994046486  # 12*ζ(3)/π² where ζ(3) ≈ 1.202
         self._gumbel_kurtosis = 12.0 / 5.0  # Excess kurtosis = 12/5
 
-        super().__init__(batch_shape=batch_shape, validate_args=validate_args)
+        super().__init__(loc, scale, validate_args=validate_args)
 
     def sample(self, key: jnp.ndarray, sample_shape: tuple = ()) -> jnp.ndarray:
-        """
-        Generate samples from the Gumbel Type I GEVD using inverse transform sampling.
+        """Sample via numpyro's native ``jax.random.gumbel`` path.
 
-        The sampling uses the quantile function (inverse CDF):
-        Q(p) = μ - σ * ln(-ln(p))
-
-        This is numerically stable and provides exact samples from the distribution.
-
-        Args:
-            key: JAX random key for sampling
-            sample_shape: Shape of samples to generate
-
-        Returns:
-            Array of samples from the Gumbel distribution
+        Only adds xtremax's up-front PRNG-key validation (a clear
+        ``TypeError`` instead of numpyro's bare ``AssertionError``) before
+        delegating to :meth:`numpyro.distributions.Gumbel.sample`.
         """
         check_prng_key(key)
-        shape = sample_shape + self.batch_shape
-
-        # JAX's Uniform(0, 1) sampler can emit exact 0 or 1 at the
-        # endpoints; passing those to icdf yields -inf/+inf and poisons
-        # downstream computations. Clamp away from the endpoints.
-        uniform_samples = dist.Uniform(0.0, 1.0).sample(key, shape)
-        eps = jnp.finfo(uniform_samples.dtype).eps
-        uniform_samples = jnp.clip(uniform_samples, eps, 1.0 - eps)
-
-        # Apply inverse CDF transformation: Q(U) = μ - σ * ln(-ln(U))
-        return self.icdf(uniform_samples)
-
-    @validate_sample
-    def log_prob(self, value: jnp.ndarray) -> jnp.ndarray:
-        """Log PDF. Thin wrapper for ``gumbel_log_prob``."""
-        return gumbel_log_prob(value, self.loc, self.scale)
-
-    def cdf(self, value: jnp.ndarray) -> jnp.ndarray:
-        """CDF. Thin wrapper for :func:`~xtremax.primitives.gumbel.gumbel_cdf`."""
-        return gumbel_cdf(value, self.loc, self.scale)
-
-    def icdf(self, q: jnp.ndarray) -> jnp.ndarray:
-        """Quantile function. Thin wrapper for ``gumbel_icdf``."""
-        return gumbel_icdf(q, self.loc, self.scale)
-
-    @property
-    def support(self) -> constraints.Constraint:
-        """
-        Return the support constraint for Gumbel Type I GEVD.
-
-        Returns:
-            Constraint representing x ∈ (-∞, +∞) (unbounded real line)
-        """
-        return constraints.real
+        return super().sample(key, sample_shape)
 
     def upper_bound(self) -> jnp.ndarray:
         """
@@ -231,11 +187,6 @@ class GumbelType1GEVD(dist.Distribution):
         return jnp.full_like(self.loc, -jnp.inf)
 
     @property
-    def mean(self) -> jnp.ndarray:
-        """Mean. Thin wrapper for :func:`~xtremax.primitives.gumbel.gumbel_mean`."""
-        return gumbel_mean(self.loc, self.scale)
-
-    @property
     def mode(self) -> jnp.ndarray:
         """
         Compute the mode of the Gumbel Type I GEVD.
@@ -250,22 +201,6 @@ class GumbelType1GEVD(dist.Distribution):
             Mode of the distribution (equals location parameter)
         """
         return self.loc
-
-    @property
-    def variance(self) -> jnp.ndarray:
-        """
-        Compute the variance of the Gumbel Type I GEVD.
-
-        The variance is:
-        Var[X] = σ² * π²/6
-
-        This is proportional to the square of the scale parameter,
-        with the proportionality constant π²/6 ≈ 1.6449.
-
-        Returns:
-            Variance of the distribution
-        """
-        return (self.scale**2) * self._pi_squared_over_six
 
     def kurtosis(self) -> jnp.ndarray:
         """
@@ -446,12 +381,20 @@ class GumbelType1GEVD(dist.Distribution):
         x_top = self.icdf(q_top)
         upper = jnp.maximum(threshold_arr + 50.0 * scale_arr, x_top)
 
+        # Joint batch of threshold and parameters; per-batch quantities are
+        # broadcast to it before gaining the trailing grid axis — batched
+        # loc/scale evaluated against a (..., n_grid) grid otherwise raise
+        # a broadcasting error inside survival_function.
+        batch = jnp.shape(upper)
         unit = jnp.linspace(0.0, 1.0, n_grid)
-        t_exp = jnp.expand_dims(threshold_arr, axis=-1)
+        t_exp = jnp.expand_dims(jnp.broadcast_to(threshold_arr, batch), axis=-1)
         u_exp = jnp.expand_dims(upper, axis=-1)
         x_grid = t_exp + (u_exp - t_exp) * unit  # (..., n_grid)
 
-        integrand = self.survival_function(x_grid)
+        loc_e = jnp.expand_dims(jnp.broadcast_to(self.loc, batch), axis=-1)
+        scale_e = jnp.expand_dims(jnp.broadcast_to(scale_arr, batch), axis=-1)
+        z_grid = (x_grid - loc_e) / scale_e
+        integrand = -jnp.expm1(-jnp.exp(-z_grid))  # S(x) on the grid
         integral = jnp.trapezoid(integrand, x=x_grid, axis=-1)
         s_u = self.survival_function(threshold_arr)
         return jnp.where(s_u > 1e-15, integral / s_u, jnp.nan)

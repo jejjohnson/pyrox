@@ -236,15 +236,14 @@ class TestGPD:
     def test_expand_preserves_state(self):
         """Regression: the custom GPD.expand() override called
         `_get_checked_instance` (which does not exist on the current
-        NumPyro Distribution) and bypassed __init__, so attributes like
-        ``_exponential_threshold`` were missing on the returned instance
-        and every cdf/skew/kurtosis call raised AttributeError. Rebuilding
-        via ``__init__`` restores all cached state.
+        NumPyro Distribution) and bypassed __init__, so cached attributes
+        were missing on the returned instance and downstream method calls
+        raised AttributeError. Rebuilding via ``__init__`` keeps every
+        method (cdf/skew/kurtosis) usable on the expanded instance.
         """
         d = GeneralizedParetoDistribution(scale=1.0, concentration=0.2)
         expanded = d.expand((3,))
         assert expanded.batch_shape == (3,)
-        assert hasattr(expanded, "_exponential_threshold")
         x = jnp.array([0.1, 0.5, 1.0])
         _ = expanded.cdf(x)
         _ = expanded.skew()
@@ -842,3 +841,295 @@ class TestMeanExcessFarTailMonotonicGrid:
             me = float(d.conditional_excess_mean(jnp.array(u)))
             assert jnp.isfinite(me), f"ME non-finite at u={u}: {me}"
             assert me >= -1e-6, f"ME sign-flipped at u={u}: {me}"
+
+
+class TestSkewSign:
+    """#49 — GEV/Weibull skewness carried no sign(ξ) factor, flipping the
+    Weibull (ξ < 0) domain positive."""
+
+    @pytest.mark.parametrize("xi", [-0.5, -0.2, 0.2, 0.3])
+    def test_gev_skew_matches_scipy(self, xi):
+        import scipy.stats as st
+
+        got = float(
+            GeneralizedExtremeValueDistribution(0.0, 1.0, concentration=xi).skew()
+        )
+        ref = float(st.genextreme.stats(-xi, moments="s"))
+        assert got == pytest.approx(ref, rel=1e-3)
+
+    def test_weibull_skew_negative(self):
+        import scipy.stats as st
+
+        got = float(WeibullType3GEVD(0.0, 1.0, concentration=-0.5).skew())
+        ref = float(st.genextreme.stats(0.5, moments="s"))
+        assert got == pytest.approx(ref, rel=1e-3)
+        assert got < 0.0
+
+
+class TestBijectToSupport:
+    """#50 — supports built from interval(±inf) made biject_to return
+    inf/nan, breaking every latent-site use of these distributions."""
+
+    def _dists(self):
+        return [
+            GeneralizedExtremeValueDistribution(0.0, 1.0, concentration=0.3),
+            GeneralizedExtremeValueDistribution(0.0, 1.0, concentration=0.0),
+            GeneralizedExtremeValueDistribution(0.0, 1.0, concentration=-0.3),
+            GeneralizedParetoDistribution(1.0, concentration=0.3),
+            GeneralizedParetoDistribution(1.0, concentration=0.0),
+            GeneralizedParetoDistribution(1.0, concentration=-0.3),
+            GumbelType1GEVD(0.0, 1.0),
+            FrechetType2GEVD(0.0, 1.0, concentration=0.3),
+            WeibullType3GEVD(0.0, 1.0, concentration=-0.3),
+        ]
+
+    def test_biject_to_support_finite_round_trip(self):
+        from numpyro.distributions.transforms import biject_to
+
+        for d in self._dists():
+            transform = biject_to(d.support)
+            for u in [-1.5, 0.0, 0.7]:
+                x = transform(jnp.asarray(u))
+                assert jnp.isfinite(x), f"{type(d).__name__}: biject_to gave {x}"
+                assert bool(d.support(x)), f"{type(d).__name__}: {x} not in support"
+                back = transform.inv(x)
+                assert jnp.isfinite(back)
+
+    def test_traced_concentration_falls_back_to_real(self):
+        from numpyro.distributions import constraints
+
+        def support_kind(xi):
+            return GeneralizedExtremeValueDistribution(
+                0.0, 1.0, concentration=xi
+            ).support
+
+        kinds = []
+
+        def probe(xi):
+            kinds.append(support_kind(xi))
+            return xi
+
+        jax.jit(probe)(0.3)
+        assert kinds[0] is constraints.real
+
+    @pytest.mark.parametrize(
+        "make",
+        [
+            lambda: GeneralizedExtremeValueDistribution(0.0, 1.0, concentration=0.3),
+            lambda: GeneralizedParetoDistribution(1.0, concentration=0.3),
+            lambda: GeneralizedParetoDistribution(1.0, concentration=-0.3),
+            lambda: WeibullType3GEVD(0.0, 1.0, concentration=-0.3),
+        ],
+    )
+    def test_nuts_latent_site_initializes(self, make):
+        import numpyro
+        from numpyro.infer import MCMC, NUTS
+
+        d = make()
+
+        def model():
+            numpyro.sample("x", d)
+
+        mcmc = MCMC(NUTS(model), num_warmup=10, num_samples=10, progress_bar=False)
+        mcmc.run(jax.random.PRNGKey(0))
+        x = mcmc.get_samples()["x"]
+        assert jnp.all(jnp.isfinite(x))
+
+
+class TestSurvivalCdfConsistency:
+    """#51 — the class-local 1e-8 threshold disagreed with the primitives'
+    1e-7, so survival_function and 1 - cdf split by >100% in the gap."""
+
+    @pytest.mark.parametrize("xi", [5e-8, 5e-7, 1e-4, 0.2, -0.2])
+    def test_gpd_survival_equals_one_minus_cdf(self, xi):
+        d = GeneralizedParetoDistribution(scale=1.0, concentration=xi)
+        x = jnp.array([1.0, 5.0, 20.0])
+        s = d.survival_function(x)
+        one_minus_f = 1.0 - d.cdf(x)
+        assert jnp.allclose(s, one_minus_f, atol=1e-6)
+
+    def test_gpd_tiny_shape_survival_value(self):
+        # In the old gap (ξ = 5e-8) S(1) returned 1.0 — a 172% error.
+        d = GeneralizedParetoDistribution(scale=1.0, concentration=5e-8)
+        assert float(d.survival_function(jnp.asarray(1.0))) == pytest.approx(
+            0.3679, rel=1e-3
+        )
+
+
+class TestConditionalExcessMean:
+    """#52 — batched parameters crashed the quadrature and the fixed
+    20-e-fold span truncated ~14% of the mass at ξ = 0.9."""
+
+    def _scipy_ref(self, loc, scale, xi, u):
+        import numpy as np
+        import scipy.special as sp
+        import scipy.stats as st
+
+        w = -st.genextreme(-xi, loc=loc, scale=scale).logcdf(u)
+        s = -np.expm1(-w)
+        lower_gamma = sp.gammainc(1.0 - xi, w) * sp.gamma(1.0 - xi)
+        e_trunc = (loc - scale / xi) * s + (scale / xi) * lower_gamma
+        return e_trunc / s - u
+
+    def test_gev_batched_parameters(self):
+        locs = jnp.array([0.0, 1.0, 2.0])
+        batched = GeneralizedExtremeValueDistribution(
+            loc=locs, scale=1.0, concentration=0.2
+        ).conditional_excess_mean(3.0)
+        assert batched.shape == (3,)
+        for i, loc in enumerate([0.0, 1.0, 2.0]):
+            scalar = GeneralizedExtremeValueDistribution(
+                loc=loc, scale=1.0, concentration=0.2
+            ).conditional_excess_mean(3.0)
+            assert float(batched[i]) == pytest.approx(float(scalar), rel=1e-5)
+
+    @pytest.mark.parametrize(
+        "make",
+        [
+            lambda locs: GumbelType1GEVD(loc=locs, scale=2.0),
+            lambda locs: FrechetType2GEVD(loc=locs, scale=1.0, concentration=0.3),
+            lambda locs: WeibullType3GEVD(loc=locs, scale=1.0, concentration=-0.3),
+        ],
+    )
+    def test_other_classes_batched_parameters(self, make):
+        out = make(jnp.array([0.0, 1.0])).conditional_excess_mean(1.0)
+        assert out.shape == (2,)
+        assert jnp.all(jnp.isfinite(out))
+
+    @pytest.mark.parametrize("xi", [0.9, 0.7, 0.3])
+    def test_gev_heavy_tail_accuracy(self, xi):
+        got = float(
+            GeneralizedExtremeValueDistribution(
+                0.0, 1.0, concentration=xi
+            ).conditional_excess_mean(1.0)
+        )
+        ref = self._scipy_ref(0.0, 1.0, xi, 1.0)
+        assert got == pytest.approx(ref, rel=5e-3)
+
+    def test_frechet_heavy_tail_accuracy(self):
+        got = float(
+            FrechetType2GEVD(0.0, 1.0, concentration=0.9).conditional_excess_mean(1.0)
+        )
+        ref = self._scipy_ref(0.0, 1.0, 0.9, 1.0)
+        assert got == pytest.approx(ref, rel=5e-3)
+
+
+class TestGumbelDelegation:
+    """#53 — GumbelType1GEVD now inherits its core from
+    numpyro.distributions.Gumbel instead of reimplementing it."""
+
+    def test_is_numpyro_gumbel_subclass(self):
+        import numpyro.distributions as dist
+
+        assert isinstance(GumbelType1GEVD(0.0, 1.0), dist.Gumbel)
+
+    def test_core_matches_numpyro_and_scipy(self):
+        import numpyro.distributions as dist
+        import scipy.stats as st
+
+        ours = GumbelType1GEVD(1.0, 2.0)
+        theirs = dist.Gumbel(1.0, 2.0)
+        rv = st.gumbel_r(1.0, 2.0)
+        x = jnp.array([-2.0, 0.0, 1.0, 4.0])
+        q = jnp.array([0.1, 0.5, 0.9])
+        assert jnp.allclose(ours.log_prob(x), theirs.log_prob(x), atol=1e-6)
+        assert jnp.allclose(ours.log_prob(x), jnp.asarray(rv.logpdf(x)), atol=1e-5)
+        assert jnp.allclose(ours.cdf(x), jnp.asarray(rv.cdf(x)), atol=1e-6)
+        assert jnp.allclose(ours.icdf(q), jnp.asarray(rv.ppf(q)), atol=1e-5)
+
+    def test_sample_moments_match_theory(self, key):
+        d = GumbelType1GEVD(1.0, 2.0)
+        samples = d.sample(key, (20000,))
+        assert float(jnp.mean(samples)) == pytest.approx(float(d.mean), abs=0.1)
+        assert float(jnp.var(samples)) == pytest.approx(float(d.variance), rel=0.1)
+
+    def test_evt_sugar_still_available(self):
+        d = GumbelType1GEVD(0.0, 1.0)
+        assert jnp.isfinite(d.return_level(50.0))
+        assert jnp.isfinite(d.entropy())
+        assert float(d.skew()) == pytest.approx(1.1395, rel=1e-3)
+
+
+class TestBoundarySemantics:
+    """#54 — mode for ξ < -1, endpoint density limits, NaN sentinels for
+    undefined moments, and jit-safe hill_plot_data."""
+
+    def test_gpd_mode_bounded_branch(self):
+        assert float(
+            GeneralizedParetoDistribution(1.0, concentration=-1.5).mode
+        ) == pytest.approx(1.0 / 1.5, rel=1e-6)
+        assert float(GeneralizedParetoDistribution(1.0, concentration=0.2).mode) == 0.0
+        assert float(GeneralizedParetoDistribution(1.0, concentration=-0.5).mode) == 0.0
+
+    def test_gpd_endpoint_log_prob(self):
+        # GPD(ξ=-1) is Uniform(0, σ): finite log density at the endpoint.
+        d = GeneralizedParetoDistribution(scale=2.0, concentration=-1.0)
+        assert float(d.log_prob(jnp.asarray(2.0))) == pytest.approx(
+            float(jnp.log(0.5)), rel=1e-6
+        )
+        assert bool(d.support(jnp.asarray(2.0)))
+        # -1 < ξ < 0: density vanishes at the endpoint.
+        d2 = GeneralizedParetoDistribution(scale=1.0, concentration=-0.5)
+        assert jnp.isneginf(d2.log_prob(jnp.asarray(2.0)))
+        # ξ < -1: density diverges toward the endpoint.
+        d3 = GeneralizedParetoDistribution(scale=1.0, concentration=-1.5)
+        assert jnp.isposinf(d3.log_prob(jnp.asarray(1.0 / 1.5)))
+
+    def test_gev_endpoint_log_prob(self):
+        d = GeneralizedExtremeValueDistribution(0.0, 2.0, concentration=-1.0)
+        assert float(d.log_prob(jnp.asarray(2.0))) == pytest.approx(
+            float(jnp.log(0.5)), rel=1e-6
+        )
+        assert bool(d.support(jnp.asarray(2.0)))
+
+    def test_endpoint_detection_tolerates_roundoff(self):
+        """Standardizing the advertised endpoint for non-power-of-two
+        parameters (e.g. σ=3.7, ξ=-1.1) rounds ξ·z slightly off -1; the
+        endpoint limit must still be applied, not the -inf support mask."""
+        d = GeneralizedParetoDistribution(scale=3.7, concentration=-1.1)
+        assert jnp.isposinf(d.log_prob(d.upper_bound()))
+        d2 = GeneralizedParetoDistribution(scale=3.7, concentration=-1.0)
+        assert float(d2.log_prob(d2.upper_bound())) == pytest.approx(
+            float(-jnp.log(3.7)), rel=1e-5
+        )
+        g = GeneralizedExtremeValueDistribution(0.5, 3.7, concentration=-1.1)
+        assert jnp.isposinf(g.log_prob(g.upper_bound()))
+        g2 = GeneralizedExtremeValueDistribution(0.5, 3.7, concentration=-1.0)
+        assert float(g2.log_prob(g2.upper_bound())) == pytest.approx(
+            float(-jnp.log(3.7)), rel=1e-5
+        )
+
+    def test_undefined_moment_sentinels_are_nan(self):
+        assert jnp.isnan(
+            GeneralizedExtremeValueDistribution(0.0, 1.0, concentration=0.5).skew()
+        )
+        assert jnp.isnan(
+            GeneralizedExtremeValueDistribution(0.0, 1.0, concentration=0.3).kurtosis()
+        )
+        assert jnp.isnan(GeneralizedParetoDistribution(1.0, concentration=0.4).skew())
+        assert jnp.isnan(
+            GeneralizedParetoDistribution(1.0, concentration=0.3).kurtosis()
+        )
+        assert jnp.isnan(FrechetType2GEVD(0.0, 1.0, concentration=0.4).skew())
+        # Divergent moments keep +inf.
+        assert jnp.isposinf(
+            GeneralizedExtremeValueDistribution(0.0, 1.0, concentration=0.6).variance
+        )
+        assert jnp.isposinf(
+            GeneralizedParetoDistribution(1.0, concentration=0.6).variance
+        )
+
+    def test_hill_plot_data_jit_safe(self):
+        d = GeneralizedParetoDistribution(1.0, concentration=0.5)
+        order_stats = jnp.sort(d.sample(jax.random.PRNGKey(0), (100,)), descending=True)
+        k_values = jnp.array([0, 5, 10, 50, 100])
+
+        def run(os, ks):
+            return d.hill_plot_data(os, ks)["hill_estimates"]
+
+        eager = run(order_stats, k_values)
+        jitted = jax.jit(run)(order_stats, k_values)
+        assert jnp.isnan(eager[0])  # k = 0 invalid
+        assert jnp.isnan(eager[-1])  # k = n invalid
+        assert jnp.all(jnp.isfinite(eager[1:-1]))
+        assert jnp.allclose(eager[1:-1], jitted[1:-1], atol=1e-6)

@@ -208,10 +208,15 @@ class FrechetType2GEVD(dist.Distribution):
         Return the support constraint for Fréchet Type II GEVD.
 
         Returns:
-            Constraint representing x ≥ μ - σ/ξ (lower bounded)
+            ``greater_than_eq(μ - σ/ξ)`` — lower-bounded, closed at the
+            endpoint (matching the closed ``interval`` membership this
+            class always had; the density vanishes there so ``log_prob``
+            is -inf). The old ``interval(lo, +inf)`` construction made
+            ``biject_to(support)`` return inf, breaking NUTS/SVI models
+            with a Fréchet latent site; ``greater_than_eq`` has a
+            registered bijector that handles the unbounded tail.
         """
-        lower_bound = self.lower_bound()
-        return constraints.interval(lower_bound, self.upper_bound())
+        return constraints.greater_than_eq(self.lower_bound())
 
     def upper_bound(self) -> jnp.ndarray:
         """
@@ -310,7 +315,9 @@ class FrechetType2GEVD(dist.Distribution):
 
         excess_kurt = (mu4 / mu2**2) - 3.0
 
-        return jnp.where(kurt_exists, excess_kurt, jnp.inf)
+        # NaN, not inf: beyond ξ = 1/4 the standardized fourth moment is
+        # undefined, unlike the variance which genuinely diverges to +inf.
+        return jnp.where(kurt_exists, excess_kurt, jnp.nan)
 
     def skew(self) -> jnp.ndarray:
         """
@@ -340,7 +347,9 @@ class FrechetType2GEVD(dist.Distribution):
 
         skewness = mu3 / jnp.power(mu2, 1.5)
 
-        return jnp.where(skew_exists, skewness, jnp.inf)
+        # NaN, not inf: beyond ξ = 1/3 the standardized third moment is
+        # undefined, unlike the variance which genuinely diverges to +inf.
+        return jnp.where(skew_exists, skewness, jnp.nan)
 
     def entropy(self) -> jnp.ndarray:
         """
@@ -500,24 +509,28 @@ class FrechetType2GEVD(dist.Distribution):
         # (b) linear spacing underresolved heavy Fréchet tails.
         n_grid = 1024
         p0 = self.cdf(threshold_arr)
+        # Joint batch of threshold and parameters; per-batch quantities are
+        # broadcast to it before gaining the trailing grid axis.
+        batch = jnp.shape(p0)
         s_u = 1.0 - p0
         # Cap away from 1.0 so p_grid stays strictly in (0, 1). See
         # GEVD.conditional_excess_mean.
         s_u_safe = jnp.clip(s_u, 1e-12, 1.0 - 1e-6)
         log_s_u = jnp.log(s_u_safe)
         # Lower log-y endpoint: step ~20 e-folds below log_s_u so the
-        # grid always captures the bulk of the tail-integrand mass
-        # (ξ < 1) AND stays strictly ascending. A fixed floor like
-        # log(1e-6) would run backward when S(u) < 1e-6 and trapezoid
-        # would sign-flip. The ``-jnp.log1p(-y)`` step below is
-        # accurate to subnormals in float32, so y can safely go below
-        # eps(float32). See GEVD.conditional_excess_mean for details.
+        # grid always captures the bulk of the tail-integrand mass AND
+        # stays strictly ascending. The truncated mass below y_c —
+        # which behaves like y^{1-ξ} and reached ~14% of the total at
+        # ξ = 0.9 — is added back analytically below rather than by
+        # widening the span (which would underflow float32 exp). The
+        # ``-jnp.log1p(-y)`` step below is accurate to subnormals in
+        # float32. See GEVD.conditional_excess_mean for details.
         span = jnp.asarray(20.0, dtype=log_s_u.dtype)
         log_y_min = log_s_u - span
 
         unit = jnp.linspace(0.0, 1.0, n_grid)
         log_s_u_exp = jnp.expand_dims(log_s_u, axis=-1)
-        log_y_min_exp = jnp.expand_dims(log_y_min, axis=-1)
+        log_y_min_exp = jnp.expand_dims(jnp.broadcast_to(log_y_min, batch), axis=-1)
         v_grid = log_y_min_exp * (1.0 - unit) + log_s_u_exp * unit
         y_grid = jnp.exp(v_grid)
         # Compute ``x = F⁻¹(1 - y)`` directly from ``y`` using
@@ -527,11 +540,33 @@ class FrechetType2GEVD(dist.Distribution):
         # quadrature sign-flips at very high thresholds. See
         # GEVD.conditional_excess_mean for details. ξ > 0 is enforced
         # by ``arg_constraints``, so the Gumbel branch is unreachable.
+        # Parameters are broadcast to the joint batch and given the same
+        # trailing grid axis — batched (batch,) parameters against a
+        # (..., n_grid) grid otherwise raise a broadcasting error.
         neg_log_q = -jnp.log1p(-y_grid)
-        x_grid = self.loc + (self.scale / shape) * (jnp.power(neg_log_q, -shape) - 1.0)
+        loc_e = jnp.expand_dims(jnp.broadcast_to(self.loc, batch), axis=-1)
+        scale_e = jnp.expand_dims(jnp.broadcast_to(self.scale, batch), axis=-1)
+        shape_e = jnp.expand_dims(jnp.broadcast_to(shape, batch), axis=-1)
+        x_grid = loc_e + (scale_e / shape_e) * (jnp.power(neg_log_q, -shape_e) - 1.0)
 
         integrand = x_grid * y_grid
         numerator = jnp.trapezoid(integrand, x=v_grid, axis=-1)
+
+        # Closed-form remainder for the truncated (0, y_c] tail with
+        # y_c = S(u)·e⁻²⁰, where x(y) ≈ (μ - σ/ξ) + (σ/ξ)·y^{-ξ}:
+        #   ∫₀^{y_c} x dy = (μ - σ/ξ)·y_c + (σ/ξ)·y_c^{1-ξ}/(1-ξ).
+        # Dropping this was the ~14%-at-ξ=0.9 truncation bias. ξ ≥ 1 is
+        # masked to NaN below; sanitize its 1-ξ ≤ 0 divisor.
+        loc_b = jnp.broadcast_to(self.loc, batch)
+        scale_b = jnp.broadcast_to(self.scale, batch)
+        shape_b = jnp.broadcast_to(shape, batch)
+        y_c = jnp.exp(log_y_min)
+        one_minus_xi = jnp.where(shape_b >= 1.0, 1.0, 1.0 - shape_b)
+        remainder = (loc_b - scale_b / shape_b) * y_c + (scale_b / shape_b) * jnp.power(
+            y_c, one_minus_xi
+        ) / one_minus_xi
+        numerator = numerator + remainder
+
         mean_conditional = numerator / s_u_safe
         mean_excess = mean_conditional - threshold_arr
 
