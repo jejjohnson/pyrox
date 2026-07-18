@@ -28,6 +28,7 @@ from jax import random
 from jaxtyping import Array, Bool, Float, Int, PRNGKeyArray
 
 from xtremax.point_processes._domain import RectangularDomain
+from xtremax.point_processes._results import SpatialSampleResult
 
 
 def ipp_spatial_log_prob(
@@ -130,7 +131,7 @@ def ipp_spatial_sample_thinning(
     n_accepted = jnp.sum(accepted_raw)
     accepted_mask = ranks < n_accepted
     locations = jnp.where(accepted_mask[:, None], compacted, domain.lo)
-    return locations, accepted_mask, n_uncapped
+    return SpatialSampleResult(locations, accepted_mask, n_uncapped)
 
 
 def ipp_spatial_intensity(

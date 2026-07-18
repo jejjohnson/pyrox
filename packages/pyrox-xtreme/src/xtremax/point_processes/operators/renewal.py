@@ -15,13 +15,7 @@ import numpyro.distributions as dist
 from jax.typing import ArrayLike
 from jaxtyping import Array, Bool, Float, Int, PRNGKeyArray
 
-from xtremax.point_processes.operators.temporal import GoodnessOfFit
-from xtremax.point_processes.primitives.diagnostics import (
-    compensator_curve,
-    ks_statistic_exp1,
-    qq_exp1_quantiles,
-    time_rescaling_residuals,
-)
+from xtremax.point_processes.operators._base import GoodnessOfFitMixin
 from xtremax.point_processes.primitives.renewal import (
     renewal_cumulative_hazard,
     renewal_expected_count,
@@ -34,7 +28,7 @@ from xtremax.point_processes.primitives.renewal import (
 )
 
 
-class RenewalProcess(eqx.Module):
+class RenewalProcess(GoodnessOfFitMixin, eqx.Module):
     """Renewal process on ``[0, T]`` with a user-supplied inter-event law.
 
     Args:
@@ -133,10 +127,11 @@ class RenewalProcess(eqx.Module):
         )
 
     # ------------------------------------------------------------
-    # Diagnostics
+    # Diagnostics — residuals/goodness_of_fit/compensator_curve come
+    # from GoodnessOfFitMixin via this hook.
     # ------------------------------------------------------------
 
-    def _cumulative_intensity_fn(
+    def _compensator_fn(
         self,
         event_times: Float[Array, ...],
         mask: Bool[Array, ...],
@@ -147,6 +142,8 @@ class RenewalProcess(eqx.Module):
         evaluated on inter-event gaps; we reconstruct it at the
         supplied events and return a callable for the diagnostics
         helpers, which expect ``cumulative_intensity_fn(event_times)``.
+        Requires the contiguous-prefix mask invariant (gaps are taken
+        between consecutive buffer slots).
         """
         zero = jnp.zeros_like(event_times[..., :1])
         prev = jnp.concatenate([zero, event_times[..., :-1]], axis=-1)
@@ -161,32 +158,3 @@ class RenewalProcess(eqx.Module):
             return cum
 
         return _fn
-
-    def residuals(
-        self,
-        event_times: Float[Array, ...],
-        mask: Bool[Array, ...],
-    ) -> tuple[Float[Array, ...], Bool[Array, ...]]:
-        """Inter-event-gap-based residuals ``τᵢ = Λ_F(Δtᵢ)``."""
-        fn = self._cumulative_intensity_fn(event_times, mask)
-        return time_rescaling_residuals(event_times, mask, fn)
-
-    def goodness_of_fit(
-        self,
-        event_times: Float[Array, ...],
-        mask: Bool[Array, ...],
-    ) -> GoodnessOfFit:
-        """Residuals + KS + QQ against ``Exp(1)``."""
-        residuals, res_mask = self.residuals(event_times, mask)
-        ks = ks_statistic_exp1(residuals, res_mask)
-        theoretical, empirical = qq_exp1_quantiles(residuals, res_mask)
-        return GoodnessOfFit(residuals, res_mask, ks, theoretical, empirical)
-
-    def compensator_curve(
-        self,
-        event_times: Float[Array, ...],
-        mask: Bool[Array, ...],
-    ) -> tuple[Float[Array, ...], Float[Array, ...]]:
-        """Pairs ``(t_i, Λ(t_i))`` for a compensator plot."""
-        fn = self._cumulative_intensity_fn(event_times, mask)
-        return compensator_curve(event_times, mask, fn)

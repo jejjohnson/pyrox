@@ -28,6 +28,7 @@ from xtremax.point_processes._integration import (
     cumulative_log_intensity,
     integrate_log_intensity,
 )
+from xtremax.point_processes._results import SampleResult
 
 
 def ipp_log_prob(
@@ -149,7 +150,7 @@ def ipp_sample_thinning(
     n_accepted = jnp.sum(accepted_raw)
     accepted_mask = ranks < n_accepted
     times = jnp.where(accepted_mask, compacted, T)
-    return times, accepted_mask, n_uncapped
+    return SampleResult(times, accepted_mask, n_uncapped)
 
 
 def ipp_sample_inversion(
@@ -204,7 +205,7 @@ def ipp_sample_inversion(
     # Final padding-position value: ``Λ⁻¹(Λ(T))`` = right edge of window.
     t_right = inverse_cumulative_intensity_fn(Lambda_T)
     times = jnp.where(mask, times, t_right)
-    return times, mask, n_events
+    return SampleResult(times, mask, n_events)
 
 
 def ipp_intensity(

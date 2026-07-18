@@ -21,19 +21,22 @@ from __future__ import annotations
 from collections.abc import Callable
 
 import equinox as eqx
-import jax
-import jax.numpy as jnp
 import numpyro.distributions as dist
 from jaxtyping import Array, Bool, Float, PRNGKeyArray
 
 from xtremax.point_processes._history import EventHistory
+from xtremax.point_processes._results import MarkedSampleResult
+from xtremax.point_processes.operators._base import (
+    SeparableMarkedPP,
+    call_sequence_log_prob,
+)
 from xtremax.point_processes.primitives.marked import (
     marks_log_prob,
     sample_marks_at_times,
 )
 
 
-class MarkedTemporalPointProcess(eqx.Module):
+class MarkedTemporalPointProcess(SeparableMarkedPP):
     """Separable marked TPP: ground process + time-/history-conditioned marks.
 
     Args:
@@ -54,9 +57,6 @@ class MarkedTemporalPointProcess(eqx.Module):
             history-independent mark distributions.
     """
 
-    ground: eqx.Module
-    mark_distribution_fn: Callable[[Array, EventHistory], dist.Distribution]
-    mark_dim: int | None = eqx.field(static=True, default=None)
     history_at_each_event: bool = eqx.field(static=True, default=True)
 
     def __init__(
@@ -110,41 +110,42 @@ class MarkedTemporalPointProcess(eqx.Module):
         mask: Bool[Array, ...],
     ) -> Float[Array, ...]:
         """Forward to the ground's ``log_prob`` matching its signature."""
-        # All IPP/Hawkes/Renewal operators in this package take (times, mask);
-        # HPP takes n_events. Try (times, mask) first, fall back to the count.
-        try:
-            return self.ground.log_prob(event_times, mask)
-        except TypeError:
-            n = jnp.sum(mask, axis=-1)
-            return self.ground.log_prob(n)
+        return call_sequence_log_prob(self.ground, event_times, mask)
+
+    def _sample_marks(
+        self,
+        key: PRNGKeyArray,
+        *event_coords: Array,
+        mask: Bool[Array, ...],
+    ) -> Float[Array, ...]:
+        (times,) = event_coords
+        return sample_marks_at_times(
+            key,
+            times,
+            mask,
+            self.mark_distribution_fn,
+            history_at_each_event=self.history_at_each_event,
+        )
 
     def sample(
         self,
         key: PRNGKeyArray,
         max_events: int,
         **ground_kwargs,
-    ) -> tuple[Float[Array, ...], Bool[Array, ...], Float[Array, ...]]:
+    ) -> MarkedSampleResult:
         """Sample ground event times, then draw marks at each time.
 
         Returns:
-            Tuple ``(times, mask, marks)``. ``marks`` has shape
+            :class:`MarkedSampleResult` ``(times, mask, marks)`` —
+            unpacks like the tuple it replaces. ``marks`` has shape
             ``(max_events,)`` for scalar marks or
             ``(max_events, mark_dim)`` for vector marks; padding
-            positions are filled with zeros.
+            positions are filled with zeros. Any operator-specific
+            sample kwargs (e.g. ``max_candidates`` for a thinning-based
+            ground sampler) are forwarded to the ground.
         """
-        key_ground, key_marks = jax.random.split(key)
-        # Forward any operator-specific sample kwargs (e.g. ``max_candidates``
-        # for a thinning-based ground sampler).
-        ground_result = self.ground.sample(key_ground, max_events, **ground_kwargs)
-        times, mask, _ = ground_result
-        marks = sample_marks_at_times(
-            key_marks,
-            times,
-            mask,
-            self.mark_distribution_fn,
-            history_at_each_event=self.history_at_each_event,
-        )
-        return times, mask, marks
+        times, mask, marks = self._sample_joint(key, max_events, **ground_kwargs)
+        return MarkedSampleResult(times, mask, marks)
 
     # ------------------------------------------------------------
     # Ground-process pass-throughs

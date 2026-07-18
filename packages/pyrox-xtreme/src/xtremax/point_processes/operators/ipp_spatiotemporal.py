@@ -181,9 +181,16 @@ class InhomogeneousSpatioTemporalPP(eqx.Module):
     def marginal_spatial_intensity(
         self,
         locations: Float[Array, ...],
-        n_time_points: int = 100,
+        n_time_points: int | None = None,
     ) -> Float[Array, ...]:
-        """``λ_S(s) = ∫_{t0}^{t1} λ(s, t) dt`` via trapezoid in time."""
+        """``λ_S(s) = ∫_{t0}^{t1} λ(s, t) dt`` via trapezoid in time.
+
+        The default grid size derives from :attr:`n_integration_points`
+        (floored at the historical default of 100), so raising the
+        operator's quadrature budget also refines the marginals.
+        """
+        if n_time_points is None:
+            n_time_points = max(100, round(self.n_integration_points**0.5))
         return ipp_spatiotemporal_marginal_spatial_intensity(
             locations, self.log_intensity_fn, self.temporal, n_time_points=n_time_points
         )
@@ -191,9 +198,15 @@ class InhomogeneousSpatioTemporalPP(eqx.Module):
     def marginal_temporal_intensity(
         self,
         times: Float[Array, ...],
-        n_spatial_points: int = 256,
+        n_spatial_points: int | None = None,
     ) -> Float[Array, ...]:
-        """``λ_T(t) = ∫_D λ(s, t) ds`` via Halton QMC in space."""
+        """``λ_T(t) = ∫_D λ(s, t) ds`` via Halton QMC in space.
+
+        The default node count derives from :attr:`n_integration_points`
+        (floored at the historical default of 256).
+        """
+        if n_spatial_points is None:
+            n_spatial_points = max(256, self.n_integration_points // 16)
         return ipp_spatiotemporal_marginal_temporal_intensity(
             times,
             self.log_intensity_fn,

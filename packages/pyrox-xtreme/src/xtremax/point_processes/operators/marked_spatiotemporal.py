@@ -14,20 +14,19 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-import equinox as eqx
-import jax
-import jax.numpy as jnp
 import numpyro.distributions as dist
 from jaxtyping import Array, Bool, Float, PRNGKeyArray
 
 from xtremax.point_processes._domain import RectangularDomain, TemporalDomain
+from xtremax.point_processes._results import MarkedSpatiotemporalSampleResult
+from xtremax.point_processes.operators._base import SeparableMarkedPP
 from xtremax.point_processes.primitives.marked_spatiotemporal import (
     sample_spatiotemporal_marks,
     spatiotemporal_marks_log_prob,
 )
 
 
-class MarkedSpatioTemporalPP(eqx.Module):
+class MarkedSpatioTemporalPP(SeparableMarkedPP):
     """Separable marked spatiotemporal PP: ground × mark distribution.
 
     Args:
@@ -42,13 +41,9 @@ class MarkedSpatioTemporalPP(eqx.Module):
             scalar marks. Same role as in the marked spatial operator.
     """
 
-    ground: eqx.Module
-    mark_distribution_fn: Callable[[Array, Array], dist.Distribution]
-    mark_dim: int | None = eqx.field(static=True, default=None)
-
     def __init__(
         self,
-        ground: eqx.Module,
+        ground: object,
         mark_distribution_fn: Callable[[Array, Array], dist.Distribution],
         mark_dim: int | None = None,
     ) -> None:
@@ -84,23 +79,32 @@ class MarkedSpatioTemporalPP(eqx.Module):
         )
         return ground_lp + mark_lp
 
+    def _sample_marks(
+        self,
+        key: PRNGKeyArray,
+        *event_coords: Array,
+        mask: Bool[Array, ...],
+    ) -> Float[Array, ...]:
+        locations, times = event_coords
+        return sample_spatiotemporal_marks(
+            key, locations, times, mask, self.mark_distribution_fn
+        )
+
     def sample(
         self,
         key: PRNGKeyArray,
         max_events: int,
         **ground_kwargs,
-    ) -> tuple[
-        Float[Array, ...], Float[Array, ...], Bool[Array, ...], Float[Array, ...]
-    ]:
-        """Sample ground (locations, times, mask), then marks at each event."""
-        key_ground, key_marks = jax.random.split(key)
-        locations, times, mask, _ = self.ground.sample(
-            key_ground, max_events, **ground_kwargs
+    ) -> MarkedSpatiotemporalSampleResult:
+        """Sample ground (locations, times, mask), then marks at each event.
+
+        Returns :class:`MarkedSpatiotemporalSampleResult` — unpacks like
+        the ``(locations, times, mask, marks)`` tuple it replaces.
+        """
+        locations, times, mask, marks = self._sample_joint(
+            key, max_events, **ground_kwargs
         )
-        marks = sample_spatiotemporal_marks(
-            key_marks, locations, times, mask, self.mark_distribution_fn
-        )
-        return locations, times, mask, marks
+        return MarkedSpatiotemporalSampleResult(locations, times, mask, marks)
 
     def ground_log_prob(
         self,
@@ -131,21 +135,5 @@ class MarkedSpatioTemporalPP(eqx.Module):
         """Forward to the ground operator's ``intensity``."""
         return self.ground.intensity(locations, times)
 
-    def mark_intensity(
-        self,
-        locations: Float[Array, ...],
-        times: Float[Array, ...],
-        marks: Float[Array, ...],
-    ) -> Float[Array, ...]:
-        """Joint intensity ``λ(s, t, m) = λ(s, t) · f(m | s, t)``.
-
-        Useful for diagnostic plots and mark-thinned sub-process
-        intensities.
-        """
-        ground_lam = self.ground.intensity(locations, times)
-
-        def mark_density(s: Array, t: Array, m: Array) -> Array:
-            return jnp.exp(self.mark_distribution_fn(s, t).log_prob(m))
-
-        densities = jax.vmap(mark_density)(locations, times, marks)
-        return ground_lam * densities
+    # ``mark_intensity(locations, times, marks)`` — the joint intensity
+    # λ(s, t, m) = λ(s, t)·f(m | s, t) — comes from SeparableMarkedPP.

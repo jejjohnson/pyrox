@@ -47,6 +47,7 @@ from jax.scipy.special import erf
 from jaxtyping import Array, Bool, Float, Int, PRNGKeyArray
 
 from xtremax.point_processes._domain import RectangularDomain, TemporalDomain
+from xtremax.point_processes._results import SpatiotemporalSampleResult
 
 
 def _gaussian_kernel(
@@ -400,4 +401,4 @@ def stpp_hawkes_sample(
     # monotonically forward.
     locations = jnp.where(mask[:, None], locs, spatial.lo)
     times = jnp.where(mask, times, temporal.t1)
-    return locations, times, mask, count
+    return SpatiotemporalSampleResult(locations, times, mask, count)

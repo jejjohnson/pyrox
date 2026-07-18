@@ -19,20 +19,19 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-import equinox as eqx
-import jax
-import jax.numpy as jnp
 import numpyro.distributions as dist
 from jaxtyping import Array, Bool, Float, PRNGKeyArray
 
 from xtremax.point_processes._domain import RectangularDomain
+from xtremax.point_processes._results import MarkedSpatialSampleResult
+from xtremax.point_processes.operators._base import SeparableMarkedPP
 from xtremax.point_processes.primitives.marked_spatial import (
     sample_spatial_marks_at_locations,
     spatial_marks_log_prob,
 )
 
 
-class MarkedSpatialPP(eqx.Module):
+class MarkedSpatialPP(SeparableMarkedPP):
     """Separable marked spatial PP: ground process × mark distribution.
 
     Args:
@@ -52,13 +51,9 @@ class MarkedSpatialPP(eqx.Module):
             ``mark_distribution_fn``.
     """
 
-    ground: eqx.Module
-    mark_distribution_fn: Callable[[Array], dist.Distribution]
-    mark_dim: int | None = eqx.field(static=True, default=None)
-
     def __init__(
         self,
-        ground: eqx.Module,
+        ground: object,
         mark_distribution_fn: Callable[[Array], dist.Distribution],
         mark_dim: int | None = None,
     ) -> None:
@@ -93,27 +88,32 @@ class MarkedSpatialPP(eqx.Module):
         )
         return ground_lp + mark_lp
 
+    def _sample_marks(
+        self,
+        key: PRNGKeyArray,
+        *event_coords: Array,
+        mask: Bool[Array, ...],
+    ) -> Float[Array, ...]:
+        (locations,) = event_coords
+        return sample_spatial_marks_at_locations(
+            key, locations, mask, self.mark_distribution_fn
+        )
+
     def sample(
         self,
         key: PRNGKeyArray,
         max_events: int,
         **ground_kwargs,
-    ) -> tuple[Float[Array, ...], Bool[Array, ...], Float[Array, ...]]:
+    ) -> MarkedSpatialSampleResult:
         """Sample ground locations, then draw marks at each location.
 
-        Returns ``(locations, mask, marks)`` — a strict three-tuple,
-        unlike the temporal marked PP which slots marks behind the
-        existing ``(times, mask, n)`` triple. The spatial ground
-        operator already returns ``(locations, mask, n)``; we drop the
-        ``n`` because the marks tensor already encodes the kept events
-        via shape and ``mask`` already encodes which slots are real.
+        Returns :class:`MarkedSpatialSampleResult`
+        ``(locations, mask, marks)`` — unpacks like the strict
+        three-tuple it replaces. The ground's event count is dropped;
+        ``mask`` already encodes which slots are real.
         """
-        key_ground, key_marks = jax.random.split(key)
-        locations, mask, _ = self.ground.sample(key_ground, max_events, **ground_kwargs)
-        marks = sample_spatial_marks_at_locations(
-            key_marks, locations, mask, self.mark_distribution_fn
-        )
-        return locations, mask, marks
+        locations, mask, marks = self._sample_joint(key, max_events, **ground_kwargs)
+        return MarkedSpatialSampleResult(locations, mask, marks)
 
     # ------------------------------------------------------------
     # Component pass-throughs
@@ -142,21 +142,5 @@ class MarkedSpatialPP(eqx.Module):
         # spatial PP operators all accept it as a positional argument.
         return self.ground.intensity(locations)
 
-    def mark_intensity(
-        self,
-        locations: Float[Array, ...],
-        marks: Float[Array, ...],
-    ) -> Float[Array, ...]:
-        """Joint intensity ``λ(s, m) = λ(s) · f(m | s)`` evaluated pointwise.
-
-        Useful for diagnostic plots (mark-conditional rate maps) and
-        for mark-thinned sub-process intensities.
-        """
-        ground_lam = self.ground.intensity(locations)
-
-        # ``mark_distribution_fn`` is called per-event via ``vmap``.
-        def mark_density(s: Array, m: Array) -> Array:
-            return jnp.exp(self.mark_distribution_fn(s).log_prob(m))
-
-        densities = jax.vmap(mark_density)(locations, marks)
-        return ground_lam * densities
+    # ``mark_intensity(locations, marks)`` — the joint intensity
+    # λ(s, m) = λ(s)·f(m | s) — comes from SeparableMarkedPP.

@@ -23,6 +23,7 @@ from jax import random
 from jaxtyping import Array, Bool, Float, Int, PRNGKeyArray
 
 from xtremax.point_processes._domain import RectangularDomain
+from xtremax.point_processes._results import SpatialSampleResult
 
 
 def hpp_spatial_log_prob(
@@ -141,7 +142,7 @@ def hpp_spatial_sample(
     # ``domain.sample_uniform`` builds the trailing ``(d,)`` axis from
     # ``n_dims`` directly, we are safe by construction.
     del d
-    return locations, sorted_mask, n_uncapped
+    return SpatialSampleResult(locations, sorted_mask, n_uncapped)
 
 
 def hpp_spatial_intensity(

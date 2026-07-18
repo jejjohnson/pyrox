@@ -37,6 +37,7 @@ from jax import random
 from jaxtyping import Array, Bool, Float, Int, PRNGKeyArray
 
 from xtremax.point_processes._history import EventHistory
+from xtremax.point_processes._results import SampleResult
 
 
 def thinning_sample(
@@ -132,7 +133,7 @@ def thinning_sample(
     # Final pass: pad padding positions with T so downstream intensity
     # evaluations stay inside the window.
     times = jnp.where(final_history.mask, final_history.times, T_arr)
-    return times, final_history.mask, n_proposals
+    return SampleResult(times, final_history.mask, n_proposals)
 
 
 def _prefix_history(history: EventHistory, keep: Bool[Array, ...]) -> EventHistory:

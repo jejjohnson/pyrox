@@ -24,6 +24,8 @@ import jax.numpy as jnp
 import numpyro.distributions as dist
 from jaxtyping import Array, Bool, Float, Int, PRNGKeyArray
 
+from xtremax.point_processes._results import SampleResult
+
 
 def renewal_log_prob(
     event_times: Float[Array, ...],
@@ -115,7 +117,7 @@ def renewal_sample(
     n_events = jnp.sum(mask, axis=-1).astype(jnp.int32)
     # Pad out-of-window positions to T so downstream intensity evaluations stay safe.
     times = jnp.where(mask, times, T_arr)
-    return times, mask, n_events
+    return SampleResult(times, mask, n_events)
 
 
 def renewal_hazard(

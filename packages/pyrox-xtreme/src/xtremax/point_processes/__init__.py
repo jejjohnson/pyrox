@@ -41,6 +41,34 @@ The shared :class:`~xtremax.point_processes._history.EventHistory`
 pytree is the lingua franca for user-supplied retention and mark
 callables: every family threads history through in the same shape so
 user code need not know the underlying family.
+
+Sample-result convention
+------------------------
+
+Every sampler returns a ``NamedTuple`` from
+:mod:`~xtremax.point_processes._results` —
+:class:`SampleResult` ``(times, mask, n_events)`` for unmarked temporal
+processes, :class:`MarkedSampleResult` ``(times, mask, marks)`` for
+marked ones, and the spatial/spatiotemporal analogues. These unpack
+positionally exactly like the tuples they replaced, are valid JAX
+pytrees, and let wrapper operators dispatch on the result *type*
+instead of shape/dtype heuristics. The ``n_events`` semantics are
+family-specific and documented per sampler (HPP: uncapped event count;
+thinning IPPs: uncapped candidate count; Hawkes: proposals consumed;
+renewal: retained events). ``sample_shape`` batching exists only on the
+temporal HPP; batch every other sampler with ``jax.vmap`` /
+``equinox.filter_vmap`` over keys.
+
+Operator architecture
+---------------------
+
+Cross-family operator surface lives once in
+:mod:`~xtremax.point_processes.operators._base`: the time-rescaling
+diagnostics trio (``residuals`` / ``goodness_of_fit`` /
+``compensator_curve``) in ``GoodnessOfFitMixin`` (families supply only
+``_compensator_fn``), the live-``λ_max`` accessor in
+``LiveIntensityMixin``, and the separable marked-process plumbing in
+``SeparableMarkedPP``.
 """
 
 from __future__ import annotations
@@ -64,11 +92,27 @@ from xtremax.point_processes._integration_spatial import (
 from xtremax.point_processes._integration_spatiotemporal import (
     integrate_log_intensity_spatiotemporal,
 )
+from xtremax.point_processes._results import (
+    GoodnessOfFit,
+    MarkedSampleResult,
+    MarkedSpatialSampleResult,
+    MarkedSpatiotemporalSampleResult,
+    SampleResult,
+    SpatialSampleResult,
+    SpatiotemporalSampleResult,
+)
 
 
 __all__ = [
     "EventHistory",
+    "GoodnessOfFit",
+    "MarkedSampleResult",
+    "MarkedSpatialSampleResult",
+    "MarkedSpatiotemporalSampleResult",
     "RectangularDomain",
+    "SampleResult",
+    "SpatialSampleResult",
+    "SpatiotemporalSampleResult",
     "TemporalDomain",
     "constant_mark_distribution",
     "constant_retention",

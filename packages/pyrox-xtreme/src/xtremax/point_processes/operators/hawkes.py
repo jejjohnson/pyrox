@@ -29,13 +29,7 @@ from jaxtyping import Array, Bool, Float, Int, PRNGKeyArray
 
 from xtremax.point_processes._history import EventHistory
 from xtremax.point_processes._integration import integrate_log_intensity
-from xtremax.point_processes.operators.temporal import GoodnessOfFit
-from xtremax.point_processes.primitives.diagnostics import (
-    compensator_curve,
-    ks_statistic_exp1,
-    qq_exp1_quantiles,
-    time_rescaling_residuals,
-)
+from xtremax.point_processes.operators._base import GoodnessOfFitMixin
 from xtremax.point_processes.primitives.hawkes import (
     exp_hawkes_cumulative_intensity,
     exp_hawkes_intensity,
@@ -74,7 +68,7 @@ class ExponentialKernel(eqx.Module):
         return jnp.asarray(self.alpha)
 
 
-class ExponentialHawkes(eqx.Module):
+class ExponentialHawkes(GoodnessOfFitMixin, eqx.Module):
     r"""Hawkes process with exponential excitation on ``[0, T]``.
 
     Args:
@@ -192,43 +186,22 @@ class ExponentialHawkes(eqx.Module):
         return self.cumulative_intensity(self.observation_window, event_times, mask)
 
     # ------------------------------------------------------------
-    # Diagnostics
+    # Diagnostics — residuals/goodness_of_fit/compensator_curve come
+    # from GoodnessOfFitMixin via this hook.
     # ------------------------------------------------------------
 
-    def residuals(
+    def _compensator_fn(
         self,
         event_times: Float[Array, ...],
         mask: Bool[Array, ...],
-    ) -> tuple[Float[Array, ...], Bool[Array, ...]]:
-        """Time-rescaling residuals under the conditional compensator."""
-
+    ) -> Callable[[Array], Array]:
         def cum_fn(ts: Array) -> Array:
             return self.cumulative_intensity(ts, event_times, mask)
 
-        return time_rescaling_residuals(event_times, mask, cum_fn)
-
-    def goodness_of_fit(
-        self,
-        event_times: Float[Array, ...],
-        mask: Bool[Array, ...],
-    ) -> GoodnessOfFit:
-        residuals, res_mask = self.residuals(event_times, mask)
-        ks = ks_statistic_exp1(residuals, res_mask)
-        theoretical, empirical = qq_exp1_quantiles(residuals, res_mask)
-        return GoodnessOfFit(residuals, res_mask, ks, theoretical, empirical)
-
-    def compensator_curve(
-        self,
-        event_times: Float[Array, ...],
-        mask: Bool[Array, ...],
-    ) -> tuple[Float[Array, ...], Float[Array, ...]]:
-        def cum_fn(ts: Array) -> Array:
-            return self.cumulative_intensity(ts, event_times, mask)
-
-        return compensator_curve(event_times, mask, cum_fn)
+        return cum_fn
 
 
-class GeneralHawkesProcess(eqx.Module):
+class GeneralHawkesProcess(GoodnessOfFitMixin, eqx.Module):
     r"""Hawkes process with a user-supplied kernel module.
 
     Args:
@@ -375,35 +348,16 @@ class GeneralHawkesProcess(eqx.Module):
         return self.cumulative_intensity(self.observation_window, event_times, mask)
 
     # ------------------------------------------------------------
-    # Diagnostics (parallels ExponentialHawkes)
+    # Diagnostics — residuals/goodness_of_fit/compensator_curve come
+    # from GoodnessOfFitMixin via this hook.
     # ------------------------------------------------------------
 
-    def residuals(
+    def _compensator_fn(
         self,
         event_times: Float[Array, ...],
         mask: Bool[Array, ...],
-    ) -> tuple[Float[Array, ...], Bool[Array, ...]]:
+    ) -> Callable[[Array], Array]:
         def cum_fn(ts: Array) -> Array:
             return self.cumulative_intensity(ts, event_times, mask)
 
-        return time_rescaling_residuals(event_times, mask, cum_fn)
-
-    def goodness_of_fit(
-        self,
-        event_times: Float[Array, ...],
-        mask: Bool[Array, ...],
-    ) -> GoodnessOfFit:
-        residuals, res_mask = self.residuals(event_times, mask)
-        ks = ks_statistic_exp1(residuals, res_mask)
-        theoretical, empirical = qq_exp1_quantiles(residuals, res_mask)
-        return GoodnessOfFit(residuals, res_mask, ks, theoretical, empirical)
-
-    def compensator_curve(
-        self,
-        event_times: Float[Array, ...],
-        mask: Bool[Array, ...],
-    ) -> tuple[Float[Array, ...], Float[Array, ...]]:
-        def cum_fn(ts: Array) -> Array:
-            return self.cumulative_intensity(ts, event_times, mask)
-
-        return compensator_curve(event_times, mask, cum_fn)
+        return cum_fn

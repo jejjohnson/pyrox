@@ -24,7 +24,6 @@ transforms, or wrap the callable in an ``eqx.Module``.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import NamedTuple
 
 import equinox as eqx
 import jax
@@ -32,8 +31,18 @@ import jax.numpy as jnp
 from jax.typing import ArrayLike
 from jaxtyping import Array, Bool, Float, Int, PRNGKeyArray
 
+# Redundant aliases mark deliberate re-exports (kept for backward
+# compatibility: Hawkes/renewal operators and user code import
+# GoodnessOfFit from this module).
+from xtremax.point_processes._results import (
+    GoodnessOfFit as GoodnessOfFit,
+    SampleResult as SampleResult,
+)
+from xtremax.point_processes.operators._base import (
+    GoodnessOfFitMixin,
+    LiveIntensityMixin,
+)
 from xtremax.point_processes.primitives import (
-    compensator_curve,
     hpp_cumulative_intensity,
     hpp_exceedance_log_prob,
     hpp_hazard,
@@ -52,9 +61,6 @@ from xtremax.point_processes.primitives import (
     ipp_predict_count,
     ipp_sample_inversion,
     ipp_sample_thinning,
-    ks_statistic_exp1,
-    qq_exp1_quantiles,
-    time_rescaling_residuals,
 )
 
 
@@ -139,25 +145,12 @@ class PiecewiseConstantLogIntensity(eqx.Module):
         return jnp.exp(jnp.max(self.log_rates))
 
 
-class GoodnessOfFit(NamedTuple):
-    """Bundle of diagnostics returned by :meth:`goodness_of_fit`.
-
-    Attributes:
-        residuals: Time-rescaled inter-event residuals :math:`\\tau_i`.
-        mask: Real-event mask aligned with ``residuals``.
-        ks_statistic: Kolmogorov–Smirnov statistic versus ``Exp(1)``.
-        theoretical_quantiles: QQ-plot theoretical quantiles.
-        empirical_quantiles: QQ-plot empirical quantiles.
-    """
-
-    residuals: Float[Array, ...]
-    mask: Bool[Array, ...]
-    ks_statistic: Float[Array, ...]
-    theoretical_quantiles: Float[Array, ...]
-    empirical_quantiles: Float[Array, ...]
+# NOTE: ``GoodnessOfFit`` now lives in ``xtremax.point_processes._results``
+# and is imported above — existing ``from ...operators.temporal import
+# GoodnessOfFit`` call sites keep working unchanged.
 
 
-class HomogeneousPoissonProcess(eqx.Module):
+class HomogeneousPoissonProcess(GoodnessOfFitMixin, eqx.Module):
     """Homogeneous Poisson process on ``[0, T]``.
 
     Args:
@@ -266,38 +259,20 @@ class HomogeneousPoissonProcess(eqx.Module):
         return hpp_exceedance_log_prob(k, start_time, end_time, self.rate)
 
     # ------------------------------------------------------------
-    # Diagnostics
+    # Diagnostics — residuals/goodness_of_fit/compensator_curve come
+    # from GoodnessOfFitMixin via this hook.
     # ------------------------------------------------------------
 
-    def residuals(
+    def _compensator_fn(
         self,
         event_times: Float[Array, ...],
         mask: Bool[Array, ...],
-    ) -> tuple[Float[Array, ...], Bool[Array, ...]]:
-        """Time-rescaling residuals using ``Λ(t) = λ t``."""
-        return time_rescaling_residuals(event_times, mask, self.cumulative_intensity)
-
-    def goodness_of_fit(
-        self,
-        event_times: Float[Array, ...],
-        mask: Bool[Array, ...],
-    ) -> GoodnessOfFit:
-        """Bundle residuals + KS + QQ for plotting / hypothesis testing."""
-        residuals, res_mask = self.residuals(event_times, mask)
-        ks = ks_statistic_exp1(residuals, res_mask)
-        theoretical, empirical = qq_exp1_quantiles(residuals, res_mask)
-        return GoodnessOfFit(residuals, res_mask, ks, theoretical, empirical)
-
-    def compensator_curve(
-        self,
-        event_times: Float[Array, ...],
-        mask: Bool[Array, ...],
-    ) -> tuple[Float[Array, ...], Float[Array, ...]]:
-        """Pairs ``(t_i, Λ(t_i))`` for a compensator plot."""
-        return compensator_curve(event_times, mask, self.cumulative_intensity)
+    ) -> Callable[[Array], Array]:
+        del event_times, mask  # Λ(t) = λt needs no history
+        return self.cumulative_intensity
 
 
-class InhomogeneousPoissonProcess(eqx.Module):
+class InhomogeneousPoissonProcess(GoodnessOfFitMixin, LiveIntensityMixin, eqx.Module):
     """Inhomogeneous Poisson process on ``[0, T]``.
 
     Args:
@@ -469,27 +444,8 @@ class InhomogeneousPoissonProcess(eqx.Module):
             return jnp.where(is_full_window, self.integrated_intensity, live)
         return live
 
-    def effective_lambda_max(self) -> Float[Array, ...]:
-        """Return the current thinning bound.
-
-        Prefers the pinned :attr:`lambda_max` (if set) over anything
-        derived from the module. Otherwise calls
-        ``log_intensity_fn.max_intensity()`` and raises if neither is
-        available. Reading the module every call keeps thinning
-        samplers safe after ``log_rates`` has been updated by an
-        optimiser.
-        """
-        if self.lambda_max is not None:
-            return self.lambda_max
-        max_intensity = getattr(self.log_intensity_fn, "max_intensity", None)
-        if max_intensity is not None:
-            return max_intensity()
-        raise ValueError(
-            "Cannot sample via thinning: no lambda_max pinned on the "
-            "operator and log_intensity_fn has no .max_intensity() "
-            "method. Pass a bound at construction, use a module that "
-            "exposes it, or call sample_inversion instead."
-        )
+    # ``effective_lambda_max`` comes from LiveIntensityMixin (pinned →
+    # ``.max_intensity()`` → raise).
 
     # ------------------------------------------------------------
     # Core distribution API
@@ -642,32 +598,14 @@ class InhomogeneousPoissonProcess(eqx.Module):
         return self.effective_integrated_intensity(start_time, end_time)
 
     # ------------------------------------------------------------
-    # Diagnostics
+    # Diagnostics — residuals/goodness_of_fit/compensator_curve come
+    # from GoodnessOfFitMixin via this hook.
     # ------------------------------------------------------------
 
-    def residuals(
+    def _compensator_fn(
         self,
         event_times: Float[Array, ...],
         mask: Bool[Array, ...],
-    ) -> tuple[Float[Array, ...], Bool[Array, ...]]:
-        """Time-rescaling residuals under :math:`\\Lambda(t)`."""
-        return time_rescaling_residuals(event_times, mask, self.cumulative_intensity)
-
-    def goodness_of_fit(
-        self,
-        event_times: Float[Array, ...],
-        mask: Bool[Array, ...],
-    ) -> GoodnessOfFit:
-        """Bundle residuals + KS + QQ for plotting / hypothesis testing."""
-        residuals, res_mask = self.residuals(event_times, mask)
-        ks = ks_statistic_exp1(residuals, res_mask)
-        theoretical, empirical = qq_exp1_quantiles(residuals, res_mask)
-        return GoodnessOfFit(residuals, res_mask, ks, theoretical, empirical)
-
-    def compensator_curve(
-        self,
-        event_times: Float[Array, ...],
-        mask: Bool[Array, ...],
-    ) -> tuple[Float[Array, ...], Float[Array, ...]]:
-        """Pairs ``(t_i, Λ(t_i))`` for a compensator plot."""
-        return compensator_curve(event_times, mask, self.cumulative_intensity)
+    ) -> Callable[[Array], Array]:
+        del event_times, mask  # the IPP compensator needs no history
+        return self.cumulative_intensity

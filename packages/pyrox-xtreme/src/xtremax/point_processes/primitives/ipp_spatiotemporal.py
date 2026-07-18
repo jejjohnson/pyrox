@@ -25,6 +25,7 @@ from jax import random
 from jaxtyping import Array, Bool, Float, Int, PRNGKeyArray
 
 from xtremax.point_processes._domain import RectangularDomain, TemporalDomain
+from xtremax.point_processes._results import SpatiotemporalSampleResult
 
 
 def ipp_spatiotemporal_log_prob(
@@ -83,7 +84,11 @@ def ipp_spatiotemporal_sample_thinning(
         ``(locations, times, mask, n_events)`` with the same shape
         contract as :func:`hpp_spatiotemporal_sample`. Times are sorted
         ascending; locations follow the time order. ``n_events`` is the
-        post-thinning count clipped to ``max_candidates``.
+        **uncapped candidate count** (the Poisson draw before capping at
+        ``max_candidates``) — matching the temporal/spatial thinning
+        siblings, so a value above ``max_candidates`` diagnoses a
+        truncated candidate pool. The accepted-event count is
+        ``mask.sum()``.
     """
     lambda_max = jnp.asarray(lambda_max)
     vol = spatial.volume()
@@ -106,8 +111,6 @@ def ipp_spatiotemporal_sample_thinning(
     accepted = jnp.log(u) < log_accept
     keep = candidate_mask & accepted
 
-    n_kept = jnp.sum(keep)
-
     # Sort kept events by time; push the rest to the tail.
     sort_key = jnp.where(keep, raw_times, jnp.inf)
     order = jnp.argsort(sort_key)
@@ -120,7 +123,7 @@ def ipp_spatiotemporal_sample_thinning(
     final_mask = sorted_keep
     times = jnp.where(final_mask, sorted_times, temporal.t1)
     locations = jnp.where(final_mask[:, None], sorted_locs, spatial.lo)
-    return locations, times, final_mask, n_kept
+    return SpatiotemporalSampleResult(locations, times, final_mask, n_candidates)
 
 
 def ipp_spatiotemporal_intensity(

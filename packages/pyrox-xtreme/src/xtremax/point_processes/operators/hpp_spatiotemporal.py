@@ -90,6 +90,8 @@ class HomogeneousSpatioTemporalPP(eqx.Module):
         sub_temporal: TemporalDomain | None = None,
     ) -> tuple[Float[Array, ...], Float[Array, ...]]:
         """Mean and variance of the count over a sub-slab (defaults to full slab)."""
-        vol = (sub_spatial or self.spatial).volume()
-        dur = (sub_temporal or self.temporal).duration
+        # `is None` (not `or`): a falsy-but-valid subdomain must not be
+        # silently replaced by the full domain.
+        vol = (self.spatial if sub_spatial is None else sub_spatial).volume()
+        dur = (self.temporal if sub_temporal is None else sub_temporal).duration
         return hpp_spatiotemporal_predict_count(self.rate, vol, dur)

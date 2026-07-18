@@ -23,6 +23,7 @@ from jax import random
 from jaxtyping import Array, Bool, Float, Int, PRNGKeyArray
 
 from xtremax.point_processes._domain import RectangularDomain, TemporalDomain
+from xtremax.point_processes._results import SpatiotemporalSampleResult
 
 
 def hpp_spatiotemporal_log_prob(
@@ -113,7 +114,7 @@ def hpp_spatiotemporal_sample(
 
     times = jnp.where(sorted_mask, sorted_times, temporal.t1)
     locations = jnp.where(sorted_mask[:, None], sorted_locs, spatial.lo)
-    return locations, times, sorted_mask, n_uncapped
+    return SpatiotemporalSampleResult(locations, times, sorted_mask, n_uncapped)
 
 
 def hpp_spatiotemporal_intensity(

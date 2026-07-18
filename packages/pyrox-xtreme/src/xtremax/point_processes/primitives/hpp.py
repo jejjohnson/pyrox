@@ -21,6 +21,8 @@ import jax.numpy as jnp
 from jax import random
 from jaxtyping import Array, Bool, Float, Int, PRNGKeyArray
 
+from xtremax.point_processes._results import SampleResult
+
 
 def hpp_log_prob(
     n_events: Int[Array, ...],
@@ -114,7 +116,7 @@ def hpp_sample(
     # safe value inside the window) so downstream intensity evaluations
     # don't trip on ``+inf``.
     times = jnp.where(mask, times_sorted, T_b)
-    return times, mask, n_events
+    return SampleResult(times, mask, n_events)
 
 
 def hpp_intensity(
