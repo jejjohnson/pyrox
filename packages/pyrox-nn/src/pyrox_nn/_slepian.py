@@ -54,6 +54,7 @@ class BayesianSlepianEncoder(Parameterized):
         static=True, default="lonlat"
     )
     weight_by_eigenvalue: bool = eqx.field(static=True, default=True)
+    pyrox_name: str | None = eqx.field(static=True, default=None)
 
     def setup(self) -> None:
         if self.l_max < 0:

@@ -80,6 +80,29 @@ def test_bayesian_slepian_encoder_registers_cap_sites():
     assert encoder(lonlat).shape == (1, 3)
 
 
+def test_bayesian_slepian_encoder_named_siblings_get_distinct_sites():
+    """Two encoders in one model disambiguate via per-instance pyrox_name
+    (unnamed siblings share the class-name scope and would collide in a
+    trace).
+    """
+    kwargs = dict(
+        l_max=2,
+        init_cap_radius_deg=45.0,
+        init_cap_centre_lonlat_deg=(0.0, 0.0),
+        n_modes=3,
+    )
+    enc_a = BayesianSlepianEncoder(**kwargs, pyrox_name="cap_a")
+    enc_b = BayesianSlepianEncoder(**kwargs, pyrox_name="cap_b")
+    lonlat = jnp.array([[0.0, 0.0]])
+
+    def model(x):
+        return enc_a(x), enc_b(x)
+
+    trace = handlers.trace(model).get_trace(lonlat)
+    assert "cap_a.cap_radius" in trace
+    assert "cap_b.cap_radius" in trace
+
+
 def test_slepian_encoder_filter_jit():
     basis = slepian_cap_basis(3, jnp.deg2rad(45.0), n_modes=4)
     encoder = SlepianEncoder(basis=basis, input_mode="cartesian")

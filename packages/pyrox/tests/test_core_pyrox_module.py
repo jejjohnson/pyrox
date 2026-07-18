@@ -176,8 +176,12 @@ def test_fullname_uses_pyrox_name_when_set():
     assert m._pyrox_fullname("w") == "BayesianLinear.w"
 
 
-def test_fullname_falls_back_to_class_plus_id_without_pyrox_name():
-    """Unnamed sibling instances of the same class must NOT collide."""
+def test_fullname_falls_back_to_class_name_without_pyrox_name():
+    """The unnamed fallback is the class name — deterministic, identical
+    across instances, and stable across pytree reconstruction (#184
+    Option C: the old ``{ClassName}_{id}`` fallback silently renamed sites
+    whenever Equinox rebuilt the module).
+    """
 
     class Anon(PyroxModule):
         @pyrox_method
@@ -186,16 +190,38 @@ def test_fullname_falls_back_to_class_plus_id_without_pyrox_name():
 
     a = Anon()
     b = Anon()
-    # Instance-qualified scope → distinct fullnames for distinct instances.
-    assert a._pyrox_scope_name() != b._pyrox_scope_name()
-    assert a._pyrox_fullname("w") != b._pyrox_fullname("w")
-    assert a._pyrox_scope_name().startswith("Anon_")
+    assert a._pyrox_scope_name() == b._pyrox_scope_name() == "Anon"
+    assert a._pyrox_fullname("w") == "Anon.w"
 
 
-def test_two_same_class_instances_register_distinct_sites_in_one_trace():
-    """Two module instances of the same class inside one model should
-    produce distinct sites — regression for PR #57 review: site-name
-    collisions when multiple layers of the same class appear together.
+def test_scope_name_stable_across_pytree_reconstruction():
+    """Site names must not change when the module is rebuilt by
+    flatten/unflatten (the reconstruction path used by eqx.tree_at,
+    filter_jit-with-module-arg, and checkpoint loads). Regression for
+    #184: the id-based fallback desynchronized MCMC draws from a later
+    Predictive on the rebuilt copy.
+    """
+
+    class Anon(PyroxModule):
+        @pyrox_method
+        def __call__(self):
+            return self.pyrox_sample("w", dist.Normal(0.0, 1.0))
+
+    a = Anon()
+    leaves, treedef = jax.tree.flatten(a)
+    a2 = jax.tree.unflatten(treedef, leaves)
+    with handlers.trace() as tr1, handlers.seed(rng_seed=0):
+        a()
+    with handlers.trace() as tr2, handlers.seed(rng_seed=0):
+        a2()
+    assert list(tr1) == list(tr2) == ["Anon.w"]
+
+
+def test_unnamed_same_class_siblings_collide_loudly_under_trace():
+    """With the class-name fallback, two *unnamed* instances of one class
+    share a scope; a trace must reject the duplicate loudly. Users who
+    stack several instances of a class give each a distinct pyrox_name
+    (see the named-siblings test below).
     """
 
     class Layer(PyroxModule):
@@ -204,6 +230,277 @@ def test_two_same_class_instances_register_distinct_sites_in_one_trace():
             return self.pyrox_sample("w", dist.Normal(0.0, 1.0)) + x
 
     a, b = Layer(), Layer()
+    with (
+        pytest.raises(AssertionError, match="unique names"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+    ):
+        b(a(jnp.array(0.0)))
+
+
+def test_unnamed_param_only_siblings_collide_loudly_under_trace():
+    """NumPyro's trace only asserts uniqueness for *sample* sites; duplicate
+    param registrations are silently tolerated (last write wins), which
+    would let two unnamed param-only siblings share weights under SVI/MAP.
+    pyrox's duplicate-scope guard must reject this loudly. Regression for
+    the #187 Codex P1 finding.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    a, b = ParamLayer(), ParamLayer()
+    with (
+        pytest.raises(ValueError, match="different module instance"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+    ):
+        b(a(jnp.zeros(2)))
+
+
+def test_param_sibling_collision_detected_under_handlers_scope():
+    """The duplicate-param guard must see site names as the trace records
+    them: handlers.scope rewrites names (``enc/Class.b``) before recording,
+    so a raw-fullname pre-check would miss collisions inside a scope.
+    Regression for the #187 Codex scope-rewrite finding.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    a, b = ParamLayer(), ParamLayer()
+    with (
+        pytest.raises(ValueError, match="different module instance"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+        handlers.scope(prefix="enc"),
+    ):
+        b(a(jnp.zeros(2)))
+
+
+def test_param_ownership_does_not_leak_across_traces():
+    """Ownership is per-trace: an instance that registered a site in an
+    earlier (e.g. warm-up) trace must not bypass the guard in a later
+    trace where a sibling registered the same name first. Regression for
+    the #187 Codex stale-ownership finding.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    w1, w2 = ParamLayer(), ParamLayer()
+    with handlers.trace(), handlers.seed(rng_seed=0):
+        w1(jnp.zeros(2))  # warm-up trace: only w1
+    with (
+        pytest.raises(ValueError, match="different module instance"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+    ):
+        w1(w2(jnp.zeros(2)))  # w2 registers first; w1's stale claim must not pass
+
+    # And a lone instance across repeated traces stays fine.
+    f = ParamLayer()
+    for _ in range(2):
+        with handlers.trace() as tr, handlers.seed(rng_seed=0):
+            f(jnp.zeros(2))
+    assert list(tr) == ["ParamLayer.b"]
+
+
+def test_param_sibling_collision_detected_under_handlers_lift():
+    """handlers.lift converts params to samples and serves a cached draw for
+    a name it already lifted — the second registration leaves no trace
+    footprint, so the diff-based detection sees nothing. The backstop must
+    still reject the un-owned duplicate instead of silently sharing the
+    first draw. Regression for the #187 Codex lift finding.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    prior = dist.Normal(0.0, 1.0).expand([2]).to_event(1)
+    a, b = ParamLayer(), ParamLayer()
+    with (
+        pytest.raises(ValueError, match="different module instance"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+        handlers.lift(prior={"ParamLayer.b": prior}),
+    ):
+        b(a(jnp.zeros(2)))
+
+    # Same instance re-using its own lifted draw across calls stays allowed.
+    c = ParamLayer()
+    with (
+        handlers.trace() as tr,
+        handlers.seed(rng_seed=0),
+        handlers.lift(prior={"ParamLayer.b": prior}),
+    ):
+        y1 = c(jnp.zeros(2))
+        y2 = c(jnp.zeros(2))
+    assert list(tr) == ["ParamLayer.b"]
+    assert jnp.allclose(y1, y2)
+
+
+def test_param_sibling_collision_detected_under_lift_inside_scope():
+    """lift serves a cached draw (no trace footprint) AND scope rewrites the
+    recorded name — the guard must predict the scope-folded candidate name
+    and check it against the traces. Regression for the #187 Codex
+    lift+scope finding.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    prior = dist.Normal(0.0, 1.0).expand([2]).to_event(1)
+    a, b = ParamLayer(), ParamLayer()
+    with (
+        pytest.raises(ValueError, match="different module instance"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+        handlers.scope(prefix="enc"),
+        handlers.lift(prior={"enc/ParamLayer.b": prior}),
+    ):
+        b(a(jnp.zeros(2)))
+
+
+def test_param_sibling_collision_detected_across_nested_traces():
+    """Nested traces all record every site: siblings called under separate
+    inner traces look unique to their own inner trace but duplicate in the
+    outer one — every active trace must be checked. Same-instance reuse
+    across inner traces stays allowed (ownership is tracked per trace,
+    including the outer). Regression for the #187 Codex nested-trace
+    finding.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    a, b = ParamLayer(), ParamLayer()
+    with (
+        pytest.raises(ValueError, match="different module instance"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+    ):
+        with handlers.trace():
+            a(jnp.zeros(2))
+        with handlers.trace():
+            b(jnp.zeros(2))
+
+    c = ParamLayer()
+    with handlers.trace() as outer, handlers.seed(rng_seed=0):
+        with handlers.trace():
+            c(jnp.zeros(2))
+        with handlers.trace():
+            c(jnp.zeros(2))
+    assert list(outer) == ["ParamLayer.b"]
+
+
+def test_param_sibling_collision_detected_under_scope_hide_types():
+    """``scope(hide_types=["param"])`` deliberately leaves param names
+    unprefixed — the guard's predicted name must respect that, or scoped
+    prediction diverges from the recorded raw name and the collision is
+    missed. Regression for the #187 Codex hide_types finding.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    a, b = ParamLayer(), ParamLayer()
+    with (
+        pytest.raises(ValueError, match="different module instance"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+        handlers.scope(prefix="enc", hide_types=["param"]),
+    ):
+        b(a(jnp.zeros(2)))
+
+
+def test_param_sibling_collision_detected_under_empty_prefix_scope():
+    """``scope()`` with the default empty prefix still rewrites names to
+    ``/name`` — the guard's prediction must fold empty prefixes too.
+    Regression for the #187 Codex empty-prefix finding.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    a, b = ParamLayer(), ParamLayer()
+    with (
+        pytest.raises(ValueError, match="different module instance"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+        handlers.scope(prefix=""),
+    ):
+        b(a(jnp.zeros(2)))
+
+
+def test_block_hidden_param_sibling_is_not_a_false_positive():
+    """A sibling deliberately wrapped in ``handlers.block(hide=[...])`` never
+    reaches the outer trace, so registering it is legitimate handler
+    composition — the guard must only consider traces the message will
+    actually reach and must NOT raise. Regression for the #187 Codex
+    block finding (a false positive would break correct user code).
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    a, b = ParamLayer(), ParamLayer()
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        a(jnp.zeros(2))
+        with handlers.block(hide=["ParamLayer.b"]):
+            b(jnp.zeros(2))  # hidden from the outer trace: no collision
+    assert list(tr) == ["ParamLayer.b"]
+
+
+def test_same_instance_param_reuse_across_calls_stays_allowed():
+    """Calling one module twice in one trace re-uses its own param site
+    (legitimate weight sharing) — the duplicate-scope guard must only fire
+    for *different* instances sharing a scope.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    c = ParamLayer()
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        c(jnp.zeros(2))
+        c(jnp.ones(2))
+    assert list(tr) == ["ParamLayer.b"]
+
+
+def test_named_same_class_instances_register_distinct_sites_in_one_trace():
+    """Two instances of one class with distinct per-instance pyrox_name
+    fields produce distinct sites — the supported stacking pattern.
+    """
+
+    class Layer(PyroxModule):
+        pyrox_name: str
+
+        @pyrox_method
+        def __call__(self, x):
+            return self.pyrox_sample("w", dist.Normal(0.0, 1.0)) + x
+
+    a, b = Layer(pyrox_name="layer0"), Layer(pyrox_name="layer1")
 
     def model():
         y = a(jnp.array(0.0))
@@ -211,9 +508,7 @@ def test_two_same_class_instances_register_distinct_sites_in_one_trace():
 
     with handlers.trace() as tr, handlers.seed(rng_seed=0):
         model()
-    site_names = list(tr)
-    assert len(site_names) == 2
-    assert site_names[0] != site_names[1]
+    assert list(tr) == ["layer0.w", "layer1.w"]
 
 
 def test_pyrox_sample_with_non_distribution_uses_deterministic():

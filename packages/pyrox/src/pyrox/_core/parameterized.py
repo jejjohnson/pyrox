@@ -91,7 +91,15 @@ class Parameterized(PyroxModule):
         entry = self._state().params.get(name)
         if entry is None:
             raise KeyError(
-                f"parameter {name!r} not registered; call register_param first"
+                f"parameter {name!r} not registered; call register_param "
+                "first. If this module previously worked and was then "
+                "rebuilt by a functional pytree update (eqx.tree_at, "
+                "eqx.apply_updates, jit/filter_jit with the module as an "
+                "argument, flatten/unflatten, or checkpoint load), note "
+                "that reconstruction skips __init__/setup(), so the "
+                "rebuilt copy has an empty registry — keep the original "
+                "instance for probabilistic calls, or reconstruct via "
+                "__init__ so setup() re-registers its parameters."
             )
         return entry
 
