@@ -8,13 +8,27 @@ so under separability the log-likelihood of *observed* events
 decomposes as
 
 .. math::
-    \\log L_\\text{thin} = \\log L_\\text{base}(\\{t_i\\})
+    \\log L_\\text{thin} = \\sum_i \\log p(t_i) \\lambda(t_i) - \\int_0^T
+        p \\lambda = \\log L_\\text{base}(\\{t_i\\})
         + \\sum_i \\log p(t_i | H_i, m_i)
-        - \\int_0^T (1 - p(t | H)) \\lambda_\\text{base}(t | H)\\, dt.
+        + \\int_0^T (1 - p(t | H)) \\lambda_\\text{base}(t | H)\\, dt.
 
-The first two terms are exact given the observed sequence; the
-correction integral is computed by trapezoid quadrature through
+The first two terms are exact given the observed sequence; the correction
+integral is **added** — the base likelihood subtracts the full compensator
+:math:`\\int \\lambda`, but only :math:`\\int p\\lambda` belongs to the
+thinned process, so :math:`\\int (1-p)\\lambda` must be restored. It is
+computed by trapezoid quadrature through
 :func:`~xtremax.point_processes.primitives.thinning.retention_compensator`.
+
+.. warning::
+    For **history-dependent** bases (Hawkes, renewal) this ``log_prob``
+    is a *pseudo-likelihood*: the base intensity is conditioned on the
+    *retained* events only, while :meth:`ThinningProcess.sample` thins a
+    full *latent* realisation whose unobserved (thinned-away) events also
+    excite the base. The decomposition is exact only for Poisson-family
+    bases (HPP/IPP), whose intensity does not depend on history. Fits
+    against history-dependent bases should be read as approximate.
+
 The retention callable is stored as a plain PyTree leaf so any
 parameters inside a learnable observation operator flow through
 ``eqx.filter_grad`` / NUTS.
@@ -22,6 +36,7 @@ parameters inside a learnable observation operator flow through
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 
 import equinox as eqx
@@ -209,7 +224,11 @@ class ThinningProcess(eqx.Module):
             mark_sample_key=mark_sample_key,
             n_mark_samples=n_mark_samples,
         )
-        return base_logp + retention_term - correction
+        # The base log_prob subtracted the FULL compensator ∫λ; the thinned
+        # process owes only ∫pλ, so the difference ∫(1-p)λ is added back.
+        # (Subtracting it here — the old sign — made every fit maximize the
+        # wrong objective, off by exactly 2∫(1-p)λ.)
+        return base_logp + retention_term + correction
 
     def _call_base_log_prob(
         self,
@@ -256,10 +275,23 @@ class ThinningProcess(eqx.Module):
         """
         key_base, key_thin = jax.random.split(key)
 
+        # Base sampler signatures are not uniform: Hawkes-style samplers
+        # take ``(key, max_events, max_candidates=...)``, while IPP-style
+        # thinning samplers size their buffer with a single
+        # ``max_candidates`` positional. Passing ``max_events``
+        # positionally into the latter used to collide with the
+        # forwarded ``max_candidates`` kwarg and raise ``TypeError``.
+        # Dispatch on the base's actual parameter names instead.
+        base_params = list(inspect.signature(self.base.sample).parameters)
+        sizing_param = base_params[1] if len(base_params) > 1 else None
         base_sample_kwargs = dict(base_kwargs)
-        if max_candidates is not None:
-            base_sample_kwargs["max_candidates"] = max_candidates
-        base_result = self.base.sample(key_base, max_events, **base_sample_kwargs)
+        if sizing_param == "max_candidates":
+            n_candidates = max_candidates if max_candidates is not None else max_events
+            base_result = self.base.sample(key_base, n_candidates, **base_sample_kwargs)
+        else:
+            if max_candidates is not None:
+                base_sample_kwargs["max_candidates"] = max_candidates
+            base_result = self.base.sample(key_base, max_events, **base_sample_kwargs)
 
         # Disambiguate the 3-tuple result. IPP / HPP / Hawkes / Renewal
         # return ``(times, mask, n_events)`` — a 0-D integer count in
@@ -335,6 +367,9 @@ class ThinningProcess(eqx.Module):
                 max_events=max_events,
                 mark_dim=mark_dim,
                 dtype=latent_times.dtype,
+                # Marks keep their own dtype — discrete (integer) marks
+                # were previously cast to the float time dtype.
+                mark_dtype=latent_marks_2d.dtype,
             )
             final_history, _ = jax.lax.scan(
                 step_marked,

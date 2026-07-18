@@ -99,11 +99,15 @@ def ipp_sample_thinning(
     Returns:
         Tuple ``(times, accepted_mask, n_candidates_uncapped)``:
 
-        * ``times`` with shape ``(max_candidates,)`` — sorted;
-          padding positions (rank ``>= n_candidates``) are set to ``T``.
-        * ``accepted_mask`` with shape ``(max_candidates,)`` — ``True``
-          at positions that are (i) real candidates and (ii) accepted
-          by thinning.
+        * ``times`` with shape ``(max_candidates,)`` — the *accepted*
+          events, sorted, compacted into a contiguous prefix; padding
+          positions are set to ``T``.
+        * ``accepted_mask`` with shape ``(max_candidates,)`` — a
+          contiguous prefix of ``True`` covering the accepted events.
+          (Rejected candidates used to stay in the buffer as hole
+          masks, which silently corrupted mask-contiguity consumers
+          such as ``time_rescaling_residuals`` — the package invariant
+          is now "mask is a contiguous prefix; padding time = T".)
         * ``n_candidates_uncapped`` — the Poisson draw before capping
           at ``max_candidates``; useful for diagnosing buffer
           over-runs.
@@ -134,9 +138,17 @@ def ipp_sample_thinning(
     log_accept = log_intensities - jnp.log(lambda_max)
     u = random.uniform(key_thin, shape=(max_candidates,))
     thinning_accept = jnp.log(u) < log_accept
-    accepted_mask = candidate_mask & thinning_accept
+    accepted_raw = candidate_mask & thinning_accept
 
-    times = jnp.where(candidate_mask, candidate_times, T)
+    # Compact the accepted events into a contiguous prefix (rejected
+    # candidates used to remain in the buffer as hole masks). Pushing
+    # rejected slots to +inf and re-sorting keeps the accepted times in
+    # ascending order at ranks 0..n_accepted-1.
+    accepted_sortable = jnp.where(accepted_raw, candidate_times, jnp.inf)
+    compacted = jnp.sort(accepted_sortable)
+    n_accepted = jnp.sum(accepted_raw)
+    accepted_mask = ranks < n_accepted
+    times = jnp.where(accepted_mask, compacted, T)
     return times, accepted_mask, n_uncapped
 
 

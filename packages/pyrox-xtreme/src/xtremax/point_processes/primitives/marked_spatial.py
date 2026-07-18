@@ -38,27 +38,11 @@ import numpyro.distributions as dist
 from jax import random
 from jaxtyping import Array, Bool, Float, PRNGKeyArray
 
-
-def _safe_padding_mark(d: dist.Distribution, m_i: Array) -> Array:
-    """Return a value inside ``d``'s support, dtype-matching ``m_i``.
-
-    Uses ``d.support.feasible_like(m_i)`` when available — NumPyro's
-    ``Constraint`` API ships this for every standard support
-    (positive, unit interval, real, simplex, integer interval, ...) —
-    and produces a value that is *strictly* inside the support and
-    of the same dtype as the prototype, so it works for both
-    continuous and discrete marks.
-
-    Falls back to ``ones_like(m_i)`` when the constraint lacks
-    ``feasible_like``. Custom user constraints that don't implement
-    it must therefore have ``1`` (cast to the mark dtype) inside
-    their support, or the caller must supply marks with safe padding
-    already in place.
-    """
-    fl = getattr(d.support, "feasible_like", None)
-    if fl is None:
-        return jnp.ones_like(m_i)
-    return fl(m_i)
+# Shared across the temporal/spatial/spatiotemporal marked variants;
+# re-exported here under the historical private name for internal users.
+from xtremax.point_processes.primitives._marks_common import (
+    safe_padding_mark as _safe_padding_mark,
+)
 
 
 def spatial_marks_log_prob(

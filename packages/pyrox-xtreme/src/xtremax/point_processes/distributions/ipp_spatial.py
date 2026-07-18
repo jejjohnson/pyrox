@@ -25,8 +25,11 @@ class InhomogeneousSpatialPP(dist.Distribution):
         domain: Rectangular domain.
         integrated_intensity: Optional pinned ``Λ(D)``; ``None``
             triggers quadrature.
-        lambda_max: Optional thinning bound; ``None`` falls back to the
-            conservative ``2 Λ(D) / |D|``.
+        lambda_max: Optional thinning bound. ``None`` defers to the
+            intensity module's ``.max_intensity()`` when available and
+            otherwise raises at sample time — there is no automatic
+            fallback, since no derived estimate can guarantee a true
+            upper bound for an arbitrary intensity surface.
         max_candidates: Static buffer for thinning.
         n_integration_points: Quadrature node count.
         integration_method: ``"qmc"`` (default) or ``"trapezoid"``.

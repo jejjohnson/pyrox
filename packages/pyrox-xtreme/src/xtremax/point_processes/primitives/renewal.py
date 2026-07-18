@@ -48,6 +48,12 @@ def renewal_log_prob(
         clipping to avoid ``log(0)`` when the observed gap has CDF
         very close to 1. The inter-event densities at padding positions
         are zeroed out by the mask.
+
+        Requires the package padded-buffer invariant (contiguous-prefix
+        mask): gaps are taken between consecutive *buffer slots*, so a
+        hole mask (a masked-out slot between two real events) silently
+        corrupts the gap terms. Package samplers always emit
+        contiguous-prefix masks.
     """
     event_times = jnp.asarray(event_times)
     T_arr = jnp.asarray(T)
@@ -188,15 +194,20 @@ def renewal_expected_count(
 ) -> Float[Array, ...]:
     r"""Expected number of events on ``[0, T]`` via the renewal equation.
 
-    Uses the integral
-    :math:`m(T) = F(T) + \\int_0^T m(T - s)\\, f(s)\\, ds` approximated
-    by iterative trapezoid on a ``n_points`` grid. For ``Exponential``
-    inter-event this recovers ``λ T`` to quadrature tolerance.
+    Solves :math:`m(T) = F(T) + \\int_0^T m(T - s)\\, f(s)\\, ds` on an
+    ``n_points`` trapezoid grid by **forward substitution**: the
+    discretized equation is lower-triangular in the grid values of
+    ``m``, so a single sweep over grid rows solves it exactly (up to
+    quadrature error) at *any* horizon. The previous fixed 8-iteration
+    Neumann series added one convolution power per iteration and
+    therefore saturated near ``E[N] ≈ 9`` regardless of ``T``. For
+    ``Exponential`` inter-events this recovers ``λT`` to quadrature
+    tolerance.
 
     Args:
         T: Window length (scalar).
         inter_event_dist: Inter-event NumPyro Distribution.
-        n_points: Grid size for the fixed-point iteration.
+        n_points: Trapezoid grid size.
 
     Returns:
         Scalar expected count.
@@ -205,23 +216,27 @@ def renewal_expected_count(
     grid = jnp.linspace(jnp.zeros_like(T_arr), T_arr, n_points)
     f_grid = jnp.exp(inter_event_dist.log_prob(grid))
     F_grid = inter_event_dist.cdf(grid)
+    dt = grid[1] - grid[0]
 
-    # Fixed-point iteration on m(t) = F(t) + ∫_0^t m(t-s) f(s) ds.
-    m = F_grid
+    # Row i of the trapezoid-discretized equation:
+    #   m_i = F_i + dt·[ f_0 m_i / 2 + Σ_{j=1}^{i-1} f_j m_{i-j} + f_i m_0 / 2 ]
+    # The f_0 m_i / 2 term moves to the left-hand side; everything else
+    # involves only already-computed rows, so a forward scan solves the
+    # lower-triangular system in one pass.
+    j = jnp.arange(n_points)
+    denom = 1.0 - 0.5 * dt * f_grid[0]
 
-    def body(m_cur: Array, _: Array) -> tuple[Array, None]:
-        # Convolution ∫_0^t m(t - s) f(s) ds on the grid via matmul.
-        # K[i, j] = f(s_j) for j <= i, else 0; m_at_tij = m(t_i - s_j).
-        idx_i = jnp.arange(n_points)[:, None]
-        idx_j = jnp.arange(n_points)[None, :]
-        diff = idx_i - idx_j
-        m_shifted = jnp.where(diff >= 0, m_cur[jnp.clip(diff, 0, n_points - 1)], 0.0)
-        f_kernel = jnp.where(idx_j <= idx_i, f_grid[idx_j[0]], 0.0)
-        dt = grid[1] - grid[0]
-        conv = jnp.sum(m_shifted * f_kernel, axis=-1) * dt
-        return F_grid + conv, None
+    def row(m_cur: Array, i: Array) -> tuple[Array, None]:
+        m_rev = m_cur[jnp.clip(i - j, 0, n_points - 1)]
+        weights = jnp.where((j >= 1) & (j <= i - 1), 1.0, 0.0) + jnp.where(
+            (j == i) & (i > 0), 0.5, 0.0
+        )
+        conv = jnp.sum(f_grid * m_rev * weights) * dt
+        m_i = (F_grid[i] + conv) / denom
+        return m_cur.at[i].set(m_i), None
 
-    m_final, _ = jax.lax.scan(body, m, jnp.arange(8))
+    m_init = jnp.zeros_like(F_grid)
+    m_final, _ = jax.lax.scan(row, m_init, jnp.arange(n_points))
     return m_final[-1]
 
 
@@ -234,12 +249,13 @@ def renewal_ogata_intensity_fn(
 
     Convenience constructor for callers that want to mix renewal with
     other history-dependent constructions (e.g. a ThinningProcess
-    wrapping a renewal base). ``event_times`` and ``mask`` are captured
-    but the returned closure ignores the ``history`` argument — the
-    renewal intensity depends only on the most recent event, and the
-    caller has already supplied one.
+    wrapping a renewal base). The ``event_times`` / ``mask`` arguments
+    are **unused** — they exist only for signature symmetry with the
+    other ``*_intensity_fn`` builders; the returned closure evaluates
+    against the *live* ``history`` the sampler passes in, so
+    self-generated chains see their own events.
     """
-    del mask  # captured already; kept for signature clarity
+    del event_times, mask  # unused; kept for signature symmetry
 
     def _fn(t: Array, history) -> Array:
         # Prefer the live history (passed in by the sampler) over the
@@ -254,18 +270,15 @@ def renewal_log_prob_counts(
     T: Float[Array, ...],
     inter_event_dist: dist.Distribution,
 ) -> Float[Array, ...]:
-    """Log-likelihood of observing exactly ``n`` events on ``[0, T]``.
+    """Count marginal :math:`P(N(T) = n)` — **not implemented**.
 
-    This is the *count* marginal :math:`P(N(T) = n)` under a renewal
-    process — not the joint event-time likelihood. Computed as
+    The count marginal of a general renewal process,
     :math:`F_n(T) - F_{n+1}(T)` with :math:`F_k` the CDF of the sum of
-    ``k`` iid inter-event gaps. Approximated by sampling the k-fold
-    convolution on a grid; exact in closed form only for Exponential
-    (recovers Poisson).
-
-    Not jit-friendly because ``n_events`` controls a Python-level
-    iteration count; callers that need a jit-able count marginal
-    should supply a fixed maximum instead.
+    ``k`` iid gaps, has no simple closed form (only Exponential gaps
+    recover the Poisson pmf). This function exists to reserve the name
+    and unconditionally raises ``NotImplementedError`` — use Monte
+    Carlo over :func:`renewal_sample`, or the event-time likelihood
+    :func:`renewal_log_prob`, instead.
     """
     raise NotImplementedError(
         "Count marginal P(N(T) = n) has no simple closed form for "

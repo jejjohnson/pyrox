@@ -30,7 +30,6 @@ from xtremax.point_processes._integration_spatial import (
 from xtremax.point_processes.primitives import (
     ipp_spatial_intensity,
     ipp_spatial_log_prob,
-    ipp_spatial_predict_count,
     ipp_spatial_sample_thinning,
 )
 
@@ -183,11 +182,11 @@ class InhomogeneousSpatialPP(eqx.Module):
         self,
         subdomain: RectangularDomain | None = None,
     ) -> Float[Array, ...]:
-        """Expected count over a sub-domain (defaults to the full ``D``)."""
-        target = self.domain if subdomain is None else subdomain
-        return ipp_spatial_predict_count(
-            self.log_intensity_fn,
-            target,
-            n_integration_points=self.n_integration_points,
-            method=self.integration_method,
-        )
+        """Expected count over a sub-domain (defaults to the full ``D``).
+
+        Delegates to :meth:`effective_integrated_intensity` so a pinned
+        ``integrated_intensity`` takes precedence for the full-domain
+        query — matching both :meth:`log_prob` and the spatiotemporal
+        operator, which already honoured the pin.
+        """
+        return self.effective_integrated_intensity(subdomain)

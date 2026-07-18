@@ -22,6 +22,7 @@ from jax import random
 from jaxtyping import Array, Bool, Float, Int, PRNGKeyArray
 
 from xtremax.point_processes._history import EventHistory
+from xtremax.point_processes.primitives._marks_common import safe_padding_mark
 
 
 def marks_log_prob(
@@ -40,20 +41,24 @@ def marks_log_prob(
             ``d``-dimensional marks.
         mask: Event mask.
         mark_distribution_fn: Callable ``(t, history) -> Distribution``.
-        history_at_each_event: When ``True`` the history passed to
-            ``mark_distribution_fn(tᵢ, Hᵢ)`` contains events
-            ``{t_j : j < i}``; when ``False`` (the default used by
-            callers that do not need prior-event conditioning) it is
-            the full observed history — this saves the per-event
-            vmap but is only correct for history-independent mark
-            distributions.
+        history_at_each_event: When ``True`` (the default) the history
+            passed to ``mark_distribution_fn(tᵢ, Hᵢ)`` contains events
+            ``{t_j : j < i}``; when ``False`` it is the full observed
+            history — this saves the per-event history construction but
+            is only correct for history-independent mark distributions.
 
     Returns:
         Scalar log-likelihood contribution from the marks.
 
     Notes:
         At padding positions ``mark_distribution_fn`` is still called
-        (to keep shapes static) but the log-prob is masked out.
+        (to keep shapes static) but the padding mark is first replaced
+        with a value inside the distribution's support
+        (:func:`safe_padding_mark`) and the log-prob is masked out.
+        Without the substitution, bounded-support mark laws (Gamma,
+        LogNormal, ...) return ``-inf`` at zero padding and autodiff
+        propagates NaN gradients through the discarded ``jnp.where``
+        branch — the same guard the spatial variants already had.
     """
     event_times = jnp.asarray(event_times)
     marks = jnp.asarray(marks)
@@ -66,8 +71,11 @@ def marks_log_prob(
         def per_event(i: Int[Array, ...]) -> Float[Array, ...]:
             t_i = event_times[i]
             d = mark_distribution_fn(t_i, full_history)
-            mark_i = marks[i]
-            return d.log_prob(mark_i)
+            # Padding marks may sit outside d's support (zero padding vs
+            # a positive-support law); substitute an in-support value so
+            # the masked-out branch cannot poison gradients with NaN.
+            safe_m = jnp.where(mask[i], marks[i], safe_padding_mark(d, marks[i]))
+            return d.log_prob(safe_m)
 
     else:
         n_max = event_times.shape[-1]
@@ -83,8 +91,9 @@ def marks_log_prob(
                 marks=jnp.where(before_i[..., None], marks_2d, 0.0),
             )
             d = mark_distribution_fn(event_times[i], h_i)
-            mark_i = marks[i]
-            return d.log_prob(mark_i)
+            # Same in-support substitution as the flat-history branch.
+            safe_m = jnp.where(mask[i], marks[i], safe_padding_mark(d, marks[i]))
+            return d.log_prob(safe_m)
 
     idx = jnp.arange(event_times.shape[-1])
     per_event_log_prob = jax.vmap(per_event)(idx)
@@ -140,21 +149,39 @@ def sample_marks_at_times(
             return jnp.where(mask, marks, 0.0)
         return jnp.where(mask[..., None], marks, 0.0)
 
-    # Sequential path: probe the mark dist once on an empty history so
-    # we know the mark shape/dtype, preallocate a 2-D marks buffer on
+    # Sequential path: probe the mark dist once on an all-padding history
+    # so we know the mark shape/dtype, preallocate a 2-D marks buffer on
     # the carry (scalar marks get a trailing ``1`` to keep the buffer
     # uniformly 2-D), and scan. Each step appends the drawn mark to the
     # carry so subsequent steps can condition on ``history.marks``.
-    empty_history = EventHistory.empty(max_events=n_max, dtype=event_times.dtype)
-    probe_spec = jax.eval_shape(
-        lambda et, k: mark_distribution_fn(et, empty_history).sample(k),
-        event_times[0],
-        keys[0],
-    )
+    #
+    # The probe history carries a 2-D marks BUFFER — the same pytree
+    # structure the scan carry has — rather than ``marks=None``: a
+    # history-dependent mark law that reads ``history.marks`` would
+    # otherwise see two different structures between probe and scan.
+    # The buffer is probed at dimension 1 first and re-probed once the
+    # true mark dimension is known (vector-mark laws that index columns
+    # of ``history.marks`` fail loudly at the probe, as before).
+    def _probe(marks_buffer: Array) -> jax.ShapeDtypeStruct:
+        hist = EventHistory(
+            times=jnp.zeros_like(event_times),
+            mask=jnp.zeros_like(mask),
+            marks=marks_buffer,
+        )
+        return jax.eval_shape(
+            lambda et, k: mark_distribution_fn(et, hist).sample(k),
+            event_times[0],
+            keys[0],
+        )
+
+    probe_spec = _probe(jnp.zeros((n_max, 1), dtype=event_times.dtype))
     mark_event_shape = probe_spec.shape
     mark_dtype = probe_spec.dtype
     is_scalar_mark = len(mark_event_shape) == 0
     mark_dim = 1 if is_scalar_mark else mark_event_shape[-1]
+    if mark_dim != 1:
+        probe_spec = _probe(jnp.zeros((n_max, mark_dim), dtype=mark_dtype))
+        mark_dtype = probe_spec.dtype
     initial_carry = EventHistory(
         times=jnp.zeros_like(event_times),
         mask=jnp.zeros_like(mask),

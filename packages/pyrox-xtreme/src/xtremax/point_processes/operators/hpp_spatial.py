@@ -62,10 +62,12 @@ class HomogeneousSpatialPP(eqx.Module):
     ) -> Float[Array, ...]:
         """Joint log-likelihood of an observed CSR pattern.
 
-        Uses the iid-uniform-locations form
-        ``n log λ − λ|D| − n log |D|``. ``locations`` is consumed only
-        through its event count via ``mask`` — under CSR the location
-        density factors through and contributes ``-n log |D|``.
+        Uses the Janossy form ``n log λ − λ|D|`` (the ``-log n!`` and
+        ``-n log |D|`` normalisers are deliberately dropped so the
+        result is directly comparable to the IPP/Hawkes log-probs; see
+        :func:`~xtremax.point_processes.primitives.hpp_spatial.hpp_spatial_log_prob`).
+        ``locations`` is consumed only through its event count via
+        ``mask`` — under CSR the location density is constant.
         """
         del locations  # CSR locations only enter via the count
         n_events = jnp.sum(mask, axis=-1)

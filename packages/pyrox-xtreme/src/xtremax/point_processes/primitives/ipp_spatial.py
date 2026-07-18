@@ -12,9 +12,11 @@ log-likelihood factorises as
 The intensity is provided in log-space (``log_intensity_fn``) — the
 same convention as the temporal IPP. Sampling uses Lewis–Shedler
 thinning with an upper bound :math:`\\lambda_{\\max}` over the box.
-The default conservative bound :math:`2 \\Lambda / |D|` is fine when
-the intensity is roughly unimodal; for sharply-peaked surfaces pass a
-tighter bound.
+The bound must be supplied by the caller (pinned, or via the intensity
+module's ``.max_intensity()``): there is **no** automatic fallback,
+because no quadrature-derived estimate can guarantee a true upper
+bound for an arbitrary intensity surface, and an under-estimate
+silently biases the sampler low in intensity peaks.
 """
 
 from __future__ import annotations
@@ -83,11 +85,12 @@ def ipp_spatial_sample_thinning(
     Returns:
         Tuple ``(locations, accepted_mask, n_candidates_uncapped)``:
 
-        * ``locations`` shape ``(max_candidates, d)`` — sorted by the
-          first coordinate to give a stable, deterministic order.
-        * ``accepted_mask`` shape ``(max_candidates,)`` — ``True`` at
-          positions that are real candidates *and* accepted by
-          thinning.
+        * ``locations`` shape ``(max_candidates, d)`` — the *accepted*
+          points compacted into a contiguous prefix, ordered by the
+          first coordinate; padding rows are set to ``domain.lo``.
+        * ``accepted_mask`` shape ``(max_candidates,)`` — a contiguous
+          prefix of ``True`` covering the accepted points (the package
+          invariant: masks are contiguous prefixes).
         * ``n_candidates_uncapped`` — Poisson draw before capping;
           useful for diagnosing buffer over-runs.
     """
@@ -116,9 +119,17 @@ def ipp_spatial_sample_thinning(
     log_accept = log_intensities - jnp.log(lambda_max)
     u = random.uniform(key_thin, shape=(max_candidates,))
     thinning_accept = jnp.log(u) < log_accept
-    accepted_mask = sorted_mask & thinning_accept
+    accepted_raw = sorted_mask & thinning_accept
 
-    locations = safe_locs
+    # Compact accepted points into a contiguous prefix (rejected
+    # candidates used to remain as hole masks): stable argsort on the
+    # rejection flag preserves the first-coordinate order within the
+    # accepted block.
+    order2 = jnp.argsort(~accepted_raw, stable=True)
+    compacted = safe_locs[order2]
+    n_accepted = jnp.sum(accepted_raw)
+    accepted_mask = ranks < n_accepted
+    locations = jnp.where(accepted_mask[:, None], compacted, domain.lo)
     return locations, accepted_mask, n_uncapped
 
 

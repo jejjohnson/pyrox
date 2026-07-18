@@ -18,6 +18,14 @@ from xtremax.point_processes.operators.thinning import ThinningProcess as _Thinn
 class ThinningProcess(dist.Distribution):
     """NumPyro wrapper for a thinned TPP.
 
+    .. warning::
+        For history-dependent bases (Hawkes, renewal) ``log_prob`` is a
+        *pseudo-likelihood* — the base intensity is conditioned on
+        retained events only, while sampling thins a full latent
+        realisation. Exact for Poisson-family bases; see the operator
+        module docstring
+        (:mod:`xtremax.point_processes.operators.thinning`).
+
     Args:
         base: Base temporal operator.
         retention_fn: ``(t, history, proposed_mark=None) -> p`` callable.

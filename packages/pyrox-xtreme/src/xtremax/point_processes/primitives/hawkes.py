@@ -63,13 +63,17 @@ def exp_hawkes_intensity(
     past = mask & (
         event_times < t_arr[..., None] if t_arr.ndim > 0 else event_times < t_arr
     )
-    # Avoid overflow from negative exponents at padding positions.
+    # Clip dt to [0, ∞) *before* the exp: padding/future events sit at
+    # time T > t, so the raw dt is negative and exp(+β|dt|) overflows in
+    # the discarded ``jnp.where`` branch — autodiff then propagates
+    # 0·inf = NaN into the β gradient. The ``past`` mask still selects
+    # the value. (Same fix as the spatiotemporal twin.)
     if t_arr.ndim == 0:
-        dt = t_arr - event_times
-        contributions = jnp.where(past, alpha * jnp.exp(-beta * dt), 0.0)
+        dt_pos = jnp.clip(t_arr - event_times, 0.0, jnp.inf)
+        contributions = jnp.where(past, alpha * jnp.exp(-beta * dt_pos), 0.0)
         return mu + jnp.sum(contributions, axis=-1)
-    dt = t_arr[..., None] - event_times
-    contributions = jnp.where(past, alpha * jnp.exp(-beta * dt), 0.0)
+    dt_pos = jnp.clip(t_arr[..., None] - event_times, 0.0, jnp.inf)
+    contributions = jnp.where(past, alpha * jnp.exp(-beta * dt_pos), 0.0)
     return mu + jnp.sum(contributions, axis=-1)
 
 
@@ -87,14 +91,18 @@ def exp_hawkes_cumulative_intensity(
     (1 - e^{-\beta(t - t_i)})`.
     """
     t_arr = jnp.asarray(t)
+    # dt clipped to [0, ∞) before the exp so padding/future events cannot
+    # overflow the discarded branch into a NaN β-gradient (see
+    # exp_hawkes_intensity); the clip also makes the clipped per-event
+    # term vanish exactly for future events.
     if t_arr.ndim == 0:
         past = mask & (event_times <= t_arr)
-        dt = t_arr - event_times
-        per_event = (alpha / beta) * (1.0 - jnp.exp(-beta * dt))
+        dt_pos = jnp.clip(t_arr - event_times, 0.0, jnp.inf)
+        per_event = (alpha / beta) * (1.0 - jnp.exp(-beta * dt_pos))
         return mu * t_arr + jnp.sum(jnp.where(past, per_event, 0.0), axis=-1)
     past = mask & (event_times <= t_arr[..., None])
-    dt = t_arr[..., None] - event_times
-    per_event = (alpha / beta) * (1.0 - jnp.exp(-beta * dt))
+    dt_pos = jnp.clip(t_arr[..., None] - event_times, 0.0, jnp.inf)
+    per_event = (alpha / beta) * (1.0 - jnp.exp(-beta * dt_pos))
     return mu * t_arr + jnp.sum(jnp.where(past, per_event, 0.0), axis=-1)
 
 
@@ -110,7 +118,10 @@ def exp_hawkes_log_prob(
 
     Uses the Ozaki recursion :math:`R_i = e^{-\beta (t_i - t_{i-1})}(1 + R_{i-1})`
     so intensity evaluation at each observed event is O(1) amortised,
-    giving O(n) total cost.
+    giving O(n) total cost. The recursion consumes consecutive buffer
+    gaps, so it requires the package padded-buffer invariant
+    (contiguous-prefix mask, padding at ``T``) that all package
+    samplers guarantee.
 
     Args:
         event_times: Padded, sorted event times.
@@ -223,14 +234,19 @@ def general_hawkes_intensity(
     :math:`\lambda^*(t) = \mu + \sum_{t_i < t} \phi(t - t_i)`.
     """
     t_arr = jnp.asarray(t)
+    # dt clamped to [0, ∞) before the user kernel: padding/future events
+    # produce negative dt, where an arbitrary kernel may be non-finite or
+    # have non-finite gradients — the discarded ``jnp.where`` branch then
+    # poisons autodiff with 0·inf = NaN. Kernels are only ever evaluated
+    # on their supported domain τ ≥ 0.
     if t_arr.ndim == 0:
         past = mask & (event_times < t_arr)
-        dt = t_arr - event_times
-        kernel_vals = kernel_fn(dt)
+        dt_pos = jnp.clip(t_arr - event_times, 0.0, jnp.inf)
+        kernel_vals = kernel_fn(dt_pos)
         return mu + jnp.sum(jnp.where(past, kernel_vals, 0.0), axis=-1)
     past = mask & (event_times < t_arr[..., None])
-    dt = t_arr[..., None] - event_times
-    kernel_vals = kernel_fn(dt)
+    dt_pos = jnp.clip(t_arr[..., None] - event_times, 0.0, jnp.inf)
+    kernel_vals = kernel_fn(dt_pos)
     return mu + jnp.sum(jnp.where(past, kernel_vals, 0.0), axis=-1)
 
 
@@ -241,12 +257,32 @@ def general_hawkes_cumulative_intensity(
     mu: Float[Array, ...],
     kernel_integral_fn: Callable[[Array, Array], Array],
 ) -> Float[Array, ...]:
-    r"""Compensator :math:`\mu T + \sum_i \int_{t_i}^{T} \phi(s - t_i) ds`."""
+    r"""Compensator :math:`\mu T + \sum_i \int_{t_i}^{T} \phi(s - t_i) ds`.
+
+    Supports scalar and array-valued ``T``. Array ``T`` takes a pairwise
+    branch — ``upper[k, i] = clip(T[k] - t_i)`` — mirroring the
+    exponential-kernel primitive; the previous elementwise subtraction
+    made ``cumulative_intensity(t=event_times)`` return ``upper ≡ 0``,
+    so every kernel integral vanished and GOF diagnostics silently
+    degenerated to a homogeneous Poisson with rate ``μ``.
+    """
     T_arr = jnp.asarray(T)
-    lower = jnp.zeros_like(event_times)
-    upper = jnp.clip(T_arr - event_times, 0.0, jnp.inf)
+    if T_arr.ndim == 0:
+        lower = jnp.zeros_like(event_times)
+        upper = jnp.clip(T_arr - event_times, 0.0, jnp.inf)
+        per_event = kernel_integral_fn(lower, upper)
+        return mu * T_arr + jnp.sum(jnp.where(mask, per_event, 0.0), axis=-1)
+    # ``T[..., None]`` adds one axis that broadcasts against the events
+    # axis — pairwise for an unbatched vector T against (n,) events, and
+    # elementwise (one T per history) for batched aligned inputs, exactly
+    # like the exponential-kernel primitive. Masking through the same
+    # broadcast (rather than an unconditional ``mask[..., None, :]``,
+    # which mixed masks across batch rows) keeps both cases correct.
+    upper = jnp.clip(T_arr[..., None] - event_times, 0.0, jnp.inf)
+    lower = jnp.zeros_like(upper)
     per_event = kernel_integral_fn(lower, upper)
-    return mu * T_arr + jnp.sum(jnp.where(mask, per_event, 0.0), axis=-1)
+    past = mask & (event_times <= T_arr[..., None])
+    return mu * T_arr + jnp.sum(jnp.where(past, per_event, 0.0), axis=-1)
 
 
 def general_hawkes_log_prob(
@@ -274,12 +310,16 @@ def general_hawkes_log_prob(
         Scalar log-likelihood.
     """
     # λ*(t_i) per event via O(n²) pairwise construction (padded-mask-safe).
-    n_max = event_times.shape[-1]
+    # Precedence is decided by TIMESTAMP, not buffer position — index-based
+    # comparison made log_prob change under a row permutation of the same
+    # event set (same fix as the spatiotemporal twin). dt is clamped to
+    # [0, ∞) before the user kernel so discarded (non-causal) pairs cannot
+    # feed a negative argument whose value/gradient may be non-finite.
     dt = event_times[..., :, None] - event_times[..., None, :]
-    kernel_vals = kernel_fn(dt)
-    idx = jnp.arange(n_max)
-    strictly_before = idx[None, :] < idx[:, None]  # j strictly before i
-    pair_valid = strictly_before & mask[..., None, :]
+    dt_pos = jnp.clip(dt, 0.0, jnp.inf)
+    kernel_vals = kernel_fn(dt_pos)
+    strictly_before = event_times[..., None, :] < event_times[..., :, None]
+    pair_valid = strictly_before & mask[..., None, :] & mask[..., :, None]
     per_i = jnp.sum(jnp.where(pair_valid, kernel_vals, 0.0), axis=-1)
     lam_at_events = mu + per_i
     log_lam = jnp.log(jnp.clip(lam_at_events, 1e-30, jnp.inf))

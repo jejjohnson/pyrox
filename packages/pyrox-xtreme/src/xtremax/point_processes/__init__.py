@@ -23,6 +23,20 @@ Families currently available:
 * Marked (``MarkedTemporalPointProcess``) — ground × mark-distribution.
 * Thinning (``ThinningProcess``) — base TPP × retention callable.
 
+Padded-buffer invariant
+-----------------------
+
+Every padded event sequence in this package satisfies: **the mask is a
+contiguous prefix** (``mask == [True]*n + [False]*(max-n)``) **and
+padding times sit at the right edge of the window** (``T``; spatial
+padding rows at ``domain.lo``). All samplers emit sequences in this
+form — thinning-based samplers compact accepted events before
+returning — and consumers with sequential structure
+(``time_rescaling_residuals``, ``exp_hawkes_log_prob`` via Ozaki gaps,
+``renewal_log_prob`` via gap differences) assume it. Hand-constructed
+inputs with hole masks are supported only where a function explicitly
+documents mask-robust behaviour.
+
 The shared :class:`~xtremax.point_processes._history.EventHistory`
 pytree is the lingua franca for user-supplied retention and mark
 callables: every family threads history through in the same shape so

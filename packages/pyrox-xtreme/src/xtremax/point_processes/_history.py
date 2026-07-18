@@ -45,12 +45,23 @@ class EventHistory(eqx.Module):
         max_events: int,
         mark_dim: int | None = None,
         dtype: jnp.dtype = jnp.float32,
+        mark_dtype: jnp.dtype | None = None,
     ) -> EventHistory:
-        """Buffer with no events yet: all times ``0``, mask all ``False``."""
+        """Buffer with no events yet: all times ``0``, mask all ``False``.
+
+        ``mark_dtype`` sets the marks-buffer dtype independently of the
+        times dtype (defaults to ``dtype``) — discrete marks would
+        otherwise be silently cast to float.
+        """
         times = jnp.zeros(max_events, dtype=dtype)
         mask = jnp.zeros(max_events, dtype=jnp.bool_)
         marks = (
-            None if mark_dim is None else jnp.zeros((max_events, mark_dim), dtype=dtype)
+            None
+            if mark_dim is None
+            else jnp.zeros(
+                (max_events, mark_dim),
+                dtype=dtype if mark_dtype is None else mark_dtype,
+            )
         )
         return cls(times=times, mask=mask, marks=marks)
 

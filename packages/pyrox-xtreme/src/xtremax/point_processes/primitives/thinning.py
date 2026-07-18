@@ -21,8 +21,10 @@ the current :class:`EventHistory`. Hawkes, ThinningProcess, and any
 future history-dependent family can delegate to it.
 
 :func:`retention_compensator` computes
-:math:`\\int_0^T (1 - p(t|H(t)))\\lambda(t|H(t))\\, dt` used by
-thinning-of-base log-likelihoods.
+:math:`\\int_0^T (1 - p(t|H(t)))\\lambda(t|H(t))\\, dt`, which
+thinning-of-base log-likelihoods **add** to the base likelihood (the base
+subtracts the full compensator :math:`\\int\\lambda`; the thinned process
+owes only :math:`\\int p\\lambda`).
 """
 
 from __future__ import annotations

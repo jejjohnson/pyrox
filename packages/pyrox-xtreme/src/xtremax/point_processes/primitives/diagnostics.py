@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Bool, Float
 
@@ -52,11 +53,25 @@ def time_rescaling_residuals(
         ``0`` (rather than ``NaN``) so downstream reductions that
         forget to mask do not propagate NaNs — they will instead see a
         biased statistic. All consumers in this module apply the mask.
+
+        The previous-event compensator is taken from the previous
+        *valid* event, not the previous buffer slot, so the function is
+        robust to hole masks (a masked-out slot between two real events
+        no longer shrinks the following residual). Samplers in this
+        package emit contiguous-prefix masks (see the package
+        docstring), but diagnostics stay correct either way.
     """
     Lambda_t = cumulative_intensity_fn(event_times)
-    # Prepend Λ(0) = 0 so that residuals[0] = Λ(t_0) - 0 = Λ(t_0).
-    zero_padding = jnp.zeros_like(Lambda_t[..., :1])
-    Lambda_prev = jnp.concatenate([zero_padding, Lambda_t[..., :-1]], axis=-1)
+    # Λ at the previous VALID event: running max of the masked Λ values
+    # (times are sorted, so Λ is monotone over valid slots and the
+    # cumulative max equals the last valid Λ), shifted one slot right,
+    # floored at Λ(0) = 0.
+    Lambda_valid = jnp.where(mask, Lambda_t, -jnp.inf)
+    # lax.cummax requires a non-negative axis index.
+    cummax = jax.lax.cummax(Lambda_valid, axis=Lambda_valid.ndim - 1)
+    neg_inf = jnp.full_like(cummax[..., :1], -jnp.inf)
+    shifted = jnp.concatenate([neg_inf, cummax[..., :-1]], axis=-1)
+    Lambda_prev = jnp.maximum(shifted, 0.0)
     residuals = Lambda_t - Lambda_prev
     residuals = jnp.where(mask, residuals, 0.0)
     return residuals, mask
