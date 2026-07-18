@@ -176,8 +176,12 @@ def test_fullname_uses_pyrox_name_when_set():
     assert m._pyrox_fullname("w") == "BayesianLinear.w"
 
 
-def test_fullname_falls_back_to_class_plus_id_without_pyrox_name():
-    """Unnamed sibling instances of the same class must NOT collide."""
+def test_fullname_falls_back_to_class_name_without_pyrox_name():
+    """The unnamed fallback is the class name — deterministic, identical
+    across instances, and stable across pytree reconstruction (#184
+    Option C: the old ``{ClassName}_{id}`` fallback silently renamed sites
+    whenever Equinox rebuilt the module).
+    """
 
     class Anon(PyroxModule):
         @pyrox_method
@@ -186,16 +190,38 @@ def test_fullname_falls_back_to_class_plus_id_without_pyrox_name():
 
     a = Anon()
     b = Anon()
-    # Instance-qualified scope → distinct fullnames for distinct instances.
-    assert a._pyrox_scope_name() != b._pyrox_scope_name()
-    assert a._pyrox_fullname("w") != b._pyrox_fullname("w")
-    assert a._pyrox_scope_name().startswith("Anon_")
+    assert a._pyrox_scope_name() == b._pyrox_scope_name() == "Anon"
+    assert a._pyrox_fullname("w") == "Anon.w"
 
 
-def test_two_same_class_instances_register_distinct_sites_in_one_trace():
-    """Two module instances of the same class inside one model should
-    produce distinct sites — regression for PR #57 review: site-name
-    collisions when multiple layers of the same class appear together.
+def test_scope_name_stable_across_pytree_reconstruction():
+    """Site names must not change when the module is rebuilt by
+    flatten/unflatten (the reconstruction path used by eqx.tree_at,
+    filter_jit-with-module-arg, and checkpoint loads). Regression for
+    #184: the id-based fallback desynchronized MCMC draws from a later
+    Predictive on the rebuilt copy.
+    """
+
+    class Anon(PyroxModule):
+        @pyrox_method
+        def __call__(self):
+            return self.pyrox_sample("w", dist.Normal(0.0, 1.0))
+
+    a = Anon()
+    leaves, treedef = jax.tree.flatten(a)
+    a2 = jax.tree.unflatten(treedef, leaves)
+    with handlers.trace() as tr1, handlers.seed(rng_seed=0):
+        a()
+    with handlers.trace() as tr2, handlers.seed(rng_seed=0):
+        a2()
+    assert list(tr1) == list(tr2) == ["Anon.w"]
+
+
+def test_unnamed_same_class_siblings_collide_loudly_under_trace():
+    """With the class-name fallback, two *unnamed* instances of one class
+    share a scope; a trace must reject the duplicate loudly. Users who
+    stack several instances of a class give each a distinct pyrox_name
+    (see the named-siblings test below).
     """
 
     class Layer(PyroxModule):
@@ -204,6 +230,27 @@ def test_two_same_class_instances_register_distinct_sites_in_one_trace():
             return self.pyrox_sample("w", dist.Normal(0.0, 1.0)) + x
 
     a, b = Layer(), Layer()
+    with (
+        pytest.raises(AssertionError, match="unique names"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+    ):
+        b(a(jnp.array(0.0)))
+
+
+def test_named_same_class_instances_register_distinct_sites_in_one_trace():
+    """Two instances of one class with distinct per-instance pyrox_name
+    fields produce distinct sites — the supported stacking pattern.
+    """
+
+    class Layer(PyroxModule):
+        pyrox_name: str
+
+        @pyrox_method
+        def __call__(self, x):
+            return self.pyrox_sample("w", dist.Normal(0.0, 1.0)) + x
+
+    a, b = Layer(pyrox_name="layer0"), Layer(pyrox_name="layer1")
 
     def model():
         y = a(jnp.array(0.0))
@@ -211,9 +258,7 @@ def test_two_same_class_instances_register_distinct_sites_in_one_trace():
 
     with handlers.trace() as tr, handlers.seed(rng_seed=0):
         model()
-    site_names = list(tr)
-    assert len(site_names) == 2
-    assert site_names[0] != site_names[1]
+    assert list(tr) == ["layer0.w", "layer1.w"]
 
 
 def test_pyrox_sample_with_non_distribution_uses_deterministic():

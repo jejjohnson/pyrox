@@ -104,26 +104,29 @@ class PyroxModule(eqx.Module):
     def _pyrox_scope_name(self) -> str:
         """Per-instance scope used when building fully-qualified site names.
 
-        Uses an explicit ``pyrox_name`` attribute if the subclass defines
-        one (as a field or class variable); otherwise falls back to a
-        ``{ClassName}_{id}`` tag so sibling instances of the same class
-        register distinct sites within a single trace. The id-based
-        fallback is stable within a Python process but not across runs —
-        set ``pyrox_name`` explicitly for checkpoint-portable names.
+        Uses an explicit ``pyrox_name`` attribute if the module defines one
+        (as a field or class variable); otherwise falls back to the **class
+        name**. Both are deterministic, so site names are stable across
+        Python runs, checkpoint round-trips, and — critically — Equinox
+        pytree reconstruction (``eqx.tree_at``, ``eqx.filter_jit`` with the
+        module as an argument, ``jax.tree.unflatten``, deserialization).
+        The previous ``{ClassName}_{id}`` fallback changed on every
+        reconstruction, silently desynchronizing site names between e.g.
+        an MCMC run and a later ``Predictive`` on a rebuilt copy.
 
-        ``pyrox_name`` must be **unique among the instances participating
-        in a single trace**: two modules that share a ``pyrox_name`` and
-        register the same site name collide. Under ``handlers.trace`` this
+        The scope must be **unique among the instances participating in a
+        single trace**. With the class-name fallback, two *unnamed*
+        instances of the same class collide: under ``handlers.trace`` this
         raises loudly ("all sites must have unique names"); under a bare
         ``handlers.seed`` (no trace) there is no uniqueness check, so the
-        two instances silently draw independent values. Give sibling
-        instances distinct ``pyrox_name`` values (or omit it and rely on
-        the id-based fallback).
+        collision is silent. When stacking several instances of one class
+        in a model, give each a distinct ``pyrox_name`` (a per-instance
+        field or constructor argument).
         """
         name = getattr(self, "pyrox_name", None)
         if isinstance(name, str) and name:
             return name
-        return f"{type(self).__name__}_{id(self):x}"
+        return type(self).__name__
 
     def _pyrox_fullname(self, name: str) -> str:
         return f"{self._pyrox_scope_name()}.{name}"

@@ -22,7 +22,7 @@ pyrox bridges [Equinox](https://docs.kidger.site/equinox/) modules and [NumPyro]
 
 ### Why pyrox?
 
-Equinox gives JAX clean, immutable modules. NumPyro gives JAX a high-quality probabilistic programming surface. But the two don't compose out of the box: Equinox modules are frozen PyTrees, and NumPyro expects per-call access to `numpyro.param` / `numpyro.sample` calls that carry unique site names. `pyrox._core` provides the missing bridge — a light per-instance context that caches site lookups within a call, instance-qualified site names to prevent collisions between sibling modules of the same class, and declarative registries for modules that want priors and guides attached to their parameters.
+Equinox gives JAX clean, immutable modules. NumPyro gives JAX a high-quality probabilistic programming surface. But the two don't compose out of the box: Equinox modules are frozen PyTrees, and NumPyro expects per-call access to `numpyro.param` / `numpyro.sample` calls that carry unique site names. `pyrox._core` provides the missing bridge — a light per-instance context that caches site lookups within a call, deterministic module-scoped site names (an explicit `pyrox_name`, or the class name by default) that stay stable across `jit`, `eqx.tree_at`, and checkpoint round-trips, and declarative registries for modules that want priors and guides attached to their parameters.
 
 ### What's in the box
 
@@ -105,7 +105,7 @@ def model(x, y=None):
 
 ### Pattern B — `PyroxModule` owns its probabilistic semantics
 
-When the module itself is inherently probabilistic — a Bayesian layer, a hierarchical component, anything that "is" a set of sample and param sites — subclass `PyroxModule`. Register sites declaratively inside `__call__` and let the module's qualified name scope them. Sibling instances of the same class automatically get distinct site names, so stacking two `BayesianLinear` layers in one model doesn't collide.
+When the module itself is inherently probabilistic — a Bayesian layer, a hierarchical component, anything that "is" a set of sample and param sites — subclass `PyroxModule`. Register sites declaratively inside `__call__` and let the module's qualified name scope them. The scope is the module's `pyrox_name` (or the class name when unset) — deterministic, so site names survive `jit`, functional updates, and checkpoints. When stacking several instances of the same class in one model, give each a distinct `pyrox_name` (e.g. `BayesianLinear(..., pyrox_name="layer0")` with `pyrox_name` declared as a field); unnamed same-class siblings share a scope and a trace will reject the duplicate sites loudly.
 
 ```python
 import jax.numpy as jnp

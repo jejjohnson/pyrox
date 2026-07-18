@@ -542,15 +542,14 @@ def test_mha_be_attention_reduces_to_value_at_uniform_keys():
     zeros_M_D = jnp.zeros((M, D), dtype=jnp.float32)
     x = jr.normal(jr.PRNGKey(7), (5, D))
     subst = {}
+    scope = mha._pyrox_scope_name()
     for proj in ("q", "k", "v", "o"):
         # Zero out Q (so scores=0 → uniform softmax).
         # Identity for K/V/O.
-        subst[f"MultiHeadAttentionBE_{id(mha):x}.{proj}_W"] = (
-            jnp.zeros((D, D)) if proj == "q" else eye
-        )
-        subst[f"MultiHeadAttentionBE_{id(mha):x}.{proj}_r"] = ones_M_D
-        subst[f"MultiHeadAttentionBE_{id(mha):x}.{proj}_s"] = ones_M_D
-        subst[f"MultiHeadAttentionBE_{id(mha):x}.{proj}_b"] = zeros_M_D
+        subst[f"{scope}.{proj}_W"] = jnp.zeros((D, D)) if proj == "q" else eye
+        subst[f"{scope}.{proj}_r"] = ones_M_D
+        subst[f"{scope}.{proj}_s"] = ones_M_D
+        subst[f"{scope}.{proj}_b"] = zeros_M_D
     with handlers.substitute(data=subst), handlers.seed(rng_seed=0):
         y = mha(x, x, x)
     expected_per_position = jnp.mean(x, axis=0)

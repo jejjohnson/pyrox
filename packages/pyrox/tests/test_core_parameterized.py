@@ -56,6 +56,25 @@ def test_register_param_before_set_prior_raises_keyerror():
         k.set_prior("missing", dist.Normal(0.0, 1.0))
 
 
+def test_reconstructed_module_raises_diagnostic_keyerror():
+    """A copy rebuilt by flatten/unflatten (the eqx.tree_at / filter_jit
+    reconstruction path) has an empty registry because setup() only runs
+    from __init__. #184 Option C: the failure stays, but the KeyError must
+    explain the reconstruction cause instead of a bare 'not registered'.
+    """
+    import jax
+
+    k = RBFKernel()
+    leaves, treedef = jax.tree.flatten(k)
+    k2 = jax.tree.unflatten(treedef, leaves)
+    X = jnp.array([[0.0], [1.0]])
+    with (
+        pytest.raises(KeyError, match="reconstruction skips __init__"),
+        handlers.seed(rng_seed=0),
+    ):
+        k2(X, X)
+
+
 # --- mode switching --------------------------------------------------------
 
 
