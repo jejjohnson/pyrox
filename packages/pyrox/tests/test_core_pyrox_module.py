@@ -260,6 +260,58 @@ def test_unnamed_param_only_siblings_collide_loudly_under_trace():
         b(a(jnp.zeros(2)))
 
 
+def test_param_sibling_collision_detected_under_handlers_scope():
+    """The duplicate-param guard must see site names as the trace records
+    them: handlers.scope rewrites names (``enc/Class.b``) before recording,
+    so a raw-fullname pre-check would miss collisions inside a scope.
+    Regression for the #187 Codex scope-rewrite finding.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    a, b = ParamLayer(), ParamLayer()
+    with (
+        pytest.raises(ValueError, match="different module instance"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+        handlers.scope(prefix="enc"),
+    ):
+        b(a(jnp.zeros(2)))
+
+
+def test_param_ownership_does_not_leak_across_traces():
+    """Ownership is per-trace: an instance that registered a site in an
+    earlier (e.g. warm-up) trace must not bypass the guard in a later
+    trace where a sibling registered the same name first. Regression for
+    the #187 Codex stale-ownership finding.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    w1, w2 = ParamLayer(), ParamLayer()
+    with handlers.trace(), handlers.seed(rng_seed=0):
+        w1(jnp.zeros(2))  # warm-up trace: only w1
+    with (
+        pytest.raises(ValueError, match="different module instance"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+    ):
+        w1(w2(jnp.zeros(2)))  # w2 registers first; w1's stale claim must not pass
+
+    # And a lone instance across repeated traces stays fine.
+    f = ParamLayer()
+    for _ in range(2):
+        with handlers.trace() as tr, handlers.seed(rng_seed=0):
+            f(jnp.zeros(2))
+    assert list(tr) == ["ParamLayer.b"]
+
+
 def test_same_instance_param_reuse_across_calls_stays_allowed():
     """Calling one module twice in one trace re-uses its own param site
     (legitimate weight sharing) — the duplicate-scope guard must only fire
