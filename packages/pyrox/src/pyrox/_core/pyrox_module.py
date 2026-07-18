@@ -42,6 +42,23 @@ import numpyro.distributions as dist
 _MISSING: Any = object()
 
 
+def _active_trace() -> dict[str, Any] | None:
+    """Return the innermost active ``handlers.trace`` mapping, if any.
+
+    Used by the duplicate-scope guard in `PyroxModule.pyrox_param`:
+    NumPyro's trace only asserts name uniqueness for *sample* sites, so
+    two modules silently sharing a scope would alias their *param* sites
+    (shared weights under SVI/MAP) without this check. Reads NumPyro's
+    handler stack; returns ``None`` when no trace is active.
+    """
+    from numpyro.primitives import _PYRO_STACK
+
+    for handler in reversed(_PYRO_STACK):
+        if isinstance(handler, numpyro.handlers.trace):
+            return getattr(handler, "trace", None)
+    return None
+
+
 class _Context:
     """Per-call site cache with re-entrant scope depth tracking.
 
@@ -49,11 +66,19 @@ class _Context:
     outermost scope closes. Re-entry (nested ``pyrox_method`` calls on the
     same module) increments the depth so the inner scope does not clobber
     the outer cache.
+
+    ``owned`` records every param fullname this instance has ever
+    registered. Unlike the per-call cache it is **not** cleared on exit:
+    it lets the duplicate-scope guard distinguish "this instance re-uses
+    its own param site across calls in one trace" (legitimate weight
+    sharing) from "a *different* instance with the same scope registered
+    this name" (silent parameter aliasing — an error).
     """
 
     def __init__(self) -> None:
         self._cache: dict[str, Any] = {}
         self._depth: int = 0
+        self.owned: set[str] = set()
 
     def __enter__(self) -> _Context:
         self._depth += 1
@@ -117,11 +142,13 @@ class PyroxModule(eqx.Module):
         The scope must be **unique among the instances participating in a
         single trace**. With the class-name fallback, two *unnamed*
         instances of the same class collide: under ``handlers.trace`` this
-        raises loudly ("all sites must have unique names"); under a bare
-        ``handlers.seed`` (no trace) there is no uniqueness check, so the
-        collision is silent. When stacking several instances of one class
-        in a model, give each a distinct ``pyrox_name`` (a per-instance
-        field or constructor argument).
+        raises loudly — NumPyro's uniqueness assertion for sample sites,
+        and pyrox's duplicate-scope guard in `pyrox_param` for param
+        sites (which NumPyro would otherwise silently alias). Under a
+        bare ``handlers.seed`` (no trace) there is no uniqueness check,
+        so the collision is silent. When stacking several instances of
+        one class in a model, give each a distinct ``pyrox_name`` (a
+        per-instance field or constructor argument).
         """
         name = getattr(self, "pyrox_name", None)
         if isinstance(name, str) and name:
@@ -145,12 +172,32 @@ class PyroxModule(eqx.Module):
             cached = ctx.get(fullname)
             if cached is not _MISSING:
                 return cached
+        # NumPyro's trace asserts uniqueness for sample sites but silently
+        # tolerates duplicate param registrations (last write wins). Without
+        # this guard, two instances sharing a scope (e.g. unnamed siblings of
+        # one class under the class-name fallback) would silently alias their
+        # parameters under SVI/MAP. Same-instance re-registration across
+        # calls in one trace (weight sharing) stays allowed via ``owned``.
+        active_trace = _active_trace()
+        if (
+            active_trace is not None
+            and fullname in active_trace
+            and fullname not in ctx.owned
+        ):
+            raise ValueError(
+                f"param site {fullname!r} was already registered in this "
+                "trace by a different module instance. Two instances of "
+                f"{type(self).__name__} are sharing the scope "
+                f"{self._pyrox_scope_name()!r} — give each a distinct "
+                "pyrox_name."
+            )
         kwargs: dict[str, Any] = {}
         if constraint is not None:
             kwargs["constraint"] = constraint
         if event_dim is not None:
             kwargs["event_dim"] = event_dim
         value = numpyro.param(fullname, init_value, **kwargs)
+        ctx.owned.add(fullname)
         return ctx.set(fullname, value)
 
     def pyrox_sample(self, name: str, prior: Any) -> Any:

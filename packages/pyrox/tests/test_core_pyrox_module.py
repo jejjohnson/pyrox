@@ -238,6 +238,46 @@ def test_unnamed_same_class_siblings_collide_loudly_under_trace():
         b(a(jnp.array(0.0)))
 
 
+def test_unnamed_param_only_siblings_collide_loudly_under_trace():
+    """NumPyro's trace only asserts uniqueness for *sample* sites; duplicate
+    param registrations are silently tolerated (last write wins), which
+    would let two unnamed param-only siblings share weights under SVI/MAP.
+    pyrox's duplicate-scope guard must reject this loudly. Regression for
+    the #187 Codex P1 finding.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    a, b = ParamLayer(), ParamLayer()
+    with (
+        pytest.raises(ValueError, match="different module instance"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+    ):
+        b(a(jnp.zeros(2)))
+
+
+def test_same_instance_param_reuse_across_calls_stays_allowed():
+    """Calling one module twice in one trace re-uses its own param site
+    (legitimate weight sharing) — the duplicate-scope guard must only fire
+    for *different* instances sharing a scope.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    c = ParamLayer()
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        c(jnp.zeros(2))
+        c(jnp.ones(2))
+    assert list(tr) == ["ParamLayer.b"]
+
+
 def test_named_same_class_instances_register_distinct_sites_in_one_trace():
     """Two instances of one class with distinct per-instance pyrox_name
     fields produce distinct sites — the supported stacking pattern.
