@@ -43,21 +43,49 @@ import numpyro.distributions as dist
 _MISSING: Any = object()
 
 
-def _active_trace() -> dict[str, Any] | None:
-    """Return the innermost active ``handlers.trace`` mapping, if any.
+def _active_traces() -> list[dict[str, Any]]:
+    """Return every active ``handlers.trace`` mapping, innermost first.
 
     Used by the duplicate-scope guard in `PyroxModule.pyrox_param`:
     NumPyro's trace only asserts name uniqueness for *sample* sites, so
     two modules silently sharing a scope would alias their *param* sites
-    (shared weights under SVI/MAP) without this check. Reads NumPyro's
-    handler stack; returns ``None`` when no trace is active.
+    (shared weights under SVI/MAP) without this check. Every active trace
+    records every site, so a duplicate hidden from an inner trace (e.g.
+    siblings called under separate inner traces) is still visible in the
+    outer one — all of them must be checked.
     """
     from numpyro.primitives import _PYRO_STACK
 
+    traces = []
     for handler in reversed(_PYRO_STACK):
         if isinstance(handler, numpyro.handlers.trace):
-            return getattr(handler, "trace", None)
-    return None
+            tr = getattr(handler, "trace", None)
+            if tr is not None:
+                traces.append(tr)
+    return traces
+
+
+def _candidate_site_name(fullname: str) -> str:
+    """Predict the site name the active traces will record for ``fullname``.
+
+    ``handlers.scope`` rewrites message names during the process phase
+    (innermost scope applied first: ``outer/inner/name``), and the traces
+    record the rewritten name. Folding the active scope prefixes over the
+    raw fullname reproduces that name, so the duplicate guard can compare
+    against trace contents even when the registration itself leaves no
+    footprint (``handlers.lift`` serves cached draws without re-recording).
+    ``scope`` is NumPyro's only param-name-rewriting handler.
+    """
+    from numpyro.primitives import _PYRO_STACK
+
+    name = fullname
+    for handler in reversed(_PYRO_STACK):
+        if isinstance(handler, numpyro.handlers.scope):
+            prefix = getattr(handler, "prefix", None)
+            divider = getattr(handler, "divider", "/")
+            if prefix:
+                name = f"{prefix}{divider}{name}"
+    return name
 
 
 class _Context:
@@ -83,17 +111,24 @@ class _Context:
     def __init__(self) -> None:
         self._cache: dict[str, Any] = {}
         self._depth: int = 0
-        self._trace_ref: Any = None
         # ``builtins.set`` in the annotations: the bare name ``set`` resolves
         # to the ``_Context.set`` method inside this class body.
-        self._trace_owned: builtins.set[str] = set()
+        self._trace_owned: list[tuple[Any, builtins.set[str]]] = []
 
     def trace_owned(self, tr: dict[str, Any]) -> builtins.set[str]:
-        """Return the set of site names owned by this instance in ``tr``."""
-        if self._trace_ref is None or self._trace_ref() is not tr:
-            self._trace_ref = weakref.ref(tr)
-            self._trace_owned = set()
-        return self._trace_owned
+        """Return the set of site names owned by this instance in ``tr``.
+
+        One entry per live trace object (weakly referenced; dead entries are
+        pruned), because nested traces are simultaneously active and each
+        records every site.
+        """
+        self._trace_owned = [(r, s) for r, s in self._trace_owned if r() is not None]
+        for ref, owned in self._trace_owned:
+            if ref() is tr:
+                return owned
+        owned: builtins.set[str] = set()
+        self._trace_owned.append((weakref.ref(tr), owned))
+        return owned
 
     def __enter__(self) -> _Context:
         self._depth += 1
@@ -196,51 +231,30 @@ class PyroxModule(eqx.Module):
         # tolerates duplicate param registrations (last write wins). Without
         # a guard, two instances sharing a scope (e.g. unnamed siblings of
         # one class under the class-name fallback) would silently alias
-        # their parameters under SVI/MAP. Detection runs *after*
-        # registration by diffing the trace, so it sees the name exactly as
-        # the trace records it (handlers such as ``scope`` rewrite site
-        # names before recording — a raw-fullname pre-check would miss
-        # collisions inside a scope). Same-instance re-registration across
-        # calls in one trace (weight sharing) stays allowed via the
-        # per-trace ownership set; ownership does not leak across traces.
-        active_trace = _active_trace()
-        before = (
-            {k: id(m) for k, m in active_trace.items()}
-            if active_trace is not None
-            else None
-        )
-        value = numpyro.param(fullname, init_value, **kwargs)
-        if active_trace is not None and before is not None:
-            owned = ctx.trace_owned(active_trace)
-            changed = [k for k, m in active_trace.items() if before.get(k) != id(m)]
-            for final_name in changed:
-                if final_name in before and final_name not in owned:
+        # their parameters under SVI/MAP. The guard pre-checks the
+        # scope-folded candidate name against EVERY active trace: nested
+        # traces all record every site, and caching handlers
+        # (``handlers.lift``) serve duplicates without re-recording, so
+        # neither an innermost-only nor a post-registration check covers
+        # all compositions. Same-instance re-registration across calls in
+        # one trace (weight sharing) stays allowed via the per-trace
+        # ownership sets; ownership does not leak across traces.
+        traces = _active_traces()
+        if traces:
+            candidate = _candidate_site_name(fullname)
+            for tr in traces:
+                if candidate in tr and candidate not in ctx.trace_owned(tr):
                     raise ValueError(
-                        f"param site {final_name!r} was already registered "
+                        f"param site {candidate!r} was already registered "
                         "in this trace by a different module instance. Two "
                         f"instances of {type(self).__name__} are sharing "
                         f"the scope {self._pyrox_scope_name()!r} — give "
                         "each a distinct pyrox_name."
                     )
-                owned.add(final_name)
-            if not changed and fullname in active_trace and fullname not in owned:
-                # The registration left no trace footprint at all: a handler
-                # served a cached value for a name it already processed —
-                # ``handlers.lift`` does this when a second instance re-uses
-                # a lifted param name, silently sharing the first draw. The
-                # raw fullname matching an un-owned trace entry is exactly
-                # that duplicate. (If a name-rewriting handler like ``scope``
-                # is *also* active, the recorded name differs from the raw
-                # fullname and this backstop cannot see it — the lift∩scope
-                # intersection remains undetectable.)
-                raise ValueError(
-                    f"param site {fullname!r} was already registered in "
-                    "this trace by a different module instance (served "
-                    "from a handler cache, e.g. handlers.lift). Two "
-                    f"instances of {type(self).__name__} are sharing the "
-                    f"scope {self._pyrox_scope_name()!r} — give each a "
-                    "distinct pyrox_name."
-                )
+        value = numpyro.param(fullname, init_value, **kwargs)
+        if traces:
+            for tr in traces:
+                ctx.trace_owned(tr).add(candidate)
         return ctx.set(fullname, value)
 
     def pyrox_sample(self, name: str, prior: Any) -> Any:

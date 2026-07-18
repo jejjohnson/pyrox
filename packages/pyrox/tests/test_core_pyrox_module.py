@@ -348,6 +348,64 @@ def test_param_sibling_collision_detected_under_handlers_lift():
     assert jnp.allclose(y1, y2)
 
 
+def test_param_sibling_collision_detected_under_lift_inside_scope():
+    """lift serves a cached draw (no trace footprint) AND scope rewrites the
+    recorded name — the guard must predict the scope-folded candidate name
+    and check it against the traces. Regression for the #187 Codex
+    lift+scope finding.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    prior = dist.Normal(0.0, 1.0).expand([2]).to_event(1)
+    a, b = ParamLayer(), ParamLayer()
+    with (
+        pytest.raises(ValueError, match="different module instance"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+        handlers.scope(prefix="enc"),
+        handlers.lift(prior={"enc/ParamLayer.b": prior}),
+    ):
+        b(a(jnp.zeros(2)))
+
+
+def test_param_sibling_collision_detected_across_nested_traces():
+    """Nested traces all record every site: siblings called under separate
+    inner traces look unique to their own inner trace but duplicate in the
+    outer one — every active trace must be checked. Same-instance reuse
+    across inner traces stays allowed (ownership is tracked per trace,
+    including the outer). Regression for the #187 Codex nested-trace
+    finding.
+    """
+
+    class ParamLayer(PyroxModule):
+        @pyrox_method
+        def __call__(self, x):
+            return x + self.pyrox_param("b", jnp.zeros(2))
+
+    a, b = ParamLayer(), ParamLayer()
+    with (
+        pytest.raises(ValueError, match="different module instance"),
+        handlers.trace(),
+        handlers.seed(rng_seed=0),
+    ):
+        with handlers.trace():
+            a(jnp.zeros(2))
+        with handlers.trace():
+            b(jnp.zeros(2))
+
+    c = ParamLayer()
+    with handlers.trace() as outer, handlers.seed(rng_seed=0):
+        with handlers.trace():
+            c(jnp.zeros(2))
+        with handlers.trace():
+            c(jnp.zeros(2))
+    assert list(outer) == ["ParamLayer.b"]
+
+
 def test_same_instance_param_reuse_across_calls_stays_allowed():
     """Calling one module twice in one trace re-uses its own param site
     (legitimate weight sharing) — the duplicate-scope guard must only fire
