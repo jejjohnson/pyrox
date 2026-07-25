@@ -85,6 +85,7 @@ nav:
           - Models: design_docs/examples/models.md
           - Integration: design_docs/examples/integration.md
   - API Reference: api/reference.md
+  - Interop: interop.md
   - Contributing: contributing.md
   - Changelog: changelog.md
 

@@ -164,7 +164,13 @@ class GeneralizedParetoDistribution(dist.Distribution):
 
         super().__init__(batch_shape=batch_shape, validate_args=validate_args)
 
-    def sample(self, key: jnp.ndarray, sample_shape: tuple = ()) -> jnp.ndarray:
+    def sample(
+        self,
+        key: jnp.ndarray,
+        sample_shape: tuple = (),
+        *,
+        shape: tuple | None = None,
+    ) -> jnp.ndarray:
         """
         Generate samples from the GPD using inverse transform sampling.
 
@@ -179,17 +185,30 @@ class GeneralizedParetoDistribution(dist.Distribution):
         Args:
             key: JAX random key for sampling
             sample_shape: Shape of samples to generate
+            shape: Keyword-only alias for ``sample_shape`` matching the
+                ``pipekit_cycle.ObservationNoise`` protocol's parameter
+                name (``sample(key, shape)``), so callers typed against
+                that protocol can pass it by keyword. Passing both a
+                non-empty ``sample_shape`` and ``shape`` raises
+                ``ValueError``.
 
         Returns:
             Array of samples from the GPD (all within support)
         """
+        if shape is not None:
+            if sample_shape != ():
+                raise ValueError(
+                    "Pass only one of 'sample_shape' (NumPyro spelling) or "
+                    "'shape' (ObservationNoise protocol spelling), not both."
+                )
+            sample_shape = shape
         check_prng_key(key)
-        shape = sample_shape + self.batch_shape
+        extended_shape = sample_shape + self.batch_shape
 
         # JAX's Uniform(0, 1) sampler can emit exact 0 or 1 at the
         # endpoints; passing those to icdf yields -inf/+inf and poisons
         # downstream computations. Clamp away from the endpoints.
-        uniform_samples = dist.Uniform(0.0, 1.0).sample(key, shape)
+        uniform_samples = dist.Uniform(0.0, 1.0).sample(key, extended_shape)
         eps = jnp.finfo(uniform_samples.dtype).eps
         uniform_samples = jnp.clip(uniform_samples, eps, 1.0 - eps)
 
@@ -310,6 +329,25 @@ class GeneralizedParetoDistribution(dist.Distribution):
         var_val = (scale**2) / denominator
 
         return jnp.where(var_exists, var_val, jnp.inf)
+
+    def covariance(self) -> jnp.ndarray:
+        """Marginal variance broadcast to the batch shape.
+
+        Structural seam for ``pipekit_cycle.ObservationNoise`` (which
+        requires ``covariance()`` and ``sample(key, shape)``): together
+        with the existing :meth:`sample`, this lets the distribution act
+        as a non-Gaussian observation-error model in data-assimilation
+        experiments — without xtremax importing pipekit (see
+        ``docs/interop.md``). The observation errors are treated as
+        independent per batch element, so the "covariance" is the
+        marginal variance vector rather than a dense matrix; consuming
+        analysis steps interpret it as a diagonal.
+
+        Returns:
+            Variance broadcast to ``batch_shape`` (``+inf`` where the
+            variance does not exist, i.e. ξ >= 1/2).
+        """
+        return jnp.broadcast_to(jnp.asarray(self.variance), self.batch_shape)
 
     def kurtosis(self) -> jnp.ndarray:
         """
