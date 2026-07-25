@@ -11,9 +11,11 @@
   cross-output structure without monolithic model classes — plus the
   model layer on top: `MultiOutputGPPrior` /
   `MultiOutputConditionedGP` / `mo_gp_factor` for exact
-  inference and `MultiOutputSparseGPPrior` /
+  inference, `MultiOutputSparseGPPrior` /
   `mo_svgp_elbo` / `mo_svgp_factor` for the inducing-input
-  variational path (reusing the single-output guides).
+  variational path (reusing the single-output guides), and
+  `OILMMGPPrior` / `ConditionedOILMMGP` for the
+  orthogonal-projection exact workflow.
 * Abstract protocols (`Kernel`, `Guide`,
   `Likelihood`) plus five concrete sparse
   variational guides — `FullRankGuide`, `MeanFieldGuide`,
@@ -127,9 +129,11 @@ from pyrox_gp._multi_output import (
     SharedInducingPoints,
 )
 from pyrox_gp._multi_output_models import (
+    ConditionedOILMMGP,
     MultiOutputConditionedGP,
     MultiOutputGPPrior,
     MultiOutputSparseGPPrior,
+    OILMMGPPrior,
     mo_gp_factor,
     mo_svgp_elbo,
     mo_svgp_factor,
@@ -161,6 +165,7 @@ __all__ = [
     "BernoulliLikelihood",
     "ConditionedGP",
     "ConditionedMarkovGP",
+    "ConditionedOILMMGP",
     "ConjugateVI",
     "Constant",
     "ConstantSDE",
@@ -200,6 +205,7 @@ __all__ = [
     "NaturalGuide",
     "NonGaussConditionedGP",
     "NonGaussConditionedMarkovGP",
+    "OILMMGPPrior",
     "OILMMKernel",
     "PathwiseFunction",
     "PathwiseSampler",
