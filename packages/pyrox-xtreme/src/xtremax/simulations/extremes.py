@@ -12,6 +12,21 @@ import xarray as xr
 from scipy.stats import genextreme, weibull_min
 
 
+# Per-variable salts folded into the RNG seed so simulators for
+# *different* variables draw from independent streams even when called
+# with the same (or default) `seed`. Without this, inverse-CDF sampling
+# from identical uniform streams made e.g. temperature and wind maxima
+# ~99.9% comonotonic — poison for validating multivariate-extremes
+# methods on "independent" variables.
+_VARIABLE_SALTS = {"temp": 1, "precip": 2, "wind": 3}
+
+
+def _variable_rng(variable: str, seed: int) -> np.random.Generator:
+    """Per-variable salted Generator: same seed → reproducible, distinct
+    variables → independent streams."""
+    return np.random.default_rng([_VARIABLE_SALTS[variable], seed])
+
+
 # ==============================================================================
 # SPATIAL MODULE: FIELDS & COVARIATES
 # ==============================================================================
@@ -110,8 +125,11 @@ def simulate_temp_extremes(
         mu: Location parameter (varying over time/space).
         scale: Scale parameter (assumed constant here, but could be array).
         shape: Shape parameter (xi).
+        seed: Reproducibility seed. The stream is salted per variable, so
+            temperature, precipitation, and wind simulators called with
+            equal seeds still draw independently of each other.
     """
-    shape_dim = mu.shape
+    rng = _variable_rng("temp", seed)
 
     # Scipy uses shape 'c' where c = -xi (sign flip vs typical EVT notation).
     # However, standard GEV: mu + (sigma/xi)* ((p^-xi) - 1)
@@ -122,11 +140,11 @@ def simulate_temp_extremes(
     c = -shape
 
     data = genextreme.rvs(
-        c, loc=mu.values, scale=scale, size=shape_dim, random_state=seed
+        c, loc=mu.values, scale=scale, size=mu.shape, random_state=rng
     )
 
     ds = mu.to_dataset(name="mu_tmax")
-    ds["tmax"] = (("year", "site"), data)
+    ds["tmax"] = (mu.dims, data)
     ds.attrs["distribution"] = "GEV"
     return ds
 
@@ -138,12 +156,18 @@ def simulate_precip_extremes(
     Simulates Precipitation Extremes:
     1. Intensity (Rx1day): Gamma or GEV distribution.
     2. Duration (Consecutive Wet Days - CWD): Poisson/Geometric approach.
+
+    The seed is salted per variable (see :func:`simulate_temp_extremes`).
+
+    Note: CWD is modelled as a Poisson draw whose mean is floored at 1.0
+    — a count model, not a true maximum over wet runs; it captures the
+    trend in duration, not the extremal behaviour of run lengths.
     """
     if "year" not in gmst_da.sizes:
         raise ValueError("gmst_da must include a 'year' dimension.")
     if "site" not in spatial_ds.sizes:
         raise ValueError("spatial_ds must include a 'site' dimension.")
-    rng = np.random.default_rng(seed)
+    rng = _variable_rng("precip", seed)
 
     # --- A. Intensity (Rx1day - Annual Max Precip) ---
     # Physical intuition: Warmer air holds more moisture (Clausius-Clapeyron ~7%/K)
@@ -161,10 +185,11 @@ def simulate_precip_extremes(
 
     # Values must be broadcast manually for numpy sampling if using arrays
     # But Xarray math handles the broadcasting for parameters
-    # We sample:
+    # We sample (transpose by *name* so inputs with unexpected dims error
+    # clearly instead of being silently mislabeled):
     rx1day = rng.gamma(
         shape=gamma_shape,
-        scale=gamma_scale.values.transpose(),  # (year, site)
+        scale=gamma_scale.transpose("year", "site").values,
     )
 
     # --- B. Duration (CWD - Max consecutive wet days) ---
@@ -173,10 +198,12 @@ def simulate_precip_extremes(
     trend_duration = 1.0 - 0.2 * gmst_da
 
     lambda_param = base_duration * trend_duration
-    lambda_param = np.maximum(1.0, lambda_param)  # Ensure positive
+    # Floor the Poisson mean at 1.0 (not just positivity — it clamps the
+    # low-duration tail so every site averages at least one wet day).
+    lambda_param = np.maximum(1.0, lambda_param)
 
     # Poisson for count data
-    cwd = rng.poisson(lambda_param.values.transpose())
+    cwd = rng.poisson(lambda_param.transpose("year", "site").values)
 
     ds = xr.Dataset(
         coords={"year": gmst_da.year, "site": spatial_ds.site},
@@ -196,7 +223,10 @@ def simulate_wind_extremes(
 ) -> xr.Dataset:
     """
     Simulates Extreme Wind Speeds (Gusts) using Weibull distribution.
+
+    The seed is salted per variable (see :func:`simulate_temp_extremes`).
     """
+    rng = _variable_rng("wind", seed)
     # Wind often higher at higher elevation and near coast (ignored coast for now)
     base_wind = 15.0 + 0.01 * spatial_ds["elevation"]  # m/s
 
@@ -214,9 +244,9 @@ def simulate_wind_extremes(
     # Scipy weibull_min takes 'c' as shape parameter
     wind_max = weibull_min.rvs(
         c=k_shape,
-        scale=w_scale_time.values.transpose(),
+        scale=w_scale_time.transpose("year", "site").values,
         loc=0,
-        random_state=seed,
+        random_state=rng,
     )
 
     ds = xr.Dataset(

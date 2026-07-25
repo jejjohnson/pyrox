@@ -74,7 +74,14 @@ def quantile_threshold(
     >>> # 99th percentile, computed separately for each location
     >>> thresh = quantile_threshold(da, 0.99, dim='time')
     """
-    return da.quantile(quantile, dim=dim)
+    # Drop the scalar `quantile` coordinate xarray attaches — it leaks
+    # into downstream arithmetic (any later combination with another
+    # quantile-carrying array would conflict on the coord).
+    result = da.quantile(quantile, dim=dim).drop_vars("quantile")
+    if result.ndim == 0:
+        # Fully reduced: honour the documented `float` return type.
+        return float(result)
+    return result
 
 
 def temporal_threshold(
@@ -103,8 +110,9 @@ def temporal_threshold(
         - 'time.month' : monthly (1-12)
         - 'time.year' : annual
         - 'time.dayofyear' : day of year (1-365/366)
-        - 'time.week' : week of year
         - 'time.hour' : hour of day
+        (For week-of-year grouping, precompute an isocalendar week
+        coordinate; the ``'time.week'`` accessor is deprecated.)
     time_dim : str, default 'time'
         Name of the time dimension
     method : str, default 'quantile'
@@ -129,8 +137,8 @@ def temporal_threshold(
     >>> # Annual maximum
     >>> thresh = temporal_threshold(da, 0.95, groupby='time.year', method='max')
 
-    >>> # Weekly mean thresholds
-    >>> thresh = temporal_threshold(da, 0.9, groupby='time.week', method='mean')
+    >>> # Day-of-year mean thresholds
+    >>> thresh = temporal_threshold(da, 0.9, groupby='time.dayofyear', method='mean')
 
     Notes
     -----
@@ -147,7 +155,9 @@ def temporal_threshold(
 
     # Compute threshold for each group
     if method == "quantile":
-        threshold_by_group = grouped.quantile(quantile, dim=time_dim)
+        threshold_by_group = grouped.quantile(quantile, dim=time_dim).drop_vars(
+            "quantile"
+        )
     elif method == "mean":
         threshold_by_group = grouped.mean(dim=time_dim)
     elif method == "median":
@@ -197,12 +207,16 @@ def rolling_threshold(
     center : bool, default True
         If True, set window labels at center of window
     min_periods : int, optional
-        Minimum number of observations required in window. If None, uses window_size.
+        Minimum number of observations required in window. If None, uses
+        window_size. Windows with fewer valid observations (e.g. at the
+        series edges) return NaN.
 
     Returns
     -------
     xr.DataArray
-        Time-varying threshold values with smooth temporal variation
+        Time-varying threshold values with smooth temporal variation.
+        Positions whose window holds fewer than ``min_periods`` valid
+        observations are NaN.
 
     Examples
     --------
@@ -228,9 +242,14 @@ def rolling_threshold(
         {time_dim: window_size}, center=center, min_periods=min_periods
     )
     # xarray removed DataArrayRolling.quantile; materialize the window axis
-    # with construct and take the quantile along it.
+    # with construct and take the quantile along it. `construct` does not
+    # apply `min_periods` (and `.quantile` skips NaN), so partial edge
+    # windows must be masked explicitly — otherwise they'd return
+    # quantiles of only 1..window_size-1 samples.
     windowed = rolling.construct("_window")
-    return windowed.quantile(quantile, dim="_window")
+    result = windowed.quantile(quantile, dim="_window").drop_vars("quantile")
+    valid = windowed.notnull().sum("_window") >= min_periods
+    return result.where(valid)
 
 
 # Alias for backward compatibility

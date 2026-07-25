@@ -23,7 +23,7 @@ from typing import Literal
 import numpy as np
 import xarray as xr
 from scipy.integrate import solve_ivp
-from scipy.interpolate import interp1d
+from scipy.signal import lfilter
 
 
 # ==============================================================================
@@ -58,15 +58,18 @@ def generate_gmst_trajectory(
     elif trend_type == "logistic":
         # S-curve (stabilization scenario)
         trend = 1.0 / (1 + np.exp(-10 * (t - 0.5)))
+    else:
+        raise ValueError(
+            f"Unknown trend_type: {trend_type!r}. "
+            "Choose from: 'linear', 'exponential', 'logistic'"
+        )
 
-    # Add AR(1) red noise to mimic internal climate variability
-    noise = np.zeros(n_years)
+    # Add AR(1) red noise to mimic internal climate variability:
+    # noise[i] = alpha * noise[i-1] + epsilon[i], expressed as the IIR
+    # filter 1 / (1 - alpha z^-1) applied to the innovations.
     epsilon = rng.normal(0, noise_std, n_years)
     alpha = 0.6  # Autocorrelation factor
-
-    noise[0] = epsilon[0]
-    for i in range(1, n_years):
-        noise[i] = alpha * noise[i - 1] + epsilon[i]
+    noise = lfilter([1.0], [1.0, -alpha], epsilon)
 
     gmst = trend + noise
 
@@ -164,16 +167,18 @@ def generate_physical_gmst(
         eruption_magnitudes = np.empty(0, dtype=float)
 
     def forcing_volcano(t):
-        val = 0.0
-        # Sum effect of all previous eruptions
-        for et, mag in zip(eruption_times, eruption_magnitudes, strict=False):
-            if t > et:
-                # Eruptions cause cooling (negative forcing)
-                # Rapid onset, slow decay (e.g. 2 year lifetime)
-                dt = t - et
-                decay = np.exp(-dt / 2.0)
-                val -= mag * decay * (dt * 2)  # Shape pulse
-        return val
+        # Vectorised over t: sum the pulse of every eruption already in
+        # the past. Eruptions cause cooling (negative forcing) with a
+        # rapid onset and slow decay (~2 year lifetime).
+        t_arr = np.asarray(t, dtype=float)
+        dt = t_arr[..., None] - eruption_times  # (..., n_eruptions)
+        active = dt > 0
+        # Zero out inactive entries *before* exp so future eruptions
+        # (dt < 0) can't overflow exp(-dt/2).
+        dt_safe = np.where(active, dt, 0.0)
+        pulse = eruption_magnitudes * np.exp(-dt_safe / 2.0) * (dt_safe * 2.0)
+        val = -np.sum(np.where(active, pulse, 0.0), axis=-1)
+        return val if val.ndim else float(val)
 
     # D. Stochastic Weather/Internal Variability (Ornstein-Uhlenbeck / Red Noise)
     #    Since ODE solvers need continuous functions, we pre-generate noise
@@ -183,16 +188,17 @@ def generate_physical_gmst(
     noise_t = np.linspace(0, n_years, noise_steps)
     white_noise = rng.normal(0, 0.2, size=noise_steps)
 
-    # Generate Red Noise (AR1)
-    red_noise = np.zeros_like(white_noise)
+    # Generate Red Noise (AR1): red[i] = alpha*red[i-1] + (1-alpha)*white[i]
+    # with red[0] = 0, via the IIR filter (1-alpha) / (1 - alpha z^-1).
+    # Zeroing the first innovation reproduces the red[0] = 0 start.
     alpha = 0.95
-    for i in range(1, noise_steps):
-        red_noise[i] = alpha * red_noise[i - 1] + (1 - alpha) * white_noise[i]
+    innovations = white_noise.copy()
+    innovations[0] = 0.0
+    red_noise = lfilter([1.0 - alpha], [1.0, -alpha], innovations)
 
-    # Create continuous noise function
-    forcing_noise_func = interp1d(
-        noise_t, red_noise, kind="linear", fill_value=0.0, bounds_error=False
-    )
+    # Create continuous noise function (0 outside the sampled range).
+    def forcing_noise_func(t):
+        return np.interp(t, noise_t, red_noise, left=0.0, right=0.0)
 
     # --------------------------------------------------------------------------
     # 3. Solve ODE
@@ -222,18 +228,20 @@ def generate_physical_gmst(
     sol = solve_ivp(
         system_dynamics, t_span=(0, n_years), y0=y0, t_eval=t_eval, method="RK45"
     )
+    if not sol.success:
+        raise RuntimeError(f"EBM ODE integration failed: {sol.message}")
 
     # --------------------------------------------------------------------------
     # 4. Packaging Results
     # --------------------------------------------------------------------------
 
-    # Reconstruct forcing components for the output dataset
-    # (Expensive loop, but fine for dataset generation)
-    f_ghg = [forcing_ghg(t) for t in sol.t]
-    f_volc = [forcing_volcano(t) for t in sol.t]
-    f_solar = [forcing_solar(t) for t in sol.t]
-    f_noise = [forcing_noise_func(t) for t in sol.t]
-    f_total = np.array(f_ghg) + np.array(f_volc) + np.array(f_solar) + np.array(f_noise)
+    # Reconstruct forcing components for the output dataset (all four
+    # forcing functions are vectorised over t).
+    f_ghg = forcing_ghg(sol.t)
+    f_volc = forcing_volcano(sol.t)
+    f_solar = forcing_solar(sol.t)
+    f_noise = forcing_noise_func(sol.t)
+    f_total = f_ghg + f_volc + f_solar + f_noise
 
     years_abs = start_year + sol.t
 

@@ -105,6 +105,87 @@ class TestSpatial:
         del before
 
 
+class TestRNGDiscipline:
+    """#70 — per-variable salted streams and Generator-API unification."""
+
+    def test_cross_variable_independence(self):
+        """Default (equal) seeds must not make nominally independent
+        variables comonotonic. Previously temp and wind shared the same
+        legacy `random_state=42` uniform stream, giving corr ≈ 0.9992."""
+        gmst = generate_gmst_trajectory(n_years=200, seed=0)
+        space = generate_spatial_field(n_sites=1, seed=0)
+        mu = compute_climate_signal(space, gmst, base_val=20.0, coeffs={"gmst": 1.0})
+        temp = simulate_temp_extremes(mu)  # default seed
+        wind = simulate_wind_extremes(space, gmst)  # default seed
+
+        # Detrend by removing the shared GMST-driven signal component:
+        # correlate the residuals around each variable's own year-mean.
+        t = temp["tmax"].values[:, 0] - np.asarray(mu.values)[:, 0]
+        w = wind["wind_max"].values[:, 0] - (15.0 + 0.5 * gmst.values)
+        corr = np.corrcoef(t, w)[0, 1]
+        assert abs(corr) < 0.15
+
+    def test_same_seed_reproducible(self):
+        gmst = generate_gmst_trajectory(n_years=10, seed=0)
+        space = generate_spatial_field(n_sites=5, seed=0)
+        a = simulate_wind_extremes(space, gmst, seed=7)
+        b = simulate_wind_extremes(space, gmst, seed=7)
+        np.testing.assert_array_equal(a["wind_max"].values, b["wind_max"].values)
+        c = simulate_wind_extremes(space, gmst, seed=8)
+        assert not np.array_equal(a["wind_max"].values, c["wind_max"].values)
+
+
+class TestCleanupBatch:
+    """#71 — assorted API-hygiene regressions."""
+
+    def test_invalid_trend_type_raises_value_error(self):
+        """Previously an invalid trend_type fell through every branch and
+        crashed with UnboundLocalError on `trend`."""
+        with pytest.raises(ValueError, match="trend_type"):
+            generate_gmst_trajectory(trend_type="quadratic")  # type: ignore[arg-type]
+
+    def test_augment_spatial_features_does_not_mutate_input(self):
+        from xtremax.simulations.spatial import (
+            augment_spatial_features,
+            create_iberian_domain,
+        )
+
+        ds = create_iberian_domain(res_deg=0.5, seed=0)
+        before = set(ds.data_vars)
+        out = augment_spatial_features(ds)
+        assert set(ds.data_vars) == before  # input untouched
+        assert "slope" in out.data_vars and "roughness" in out.data_vars
+
+    def test_spatial_features_handle_transposed_input(self):
+        """Codex round on #86: a dataset storing its variables as
+        (lon, lat) must produce the same labeled features as the
+        (lat, lon) layout — the extractors transpose by name."""
+        from xtremax.simulations.spatial import (
+            augment_spatial_features,
+            create_iberian_domain,
+        )
+
+        ds = create_iberian_domain(res_deg=0.5, seed=0)
+        ds_t = ds.transpose("lon", "lat")
+        out = augment_spatial_features(ds)
+        out_t = augment_spatial_features(ds_t)
+        for var in ("dist_to_coast", "slope", "aspect", "roughness"):
+            np.testing.assert_allclose(
+                out[var].transpose("lat", "lon").values,
+                out_t[var].transpose("lat", "lon").values,
+                equal_nan=True,
+            )
+
+    def test_simulators_reject_transposed_parameter_fields(self):
+        """Blind `.values.transpose()` used to silently mislabel data when
+        inputs arrived with unexpected dims; named transposes now raise."""
+        gmst = generate_gmst_trajectory(n_years=10, seed=0)
+        space = generate_spatial_field(n_sites=5, seed=0)
+        bad_gmst = gmst.rename({"year": "t"})
+        with pytest.raises((ValueError, KeyError)):
+            simulate_wind_extremes(space, bad_gmst, seed=0)
+
+
 class TestExtremes:
     def test_spatial_field(self):
         ds = generate_spatial_field(n_sites=20, seed=0)

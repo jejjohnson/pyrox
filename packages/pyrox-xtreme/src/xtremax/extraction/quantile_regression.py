@@ -27,9 +27,17 @@ from __future__ import annotations
 
 import numpy as np
 import xarray as xr
-from sklearn.base import BaseEstimator, RegressorMixin
-from sklearn.linear_model import QuantileRegressor as _SklearnQuantileRegressor
-from sklearn.utils.validation import check_is_fitted
+
+
+try:
+    from sklearn.base import BaseEstimator, RegressorMixin
+    from sklearn.linear_model import QuantileRegressor as _SklearnQuantileRegressor
+    from sklearn.utils.validation import check_is_fitted
+except ImportError as _err:
+    raise ImportError(
+        "Quantile-regression thresholds require scikit-learn, which is an "
+        "optional dependency. Install it with: pip install 'xtremax[threshold]'"
+    ) from _err
 
 
 # ---------------------------------------------------------------------------
@@ -153,7 +161,10 @@ class XarrayQuantileRegressor(BaseEstimator, RegressorMixin):
 def _time_to_numeric(time_values: np.ndarray) -> np.ndarray:
     """Convert datetime-like values to float days since first observation.
 
-    Handles ``np.datetime64`` and already-numeric arrays.
+    Handles ``np.datetime64`` and already-numeric arrays. ``cftime``
+    objects (non-standard calendars) are *not* supported — they reach the
+    ``float64`` cast below and raise; convert such axes to
+    ``np.datetime64`` (e.g. via ``xr.Dataset.convert_calendar``) first.
     """
     if np.issubdtype(np.asarray(time_values).dtype, np.datetime64):
         t0 = time_values[0]
@@ -190,7 +201,19 @@ def _build_feature_matrix(
         # targets and produces numerically wrong thresholds with no
         # error raised.
         covariates = covariates.reindex({time_dim: da.coords[time_dim]})
+        # Put the time axis first so raw `.values` columns line up with
+        # the response regardless of the covariate's stored dim order.
+        covariates = covariates.transpose(time_dim, ...)
         cov_np = covariates.values
+        if np.isnan(cov_np).any():
+            raise ValueError(
+                "Covariates contain NaN after alignment to the response's "
+                f"{time_dim!r} coordinate — either the covariate series has "
+                "missing values, or it lacks some of the response's "
+                "timestamps (reindexing fills those rows with NaN). "
+                "sklearn's QuantileRegressor cannot fit NaN rows; drop or "
+                "fill them first."
+            )
         if cov_np.ndim == 1:
             columns.append(cov_np)
             feature_names.append("covariate_0")

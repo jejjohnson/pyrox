@@ -19,8 +19,8 @@ def temporal_block_maxima(
     da : xr.DataArray
         Input data array
     freq : str
-        Frequency string for temporal grouping (e.g., '1Y' for annual,
-        '1M' for monthly, '7D' for weekly, '3H' for 3-hourly)
+        Frequency string for temporal grouping (e.g., 'YS' for annual,
+        'MS' for monthly, '7D' for weekly, '3h' for 3-hourly)
     time_dim : str, default 'time'
         Name of the time dimension
     min_periods : int, optional
@@ -35,13 +35,13 @@ def temporal_block_maxima(
     Examples
     --------
     >>> # Annual maxima
-    >>> annual_max = temporal_block_maxima(da, '1Y')
+    >>> annual_max = temporal_block_maxima(da, 'YS')
 
     >>> # Monthly maxima with at least 20 observations per month
-    >>> monthly_max = temporal_block_maxima(da, '1M', min_periods=20)
+    >>> monthly_max = temporal_block_maxima(da, 'MS', min_periods=20)
 
     >>> # Seasonal maxima (3-month blocks)
-    >>> seasonal_max = temporal_block_maxima(da, '3M')
+    >>> seasonal_max = temporal_block_maxima(da, '3MS')
     """
     resampler = da.resample({time_dim: freq})
 
@@ -182,9 +182,21 @@ def sliding_block_maxima(
     rolling = da.rolling({dim: window_size}, center=center, min_periods=min_periods)
     maxima = rolling.max()
 
-    # Apply stride by subsampling
+    # Apply stride by subsampling, starting from the first *valid*
+    # window — the first position whose window holds at least
+    # min_periods samples. With the default min_periods == window_size
+    # that is the first complete window, so stride == window_size
+    # reproduces non-overlapping blocks (coarsen equivalence); an
+    # explicit smaller min_periods keeps the valid partial edge windows
+    # instead of discarding them. Rolling labels sit at the window end
+    # (center=False) or centre (center=True, window spanning
+    # [i - w//2, i + (w-1)//2]).
     if stride > 1:
-        maxima = maxima.isel({dim: slice(None, None, stride)})
+        if center:
+            offset = max(0, min_periods - 1 - (window_size - 1) // 2)
+        else:
+            offset = min_periods - 1
+        maxima = maxima.isel({dim: slice(offset, None, stride)})
 
     return maxima
 
@@ -215,7 +227,8 @@ def declustered_block_maxima(
         Dimension along which to decluster
     method : str, default 'runs'
         Declustering method:
-        - 'runs': Select maximum from each exceedance run
+        - 'runs': Select maximum from each exceedance run, merging runs
+          whose below-threshold gap is shorter than ``min_separation``
         - 'separation': Enforce minimum time separation between peaks
 
     Returns
@@ -246,7 +259,15 @@ def declustered_block_maxima(
     if method == "runs":
         # Delegate so run IDs are computed per non-`dim` slice and cannot
         # collide across batch rows (e.g. different sites).
-        reduced = decluster_runs(da, threshold=threshold, dim=dim, reduction="max")
+        # `min_separation` is the runs parameter r: below-threshold gaps
+        # shorter than it are intra-cluster.
+        reduced = decluster_runs(
+            da,
+            threshold=threshold,
+            dim=dim,
+            reduction="max",
+            min_separation=min_separation,
+        )
         return reduced.dropna(dim, how="all")
 
     elif method == "separation":
@@ -290,12 +311,14 @@ def r_largest_block_maxima(
     Returns
     -------
     xr.DataArray
-        Array with r-largest values from each block, with new dimension 'order'
+        Array with r-largest values from each block, with new dimension 'order'.
+        For integer ``block_size``, a trailing partial block (fewer than
+        ``block_size`` samples) is trimmed and does not contribute values.
 
     Examples
     --------
     >>> # 3 largest values from each year
-    >>> annual_r_largest = r_largest_block_maxima(da, '1Y', r=3)
+    >>> annual_r_largest = r_largest_block_maxima(da, 'YS', r=3)
 
     >>> # Top 5 values from 100-element blocks
     >>> block_r_largest = r_largest_block_maxima(da, 100, r=5)
@@ -338,7 +361,13 @@ def r_largest_block_maxima(
                 output_core_dims=[["order"]],
                 vectorize=True,
                 output_dtypes=[float],
-                dask_gufunc_kwargs={"output_sizes": {"order": r}},
+                dask="parallelized",
+                dask_gufunc_kwargs={
+                    "output_sizes": {"order": r},
+                    # Core-dim inputs chunked along `dim` must be
+                    # consolidated before the gufunc runs.
+                    "allow_rechunk": True,
+                },
             )
 
         result = groups.map(_group_top_r)
@@ -352,6 +381,12 @@ def r_largest_block_maxima(
         # structure instead of flattening every non-``dim`` axis into
         # the block-wise top-r pool.
         n_blocks = da.sizes[dim] // block_size
+        if n_blocks == 0:
+            raise ValueError(
+                f"Series has {da.sizes[dim]} samples along {dim!r}, shorter "
+                f"than one block of size {block_size}; no block maxima can "
+                "be extracted."
+            )
         trimmed_length = n_blocks * block_size
         trimmed = da.isel({dim: slice(0, trimmed_length)})
 
@@ -366,7 +401,13 @@ def r_largest_block_maxima(
                 output_core_dims=[["order"]],
                 vectorize=True,
                 output_dtypes=[float],
-                dask_gufunc_kwargs={"output_sizes": {"order": r}},
+                dask="parallelized",
+                dask_gufunc_kwargs={
+                    "output_sizes": {"order": r},
+                    # Core-dim inputs chunked along `dim` must be
+                    # consolidated before the gufunc runs.
+                    "allow_rechunk": True,
+                },
             )
 
         result = trimmed.groupby("_block").map(_per_block_top_r)

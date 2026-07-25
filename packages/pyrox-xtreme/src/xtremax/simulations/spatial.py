@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 import xarray as xr
-from scipy.ndimage import distance_transform_edt, gaussian_filter
+from scipy.ndimage import distance_transform_edt, gaussian_filter, uniform_filter
 
 
 # ==============================================================================
@@ -163,7 +163,9 @@ class SpatialFeatureExtractor:
         Calculates Euclidean distance to the nearest coast (mask boundary).
         Uses SciPy's Distance Transform.
         """
-        mask = ds["mask"].values
+        # Transpose by name so datasets storing (lon, lat) — or any other
+        # order — are processed and labeled correctly.
+        mask = ds["mask"].transpose("lat", "lon").values
         # distance_transform_edt calculates distance to background (0)
         # We want distance from land (1) to ocean (0)
         dist_grid = distance_transform_edt(mask)
@@ -174,7 +176,7 @@ class SpatialFeatureExtractor:
         dist_km = dist_grid * float(res_deg) * 111.0
 
         return xr.DataArray(
-            dist_km, coords=ds.coords, dims=ds.dims, name="dist_to_coast"
+            dist_km, coords=ds.coords, dims=("lat", "lon"), name="dist_to_coast"
         )
 
     @staticmethod
@@ -184,12 +186,22 @@ class SpatialFeatureExtractor:
         Slope is critical for orographic precipitation.
         Aspect is critical for solar insolation (South vs North facing).
         """
-        elev = ds["elevation"].values
+        # Transpose by name so the row axis is latitude regardless of the
+        # dataset's stored dim order (the per-row cos(lat) scaling below
+        # depends on it).
+        elev = ds["elevation"].transpose("lat", "lon").values
         res_deg = float(ds.lat[1] - ds.lat[0])
-        dx_meters = res_deg * 111000.0
 
-        # Numpy gradient: returns (dy, dx)
-        grad_y, grad_x = np.gradient(elev, dx_meters)
+        # Metric spacing differs per axis: one degree of longitude spans
+        # 111 km · cos(latitude), so using the N–S spacing for both axes
+        # overstates E–W gradients by ~30% at 40°N. Take gradients in
+        # degree units, then rescale each axis by its own metres-per-degree
+        # factor (per-row for longitude).
+        grad_y_deg, grad_x_deg = np.gradient(elev, res_deg, res_deg)
+        m_per_deg_lat = 111000.0
+        m_per_deg_lon = m_per_deg_lat * np.cos(np.radians(ds["lat"].values))[:, None]
+        grad_y = grad_y_deg / m_per_deg_lat
+        grad_x = grad_x_deg / m_per_deg_lon
 
         # Slope (Magnitude) in degrees
         slope_rad = np.arctan(np.sqrt(grad_x**2 + grad_y**2))
@@ -200,9 +212,11 @@ class SpatialFeatureExtractor:
         aspect_rad = np.arctan2(-grad_x, grad_y)  # Mathematical convention to compass
         aspect_deg = (np.degrees(aspect_rad) + 360) % 360
 
-        da_slope = xr.DataArray(slope_deg, coords=ds.coords, dims=ds.dims, name="slope")
+        da_slope = xr.DataArray(
+            slope_deg, coords=ds.coords, dims=("lat", "lon"), name="slope"
+        )
         da_aspect = xr.DataArray(
-            aspect_deg, coords=ds.coords, dims=ds.dims, name="aspect"
+            aspect_deg, coords=ds.coords, dims=("lat", "lon"), name="aspect"
         )
 
         return da_slope, da_aspect
@@ -213,15 +227,21 @@ class SpatialFeatureExtractor:
         Calculates Terrain Roughness Index (TRI).
         Roughness = Std Dev of elevation in a local window.
         """
-        elev = ds["elevation"].values
-        # We use a uniform filter to get local mean, then compute variance
-        local_mean = gaussian_filter(elev, sigma=window_size)
-        local_sq_mean = gaussian_filter(elev**2, sigma=window_size)
+        # Transpose by name so the output labels match the array layout
+        # for any stored dim order.
+        elev = ds["elevation"].transpose("lat", "lon").values
+        # Uniform (boxcar) window of `window_size` pixels, matching the
+        # TRI definition — previously this used a Gaussian filter with
+        # sigma=window_size, i.e. a much wider, weighted window.
+        local_mean = uniform_filter(elev, size=window_size)
+        local_sq_mean = uniform_filter(elev**2, size=window_size)
 
         # Var = E[x^2] - (E[x])^2
         roughness = np.sqrt(np.maximum(0, local_sq_mean - local_mean**2))
 
-        return xr.DataArray(roughness, coords=ds.coords, dims=ds.dims, name="roughness")
+        return xr.DataArray(
+            roughness, coords=ds.coords, dims=("lat", "lon"), name="roughness"
+        )
 
 
 # ==============================================================================
@@ -230,7 +250,13 @@ class SpatialFeatureExtractor:
 
 
 def augment_spatial_features(ds: xr.Dataset) -> xr.Dataset:
-    """Pipeline to run all extractors and merge into Dataset."""
+    """Pipeline to run all extractors and merge into Dataset.
+
+    Returns a new Dataset; the input is not modified.
+    """
+    # Shallow copy so assignments below don't mutate the caller's Dataset
+    # (repo convention: pure functions, side effects explicit).
+    ds = ds.copy()
     extractor = SpatialFeatureExtractor()
 
     ds["dist_to_coast"] = extractor.get_distance_to_coast(ds)
