@@ -8,7 +8,12 @@
   module.
 * Multi-output GP structures — `LMCKernel`, `ICMKernel`,
   `OILMMKernel`, and shared inducing-point helpers for explicit
-  cross-output structure without monolithic model classes.
+  cross-output structure without monolithic model classes — plus the
+  model layer on top: `MultiOutputGPPrior` /
+  `MultiOutputConditionedGP` / `mo_gp_factor` for exact
+  inference and `MultiOutputSparseGPPrior` /
+  `mo_svgp_elbo` / `mo_svgp_factor` for the inducing-input
+  variational path (reusing the single-output guides).
 * Abstract protocols (`Kernel`, `Guide`,
   `Likelihood`) plus five concrete sparse
   variational guides — `FullRankGuide`, `MeanFieldGuide`,
@@ -121,6 +126,14 @@ from pyrox_gp._multi_output import (
     OILMMKernel,
     SharedInducingPoints,
 )
+from pyrox_gp._multi_output_models import (
+    MultiOutputConditionedGP,
+    MultiOutputGPPrior,
+    MultiOutputSparseGPPrior,
+    mo_gp_factor,
+    mo_svgp_elbo,
+    mo_svgp_factor,
+)
 from pyrox_gp._pathwise import (
     DecoupledPathwiseSampler,
     PathwiseFunction,
@@ -180,7 +193,10 @@ __all__ = [
     "Matern",
     "MaternSDE",
     "MeanFieldGuide",
+    "MultiOutputConditionedGP",
+    "MultiOutputGPPrior",
     "MultiOutputInducingVariables",
+    "MultiOutputSparseGPPrior",
     "NaturalGuide",
     "NonGaussConditionedGP",
     "NonGaussConditionedMarkovGP",
@@ -216,6 +232,9 @@ __all__ = [
     "gp_sample",
     "markov_gp_factor",
     "markov_gp_sample",
+    "mo_gp_factor",
+    "mo_svgp_elbo",
+    "mo_svgp_factor",
     "sparse_markov_elbo",
     "sparse_markov_factor",
     "svgp_elbo",
