@@ -84,24 +84,22 @@ class TestSurvival:
         log_s = gev_log_survival(x, 0.0, 1.0, -0.1)
         assert jnp.allclose(jnp.exp(log_s), s, atol=1e-6)
 
-    def test_deep_tail_accuracy_float64(self):
-        """`1 - cdf` cancels to 0 in the deep tail; `gev_survival` does not."""
-        from jax import config
+    def test_deep_tail_accuracy(self):
+        """`1 - cdf` cancels to 0 in the deep tail; `gev_survival` does not.
 
-        prior_x64 = config.read("jax_enable_x64")
-        config.update("jax_enable_x64", True)
-        try:
-            x = jnp.asarray(40.0, dtype=jnp.float64)  # Gumbel, S ~ e^-40 ~ 4e-18
-            s = gev_survival(x, 0.0, 1.0, 0.0)
-            naive = 1.0 - gev_cdf(x, 0.0, 1.0, 0.0)
-            assert float(s) > 0.0
-            assert jnp.allclose(s, jnp.exp(-40.0), rtol=1e-6)
-            # The naive form has lost all precision (rounds to exactly 0).
-            assert float(naive) == 0.0
-        finally:
-            # Restore the prior setting rather than forcing float32, so a suite
-            # run under JAX_ENABLE_X64=1 is not silently downgraded afterward.
-            config.update("jax_enable_x64", prior_x64)
+        Float32 in-process check. The float64 twin runs in a subprocess
+        (``tests/test_oracles.py::TestFloat64Isolation``) so the global
+        ``jax_enable_x64`` flag is never mutated mid-session — the old
+        in-process ``config.update`` pattern was flaky under parallel
+        runners and leaked JIT-cache state (#72).
+        """
+        x = jnp.asarray(20.0)  # Gumbel, S ~ e^-20 ~ 2e-9
+        s = gev_survival(x, 0.0, 1.0, 0.0)
+        naive = 1.0 - gev_cdf(x, 0.0, 1.0, 0.0)
+        assert float(s) > 0.0
+        assert jnp.allclose(s, jnp.exp(-20.0), rtol=1e-5)
+        # The naive form has lost all precision (rounds to exactly 0).
+        assert float(naive) == 0.0
 
     def test_out_of_support_boundaries(self):
         # Fréchet (ξ>0): below lower endpoint S = 1.

@@ -328,7 +328,12 @@ class GeneralizedExtremeValueDistribution(dist.Distribution):
         def gevd_variance():
             gamma1 = jnp.exp(gammaln(1.0 - 2.0 * shape))
             gamma2 = jnp.exp(2.0 * gammaln(1.0 - shape))
-            return (scale**2 / shape**2) * (gamma1 - gamma2)
+            # Substitute a safe divisor where the Gumbel branch is taken:
+            # with Python-float parameters ``shape**2`` divides eagerly
+            # (both jnp.where branches evaluate), so ξ = 0 raised
+            # ZeroDivisionError before the mask could select the branch.
+            safe_shape = jnp.where(is_gumbel, 1.0, shape)
+            return (scale**2 / safe_shape**2) * (gamma1 - gamma2)
 
         var_gumbel = gumbel_variance()
         var_gevd = gevd_variance()
@@ -507,7 +512,12 @@ class GeneralizedExtremeValueDistribution(dist.Distribution):
         Returns:
             Tail index (1/ξ for ξ > 0, ∞ for ξ ≤ 0)
         """
-        return jnp.where(self.concentration > 0, 1.0 / self.concentration, jnp.inf)
+        shape = jnp.asarray(self.concentration)
+        # Safe divisor: with Python-float parameters the division happens
+        # eagerly in both jnp.where branches, so ξ = 0 raised
+        # ZeroDivisionError before the mask applied.
+        safe_shape = jnp.where(shape > 0, shape, 1.0)
+        return jnp.where(shape > 0, 1.0 / safe_shape, jnp.inf)
 
     def exceedance_probability(self, threshold: jnp.ndarray) -> jnp.ndarray:
         """

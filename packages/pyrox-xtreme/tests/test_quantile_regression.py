@@ -79,6 +79,14 @@ class TestQuantileRegression:
         u = quantile_regression_threshold(daily_series, quantile=0.95, time_dim="time")
         assert u.shape == daily_series.shape
 
+    def test_pinball_coverage(self, daily_series):
+        """#75 — the fitted τ-quantile threshold must leave ≈ (1 − τ)
+        of the responses above it (pinball-loss coverage property)."""
+        tau = 0.9
+        u = quantile_regression_threshold(daily_series, quantile=tau, time_dim="time")
+        frac_below = float((daily_series < u).mean())
+        assert abs(frac_below - tau) < 0.03
+
     def test_misaligned_covariate_raises(self):
         """Covariates missing timestamps become NaN rows after reindexing;
         sklearn would raise an opaque error (or silently misfit), so the
