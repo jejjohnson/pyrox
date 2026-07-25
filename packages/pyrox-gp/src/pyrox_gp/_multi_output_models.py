@@ -19,6 +19,11 @@ The model surface on top of the multi-output kernels in
   consume, so one guide over the stacked ``Q * M`` inducing values
   serves the whole multi-output model. `mo_svgp_elbo` /
   `mo_svgp_factor` are the ELBO entry points.
+* **OILMM (projected exact)** — `OILMMGPPrior` /
+  `ConditionedOILMMGP` exploit the orthogonal mixing of an
+  `pyrox_gp.OILMMKernel` to condition ``Q`` independent scalar
+  GPs instead of one dense multi-output solve, matching the exact
+  posterior under orthonormal mixing and isotropic noise.
 
 All flattened quantities use the ``vec`` ordering of the Kronecker
 operators returned by the kernels — output-major ``(p n)``, i.e. entry
@@ -61,6 +66,7 @@ from jaxtyping import Array, Float
 from pyrox_gp._context import _kernel_contexts
 from pyrox_gp._inference import _ell_numerical
 from pyrox_gp._likelihoods import GaussianLikelihood
+from pyrox_gp._models import ConditionedGP, GPPrior
 from pyrox_gp._multi_output import (
     ICMKernel,
     LMCKernel,
@@ -588,3 +594,203 @@ def mo_svgp_factor(
         name,
         mo_svgp_elbo(prior, guide, likelihood, X, Y, integrator=integrator),
     )
+
+
+def _per_output_noise(
+    noise_var: Float[Array, ""] | Float[Array, " P"],
+    num_outputs: int,
+) -> Float[Array, " P"]:
+    """Expand scalar noise to a per-output ``(P,)`` vector; validate shape."""
+    noise = jnp.asarray(noise_var)
+    if noise.ndim == 0:
+        return jnp.full(num_outputs, noise)
+    if noise.shape == (num_outputs,):
+        return noise
+    raise ValueError(
+        f"noise_var must be a scalar or have shape ({num_outputs},) for "
+        f"per-output noise; got shape {noise.shape}."
+    )
+
+
+class OILMMGPPrior(eqx.Module):
+    r"""Orthogonal-mixing multi-output GP prior with a projected exact posterior.
+
+    The OILMM workflow (Bruinsma et al., 2020): with a semi-orthogonal
+    mixing matrix (``W^T W = I``) the multi-output regression problem
+    projects into ``Q`` *independent scalar GP problems* — conditioning
+    costs ``Q`` factorizations of ``(N, N)`` latent Grams instead of one
+    ``(P*N, P*N)`` dense solve, while giving the same posterior over the
+    latent processes as the exact dense model.
+
+    Exactness holds when the mixing is orthonormal and the observation
+    noise is isotropic (scalar ``noise_var``). Per-output noise vectors
+    are supported through the standard OILMM projected-noise
+    approximation ``s_latent = (W ** 2)^T s`` — see
+    `pyrox_gp.OILMMKernel.project`. For exact inference under
+    general noise, use the dense `MultiOutputGPPrior` instead.
+    That dense model is also the collapsed NumPyro path
+    (`mo_gp_factor`) for `OILMMKernel`.
+
+    Attributes:
+        kernel: `pyrox_gp.OILMMKernel` holding the latent kernels
+            and the semi-orthogonal mixing matrix. Orthogonality is
+            assumed, not enforced here — construct the kernel with
+            ``check_orthogonal=True`` to verify.
+        X: Training inputs of shape ``(N, D)``.
+        mean_fn: Callable ``X -> (N, P)`` or ``None`` for the zero mean.
+            Subtracted in output space before projection and added back
+            onto predictions.
+        solver: Any ``gaussx.AbstractSolverStrategy``, forwarded to the
+            per-latent `pyrox_gp.GPPrior` instances.
+        jitter: Diagonal regularization forwarded to each latent prior.
+    """
+
+    kernel: OILMMKernel
+    X: Float[Array, "N D"]
+    mean_fn: Callable[[Float[Array, "N D"]], Float[Array, "N P"]] | None = None
+    solver: AbstractSolverStrategy | None = None
+    jitter: float = 1e-6
+
+    @property
+    def num_outputs(self) -> int:
+        """Number of observed output channels ``P``."""
+        return self.kernel.num_outputs
+
+    @property
+    def num_latents(self) -> int:
+        """Number of latent scalar GPs ``Q``."""
+        return self.kernel.num_latents
+
+    def mean(self, X: Float[Array, "N D"]) -> Float[Array, "N P"]:
+        """Evaluate the mean function at ``X``; zero by default."""
+        if self.mean_fn is None:
+            return jnp.zeros((X.shape[0], self.num_outputs), dtype=X.dtype)
+        return self.mean_fn(X)
+
+    def latent_priors(self) -> tuple[GPPrior, ...]:
+        """Return one scalar `pyrox_gp.GPPrior` per latent process."""
+        return tuple(
+            GPPrior(kernel=kernel, X=self.X, solver=self.solver, jitter=self.jitter)
+            for kernel in self.kernel.kernels
+        )
+
+    def sample(self, key: Array) -> Float[Array, "N P"]:
+        """Draw one prior function sample over all outputs, shape ``(N, P)``.
+
+        Draws each latent process from its scalar prior and mixes
+        through ``W`` — equivalent to (and cheaper than) sampling the
+        full ``(P*N, P*N)`` OILMM covariance.
+        """
+        keys = jax.random.split(key, self.num_latents)
+        with _kernel_contexts(self.kernel.kernels):
+            latents = jnp.stack(
+                [
+                    prior.sample(k)
+                    for prior, k in zip(self.latent_priors(), keys, strict=True)
+                ],
+                axis=-1,
+            )
+        # Mix latent draws into output space: f = g W^T.
+        return self.mean(self.X) + einx.dot(
+            "n q, p q -> n p", latents, self.kernel.mixing
+        )
+
+    def condition(
+        self,
+        Y: Float[Array, "N P"],
+        noise_var: Float[Array, ""] | Float[Array, " P"],
+    ) -> ConditionedOILMMGP:
+        """Condition on observations ``Y`` via the orthogonal projection.
+
+        Projects the mean-subtracted observations and the noise into
+        latent space (`pyrox_gp.OILMMKernel.project`) and
+        conditions each scalar latent `pyrox_gp.GPPrior`
+        independently. All latent kernel evaluations share one context
+        per unique kernel instance, so a priored kernel reused across
+        latents registers its NumPyro sites once.
+        """
+        _validate_targets(Y, self.num_outputs)
+        noise = _per_output_noise(noise_var, self.num_outputs)
+        residual = Y - self.mean(self.X)
+        Y_latent, noise_latent = self.kernel.project(residual, noise)
+        with _kernel_contexts(self.kernel.kernels):
+            latents = tuple(
+                prior.condition(Y_latent[:, q], noise_latent[q])
+                for q, prior in enumerate(self.latent_priors())
+            )
+        return ConditionedOILMMGP(
+            prior=self,
+            Y=Y,
+            noise_var=noise,
+            latents=latents,
+        )
+
+
+class ConditionedOILMMGP(eqx.Module):
+    """OILMM posterior — ``Q`` conditioned scalar GPs plus the mixing.
+
+    Holds one `pyrox_gp.ConditionedGP` per latent process; every
+    prediction runs the scalar predictives and mixes back to output
+    space via `pyrox_gp.OILMMKernel.back_project` (means through
+    ``W``, variances through ``W ** 2``).
+    """
+
+    prior: OILMMGPPrior
+    Y: Float[Array, "N P"]
+    noise_var: Float[Array, " P"]
+    latents: tuple[ConditionedGP, ...]
+
+    def _latent_means(self, X_star: Float[Array, "M D"]) -> Float[Array, "M Q"]:
+        return jnp.stack([cond.predict_mean(X_star) for cond in self.latents], axis=-1)
+
+    def _latent_vars(self, X_star: Float[Array, "M D"]) -> Float[Array, "M Q"]:
+        return jnp.stack([cond.predict_var(X_star) for cond in self.latents], axis=-1)
+
+    def predict_mean(self, X_star: Float[Array, "M D"]) -> Float[Array, "M P"]:
+        """Per-output predictive mean, shape ``(M, P)``."""
+        with _kernel_contexts(self.prior.kernel.kernels):
+            latent_means = self._latent_means(X_star)
+        # Mix latent means into output space: f = g W^T.
+        f_mean = einx.dot("m q, p q -> m p", latent_means, self.prior.kernel.mixing)
+        return self.prior.mean(X_star) + f_mean
+
+    def predict_var(self, X_star: Float[Array, "M D"]) -> Float[Array, "M P"]:
+        """Per-output marginal predictive variance, shape ``(M, P)``."""
+        with _kernel_contexts(self.prior.kernel.kernels):
+            latent_vars = self._latent_vars(X_star)
+        # Independent latents: output variance mixes through W ** 2.
+        return einx.dot(
+            "m q, p q -> m p", latent_vars, jnp.square(self.prior.kernel.mixing)
+        )
+
+    def predict(
+        self, X_star: Float[Array, "M D"]
+    ) -> tuple[Float[Array, "M P"], Float[Array, "M P"]]:
+        """Return per-output ``(mean, variance)`` at ``X_*`` as ``(M, P)`` pairs.
+
+        Both latent sweeps share one kernel context; the back-projection
+        delegates to `pyrox_gp.OILMMKernel.back_project`.
+        """
+        with _kernel_contexts(self.prior.kernel.kernels):
+            latent_means = self._latent_means(X_star)
+            latent_vars = self._latent_vars(X_star)
+        f_mean, f_var = self.prior.kernel.back_project(latent_means, latent_vars)
+        return self.prior.mean(X_star) + f_mean, f_var
+
+    def sample(
+        self,
+        key: Array,
+        X_star: Float[Array, "M D"],
+        n_samples: int = 1,
+    ) -> Float[Array, "S M P"]:
+        """Sample from the diagonal predictive ``N(mean, diag(var))``.
+
+        Matches the `MultiOutputConditionedGP.sample` convention —
+        independent per input and output channel.
+        """
+        with _kernel_contexts(self.prior.kernel.kernels):
+            mean, var = self.predict(X_star)
+        std = jnp.sqrt(jnp.clip(var, min=0.0))
+        eps = jax.random.normal(key, (n_samples, *mean.shape), dtype=mean.dtype)
+        # Scale per-point, per-output std across the S sample rows.
+        return einx.multiply("m p, s m p -> s m p", std, eps) + mean
