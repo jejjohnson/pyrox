@@ -33,9 +33,23 @@ plugins:
         python:
           paths: [src]
           options:
-            docstring_style: google
+            # `auto` detects per-docstring: most of the package is Google
+            # style, but xtremax/extraction/ is NumPy style. A fixed style
+            # leaves the other one unparsed, leaking its section underlines
+            # into the page as headings.
+            docstring_style: auto
+            docstring_section_style: table
             show_source: true
             show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            heading_level: 3
+            show_signature_annotations: true
+            signature_crossrefs: true
+            merge_init_into_class: true
+            filters: ["!^_"]
   - mkdocs-jupyter:
       execute: false
       ignore_h1_titles: true
@@ -43,30 +57,36 @@ plugins:
 nav:
   - Home: index.md
   - Examples:
-      - Demo: notebooks/example_demo.ipynb
-      - GEVD on annual block maxima: notebooks/evt_gevd_block_maxima.ipynb
-      - GPD via peaks-over-threshold: notebooks/evt_gpd_pot.ipynb
-      - Quantile-regression threshold + GPD: notebooks/evt_quantile_regression_gpd.ipynb
-      - Non-stationary GEVD (parametric trend): notebooks/evt_nonstat_parametric.ipynb
-      - Non-stationary GEVD (neural ODE): notebooks/evt_nonstat_neural_ode.ipynb
-      - Non-stationary GEVD (P-splines): notebooks/evt_nonstat_splines.ipynb
-      - EVT distributions overview: notebooks/evt_distributions_overview.ipynb
-      - Fréchet on heavy-tailed maxima: notebooks/evt_frechet_heavy_tails.ipynb
-      - Weibull on bounded extremes: notebooks/evt_weibull_bounded.ipynb
-      - HPP — from scratch + NumPyro: notebooks/hpp_from_scratch_and_numpyro.ipynb
-      - IPP — from scratch + NumPyro: notebooks/ipp_from_scratch_and_numpyro.ipynb
-      - Renewal — from scratch + NumPyro: notebooks/renewal_from_scratch_and_numpyro.ipynb
-      - Hawkes — from scratch + NumPyro: notebooks/hawkes_from_scratch_and_numpyro.ipynb
-      - Marked TPP — from scratch + NumPyro: notebooks/marked_from_scratch_and_numpyro.ipynb
-      - Thinning / observation op — from scratch + NumPyro: notebooks/thinning_from_scratch_and_numpyro.ipynb
-      - HPP-spatial — from scratch + NumPyro: notebooks/hpp_spatial_from_scratch_and_numpyro.ipynb
-      - IPP-spatial — from scratch + NumPyro: notebooks/ipp_spatial_from_scratch_and_numpyro.ipynb
-      - Marked spatial — from scratch + NumPyro: notebooks/marked_spatial_from_scratch_and_numpyro.ipynb
-      - HPP-spatiotemporal — from scratch + NumPyro: notebooks/hpp_spatiotemporal_from_scratch_and_numpyro.ipynb
-      - IPP-spatiotemporal — from scratch + NumPyro: notebooks/ipp_spatiotemporal_from_scratch_and_numpyro.ipynb
-      - Marked spatiotemporal — from scratch + NumPyro: notebooks/marked_spatiotemporal_from_scratch_and_numpyro.ipynb
-      - Hawkes-spatiotemporal — from scratch + NumPyro: notebooks/hawkes_spatiotemporal_from_scratch_and_numpyro.ipynb
-      - Latent ODE for irregular IPPs: notebooks/latent_ode_ipp.ipynb
+      - Extreme Value Distributions:
+          - Distributions overview: notebooks/evt_distributions_overview.ipynb
+          - "GEVD: annual block maxima": notebooks/evt_gevd_block_maxima.ipynb
+          - "Fréchet: heavy-tailed maxima": notebooks/evt_frechet_heavy_tails.ipynb
+          - "Weibull: bounded extremes": notebooks/evt_weibull_bounded.ipynb
+      - Peaks Over Threshold:
+          - "GPD: peaks-over-threshold": notebooks/evt_gpd_pot.ipynb
+          - "GPD: quantile-regression threshold": notebooks/evt_quantile_regression_gpd.ipynb
+      - Non-stationary EVT:
+          - Parametric trend: notebooks/evt_nonstat_parametric.ipynb
+          - P-splines: notebooks/evt_nonstat_splines.ipynb
+          - Neural ODE: notebooks/evt_nonstat_neural_ode.ipynb
+      - "Point Processes: Temporal":
+          - Homogeneous Poisson: notebooks/hpp_from_scratch_and_numpyro.ipynb
+          - Inhomogeneous Poisson: notebooks/ipp_from_scratch_and_numpyro.ipynb
+          - Renewal: notebooks/renewal_from_scratch_and_numpyro.ipynb
+          - Hawkes: notebooks/hawkes_from_scratch_and_numpyro.ipynb
+          - Marked: notebooks/marked_from_scratch_and_numpyro.ipynb
+          - Thinning / observation operator: notebooks/thinning_from_scratch_and_numpyro.ipynb
+      - "Point Processes: Spatial":
+          - Homogeneous Poisson: notebooks/hpp_spatial_from_scratch_and_numpyro.ipynb
+          - Inhomogeneous Poisson: notebooks/ipp_spatial_from_scratch_and_numpyro.ipynb
+          - Marked: notebooks/marked_spatial_from_scratch_and_numpyro.ipynb
+      - "Point Processes: Spatiotemporal":
+          - Homogeneous Poisson: notebooks/hpp_spatiotemporal_from_scratch_and_numpyro.ipynb
+          - Inhomogeneous Poisson: notebooks/ipp_spatiotemporal_from_scratch_and_numpyro.ipynb
+          - Marked: notebooks/marked_spatiotemporal_from_scratch_and_numpyro.ipynb
+          - Hawkes: notebooks/hawkes_spatiotemporal_from_scratch_and_numpyro.ipynb
+      - Neural / Advanced:
+          - Latent ODE for irregular IPPs: notebooks/latent_ode_ipp.ipynb
   - Design:
       - Overview: design_docs/README.md
       - Vision: design_docs/vision.md

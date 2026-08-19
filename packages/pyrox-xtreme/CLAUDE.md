@@ -57,6 +57,23 @@ All implementation lives in `src/xtremax/`. The public API is re-exported throug
 | `notebooks/` | Jupyter notebooks |
 | `scripts/` | Example scripts |
 
+## API Reference Pages
+
+The pages in `docs/api/` are **section-structured**, not whole-module dumps:
+each `## Section` gets a short prose paragraph explaining what the group is
+for, followed by a `::: module` block with an explicit `members:` list. This
+keeps the rendered sidebar/TOC organised instead of an alphabetical wall.
+
+When you add a public symbol, add it to the `members:` list of the section it
+belongs to. `tests/test_docs_api_coverage.py` enforces that every name in a
+module's `__all__` appears on exactly one page, and that no page lists a name
+the package no longer exports.
+
+Docstring style is `auto` in `mkdocs.yml` — griffe detects per docstring,
+because most of the package is Google style while `src/xtremax/extraction/`
+is NumPy style. Don't pin it to a single style: the other one then goes
+unparsed and its section underlines leak into the page as headings.
+
 ## Documentation Examples
 
 Example notebooks live in `docs/notebooks/` as jupytext percent-format `.py` files. The workflow:
