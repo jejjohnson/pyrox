@@ -62,6 +62,7 @@ class TestHppOperator:
         tau = op.return_period(0.8)
         assert jnp.allclose(1.0 - jnp.exp(-1.5 * tau), 0.8)
 
+    @pytest.mark.slow
     def test_goodness_of_fit_on_own_samples(self):
         op = HomogeneousPoissonProcess(rate=2.0, observation_window=20.0)
         times, mask, _ = op.sample(random.PRNGKey(0), max_events=128)
@@ -72,6 +73,7 @@ class TestHppOperator:
 
 
 class TestIppOperator:
+    @pytest.mark.slow
     def test_piecewise_constant_factory(self):
         op = InhomogeneousPoissonProcess.from_piecewise_constant(
             bin_edges=jnp.array([0.0, 2.0, 5.0]),
@@ -121,6 +123,7 @@ class TestIppOperator:
         with pytest.raises(ValueError, match="lambda_max"):
             ipp.sample(random.PRNGKey(0), max_candidates=32)
 
+    @pytest.mark.slow
     def test_integrated_intensity_computed_when_none(self):
         # If integrated_intensity is omitted, log_prob should still be finite.
         def fn(t):
@@ -166,6 +169,7 @@ class TestIppOperator:
         valid = times[mask]
         assert jnp.all(jnp.diff(valid) >= -1e-7)
 
+    @pytest.mark.slow
     def test_goodness_of_fit_on_piecewise_sample(self):
         op = InhomogeneousPoissonProcess.from_piecewise_constant(
             bin_edges=jnp.array([0.0, 5.0, 10.0]),
@@ -189,6 +193,7 @@ class TestIppOperator:
 class TestRegressionsFromPrReview:
     """Regression tests guarding specific PR-review findings on PR #10."""
 
+    @pytest.mark.slow
     def test_neural_intensity_module_is_trainable(self):
         # PR review: declaring log_intensity_fn with eqx.field(static=True)
         # removed it from the PyTree, so an `eqx.Module` intensity's
@@ -221,6 +226,7 @@ class TestRegressionsFromPrReview:
         assert jnp.isfinite(grads.log_intensity_fn.a)
         assert jnp.isfinite(grads.log_intensity_fn.b)
 
+    @pytest.mark.slow
     def test_piecewise_log_intensity_is_pytree_with_leaves(self):
         # PR review: from_piecewise_constant used to build a Python
         # closure, hiding `bin_edges`/`rates` from the PyTree. They
@@ -246,6 +252,7 @@ class TestRegressionsFromPrReview:
         assert grads.log_intensity_fn.log_rates is not None
         assert jnp.all(jnp.isfinite(grads.log_intensity_fn.log_rates))
 
+    @pytest.mark.slow
     def test_inversion_sampler_mean_not_biased_early(self):
         # PR review: ipp_sample_inversion had the same order-statistic
         # bias that was fixed in thinning. With constant rate on [0, T],
@@ -301,6 +308,7 @@ class TestLiveLambdaAndIntegrated:
         expected = 3 * jnp.log(2.0) - 20.0
         assert jnp.allclose(after, expected, atol=1e-4)
 
+    @pytest.mark.slow
     def test_grad_through_log_rates_flows_into_compensator_term(self):
         # ∂log L / ∂log_rates[b] = #events_in_bin(b) - rate(b) * width(b).
         # Without the stale-cache fix the second term drops out.
@@ -350,6 +358,7 @@ class TestLiveLambdaAndIntegrated:
         )
         assert jnp.allclose(op.effective_integrated_intensity(), 123.0)
 
+    @pytest.mark.slow
     def test_sample_uses_live_lambda_max(self):
         # After bumping log_rates, thinning should draw the new number
         # of candidates (≈ λ_max_new · T instead of the old bound).

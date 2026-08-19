@@ -83,6 +83,7 @@ class TestExpHawkesLogProb:
         hpp_ll = hpp_log_prob(jnp.sum(mask), mu, T)
         assert float(hawkes_ll) == pytest.approx(float(hpp_ll), rel=1e-5)
 
+    @pytest.mark.slow
     def test_matches_general_hawkes_log_prob(self):
         event_times = jnp.array([0.3, 1.1, 2.0, 2.8])
         mask = jnp.array([True, True, True, True])
@@ -105,6 +106,7 @@ class TestExpHawkesLogProb:
         )
         assert ll_exp == pytest.approx(ll_gen, rel=1e-4)
 
+    @pytest.mark.slow
     def test_log_prob_grad_flows(self):
         """Gradients through μ, α, β are finite and non-zero."""
         event_times = jnp.array([0.3, 1.1, 2.0, 2.8])
@@ -119,6 +121,7 @@ class TestExpHawkesLogProb:
         assert jnp.all(jnp.isfinite(g))
         assert jnp.any(jnp.abs(g) > 1e-6)
 
+    @pytest.mark.slow
     def test_padding_positions_ignored(self):
         """Extending with padding must not change the log-prob."""
         real_times = jnp.array([0.3, 1.1, 2.0])
@@ -132,6 +135,7 @@ class TestExpHawkesLogProb:
 
 
 class TestExpHawkesSample:
+    @pytest.mark.slow
     def test_expected_count_matches_closed_form(self):
         """Stationary expected count: μT/(1−α/β)."""
         key = jax.random.PRNGKey(0)
@@ -144,6 +148,7 @@ class TestExpHawkesSample:
         expected = mu * T / (1 - alpha / beta)
         assert float(jnp.mean(counts)) == pytest.approx(expected, rel=0.2)
 
+    @pytest.mark.slow
     def test_sampled_times_are_sorted_and_in_window(self):
         key = jax.random.PRNGKey(0)
         t, m, _ = exp_hawkes_sample(key, jnp.asarray(10.0), 0.5, 0.3, 1.0, 128)

@@ -427,6 +427,7 @@ class TestFloat64Isolation:
     ``config.update("jax_enable_x64", ...)`` pattern is flaky under
     parallel runners and leaks JIT-cache state)."""
 
+    @pytest.mark.integration
     def test_float64_roundtrips_and_deep_tail(self):
         script = textwrap.dedent(
             """

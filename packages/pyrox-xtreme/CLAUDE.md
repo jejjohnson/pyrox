@@ -10,7 +10,9 @@ xtremax: JAX/NumPyro-native library for extreme value modeling — NumPyro EVT d
 
 ```bash
 make install              # Install all deps (uv sync --all-groups) + pre-commit hooks
-make test                 # Run tests: uv run pytest -v
+make test                 # Run the whole suite (parallel, no coverage)
+make test-fast            # Fast lane only — what CI runs on a PR (~1 min)
+make test-heavy           # Heavy lane only: slow + integration
 make format               # Auto-fix: ruff format . && ruff check --fix .
 make lint                 # Lint code: ruff check .
 make typecheck            # Type check: ty check src/xtremax
@@ -24,10 +26,30 @@ make docs-serve           # Local docs server
 uv run pytest tests/test_example.py::TestClass::test_method -v
 ```
 
+### Test lanes
+
+The suite is split by marker so PRs get a fast signal (#90):
+
+| Marker | Meaning | Runs on |
+|--------|---------|---------|
+| *(none)* | fast: primitives, oracles, gradients, extraction | every PR, ~1 min |
+| `slow` | samplers, Monte-Carlo, jit+grad sweeps | merge to `main`, `v*` tags, weekly, on demand |
+| `integration` | end-to-end MCMC fits, subprocess runs | same as `slow` |
+
+Add `@pytest.mark.slow` to any new test that draws point-process realisations
+or does a statistical check; sampler-heavy modules set `pytestmark` at module
+level instead. Note that a test being slow *once* is usually the first XLA
+compile of a parametrized group being amortized — mark by behaviour, not by
+stopwatch.
+
+Coverage is not in `addopts`; it is measured over the **full** suite by the
+Extended Tests workflow, so use `make test-cov` rather than a bare
+`pytest --cov` on one lane.
+
 ### Pre-commit checklist (all four must pass)
 
 ```bash
-uv run pytest -v                              # Tests
+uv run pytest -n auto                         # Tests
 uv run --group lint ruff check .              # Lint — ENTIRE repo, not just src/xtremax/
 uv run --group lint ruff format --check .     # Format — ENTIRE repo
 uv run --group typecheck ty check src/xtremax  # Typecheck — package only

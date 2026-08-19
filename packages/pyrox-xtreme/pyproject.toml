@@ -47,6 +47,7 @@ dev = [
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
     "pre-commit>=4.5.1",
+    "pytest-xdist>=3.5",
 ]
 lint = [
     "ruff>=0.15.10",
@@ -138,7 +139,12 @@ too-many-positional-arguments = "ignore"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov=src/xtremax --cov-report=term-missing --cov-report=xml:coverage.xml"
+# Coverage is NOT in addopts: it costs ~23% and only the `main` push job and
+# `make test-cov` actually need it. Ad-hoc local runs stay uninstrumented.
+markers = [
+    "slow: individually expensive tests (>~1.5s: samplers, Monte-Carlo, jit+grad sweeps)",
+    "integration: end-to-end workflows (MCMC fits through numpyro, subprocess runs)",
+]
 
 [tool.coverage.run]
 source = ["src/xtremax"]

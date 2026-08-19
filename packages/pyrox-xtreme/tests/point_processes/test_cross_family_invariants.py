@@ -37,6 +37,7 @@ def ev():
 
 
 class TestCrossFamilyInvariants:
+    @pytest.mark.slow
     def test_renewal_exp_equals_hpp(self, ev):
         times, mask = ev
         T = 5.0
@@ -77,6 +78,7 @@ class TestCrossFamilyInvariants:
         )
         assert ll_exp == pytest.approx(ll_gen, rel=1e-4)
 
+    @pytest.mark.slow
     def test_marked_with_uniform_marks_decomposes(self, ev):
         times, mask = ev
         T = 5.0
@@ -94,6 +96,7 @@ class TestCrossFamilyInvariants:
         ll_marks = float(jnp.sum(dist.Normal(0.0, 1.0).log_prob(marks[mask])))
         assert ll_joint == pytest.approx(ll_ground + ll_marks, rel=1e-4)
 
+    @pytest.mark.slow
     def test_thinning_full_retention_equals_base(self, ev):
         times, mask = ev
         T = 5.0

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import pytest
 from jax import random
 
 from xtremax.point_processes import (
@@ -21,6 +22,12 @@ from xtremax.point_processes.primitives import (
     ipp_spatiotemporal_predict_count,
     ipp_spatiotemporal_sample_thinning,
 )
+
+
+# Heavy module: the majority of these tests build large XLA graphs (samplers
+# and high-resolution quadrature), so the whole file runs in the heavy lane.
+# See #90 for the per-file timing breakdown behind this choice.
+pytestmark = pytest.mark.slow
 
 
 class TestIppSpatiotemporalLogProb:

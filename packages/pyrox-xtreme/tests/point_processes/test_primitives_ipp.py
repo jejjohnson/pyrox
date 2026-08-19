@@ -79,6 +79,7 @@ class TestIppLogProb:
 
 
 class TestIppSampleThinning:
+    @pytest.mark.slow
     def test_reduces_to_hpp_when_lambda_max_tight(self):
         # Constant intensity with λ_max exactly equal: acceptance probability 1.
         rate = 1.5
@@ -92,6 +93,7 @@ class TestIppSampleThinning:
         n_candidates = jnp.minimum(n_uncapped, 200)
         assert accepted == n_candidates
 
+    @pytest.mark.slow
     def test_thinning_scales_count_correctly(self):
         # Over many seeds, empirical mean accepted = λ_avg * T.
         rate = 2.0
@@ -107,6 +109,7 @@ class TestIppSampleThinning:
         # Expected 20. Monte Carlo sem ≈ sqrt(20/1000) ≈ 0.14. Tolerate 1.0.
         assert jnp.abs(mean_count - 20.0) < 1.0
 
+    @pytest.mark.slow
     def test_thinning_jits(self):
         rate = 1.0
         fn = constant_log_intensity(jnp.log(rate))
@@ -114,6 +117,7 @@ class TestIppSampleThinning:
         times, _mask, _n = jitted(random.PRNGKey(0))
         assert times.shape == (128,)
 
+    @pytest.mark.slow
     def test_thinning_log_prob_consistency(self):
         # Generate events, then check log_prob is finite and reasonable.
         rate = 2.0
@@ -185,6 +189,7 @@ class TestIppInterEvent:
         )
         assert jnp.isneginf(val)
 
+    @pytest.mark.slow
     def test_inter_event_density_integrates_to_one(self):
         # Numerically: ∫₀^∞ f(τ|s=0) dτ ≈ 1.
         taus = jnp.linspace(0.0, 20.0, 1001)

@@ -1,38 +1,47 @@
 name: Tests
 
+# The PR gate: fast lane only, one Python version, no coverage. Target is
+# well under two minutes so CI is a usable feedback signal on a PR.
+#
+# Everything heavy — the `slow` / `integration` lanes, the version matrix,
+# and coverage — runs in "Extended Tests" on merge to main, on release
+# tags, weekly, and on demand. See #90.
+
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
 
 permissions:
   contents: read
 
+# Cancel superseded runs on the same ref (e.g. force-pushes to a PR).
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  test-fast:
+    name: Fast lane
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.12", "3.13"]
+    env:
+      JAX_COMPILATION_CACHE_DIR: ${{ github.workspace }}/.jax-cache
+      # The suite is compile-bound and most individual compiles are well
+      # under a second, so cache them all rather than only the slow ones.
+      JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS: "0"
+      JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES: "0"
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
+      - name: Restore JAX compilation cache
+        uses: actions/cache@v4
+        with:
+          path: .jax-cache
+          key: jax-fast-3.12-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: |
+            jax-fast-3.12-${{ hashFiles('uv.lock') }}-
       - name: Install dependencies
         run: uv sync --group dev --extra threshold
-      - name: Run tests with coverage
-        run: uv run pytest -v
-      - name: Upload coverage report
-        if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-report
-          path: coverage.xml
-      - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.12'
-        uses: codecov/codecov-action@v7
-        with:
-          files: ./coverage.xml
-          fail_ci_if_error: false
+      - name: Run fast tests
+        run: uv run pytest -n auto -m "not slow and not integration"

@@ -64,6 +64,7 @@ class TestHppSpatiotemporalLogProb:
 
 
 class TestHppSpatiotemporalSample:
+    @pytest.mark.slow
     @pytest.mark.parametrize("d", [1, 2, 3])
     def test_shapes_and_mask(self, d: int) -> None:
         spatial = RectangularDomain.from_size(jnp.full((d,), 5.0))
@@ -89,6 +90,7 @@ class TestHppSpatiotemporalSample:
         sorted_times = jnp.sort(jnp.where(mask, times, jnp.inf))
         assert jnp.allclose(jnp.where(mask, times, jnp.inf), sorted_times)
 
+    @pytest.mark.slow
     def test_empirical_count_matches_lambda_volume_T(self) -> None:
         spatial = RectangularDomain.from_size(jnp.array([4.0, 4.0]))
         temporal = TemporalDomain.from_duration(2.0)
@@ -103,6 +105,7 @@ class TestHppSpatiotemporalSample:
         counts = jax.vmap(draw)(keys)
         assert jnp.abs(jnp.mean(counts.astype(jnp.float32)) - 16.0) < 0.5
 
+    @pytest.mark.slow
     def test_padding_locations_in_domain(self) -> None:
         spatial = RectangularDomain.from_size(jnp.full((2,), 5.0))
         temporal = TemporalDomain.from_duration(3.0)

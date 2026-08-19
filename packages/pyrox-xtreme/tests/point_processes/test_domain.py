@@ -31,6 +31,7 @@ class TestRectangularDomain:
         x = jnp.array([[5.0, 5.0], [-1.0, 5.0], [5.0, 11.0]])
         assert jnp.array_equal(domain.contains(x), jnp.array([True, False, False]))
 
+    @pytest.mark.slow
     @pytest.mark.parametrize("d", [1, 2, 3])
     def test_sample_uniform_in_domain(self, d: int) -> None:
         domain = RectangularDomain.from_size(jnp.full((d,), 5.0))
@@ -67,6 +68,7 @@ class TestTemporalDomain:
         with pytest.raises(ValueError, match="t1 > t0"):
             TemporalDomain(t0=5.0, t1=2.0)
 
+    @pytest.mark.slow
     def test_sample_uniform(self) -> None:
         from xtremax.point_processes import TemporalDomain
 

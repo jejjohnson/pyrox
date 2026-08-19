@@ -46,6 +46,7 @@ def _constant_ipp(rate: float, T: float) -> InhomogeneousPoissonProcess:
 class TestThinningCompensatorSign:
     """#55 — the retention correction ∫(1-p)λ must be ADDED."""
 
+    @pytest.mark.slow
     @pytest.mark.parametrize("p", [0.3, 0.7])
     def test_thinned_hpp_matches_closed_form(self, p):
         rate, T = 2.0, 10.0
@@ -78,6 +79,7 @@ class TestGeneralHawkesVectorCompensator:
         mask = jnp.array([True, True, True, True, False, False])
         return exp_op, gen_op, times, mask
 
+    @pytest.mark.slow
     def test_vector_t_cumulative_intensity_matches_exponential(self):
         exp_op, gen_op, times, mask = self._pair()
         lam_exp = exp_op.cumulative_intensity(times, times, mask)
@@ -92,6 +94,7 @@ class TestGeneralHawkesVectorCompensator:
         res_gen, _ = gen_op.residuals(times, mask)
         assert jnp.allclose(res_exp, res_gen, rtol=1e-4, atol=1e-6)
 
+    @pytest.mark.slow
     def test_goodness_of_fit_matches(self):
         exp_op, gen_op, times, mask = self._pair()
         ks_exp = exp_op.goodness_of_fit(times, mask).ks_statistic
@@ -102,6 +105,7 @@ class TestGeneralHawkesVectorCompensator:
 class TestTemporalMarksPaddingGradients:
     """#57 — bounded-support mark laws must give finite gradients."""
 
+    @pytest.mark.slow
     @pytest.mark.parametrize(
         "make_dist",
         [
@@ -154,6 +158,7 @@ class TestTemporalHawkesSTPPBackports:
         g = jax.grad(lam)(1.0)
         assert jnp.isfinite(g)
 
+    @pytest.mark.slow
     def test_general_log_prob_permutation_invariant(self):
         kernel = ExponentialKernel(alpha=0.5, beta=1.0)
         times = jnp.array([1.0, 2.5, 4.0, 10.0])
@@ -172,6 +177,7 @@ class TestMaskContiguityInvariant:
     """#59 — samplers emit contiguous-prefix masks; residuals are
     mask-robust regardless."""
 
+    @pytest.mark.slow
     def test_ipp_thinning_sampler_emits_contiguous_mask(self):
         log_fn = lambda t: jnp.log(2.0) * jnp.ones_like(jnp.asarray(t))
         times, mask, _ = ipp_sample_thinning(
@@ -192,6 +198,7 @@ class TestMaskContiguityInvariant:
         assert float(res[0]) == pytest.approx(1.0)
         assert float(res[2]) == pytest.approx(1.0)  # 2·(1.0-0.5)
 
+    @pytest.mark.slow
     def test_residuals_match_hand_compacted(self):
         log_fn = lambda t: jnp.log(3.0) * jnp.ones_like(jnp.asarray(t))
         times, mask, _ = ipp_sample_thinning(
@@ -221,6 +228,7 @@ class TestRenewalExpectedCount:
 class TestThinningSampleBases:
     """#61 — ThinningProcess.sample works for every documented base family."""
 
+    @pytest.mark.slow
     def test_thinning_sample_ipp_base(self):
         base = _constant_ipp(2.0, 10.0)
         thin = ThinningProcess(
@@ -233,6 +241,7 @@ class TestThinningSampleBases:
         assert times.shape == (64,)
         assert int(n) == int(jnp.sum(mask))
 
+    @pytest.mark.slow
     def test_thinning_sample_hawkes_base_still_works(self):
         base = ExponentialHawkes(mu=0.5, alpha=0.3, beta=1.0, observation_window=10.0)
         thin = ThinningProcess(
@@ -287,6 +296,7 @@ class TestBatchedHawkesCompensator:
     """Round-1 review: batched (B,) T against (B, n) histories must give
     one compensator per history, not a (B, B) cross-product."""
 
+    @pytest.mark.slow
     def test_batched_histories_match_per_row(self):
         kernel = ExponentialKernel(alpha=0.5, beta=1.0)
         gen_op = GeneralHawkesProcess(mu=0.3, kernel=kernel, observation_window=10.0)
@@ -304,6 +314,7 @@ class TestPinnedIntensityFullWindow:
     """Round-1 review: an explicit full-window query must honour a pinned
     integrated_intensity, matching log_prob's Λ(T)."""
 
+    @pytest.mark.slow
     def test_explicit_full_window_uses_pin(self):
         op = InhomogeneousPoissonProcess(
             log_intensity_fn=lambda t: jnp.zeros_like(jnp.asarray(t)),

@@ -15,6 +15,7 @@ from xtremax.point_processes.primitives.thinning import (
 
 
 class TestThinningSample:
+    @pytest.mark.slow
     def test_reproduces_hpp_for_constant_intensity(self):
         """Constant λ: the generic thinning sampler must agree with HPP.
 
@@ -35,6 +36,7 @@ class TestThinningSample:
         # HPP(rate=3, T=5) → expected count 15.
         assert float(jnp.mean(counts)) == pytest.approx(15.0, abs=0.5)
 
+    @pytest.mark.slow
     def test_half_retention_halves_expected_count(self):
         """λ_max=c, λ=c/2 → acceptance 0.5 → HPP(c/2)."""
 
@@ -50,6 +52,7 @@ class TestThinningSample:
         )(keys)
         assert float(jnp.mean(counts)) == pytest.approx(15.0, abs=0.8)
 
+    @pytest.mark.slow
     def test_sampled_times_in_window(self):
         def intensity(t, history):
             return jnp.asarray(1.0)

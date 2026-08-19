@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import pytest
 from jax import random
 
 from xtremax.point_processes import RectangularDomain, TemporalDomain
@@ -17,6 +18,7 @@ from xtremax.point_processes.primitives import (
 
 
 class TestStppHawkesIntensity:
+    @pytest.mark.slow
     def test_no_history_returns_baseline(self) -> None:
         # With an empty mask, intensity == mu everywhere.
         s = jnp.array([1.0, 2.0])
@@ -106,6 +108,7 @@ class TestStppHawkesCompensator:
 
 
 class TestStppHawkesLogProb:
+    @pytest.mark.slow
     def test_zero_alpha_matches_hpp_log_prob(self) -> None:
         # alpha → 0 collapses to homogeneous: ∑ log μ - μ |D| T.
         from xtremax.point_processes.primitives import hpp_spatiotemporal_log_prob
@@ -133,6 +136,7 @@ class TestStppHawkesLogProb:
         )
         assert jnp.allclose(hawkes_lp, hpp_lp, rtol=1e-5)
 
+    @pytest.mark.slow
     def test_grad_through_mu(self) -> None:
         spatial = RectangularDomain.from_size(jnp.array([3.0, 3.0]))
         temporal = TemporalDomain.from_duration(2.0)
@@ -158,6 +162,7 @@ class TestStppHawkesLogProb:
 
 
 class TestStppHawkesSample:
+    @pytest.mark.slow
     def test_alpha_zero_matches_hpp_count(self) -> None:
         spatial = RectangularDomain.from_size(jnp.array([4.0, 4.0]))
         temporal = TemporalDomain.from_duration(5.0)
@@ -179,6 +184,7 @@ class TestStppHawkesSample:
         # E[N] = μ |D| T = 0.5 * 16 * 5 = 40
         assert jnp.abs(jnp.mean(counts.astype(jnp.float32)) - 40.0) < 1.5
 
+    @pytest.mark.slow
     def test_subcritical_run_finite(self) -> None:
         spatial = RectangularDomain.from_size(jnp.array([4.0, 4.0]))
         temporal = TemporalDomain.from_duration(2.0)

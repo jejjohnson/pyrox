@@ -134,11 +134,18 @@ Generators for testing and teaching: `simulate_temp_extremes`, `simulate_precip_
 git clone https://github.com/jejjohnson/xtremax.git
 cd xtremax
 make install      # install all dependency groups + pre-commit hooks
-make test         # run tests
+make test         # run the whole suite (parallel)
+make test-fast    # fast lane only — what CI runs on a PR (~1 min)
 make lint         # ruff check .
 make typecheck    # ty check src/xtremax
 make docs-serve   # preview docs locally
 ```
+
+The suite is split by marker: `slow` (samplers, Monte-Carlo, jit+grad sweeps)
+and `integration` (end-to-end MCMC fits) run on merge to `main`, on release
+tags, and on demand; everything else runs on every PR. Coverage is measured
+over the whole suite in the extended lane — use `make test-cov` locally rather
+than a bare `pytest --cov`.
 
 ## License
 

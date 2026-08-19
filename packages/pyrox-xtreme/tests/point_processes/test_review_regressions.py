@@ -36,6 +36,7 @@ class TestHistoryDependentRetentionSeesPrefixOnly:
     ``time < t`` prefix contract.
     """
 
+    @pytest.mark.slow
     def test_thinning_retention_log_prob_uses_prefix_only(self):
         event_times = jnp.array([1.0, 2.0, 3.0, 4.0])
         mask = jnp.array([True, True, True, True])
@@ -104,6 +105,7 @@ class TestThinningMarkedBaseRoutesMarks:
     third element of the base result was always treated as a count.
     """
 
+    @pytest.mark.slow
     def test_mark_dependent_retention_fires(self):
         class MagnitudeGate(eqx.Module):
             cutoff: jnp.ndarray
@@ -143,6 +145,7 @@ class TestSampleMarksAtTimesUsesPriorMarks:
     silently sample from the wrong law.
     """
 
+    @pytest.mark.slow
     def test_prior_marks_are_visible_to_next_mark_draw(self):
         """Each successive draw's ``loc`` shifts by the mean of prior marks.
 
@@ -187,6 +190,7 @@ class TestSampleMarksAtTimesUsesPriorMarks:
 class TestThinningPromotesScalarMarksInHistory:
     """Copilot: scalar marks must not be dropped from ``EventHistory``."""
 
+    @pytest.mark.slow
     def test_history_marks_populated_for_scalar_marks(self):
         event_times = jnp.array([0.1, 0.5, 1.0, 2.0])
         mask = jnp.array([True, True, True, True])
@@ -214,6 +218,7 @@ class TestThinningPromotesScalarMarksInHistory:
 class TestThinningForwardsMaxCandidates:
     """Copilot: ``max_candidates`` must reach a thinning-based base."""
 
+    @pytest.mark.slow
     def test_max_candidates_passes_through_to_hawkes(self):
         # Hawkes accepts ``max_candidates``; HPP does not. We assert
         # that passing it through doesn't raise for Hawkes.
@@ -231,6 +236,7 @@ class TestThinningForwardsMaxCandidates:
 class TestThinningMarkedBaseLogProb:
     """Codex P1: ThinningProcess.log_prob must accept a marked base."""
 
+    @pytest.mark.slow
     def test_log_prob_routes_through_ground_intensity(self):
         """A marked base has no ``.intensity`` / ``.rate``; the
         compensator path must fall through to ``base.ground``.
@@ -423,6 +429,7 @@ class TestSpatialMarksPaddingSupportAware:
     value is always in-support and dtype-preserving.
     """
 
+    @pytest.mark.slow
     def test_uniform_2_3_padding(self):
         # Uniform(2, 3) — old fallback ``1.0`` is below the support.
         from xtremax.point_processes.primitives import spatial_marks_log_prob
@@ -438,6 +445,7 @@ class TestSpatialMarksPaddingSupportAware:
         expected = jnp.sum(dist.Uniform(2.0, 3.0).log_prob(marks[:2]))
         assert jnp.allclose(lp, expected)
 
+    @pytest.mark.slow
     def test_beta_padding(self):
         # Beta on (0, 1) — endpoints are not in support; ``1.0`` would
         # fail and so would ``0.0``. ``feasible_like`` returns 0.5.
@@ -451,6 +459,7 @@ class TestSpatialMarksPaddingSupportAware:
         )
         assert jnp.isfinite(lp)
 
+    @pytest.mark.slow
     def test_padding_log_prob_carries_finite_grad(self):
         # Without the support-aware substitute, gradients through the
         # masked branch were NaN even though the value itself was
@@ -513,6 +522,7 @@ class TestRectangularDomainValidation:
 class TestHaltonDynamicPrimes:
     """Copilot: Halton QMC must not hard-cap at d ≤ 12."""
 
+    @pytest.mark.slow
     def test_d13_runs(self):
         from xtremax.point_processes import (
             RectangularDomain,
@@ -613,6 +623,7 @@ class TestHppSpatialDistCountPathNoClip:
         expected = hpp_spatial_log_prob(big_count, 5.0, domain.volume())
         assert jnp.allclose(result, expected)
 
+    @pytest.mark.slow
     def test_mask_path_still_works(self):
         from xtremax.point_processes import RectangularDomain
         from xtremax.point_processes.distributions import HomogeneousSpatialPP
@@ -676,6 +687,7 @@ class TestStppHawkesLogProbCausalityByTimestamp:
     to time order this would inject future events as parents.
     """
 
+    @pytest.mark.slow
     def test_log_prob_invariant_to_row_permutation(self) -> None:
         from xtremax.point_processes import RectangularDomain, TemporalDomain
         from xtremax.point_processes.primitives import stpp_hawkes_log_prob
@@ -711,6 +723,7 @@ class TestStppHawkesSampleNoOOB:
     rejection-heavy runs the buffer state can become inconsistent.
     """
 
+    @pytest.mark.slow
     def test_high_rejection_rate_keeps_buffer_clean(self) -> None:
         # μ=0, α=0 → never any acceptance; every step is a rejection.
         # Without the clip-to-(n_max-1) guard this would scatter at
@@ -783,6 +796,7 @@ class TestPearsonResidualsNoSentinelArtifact:
     count.
     """
 
+    @pytest.mark.slow
     def test_last_cell_residual_uses_real_count_only(self) -> None:
         from xtremax.point_processes import RectangularDomain, TemporalDomain
         from xtremax.point_processes.primitives import (

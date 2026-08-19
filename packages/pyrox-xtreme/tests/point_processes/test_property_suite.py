@@ -32,6 +32,12 @@ from xtremax.point_processes.operators import (
 from xtremax.point_processes.primitives.hawkes import general_hawkes_log_prob
 
 
+# Heavy module: the majority of these tests build large XLA graphs (samplers
+# and high-resolution quadrature), so the whole file runs in the heavy lane.
+# See #90 for the per-file timing breakdown behind this choice.
+pytestmark = pytest.mark.slow
+
+
 def _ipp(rate: float = 2.0, T: float = 10.0) -> InhomogeneousPoissonProcess:
     return InhomogeneousPoissonProcess.from_piecewise_constant(
         bin_edges=jnp.array([0.0, T]), rates=jnp.array([rate])

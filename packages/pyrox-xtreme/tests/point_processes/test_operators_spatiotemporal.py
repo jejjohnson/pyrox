@@ -17,6 +17,12 @@ from xtremax.point_processes.operators import (
 )
 
 
+# Heavy module: the majority of these tests build large XLA graphs (samplers
+# and high-resolution quadrature), so the whole file runs in the heavy lane.
+# See #90 for the per-file timing breakdown behind this choice.
+pytestmark = pytest.mark.slow
+
+
 class TestHomogeneousSpatioTemporalPP:
     @pytest.mark.parametrize("d", [1, 2, 3])
     def test_round_trip(self, d: int) -> None:

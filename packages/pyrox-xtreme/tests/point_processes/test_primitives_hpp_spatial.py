@@ -70,6 +70,7 @@ class TestHppSpatialLogProb:
 
 
 class TestHppSpatialSample:
+    @pytest.mark.slow
     @pytest.mark.parametrize("d", [1, 2, 3])
     def test_shapes_and_mask(self, d: int) -> None:
         domain = RectangularDomain.from_size(jnp.full((d,), 5.0))
@@ -84,6 +85,7 @@ class TestHppSpatialSample:
             assert jnp.all(locs[mask, i] >= domain.lo[i])
             assert jnp.all(locs[mask, i] < domain.hi[i] + 1e-6)
 
+    @pytest.mark.slow
     def test_empirical_count_matches_lambda_volume(self) -> None:
         domain = RectangularDomain.from_size(jnp.array([4.0, 4.0]))
         rate = 0.5  # E[N] = 0.5 * 16 = 8.
@@ -96,6 +98,7 @@ class TestHppSpatialSample:
         # SE ≈ √(8/2000) ≈ 0.063, so a 0.3 tolerance is comfortable.
         assert jnp.abs(jnp.mean(counts.astype(jnp.float32)) - 8.0) < 0.3
 
+    @pytest.mark.slow
     @pytest.mark.parametrize("d", [1, 2, 3])
     def test_padding_locations_in_domain(self, d: int) -> None:
         # Padding rows are set to ``domain.lo`` so downstream callers

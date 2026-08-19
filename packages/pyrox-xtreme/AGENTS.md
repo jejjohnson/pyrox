@@ -75,7 +75,7 @@ For multi-step tasks, state a brief plan:
 
 **All agents must** verify that every one of the following passes before creating a commit or reporting progress. No exceptions.
 
-1. **Tests** – `uv run pytest -q` (or `make test`) must have 0 failures.
+1. **Tests** – `uv run pytest -q -n auto` (or `make test`) must have 0 failures. The suite is marker-split into a fast lane and a heavy (`slow` / `integration`) lane; `make test-fast` reproduces what CI runs on a PR, but a commit must pass the **whole** suite.
 2. **Lint** – `uv run --group lint ruff check .` (or `make lint`) must report no issues.
 3. **Format** – `uv run --group lint ruff format --check .` must report no files to reformat.
 4. **Type checks** – `uv run --group typecheck ty check src/xtremax` (or `make typecheck`) must report no errors in changed files.

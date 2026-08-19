@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import pytest
 from jax import random
 
 from xtremax.point_processes.primitives import (
@@ -43,6 +44,7 @@ class TestTimeRescalingResiduals:
 
 
 class TestKsStatisticExp1:
+    @pytest.mark.slow
     def test_hpp_samples_pass_ks(self):
         # For an HPP under its own compensator, rescaled residuals are Exp(1).
         keys = random.split(random.PRNGKey(0), 50)
@@ -56,6 +58,7 @@ class TestKsStatisticExp1:
         # Median should be well below the asymptotic 95% critical value (~0.21 at n=20).
         assert float(jnp.median(ks_values)) < 0.3
 
+    @pytest.mark.slow
     def test_wrong_compensator_fails_ks(self):
         # Pass a compensator that is far too weak: residuals will have
         # mean << 1 ⇒ KS large.
@@ -70,6 +73,7 @@ class TestKsStatisticExp1:
 
 
 class TestQqExp1:
+    @pytest.mark.slow
     def test_quantile_shape_and_nan_padding(self):
         key = random.PRNGKey(2)
         times, mask, _ = hpp_sample(key, RATE, T, max_events=128)
@@ -118,6 +122,7 @@ class TestKsStatisticRegression:
         assert float(ks) > 0.9
         assert jnp.isfinite(ks)
 
+    @pytest.mark.slow
     def test_monotone_residuals_trivial_case(self):
         from xtremax.point_processes.primitives import ks_statistic_exp1
 

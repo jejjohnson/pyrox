@@ -17,6 +17,7 @@ from xtremax.point_processes.operators import (
 
 
 class TestHomogeneousSpatialPP:
+    @pytest.mark.slow
     @pytest.mark.parametrize("d", [1, 2, 3])
     def test_round_trip(self, d: int) -> None:
         domain = RectangularDomain.from_size(jnp.full((d,), 3.0))
@@ -58,6 +59,7 @@ class TestHomogeneousSpatialPP:
 
 
 class TestInhomogeneousSpatialPP:
+    @pytest.mark.slow
     def test_sample_log_prob_finite(self) -> None:
         domain = RectangularDomain.from_size(jnp.array([10.0, 10.0]))
 
@@ -88,6 +90,7 @@ class TestInhomogeneousSpatialPP:
         sub_lambda = op.effective_integrated_intensity(sub)
         assert jnp.allclose(sub_lambda, 0.5 * 4.0, rtol=1e-3)
 
+    @pytest.mark.slow
     def test_grad_through_intensity_params(self) -> None:
         domain = RectangularDomain.from_size(jnp.array([4.0, 4.0]))
 
@@ -123,6 +126,7 @@ class TestMarkedSpatialPP:
         mark_lp = jnp.sum(mark_dist.log_prob(marks[:3]))
         assert jnp.allclose(joint_lp, ground_lp + mark_lp)
 
+    @pytest.mark.slow
     def test_sample_returns_marks(self) -> None:
         domain = RectangularDomain.from_size(jnp.array([5.0, 5.0]))
         ground = HomogeneousSpatialPP(rate=0.5, domain=domain)

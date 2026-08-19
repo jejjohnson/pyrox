@@ -16,6 +16,12 @@ from xtremax.point_processes.primitives import (
 )
 
 
+# Heavy module: the majority of these tests build large XLA graphs (samplers
+# and high-resolution quadrature), so the whole file runs in the heavy lane.
+# See #90 for the per-file timing breakdown behind this choice.
+pytestmark = pytest.mark.slow
+
+
 def _gaussian_log_intensity(s):
     # Smooth bump centred at (5, 5) with peak λ = 2.
     return -0.1 * jnp.sum((s - 5.0) ** 2, axis=-1) + jnp.log(2.0)

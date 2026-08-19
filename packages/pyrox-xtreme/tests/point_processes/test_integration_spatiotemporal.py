@@ -12,6 +12,12 @@ from xtremax.point_processes import (
 )
 
 
+# Heavy module: the majority of these tests build large XLA graphs (samplers
+# and high-resolution quadrature), so the whole file runs in the heavy lane.
+# See #90 for the per-file timing breakdown behind this choice.
+pytestmark = pytest.mark.slow
+
+
 class TestSpatiotemporalIntegration:
     def test_constant_intensity_qmc(self) -> None:
         spatial = RectangularDomain.from_size(jnp.array([3.0, 3.0]))

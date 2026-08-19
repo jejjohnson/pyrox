@@ -65,6 +65,7 @@ class TestCovariance:
 
 
 class TestStructuralConformance:
+    @pytest.mark.slow
     @pytest.mark.parametrize(
         "d",
         [
@@ -86,6 +87,7 @@ class TestStructuralConformance:
         assert draws.shape == (5,)
         np.testing.assert_array_equal(np.asarray(draws), np.asarray(draws_kw))
 
+    @pytest.mark.slow
     def test_batched_noise_draw_semantics(self):
         """`shape` is the *leading draw batch* (the protocol's "batch
         shape"), prepended to the distribution's own batch shape — the

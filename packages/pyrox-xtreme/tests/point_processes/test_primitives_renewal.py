@@ -18,6 +18,7 @@ from xtremax.point_processes.primitives.renewal import (
 
 
 class TestRenewalLogProb:
+    @pytest.mark.slow
     def test_exponential_matches_hpp_log_prob(self):
         """Renewal(Exponential(λ)) coincides with HPP(λ) on the same events.
 
@@ -42,6 +43,7 @@ class TestRenewalLogProb:
         # cdf(T) is close to 1, so allow a mild absolute tolerance.
         assert float(ll) == pytest.approx(-2.0 * T, abs=1e-2)
 
+    @pytest.mark.slow
     def test_grad_through_inter_event_params(self):
         """Gradient through the inter-event Exponential rate should flow cleanly."""
         event_times = jnp.array([0.3, 1.0, 1.9])
@@ -58,6 +60,7 @@ class TestRenewalLogProb:
 
 
 class TestRenewalSample:
+    @pytest.mark.slow
     def test_sampled_count_is_Poisson_for_exponential(self):
         """Exponential inter-events → count is Poisson(λ T); check mean."""
         key = jax.random.PRNGKey(0)
@@ -69,6 +72,7 @@ class TestRenewalSample:
         )(keys)
         assert float(jnp.mean(counts)) == pytest.approx(rate * T, abs=0.3)
 
+    @pytest.mark.slow
     def test_returned_times_are_sorted(self):
         key = jax.random.PRNGKey(0)
         t, m, _ = renewal_sample(key, dist.Exponential(2.0), 10.0, 64)

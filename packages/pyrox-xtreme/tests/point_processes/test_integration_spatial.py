@@ -11,6 +11,12 @@ from xtremax.point_processes import (
 )
 
 
+# Heavy module: the majority of these tests build large XLA graphs (samplers
+# and high-resolution quadrature), so the whole file runs in the heavy lane.
+# See #90 for the per-file timing breakdown behind this choice.
+pytestmark = pytest.mark.slow
+
+
 class TestTrapezoidIntegration:
     def test_constant_intensity_d2(self) -> None:
         # ∫_[0,L]² λ ds = λ L².

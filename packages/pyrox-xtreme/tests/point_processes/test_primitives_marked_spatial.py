@@ -51,6 +51,7 @@ class TestSpatialMarksLogProb:
         expected = sum(contributions)
         assert jnp.allclose(result, expected, atol=1e-5)
 
+    @pytest.mark.slow
     def test_vector_marks(self, locations_and_mask) -> None:
         locs, mask = locations_and_mask
         d = dist.Normal(jnp.zeros(2), jnp.ones(2)).to_event(1)
@@ -65,6 +66,7 @@ class TestSpatialMarksLogProb:
 
 
 class TestSampleSpatialMarks:
+    @pytest.mark.slow
     def test_independent_scalar_marks_padding_zeroed(self, locations_and_mask) -> None:
         locs, mask = locations_and_mask
         d = dist.Gamma(concentration=5.0, rate=2.0)
@@ -78,6 +80,7 @@ class TestSampleSpatialMarks:
         assert jnp.all(marks[:3] > 0.0)
         assert marks[3] == 0.0
 
+    @pytest.mark.slow
     def test_vector_marks(self, locations_and_mask) -> None:
         locs, mask = locations_and_mask
         d = dist.MultivariateNormal(jnp.zeros(3), jnp.eye(3))

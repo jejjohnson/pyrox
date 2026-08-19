@@ -230,8 +230,36 @@ Run these locally before opening a PR:
 make format       # ruff format . + ruff check --fix .   (applies changes)
 make lint         # ruff check .                         (CI-style check)
 make typecheck    # ty check
-make test         # pytest
+make test         # pytest (whole suite, parallel)
 ```
+
+### Test lanes
+
+The suite is split by marker so that PRs get a fast signal:
+
+| Marker | What it covers | When it runs |
+|--------|----------------|--------------|
+| *(unmarked)* | primitives, oracles, gradients, extraction, simulations | **every PR** — `make test-fast`, ~1 min |
+| `slow` | point-process samplers, Monte-Carlo statistics, jit+grad sweeps | merge to `main`, `v*` tags, weekly, `workflow_dispatch` |
+| `integration` | end-to-end MCMC fits through numpyro, subprocess runs | same as `slow` |
+
+```bash
+make test-fast    # fast lane only — mirrors the PR gate
+make test-heavy   # slow + integration only
+make test         # everything
+make test-cov     # everything, with a coverage report
+```
+
+When adding a test, mark it `slow` if it draws point-process realisations or
+does a statistical check. Sampler-heavy modules set `pytestmark =
+pytest.mark.slow` at module level rather than decorating every function.
+
+A test that looks slow in `--durations` output is often just paying the first
+XLA compile for a whole parametrized group — the sibling cases are
+milliseconds. Mark by what the test *does*, not by its stopwatch reading.
+
+Coverage runs over the **whole** suite in the Extended Tests workflow, so it
+is deliberately absent from `addopts`; use `make test-cov` locally.
 
 Note that `make format` **mutates files** — it formats and applies autofixes. `make lint` is the CI-parity read-only check. Run `make format` first, commit the result, then run `make lint` / `make test` to verify.
 

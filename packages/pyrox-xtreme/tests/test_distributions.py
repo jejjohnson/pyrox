@@ -21,6 +21,7 @@ def key():
 
 
 class TestGEVD:
+    @pytest.mark.slow
     def test_log_prob_and_sample_shape(self, key):
         dist = GeneralizedExtremeValueDistribution(
             loc=0.0, scale=1.0, concentration=0.1
@@ -40,6 +41,7 @@ class TestGEVD:
         q_round = dist.cdf(x)
         assert jnp.allclose(q, q_round, atol=1e-4)
 
+    @pytest.mark.slow
     def test_small_negative_shape(self, key):
         dist = GeneralizedExtremeValueDistribution(
             loc=0.0, scale=1.0, concentration=-0.2
@@ -77,6 +79,7 @@ class TestGEVD:
         assert bool(d_gumbel.support(jnp.array(-1e6)))
         assert bool(d_gumbel.support(jnp.array(1e6)))
 
+    @pytest.mark.slow
     def test_mean_excess_normalizes_by_full_survival(self):
         """Regression: the quantile-space quadrature previously normalised
         by ``(1 - ε) - F(u)`` (truncated mass) instead of ``1 - F(u)``
@@ -93,6 +96,7 @@ class TestGEVD:
         assert jnp.isfinite(me)
         assert me > 1.5  # well above σ
 
+    @pytest.mark.slow
     def test_mean_excess_varies_with_threshold_at_gumbel_limit(self):
         """Regression: GEVD mean excess used the GPD linear POT
         approximation `(σ + ξ(u-μ))/(1-ξ)`, which collapses to a constant
@@ -117,6 +121,7 @@ class TestGEVD:
         assert float(me_gev[0]) > 1.1
         assert abs(float(me_gev[2]) - 1.0) < 0.05
 
+    @pytest.mark.slow
     def test_mode_matches_argmax_of_pdf(self):
         """Regression: the non-Gumbel mode used `(1+ξ)^ξ` with the wrong
         exponent sign. The correct stationary point is `(1+ξ)^(-ξ)`.
@@ -233,6 +238,7 @@ class TestGPD:
         assert bool(d.support(jnp.array(1e6)))
         assert not bool(d.support(jnp.array(-0.1)))
 
+    @pytest.mark.slow
     def test_expand_preserves_state(self):
         """Regression: the custom GPD.expand() override called
         `_get_checked_instance` (which does not exist on the current
@@ -442,6 +448,7 @@ class TestFrechet:
         lp = dist.log_prob(samples)
         assert jnp.all(jnp.isfinite(lp))
 
+    @pytest.mark.slow
     def test_log_survival_matches_log_of_survival(self):
         """Regression: log_survival previously returned log F(x), not log S(x)."""
         d = FrechetType2GEVD(loc=0.0, scale=1.0, concentration=0.2)
@@ -450,6 +457,7 @@ class TestFrechet:
         expected = jnp.log(1.0 - d.cdf(x))
         assert jnp.allclose(log_s, expected, atol=1e-5)
 
+    @pytest.mark.slow
     def test_mode_matches_argmax_of_pdf(self):
         """Regression: Fréchet mode used `(1+ξ)^ξ` — the GEV-parameterisation
         stationary point is `(1+ξ)^(-ξ)`. Verify by grid argmax of the pdf.
@@ -706,6 +714,7 @@ class TestPRNGKeyValidation:
         with pytest.raises(TypeError, match="JAX PRNG key"):
             d.sample(not_a_key, sample_shape=(4,))
 
+    @pytest.mark.slow
     def test_sample_does_not_emit_plus_minus_infinity(self):
         """Regression: inverse-transform sampling used Uniform(0, 1) whose
         JAX sampler can emit exact 0 (and 1 in some dtypes), sending
@@ -883,6 +892,7 @@ class TestBijectToSupport:
             WeibullType3GEVD(0.0, 1.0, concentration=-0.3),
         ]
 
+    @pytest.mark.slow
     def test_biject_to_support_finite_round_trip(self):
         from numpyro.distributions.transforms import biject_to
 
@@ -912,6 +922,7 @@ class TestBijectToSupport:
         jax.jit(probe)(0.3)
         assert kinds[0] is constraints.real
 
+    @pytest.mark.integration
     @pytest.mark.parametrize(
         "make",
         [
@@ -971,6 +982,7 @@ class TestConditionalExcessMean:
         e_trunc = (loc - scale / xi) * s + (scale / xi) * lower_gamma
         return e_trunc / s - u
 
+    @pytest.mark.slow
     def test_gev_batched_parameters(self):
         locs = jnp.array([0.0, 1.0, 2.0])
         batched = GeneralizedExtremeValueDistribution(
@@ -983,6 +995,7 @@ class TestConditionalExcessMean:
             ).conditional_excess_mean(3.0)
             assert float(batched[i]) == pytest.approx(float(scalar), rel=1e-5)
 
+    @pytest.mark.slow
     @pytest.mark.parametrize(
         "make",
         [
@@ -1119,6 +1132,7 @@ class TestBoundarySemantics:
             GeneralizedParetoDistribution(1.0, concentration=0.6).variance
         )
 
+    @pytest.mark.slow
     def test_hill_plot_data_jit_safe(self):
         d = GeneralizedParetoDistribution(1.0, concentration=0.5)
         order_stats = jnp.sort(d.sample(jax.random.PRNGKey(0), (100,)), descending=True)

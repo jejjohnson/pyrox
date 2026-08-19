@@ -1,0 +1,86 @@
+name: Extended Tests
+
+# The heavy lane. Runs the whole suite (fast + slow + integration) across
+# the Python matrix, and is where coverage is measured and reported — so
+# Codecov keeps seeing the full picture even though PRs only run the fast
+# lane. See #90.
+#
+# Triggers: every merge to main, every release tag, a weekly safety net,
+# and on demand:
+#   gh workflow run tests-extended.yml                  # full suite
+#   gh workflow run tests-extended.yml -f suite=heavy   # slow + integration only
+#   gh workflow run tests-extended.yml --ref my-branch -f suite=full
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  schedule:
+    - cron: "0 5 * * 1"  # Every Monday at 5am UTC
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Which tests to run"
+        type: choice
+        default: full
+        options:
+          - full   # entire suite
+          - heavy  # only slow + integration tests
+
+permissions:
+  contents: read
+
+# Deliberately NO concurrency group. Actions keeps at most one running and
+# one pending run per group, so a queued run is dropped when a newer one
+# arrives — even with cancel-in-progress: false. This lane promises a run
+# per merge and per tag, so every trigger has to survive.
+
+jobs:
+  test-extended:
+    name: Extended (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    env:
+      JAX_COMPILATION_CACHE_DIR: ${{ github.workspace }}/.jax-cache
+      JAX_PERSISTENT_CACHE_MIN_COMPILE_TIME_SECS: "0"
+      JAX_PERSISTENT_CACHE_MIN_ENTRY_SIZE_BYTES: "0"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Restore JAX compilation cache
+        uses: actions/cache@v4
+        with:
+          path: .jax-cache
+          key: jax-extended-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
+          restore-keys: |
+            jax-extended-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}-
+      - name: Install dependencies
+        run: uv sync --group dev --extra threshold
+
+      - name: Run heavy lane (slow + integration)
+        if: inputs.suite == 'heavy'
+        run: uv run pytest -v -n auto -m "slow or integration"
+
+      - name: Run full suite with coverage
+        if: inputs.suite != 'heavy'
+        run: >
+          uv run pytest -v -n auto
+          --cov=src/xtremax --cov-report=term-missing --cov-report=xml:coverage.xml
+
+      - name: Upload coverage report
+        if: inputs.suite != 'heavy' && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-report
+          path: coverage.xml
+      - name: Upload coverage to Codecov
+        if: inputs.suite != 'heavy' && matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v7
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false

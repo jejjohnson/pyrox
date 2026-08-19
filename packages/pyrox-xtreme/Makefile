@@ -10,7 +10,8 @@
 # QUICK START:
 #   make help          # Show all available commands
 #   make install       # Install all dependency groups
-#   make test          # Run tests
+#   make test          # Run the whole suite
+#   make test-fast     # Fast lane only — what CI runs on a PR
 #   make lint          # Lint with ruff
 #   make format        # Format with ruff
 #
@@ -61,7 +62,7 @@ check-env-%:
 # ---------------------------------------------------------------------------
 # Phony declarations
 # ---------------------------------------------------------------------------
-.PHONY: help install lint format typecheck test test-cov \
+.PHONY: help install lint format typecheck test test-fast test-heavy test-cov \
         precommit build clean version docs docs-serve docs-deploy \
         gh-labels gh-sub gh-block gh-show
 
@@ -128,14 +129,24 @@ typecheck: ## 🔬 Type-check with ty
 ##@ Testing
 # ===========================================================================
 
-test: ## 🧪 Run tests with pytest (no coverage)
+test: ## 🧪 Run the whole suite (no coverage)
 	@printf "$(YELLOW)>>> Running tests (no coverage)...$(RESET)\n"
-	uv run pytest -v -o addopts=
+	uv run pytest -v -n auto
 	@printf "$(GREEN)>>> ✅ Tests passed!$(RESET)\n"
 
-test-cov: ## 📊 Run tests with coverage report
+test-fast: ## ⚡ Run the fast lane only — what CI runs on a PR
+	@printf "$(YELLOW)>>> Running fast lane...$(RESET)\n"
+	uv run pytest -n auto -m "not slow and not integration"
+	@printf "$(GREEN)>>> ✅ Fast lane passed!$(RESET)\n"
+
+test-heavy: ## 🐢 Run the heavy lane only (slow + integration)
+	@printf "$(YELLOW)>>> Running heavy lane...$(RESET)\n"
+	uv run pytest -v -n auto -m "slow or integration"
+	@printf "$(GREEN)>>> ✅ Heavy lane passed!$(RESET)\n"
+
+test-cov: ## 📊 Run the whole suite with a coverage report
 	@printf "$(YELLOW)>>> Running tests with coverage...$(RESET)\n"
-	uv run pytest -v
+	uv run pytest -v -n auto --cov=src/xtremax --cov-report=term-missing --cov-report=xml:coverage.xml
 	@printf "$(GREEN)>>> ✅ Coverage report generated!$(RESET)\n"
 
 # ===========================================================================

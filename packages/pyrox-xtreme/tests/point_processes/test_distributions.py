@@ -55,6 +55,7 @@ class TestHppDistribution:
         expected = 3 * jnp.log(2.0) - 2.0 * 5.0
         assert jnp.allclose(log_p, expected)
 
+    @pytest.mark.integration
     def test_mcmc_recovers_rate(self):
         # Place a weak prior on λ, condition on a known count, recover via NUTS.
         observed_n = jnp.asarray(25)

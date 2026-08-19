@@ -70,6 +70,7 @@ class TestAssembleFields:
 
 
 class TestSurvival:
+    @pytest.mark.slow
     def test_matches_one_minus_cdf_in_bulk(self):
         """In the bulk, S(x) and 1 - F(x) agree to high precision."""
         x = jnp.linspace(-1.0, 4.0, 25)
@@ -84,6 +85,7 @@ class TestSurvival:
         log_s = gev_log_survival(x, 0.0, 1.0, -0.1)
         assert jnp.allclose(jnp.exp(log_s), s, atol=1e-6)
 
+    @pytest.mark.slow
     def test_deep_tail_accuracy(self):
         """`1 - cdf` cancels to 0 in the deep tail; `gev_survival` does not.
 
@@ -111,6 +113,7 @@ class TestSurvival:
 
 
 class TestStationaryConsistency:
+    @pytest.mark.slow
     def test_return_level_matches_closed_form(self):
         """time_axis=None must equal the closed-form GEV return level."""
         periods = jnp.array([2.0, 10.0, 100.0])
@@ -136,6 +139,7 @@ class TestNonStationary:
             mu0, mu1, jnp.zeros(n_sites), -0.15, time
         )
 
+    @pytest.mark.slow
     def test_expected_exceedances_decreasing(self):
         loc, scale, shape = self._fields()
         low = expected_exceedances(11.0, loc, scale, shape, time_axis=0)
@@ -143,6 +147,7 @@ class TestNonStationary:
         # Higher threshold -> fewer expected exceedances.
         assert jnp.all(high < low)
 
+    @pytest.mark.slow
     def test_return_level_solves_exceedance_target(self):
         loc, scale, shape = self._fields()
         period = 20.0
@@ -153,6 +158,7 @@ class TestNonStationary:
         # By definition sum_t P(Y_t > z) = N_blocks / T.
         assert jnp.allclose(got, n_blocks / period, atol=1e-3)
 
+    @pytest.mark.slow
     def test_return_period_roundtrip(self):
         loc, scale, shape = self._fields()
         period = 25.0
@@ -160,6 +166,7 @@ class TestNonStationary:
         recovered = nonstationary_return_period(z, loc, scale, shape, time_axis=0)
         assert jnp.allclose(recovered, period, rtol=1e-3)
 
+    @pytest.mark.slow
     def test_non_leading_time_axis(self):
         """time_axis need not be leading: (n_sites, n_blocks) with time_axis=1
         must match the transposed (n_blocks, n_sites) / time_axis=0 result."""
@@ -179,6 +186,7 @@ class TestNonStationary:
         assert count.shape == (loc0.shape[1],)
         assert jnp.allclose(count, loc0.shape[0] / period, atol=1e-3)
 
+    @pytest.mark.slow
     def test_heavy_frechet_tail_brackets_root(self):
         """Regression: heavy Fréchet tails / large T must not clamp to the
         initial 20*scale upper bracket.
@@ -214,6 +222,7 @@ class TestNonStationary:
         assert jnp.isfinite(stat)
         assert jnp.allclose(stat, gev_return_level(period, 0.0, 1.0, 0.1), rtol=1e-6)
 
+    @pytest.mark.slow
     def test_reverse_mode_grad_matches_finite_difference(self):
         """The non-stationary solve is reverse-mode differentiable via the
         implicit function theorem (issue #47): the bracketing ``while_loop``
@@ -244,6 +253,7 @@ class TestNonStationary:
 
 
 class TestSpatial:
+    @pytest.mark.slow
     def test_pairwise_distances(self):
         coords = jnp.array([[0.0, 0.0], [3.0, 4.0], [0.0, 0.0]])
         d = pairwise_distances(coords)
@@ -252,6 +262,7 @@ class TestSpatial:
         assert jnp.allclose(d[0, 1], 5.0)
         assert jnp.allclose(d, d.T)
 
+    @pytest.mark.slow
     def test_pairwise_distances_grad_finite(self):
         """The zero diagonal made ‖Δ‖'s Δ/‖Δ‖ gradient 0/0 → all-NaN (#48)."""
         coords = jnp.array([[0.0, 0.0], [1.0, 1.0], [2.0, 0.5]])
@@ -277,6 +288,7 @@ class TestSpatial:
         x = design_matrix(jnp.array([1.0, 2.0, 3.0]))
         assert x.shape == (3, 2)
 
+    @pytest.mark.slow
     def test_two_range_correlation_is_valid(self):
         coords = jnp.linspace(0.0, 1.0, 8).reshape(-1, 1)
         d = pairwise_distances(coords)
@@ -288,6 +300,7 @@ class TestSpatial:
         # Positive definite (valid correlation matrix).
         assert jnp.all(jnp.linalg.eigvalsh(c) > 0)
 
+    @pytest.mark.slow
     def test_vmap_over_sites(self):
         keys = jax.random.split(jax.random.PRNGKey(0), 5)
         coords = jax.vmap(lambda k: jax.random.normal(k, (6, 2)))(keys)

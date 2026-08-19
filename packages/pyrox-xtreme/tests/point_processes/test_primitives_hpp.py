@@ -48,6 +48,7 @@ class TestHppLogProb:
 
 
 class TestHppSample:
+    @pytest.mark.slow
     def test_sample_shapes_and_mask_consistency(self):
         key = random.PRNGKey(0)
         times, mask, n = hpp_sample(key, RATE, T, max_events=64)
@@ -59,6 +60,7 @@ class TestHppSample:
         assert jnp.all(jnp.diff(valid) >= -1e-7)
         assert jnp.all((valid >= 0.0) & (valid <= T))
 
+    @pytest.mark.slow
     def test_empirical_count_matches_rate_T(self):
         # Average count across many seeds should be close to λ T.
         keys = random.split(random.PRNGKey(42), 2000)
@@ -67,6 +69,7 @@ class TestHppSample:
         # Monte Carlo tolerance: sem ~ sqrt(λT/N) = sqrt(10/2000) ≈ 0.07.
         assert jnp.abs(mean_count - RATE * T) < 0.2
 
+    @pytest.mark.slow
     def test_batched_rate(self):
         key = random.PRNGKey(7)
         rates = jnp.array([1.0, 3.0, 5.0])
@@ -74,12 +77,14 @@ class TestHppSample:
         assert times.shape == (3, 64)
         assert n.shape == (3,)
 
+    @pytest.mark.slow
     def test_sample_shape_leads_batch(self):
         key = random.PRNGKey(8)
         times, _mask, n = hpp_sample(key, RATE, T, max_events=32, sample_shape=(5, 2))
         assert times.shape == (5, 2, 32)
         assert n.shape == (5, 2)
 
+    @pytest.mark.slow
     def test_sample_jits(self):
         jitted = jax.jit(
             lambda k: hpp_sample(k, RATE, T, max_events=32),
@@ -140,6 +145,7 @@ class TestHppPredictions:
         count = hpp_predict_count(1.0, 4.0, RATE)
         assert jnp.allclose(count, RATE * 3.0)
 
+    @pytest.mark.slow
     def test_exceedance_log_prob_zero_rate_window(self):
         # No events expected ⇒ P(N > 0) = 0.
         log_p = hpp_exceedance_log_prob(0, 1.0, 1.0, RATE)
