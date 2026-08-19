@@ -118,3 +118,6 @@ venv.bak/
 # Plans (tracked via GitHub issues, not committed)
 .plans/
 .pr-review/
+
+# Local Claude Code worktrees (not part of the project)
+.claude/worktrees/
