@@ -10,521 +10,136 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
-[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://pre-commit.com/)
 
-Author: J. Emmanuel Johnson
-Repo: [https://github.com/jejjohnson/xtremax](https://github.com/jejjohnson/xtremax)
-Website: [jejjohnson.netlify.com](https://jejjohnson.netlify.com)
+**Extreme value theory for JAX — NumPyro-native EVT distributions, temporal / spatial / spatiotemporal point processes, and xarray-native extremes extraction.**
 
-An opinionated, modern Python package template with best-practice tooling already wired up. When you use this template, you get linting, formatting, type checking, testing with coverage gates, auto-generated documentation, automated releases, security scanning, and AI agent instructions — all configured and integrated from day one. No boilerplate to write; just rename the package and start coding.
+Built on top of [JAX](https://github.com/jax-ml/jax), [NumPyro](https://github.com/pyro-ppl/numpyro), [equinox](https://github.com/patrick-kidger/equinox), and [xarray](https://github.com/pydata/xarray).
 
----
+Extreme value analysis is central to climate risk, engineering reliability, finance, and insurance — yet the Python ecosystem forces practitioners to cobble together `scipy.stats`, hand-rolled log-likelihoods, and ad hoc xarray scripts. xtremax puts the whole workflow in one differentiable place: extract extremes from spatiotemporal data, fit Bayesian EVT and point-process models with NumPyro, and compute return levels with full posterior uncertainty.
 
-## 📂 Repository Layout
-
-```
-xtremax/
-├── src/xtremax/                    # Main package code (src layout)
-├── tests/                            # pytest test suite
-├── docs/                             # MkDocs documentation source
-├── notebooks/                        # Jupyter notebooks
-├── .github/
-│   ├── workflows/                    # GitHub Actions CI/CD workflows (9 total)
-│   ├── instructions/                 # Copilot custom instructions
-│   ├── copilot-instructions.md       # Copilot behavioural config
-│   ├── dependabot.yml                # Automated dependency PRs
-│   └── labeler.yml                   # Automatic PR labelling rules
-├── pyproject.toml                    # Single source of truth for project metadata & tools
-├── uv.lock                           # Fully reproducible lockfile
-├── Makefile                          # Self-documenting task runner
-├── mkdocs.yml                        # Documentation site configuration
-├── .pre-commit-config.yaml           # Git hook definitions
-├── release-please-config.json        # Automated release & changelog config
-├── .release-please-manifest.json     # Tracks the current released version
-├── .env.example                      # Template for local environment variables
-├── AGENTS.md                         # Standing instructions for AI coding agents
-├── CODE_REVIEW.md                    # Code review standards
-└── CHANGELOG.md                      # Auto-generated changelog
-```
-
----
-
-## 🚀 Quick Start
+## Installation
 
 ```bash
-# Prerequisites: uv (https://github.com/astral-sh/uv)
+pip install xtremax
+```
+
+Or with `uv`:
+
+```bash
+uv add xtremax
+```
+
+## Quick Start
+
+```python
+import jax.random as jr
+import numpyro
+import numpyro.distributions as dist
+from numpyro.infer import MCMC, NUTS
+
+import xtremax
+
+# NumPyro-native EVT distributions — sample, log_prob, cdf, icdf,
+# moments, and return levels, all differentiable
+gev = xtremax.GeneralizedExtremeValueDistribution(
+    loc=30.0, scale=2.0, concentration=0.1
+)
+maxima = gev.sample(jr.key(0), (100,))
+z100 = gev.return_level(100)  # 100-year return level
+
+# Drop straight into NumPyro inference — NUTS, SVI, Predictive all work
+def model(y):
+    loc = numpyro.sample("loc", dist.Normal(30.0, 10.0))
+    scale = numpyro.sample("scale", dist.LogNormal(0.0, 1.0))
+    conc = numpyro.sample("concentration", dist.Normal(0.0, 0.3))
+    numpyro.sample(
+        "obs",
+        xtremax.GeneralizedExtremeValueDistribution(loc, scale, conc),
+        obs=y,
+    )
+
+mcmc = MCMC(NUTS(model), num_warmup=1000, num_samples=1000)
+mcmc.run(jr.key(1), maxima)
+```
+
+Extracting extremes from spatiotemporal data stays in xarray — coordinates, dimensions, and metadata are preserved:
+
+```python
+import xtremax.extraction as xtx
+
+# da: any xr.DataArray with a "time" dimension, e.g. daily station temperatures
+annual_max = xtx.temporal_block_maxima(da, freq="YE")       # block maxima
+u = xtx.quantile_threshold(da, quantile=0.95)               # POT threshold
+peaks = xtx.decluster_runs(da, threshold=u)                 # independent peaks
+```
+
+## What's Inside
+
+### Distributions — NumPyro-native EVT
+
+Every distribution subclasses `numpyro.distributions.Distribution`, so it plugs directly into MCMC / SVI / `Predictive` and is differentiable end to end. Beyond `sample` / `log_prob`, each carries the full EVT toolkit: `cdf`, `icdf`, `survival_function`, `mean`, `variance`, `entropy`, and `return_level`.
+
+| Distribution | Role |
+|--------------|------|
+| `GeneralizedExtremeValueDistribution` | GEV for block maxima — smoothly spans all three types via the concentration ξ |
+| `GeneralizedParetoDistribution` | GPD for peaks-over-threshold exceedances |
+| `GumbelType1GEVD` | Type I (ξ = 0): exponential tails |
+| `FrechetType2GEVD` | Type II (ξ > 0): heavy polynomial tails |
+| `WeibullType3GEVD` | Type III (ξ < 0): bounded upper tail |
+
+### Primitives — pure JAX functions
+
+The distribution math as standalone pure functions, for when you want the density without the distribution object (custom likelihoods, vmapped grids, non-stationary fields):
+
+- **Per family** — `gev_*`, `gpd_*`, `gumbel_*`, `frechet_*`, `weibull_*` variants of `log_prob` | `cdf` | `icdf` | `mean` | `return_level`, plus `survival` / `log_survival` for the GEV and GPD families
+- **Non-stationary EVT** — `design_matrix`, `assemble_nonstationary_gev_fields`, `nonstationary_return_level`, `nonstationary_return_period`, `expected_exceedances`
+- **Spatial helpers** — `pairwise_distances`, `two_range_correlation`
+
+### Extraction — xarray-native
+
+Turn raw spatiotemporal data into modeling-ready extremes. Inputs are `xr.DataArray`s, and array-valued results preserve coordinates and metadata; fully reduced results (`constant_threshold`, scalar `quantile_threshold`, 1-D `estimate_extremal_index`) come back as plain floats:
+
+| Group | Functions |
+|-------|-----------|
+| **Block maxima** | `temporal_block_maxima`, `spatial_block_maxima`, `sliding_block_maxima`, `r_largest_block_maxima`, `declustered_block_maxima` |
+| **Thresholds** | `constant_threshold`, `quantile_threshold`, `rolling_threshold`, `seasonal_threshold`, `temporal_threshold`, quantile-regression thresholds (needs the `xtremax[threshold]` extra) |
+| **Declustering** | `decluster_runs`, `decluster_separation`, `estimate_extremal_index` |
+
+### Point Processes — three-tier API
+
+Temporal, spatial, and spatiotemporal point processes — homogeneous / inhomogeneous Poisson, renewal, Hawkes (exponential and general kernels), marked variants, and thinning — each exposed at three levels:
+
+| Tier | What it is | Examples |
+|------|-----------|----------|
+| **Primitives** | Pure functions: intensities, compensators, log-probs, samplers, diagnostics | `hpp_log_prob`, `ipp_sample_thinning`, `exp_hawkes_intensity`, `csr_ripleys_k` |
+| **Operators** | Immutable `equinox.Module` process objects bundling intensity + sampling; temporal operators add time-rescaling goodness-of-fit | `InhomogeneousPoissonProcess`, `SpatioTemporalHawkes`, `MarkedTemporalPointProcess` |
+| **Distributions** | NumPyro `Distribution` wrappers — use a point process as a likelihood in MCMC / SVI | `HomogeneousPoissonProcess`, `RenewalProcess`, `ExponentialHawkes` |
+
+Shared infrastructure: `TemporalDomain` / `RectangularDomain` for observation windows, `EventHistory` for conditioning, structured `SampleResult` types, and `GoodnessOfFit` diagnostics (time-rescaling residuals, KS statistics, Ripley's K).
+
+### Simulations — synthetic extremes
+
+Generators for testing and teaching: `simulate_temp_extremes`, `simulate_precip_extremes`, `simulate_wind_extremes`, GMST trajectories (`generate_gmst_trajectory`, `generate_physical_gmst`), spatial fields with fractal terrain, and a ready-made Iberian demo domain.
+
+## Documentation
+
+- **[Documentation site](https://jejjohnson.github.io/xtremax/)** — examples, design docs, and full API reference
+- **[Examples](https://jejjohnson.github.io/xtremax/)** — 20+ executed notebooks: GEV on block maxima, GPD peaks-over-threshold, non-stationary GEV (parametric trends, P-splines, neural ODEs), and every point process from scratch *and* through NumPyro
+- **[Design docs](https://jejjohnson.github.io/xtremax/design_docs/)** — vision, architecture, API design, and decision records
+- **[Interop](https://jejjohnson.github.io/xtremax/interop/)** — how xtremax composes with the wider ecosystem (NumPyro, pipekit) without depending on it
+
+## Development
+
+```bash
 git clone https://github.com/jejjohnson/xtremax.git
 cd xtremax
-make install      # install all dependency groups
+make install      # install all dependency groups + pre-commit hooks
 make test         # run tests
+make lint         # ruff check .
+make typecheck    # ty check src/xtremax
 make docs-serve   # preview docs locally
 ```
 
----
+## License
 
-## ✨ Features
-
-### 📦 Package Management — `uv` + `uv.lock`
-
-**Files:** `pyproject.toml`, `uv.lock`
-
-[uv](https://github.com/astral-sh/uv) is a Rust-based Python package manager that is 10–100× faster than pip. It handles virtual environments, dependency resolution, and installation in a single tool.
-
-- `uv.lock` provides a fully reproducible environment (like `package-lock.json` but for Python) — every developer and every CI run installs the exact same versions.
-- Dependency groups (`dev`, `lint`, `typecheck`, `docs`) let you install only what you need for a given task.
-
-> **What:** A Rust-based package manager and virtual environment tool — runs `uv sync` once and every developer gets a bit-for-bit identical environment from `uv.lock`.
-
-> **Why uv?** Eliminates "works on my machine" problems. Faster CI. A single binary replaces pip, pip-tools, virtualenv, and pyenv.
-
----
-
-### 🏗️ Project Metadata — `pyproject.toml`
-
-**File:** `pyproject.toml`
-
-`pyproject.toml` is the single source of truth, replacing `setup.py`, `setup.cfg`, and `requirements.txt`. Everything lives in one place:
-
-- **`[project]`** (PEP 621): name, version, description, authors, license, classifiers, `requires-python`
-- **`[dependency-groups]`**: `dev`, `lint`, `typecheck`, `docs`
-- **`[build-system]`**: `hatchling` as the build backend
-- **`[tool.ruff]`**, **`[tool.ty]`**, **`[tool.pytest.ini_options]`**, **`[tool.coverage.*]`**: all tool configs co-located
-
-> **What:** A single `pyproject.toml` replaces `setup.py`, `setup.cfg`, and every scattered `*.cfg` config file — one place for project metadata and every tool's configuration.
-
-> **Why one file?** Standardised (PEP 517/518/621), no scattered config files, tooling reads from one canonical location.
-
----
-
-### 📁 `src/` Layout
-
-**Directory:** `src/xtremax/`
-
-Source code lives under `src/xtremax/` rather than at the repo root. This forces the package to be properly installed before it can be imported, which means:
-
-- Packaging bugs (missing files, incorrect paths) are caught early rather than hidden by the flat-layout import shortcut.
-- Tests always exercise the installed package, not an accidentally-importable source directory.
-
-> **What:** All source code lives under `src/xtremax/` instead of at the repo root, so the package must be installed before it can be imported.
-
-> **Why `src/` layout?** Industry best practice. See writings by Brett Cannon and Hynek Schlawack on why flat layouts silently mask packaging errors.
-
----
-
-### 🔨 Build Backend — `hatchling`
-
-**File:** `pyproject.toml` (`[build-system]`, `[tool.hatch.build.targets.wheel]`)
-
-```toml
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/xtremax"]
-```
-
-Zero-config, PEP 517 compliant. No `MANIFEST.in`, no surprises. Integrates cleanly with uv.
-
-> **What:** `hatchling` is the PEP 517 build backend — run `uv build` and it produces a wheel and sdist with zero extra config.
-
-> **Why hatchling?** Minimal configuration, actively maintained, excellent uv integration, and handles the `src/` layout without extra config.
-
----
-
-### 🧹 Linting & Formatting — `ruff`
-
-**Files:** `pyproject.toml` (`[tool.ruff]`), `.pre-commit-config.yaml`, `.github/workflows/lint.yml`
-
-[ruff](https://github.com/astral-sh/ruff) replaces flake8, isort, and black in a single Rust binary.
-
-Rule sets enabled:
-
-| Code | What it checks |
-|------|---------------|
-| `E`, `F` | pycodestyle + pyflakes (core correctness) |
-| `I` | Import sorting (replaces isort) |
-| `UP` | pyupgrade — modernise syntax automatically |
-| `B` | flake8-bugbear — common gotchas |
-| `SIM` | flake8-simplify — simplify expressions |
-| `RUF` | Ruff-native rules |
-
-Pre-commit hooks run both `ruff` (lint + autofix) and `ruff-format`. CI enforces with `ruff check` and `ruff format --check`.
-
-> **What:** A single Rust binary that lints, sorts imports, and formats Python code — replaces flake8 + isort + black with one tool and one config block.
-
-> **Why ruff?** ~100× faster than the black + flake8 + isort combination; single config block; same results.
-
----
-
-### 🔬 Type Checking — `ty`
-
-**Files:** `pyproject.toml` (`[tool.ty]`), `.github/workflows/typecheck.yml`
-
-```toml
-[tool.ty.environment]
-python-version = "3.12"
-```
-
-[ty](https://github.com/astral-sh/ty) is Astral's new Rust-based type checker (same team as ruff and uv). It is extremely fast and designed to integrate with the rest of the Astral toolchain.
-
-> **What:** A Rust-based static type checker from the Astral team — run `make typecheck` to catch type errors without executing any code.
-
-> **Why ty?** Catches whole classes of bugs before runtime. Faster than mypy or pyright. Part of the same ecosystem as ruff and uv.
-
----
-
-### 🧪 Testing — `pytest` + `pytest-cov`
-
-**Files:** `pyproject.toml` (`[tool.pytest.ini_options]`, `[tool.coverage.*]`), `.github/workflows/ci.yml`
-
-```toml
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "--cov=src/xtremax --cov-report=term-missing --cov-report=xml:coverage.xml"
-
-[tool.coverage.report]
-fail_under = 80
-```
-
-- Tests live in `tests/`.
-- Fast local run (no coverage): `make test` (skips coverage collection for speed)
-- Coverage runs (with reports + gate): `uv run pytest` or `make test-cov`, and in CI
-- Coverage report (when enabled): terminal summary + `coverage.xml` for Codecov upload
-- **Coverage gate:** `fail_under = 80` — coverage-enabled runs and CI fail if coverage drops below 80%
-- CI matrix: Python 3.12 and 3.13
-
-> **What:** pytest with an 80% coverage gate wired in — `make test` is fast (no coverage), while CI and `make test-cov` enforce the gate and upload results to Codecov.
-
-> **Why a coverage gate?** Prevents silent regressions. The matrix catches version-specific bugs that single-version CI misses.
-
----
-
-### 🪝 Pre-commit — `.pre-commit-config.yaml`
-
-**Files:** `.pre-commit-config.yaml`, `.github/workflows/pre-commit-autoupdate.yml`
-
-Hooks that run on every `git commit`:
-
-| Hook | What it does |
-|------|-------------|
-| `end-of-file-fixer` | Ensures files end with a newline |
-| `trailing-whitespace` | Removes trailing whitespace |
-| `check-yaml` | Validates YAML syntax |
-| `check-added-large-files` | Blocks accidentally committed large files |
-| `ruff` | Lint + autofix |
-| `ruff-format` | Format |
-
-Run manually: `make precommit`. Hook versions are bumped automatically weekly via `.github/workflows/pre-commit-autoupdate.yml`.
-
-> **What:** Six git hooks that run automatically on every `git commit` to catch formatting, whitespace, and YAML issues before they reach CI.
-
-> **Why pre-commit?** Stops bad commits at the source rather than relying on CI to catch them after a push. Weekly autoupdate keeps hooks on patched versions.
-
----
-
-### 📖 Documentation — MkDocs + Material + mkdocstrings + mkdocs-jupyter
-
-**Files:** `mkdocs.yml`, `pyproject.toml` (`[dependency-groups] docs`), `.github/workflows/pages.yml`
-
-| Plugin | Role |
-|--------|------|
-| `mkdocs-material` | Responsive theme with dark/light toggle, tabs, copy buttons |
-| `mkdocstrings[python]` | Auto-generates API docs from Google-style docstrings |
-| `mkdocs-jupyter` | Renders `.ipynb` notebooks directly in the docs site |
-| `jupytext` | Stores notebooks as `.py` files for clean git diffs |
-
-Commands:
-
-```bash
-make docs          # build static site
-make docs-serve    # preview locally at http://127.0.0.1:8000
-make docs-deploy   # deploy to GitHub Pages
-```
-
-Auto-deploy: `.github/workflows/pages.yml` deploys on every push to `main`.
-
-Nav structure: **Home → API Reference → Changelog**
-
-> **What:** A versioned docs site auto-generated from Google-style docstrings and Jupyter notebooks, deployed to GitHub Pages on every push to the default branch.
-
-> **Why docs-as-code?** Documentation that lives next to code gets updated with it. Auto-API-docs from docstrings means zero duplication between source and docs.
-
----
-
-### 🏷️ Conventional Commits
-
-**File:** `.github/workflows/conventional-commits.yml`
-
-All commit messages must follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
-
-```
-<type>[optional scope]: <description>
-```
-
-Valid types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`
-
-The `conventional-commits.yml` workflow validates every **PR title** automatically using [`amannn/action-semantic-pull-request`](https://github.com/amannn/action-semantic-pull-request).
-
-> **What:** A CI check that enforces Conventional Commits format on every PR title, ensuring the commit history is machine-readable for automated changelogs and version bumps.
-
-> **Why Conventional Commits?** Enables automated changelogs, drives semantic versioning decisions, and makes `git log` readable at a glance.
-
----
-
-### 🚀 Automated Releases — Release Please
-
-**Files:** `release-please-config.json`, `.release-please-manifest.json`, `.github/workflows/release-please.yml`
-
-On every push to the default branch, [Release Please](https://github.com/googleapis/release-please) opens or updates a "release PR" that:
-
-1. Bumps the version in `pyproject.toml` based on commit types
-2. Updates `CHANGELOG.md` with grouped entries
-
-Merging that PR creates a GitHub Release and a git tag — no manual version bumping or changelog editing required.
-
-Changelog sections are driven by `release-please-config.json`. The current mapping:
-
-| Commit type | CHANGELOG section | Visible |
-|-------------|------------------|---------|
-| `feat` | Features | ✅ |
-| `fix` | Bug Fixes | ✅ |
-| `perf` | Performance Improvements | ✅ |
-| `revert` | Reverts | ✅ |
-| `docs` | Documentation | hidden |
-| `style` | Styles | hidden |
-| `refactor` | Code Refactoring | hidden |
-| `test` | Tests | hidden |
-| `build` | Build System | hidden |
-| `ci` | Continuous Integration | hidden |
-| `chore` | Miscellaneous | hidden |
-
-> **What:** Fully automated releases — every push to the default branch keeps a "release PR" up to date; merging it tags a release, bumps the version, and publishes a changelog.
-
-> **Why Release Please?** Zero-friction releases. The changelog writes itself from your commit messages.
-
----
-
-### 🔒 Security — CodeQL
-
-**File:** `.github/workflows/codeql.yml`
-
-GitHub's free static analysis tool scans for security vulnerabilities on every push, every PR, and on a weekly schedule. Zero configuration required.
-
-> **What:** GitHub's built-in static analysis — scans the codebase for security vulnerabilities on push, PR, and a weekly schedule.
-
-> **Why CodeQL?** Catches common security issues automatically. Free for public repos. No maintenance overhead.
-
----
-
-### 🤖 Dependabot — `.github/dependabot.yml`
-
-Dependabot monitors both **GitHub Actions** versions and **Python (pip) dependencies**, and opens automated PRs to update them whenever a new version is released.
-
-> **What:** Automated dependency PRs every week — both GitHub Actions and Python packages are kept up to date without manual intervention.
-
-> **Why Dependabot?** Keeps CI actions and Python dependencies on recent, patched versions without any manual tracking.
-
----
-
-### 🏷️ Auto PR Labeling — `.github/labeler.yml` + `label-pr.yml`
-
-File path patterns are mapped to labels from the standard taxonomy (`area:*`, `layer:*`, `dependencies`). For example:
-
-- Changes in `src/**/_primitives/` → `layer:0-primitives`
-- Changes in `tests/` → `area:testing`
-- Changes in `docs/`, `mkdocs.yml`, `*.md` → `area:docs`
-- Changes in `.github/`, `pyproject.toml`, `Makefile` → `area:engineering`
-- Changes in dependency files → `dependencies`
-
-> **What:** Automatic label application on every PR based on which files changed — no manual labelling required.
-
-> **Why auto-labeling?** At-a-glance PR categorization in the GitHub UI with zero manual effort.
-
----
-
-### 🧭 Issue Templates + Epic Hierarchy — `.github/ISSUE_TEMPLATE/`
-
-**Files:** `.github/ISSUE_TEMPLATE/*.md`, `.github/scripts/create-labels.sh`, `docs/contributing.md`, `CONTRIBUTING.md`
-
-Six opinionated issue templates (plus a `config.yml`) enforce a two-layer epic model (**Wave → Theme → Issue**) and a consistent body format: Problem / User Story / Motivation / Proposed API / References / Implementation Steps / Definition of Done / Testing / Documentation / Relationships.
-
-| Template | Purpose |
-|---|---|
-| `Epic — Wave (L1)` | Release-scoped mega-epic; owns a milestone |
-| `Epic — Theme (L2)` | Parallel-safe group of issues under a wave |
-| `Feature / Enhancement` | One substantial deliverable |
-| `Design / ADR` | Resolves a design question for a new API |
-| `Bug report` | Something isn't working |
-| `Research / Comparative Analysis` | Investigate prior art and produce a prioritized roadmap of follow-up issues |
-
-The `Feature` and `Design` templates include two **optional** sections:
-
-- **Design Snapshot** — paste API sketches or excerpts from private / external design docs so the issue is self-contained.
-- **Mathematical Notes** — equations, sign conventions, numerical considerations.
-
-Both exist so that an implementer (human or AI agent) can work on an issue without opening other repos or chats.
-
-A companion label taxonomy (`type:*`, `area:*`, `layer:*`, `wave:*`, `priority:*`) is created by running:
-
-```bash
-make gh-labels       # idempotent; edit .github/scripts/create-labels.sh to customise
-```
-
-For planning a whole wave of issues at once, copy [`docs/templates/wave-backlog.md`](docs/templates/wave-backlog.md) into your project's `.plans/` directory and draft the wave as one reviewable file before opening GitHub issues. See [`docs/contributing.md`](docs/contributing.md) → "Drafting a wave backlog" for the workflow.
-
-Once issues are open, apply GitHub's **native sub-issue and blocked-by links** on top of the prose `## Relationships` block. A helper script and three Makefile targets wrap the GraphQL mutations:
-
-```bash
-make gh-sub   PARENT=7  CHILDREN="42 43 44"   # link sub-issues
-make gh-block ISSUE=44  BLOCKED_BY=43          # mark dependency
-make gh-show  ISSUE=44                         # inspect parent / sub-issues / blocking / blocked-by
-```
-
-Two Claude Code skills guide these workflows end-to-end:
-
-- [`create-gh-issue`](.claude/commands/create-gh-issue.md) — picks the right template, drafts the body with required sections, applies labels + milestone, opens via `gh issue create`, and chains to the linking skill for relationships. Handles single issues and bulk publishing of a `.plans/<wave>-backlog.md` file.
-- [`link-gh-issues`](.claude/commands/link-gh-issues.md) — bulk-apply sub-issue and blocked-by links from a drafted backlog or theme epic's Issues checklist.
-
-See [`docs/contributing.md`](docs/contributing.md) (or [`CONTRIBUTING.md`](CONTRIBUTING.md) at the repo root) for the full taxonomy, epic model, and conventions.
-
-> **What:** Six issue templates + a 24-label taxonomy + a `Wave → Theme → Issue` hierarchy + a wave-backlog drafting template under `docs/templates/` + `create-gh-issue` and `link-gh-issues` skills with helper scripts for filing issues and applying native sub-issue / blocked-by links, all documented in `docs/contributing.md`.
-
-> **Why an epic model?** Consistent issue structure lets humans and AI agents collaborate on planning without renegotiating conventions each time. Templates encode the conventions; `make gh-labels` bootstraps the labels; `make gh-sub` / `make gh-block` wire the native hierarchy.
-
----
-
-### 🛠️ Makefile — Self-documenting Task Runner
-
-**File:** `Makefile`
-
-All common tasks are available via `make`:
-
-| Target | Description |
-|--------|-------------|
-| `make help` | Print all targets with descriptions |
-| `make install` | Install all dependency groups via uv |
-| `make init` | Bootstrap `.env` from `.env.example` |
-| `make test` | Run tests (no coverage) |
-| `make test-cov` | Run tests with coverage report |
-| `make lint` | Lint with ruff (no autofix) |
-| `make format` | Format with ruff (format + autofix) |
-| `make typecheck` | Type-check with ty |
-| `make precommit` | Run pre-commit hooks on all files |
-| `make build` | Build wheel and sdist |
-| `make clean` | Remove build artefacts and caches |
-| `make docs` | Build documentation site |
-| `make docs-serve` | Preview documentation locally |
-| `make docs-deploy` | Deploy documentation to GitHub Pages |
-| `make gh-labels` | Bootstrap the GitHub label taxonomy (idempotent) |
-| `make gh-sub` | Link CHILDREN as sub-issues of PARENT (e.g. `make gh-sub PARENT=7 CHILDREN="42 43"`) |
-| `make gh-block` | Mark ISSUE as blocked by BLOCKED_BY (`make gh-block ISSUE=44 BLOCKED_BY=43`) |
-| `make gh-show` | Show parent / sub-issues / blocking / blocked-by for an issue |
-| `make version` | Display package version and git hash |
-
-The Makefile auto-loads `.env` and exports its variables. The `check-env-VARNAME` guard pattern lets targets declare required env vars as prerequisites.
-
-> **What:** A self-documenting task runner — `make help` prints every available command with its description, so you never need to remember toolchain invocations.
-
-> **Why a Makefile?** Single interface regardless of the underlying toolchain. Onboarding takes seconds: `make help` shows everything.
-
----
-
-### 🔐 Environment Variables — `.env.example`
-
-**File:** `.env.example`
-
-`.env.example` is committed to git as a template. The actual `.env` is gitignored. Run `make init` to copy the example to `.env`.
-
-Documented variables:
-
-| Variable | Purpose |
-|----------|---------|
-| `PKGROOT` | Path to package source (default: `src/xtremax`) |
-| `PYPI_TOKEN` | PyPI token for publishing |
-| `GITHUB_TOKEN` | GitHub personal access token |
-
-> **What:** A committed `.env.example` documents every supported environment variable; the real `.env` is gitignored and auto-loaded by the Makefile.
-
-> **Why `.env.example`?** Local overrides without committing secrets. The Makefile auto-loads and exports vars, so all targets see them automatically.
-
----
-
-### 🤖 AI Agent Support — `AGENTS.md` + `.github/copilot-instructions.md`
-
-**Files:** `AGENTS.md`, `.github/copilot-instructions.md`, `.github/instructions/`
-
-`AGENTS.md` contains standing instructions for all AI coding agents (Copilot, Claude, Gemini, etc.):
-
-- **Karpathy Coding Principles:** Think Before Coding, Simplicity First, Surgical Changes, Goal-Driven Execution
-- **Pre-commit checklist:** tests, lint, format, type checks must pass before every commit
-- **Git safety rules:** never push to `main` without explicit instruction
-- **Conventional Commits** requirement for all commit messages
-
-`.github/copilot-instructions.md` provides GitHub Copilot-specific behavioural config: project overview, build commands, key directories, and review guidelines.
-
-> **What:** Explicit behavioural contracts for AI coding agents — `AGENTS.md` for all agents, `copilot-instructions.md` for GitHub Copilot — covering coding principles, quality gates, and git safety rules.
-
-> **Why explicit agent instructions?** LLMs working on repos need explicit contracts about style, safety, and quality gates — the same way human contributors need a `CONTRIBUTING.md`.
-
----
-
-### 📋 Code Review Standards — `CODE_REVIEW.md`
-
-**File:** `CODE_REVIEW.md`
-
-Defines the review checklist (style, idioms, packaging, docs, error handling, testing, performance, security), Python-specific checks, output format, and suggestion priorities. Referenced by both `AGENTS.md` and `copilot-instructions.md` so that humans and AI agents apply the same criteria.
-
-> **What:** A shared code-review rubric that both human reviewers and AI agents reference, ensuring consistent feedback quality across the project.
-
----
-
-## 🔄 CI/CD Workflows
-
-| Workflow | File | Trigger | What it does |
-|----------|------|---------|-------------|
-| Tests | `ci.yml` | push / PR to default branch | pytest matrix (3.12, 3.13) + Codecov upload |
-| Lint | `lint.yml` | push / PR to default branch | `ruff check` + `ruff format --check` |
-| Type Check | `typecheck.yml` | push / PR to default branch | `ty check` |
-| Deploy Docs | `pages.yml` | push to default branch | `mkdocs gh-deploy` |
-| Release Please | `release-please.yml` | push to default branch | automated release PR + changelog |
-| CodeQL | `codeql.yml` | push / PR / schedule | security static analysis |
-| Conventional Commits | `conventional-commits.yml` | PR | validates PR title format |
-| PR Labeler | `label-pr.yml` | PR | applies path-based labels |
-| Pre-commit Autoupdate | `pre-commit-autoupdate.yml` | weekly schedule | bumps hook revisions, opens PR |
-
----
-
-## 🛠️ Adapting This Template
-
-Follow this checklist when using this repo as a base for a new project:
-
-1. **Search-and-replace** `xtremax` with your package name everywhere (source, config, docs)
-2. **Update `[project]` in `pyproject.toml`**: name, description, authors, keywords, classifiers, `requires-python`
-3. **Update `mkdocs.yml`**: `site_name`, `site_description`, `repo_url`, `repo_name`
-4. **Rename `src/xtremax/`** to `src/<yourpackage>/`
-5. **Copy `.env.example` to `.env`** (`make init`) and fill in values
-6. **Run `make install`** then **`make test`** to verify the baseline works
-7. **Set up Codecov** and add `CODECOV_TOKEN` to GitHub Secrets if you want coverage tracking
-8. **Update badge URLs** in this README to point at your repository
-9. **Update `[project.urls]`** in `pyproject.toml` to your repository URL
-10. Delete or update `CHANGELOG.md` and `.release-please-manifest.json` to start fresh
-11. **Bootstrap the GitHub label taxonomy**: `make gh-labels` (edits `.github/scripts/create-labels.sh` if you need to customise `area:*` / `layer:*` / `wave:*` for your project)
-12. **Review `docs/contributing.md`** and adjust the label taxonomy / epic model / contact links for your project; update `.github/ISSUE_TEMPLATE/config.yml` discussions URL
-
----
-
-## 📚 Further Reading
-
-| Tool | Documentation |
-|------|--------------|
-| uv | <https://docs.astral.sh/uv/> |
-| ruff | <https://docs.astral.sh/ruff/> |
-| ty | <https://github.com/astral-sh/ty> |
-| hatchling | <https://hatch.pypa.io/latest/> |
-| pytest | <https://docs.pytest.org/> |
-| MkDocs Material | <https://squidfunk.github.io/mkdocs-material/> |
-| mkdocstrings | <https://mkdocstrings.github.io/> |
-| pre-commit | <https://pre-commit.com/> |
-| Release Please | <https://github.com/googleapis/release-please> |
-| Conventional Commits | <https://www.conventionalcommits.org/> |
+MIT

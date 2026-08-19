@@ -4,8 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-<!-- TODO: Replace with your project description -->
-A Python package. Built with Python 3.12+, uv, pytest, and MkDocs.
+xtremax: JAX/NumPyro-native library for extreme value modeling — NumPyro EVT distributions (GEV, GPD, Gumbel, Fréchet, Weibull), temporal/spatial/spatiotemporal point processes, and xarray-native extremes extraction. Built on JAX, NumPyro, equinox, and xarray.
 
 ## Common Commands
 
@@ -46,9 +45,15 @@ All implementation lives in `src/xtremax/`. The public API is re-exported throug
 
 | Path | Purpose |
 |------|---------|
-| `src/xtremax/` | Main package source code |
+| `src/xtremax/distributions/` | NumPyro-native EVT distributions (GEV, GPD, Gumbel, Fréchet, Weibull) |
+| `src/xtremax/primitives/` | Pure JAX functions per family (`gev_*`, `gpd_*`, …) + non-stationary and spatial helpers |
+| `src/xtremax/extraction/` | xarray-native block maxima, thresholds, declustering |
+| `src/xtremax/point_processes/primitives/` | Pure functions: intensities, compensators, log-probs, samplers, diagnostics |
+| `src/xtremax/point_processes/operators/` | `equinox.Module` process objects (intensity + sampling + GOF) |
+| `src/xtremax/point_processes/distributions/` | NumPyro `Distribution` wrappers for point processes |
+| `src/xtremax/simulations/` | Synthetic extremes generators |
 | `tests/` | Test suite |
-| `docs/` | Documentation (MkDocs) |
+| `docs/` | Documentation (MkDocs); API pages in `docs/api/`, design docs in `docs/design_docs/` |
 | `notebooks/` | Jupyter notebooks |
 | `scripts/` | Example scripts |
 

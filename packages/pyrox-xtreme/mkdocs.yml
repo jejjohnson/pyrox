@@ -84,7 +84,16 @@ nav:
           - Components: design_docs/examples/components.md
           - Models: design_docs/examples/models.md
           - Integration: design_docs/examples/integration.md
-  - API Reference: api/reference.md
+  - API Reference:
+      - Overview: api/index.md
+      - Distributions: api/distributions.md
+      - Primitives: api/primitives.md
+      - Extraction: api/extraction.md
+      - "Point Processes — Overview": api/point-processes.md
+      - "Point Processes — Primitives": api/point-process-primitives.md
+      - "Point Processes — Operators": api/point-process-operators.md
+      - "Point Processes — Distributions": api/point-process-distributions.md
+      - Simulations: api/simulations.md
   - Interop: interop.md
   - Contributing: contributing.md
   - Changelog: changelog.md
