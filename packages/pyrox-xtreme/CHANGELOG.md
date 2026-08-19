@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.2](https://github.com/jejjohnson/xtremax/compare/v0.0.1...v0.0.2) (2026-08-19)
+
+
+### Features
+
+* **distributions:** covariance() for the pipekit ObservationNoise seam (epic [#42](https://github.com/jejjohnson/xtremax/issues/42)) ([#89](https://github.com/jejjohnson/xtremax/issues/89)) ([43c8f76](https://github.com/jejjohnson/xtremax/commit/43c8f763873aeefb532ff0ecbaf560fd1436b2e1))
+* **extraction:** record where each block maximum occurred ([#30](https://github.com/jejjohnson/xtremax/issues/30)) ([2a4b329](https://github.com/jejjohnson/xtremax/commit/2a4b329cf880c6852e010114ad3a41deaf38bc52))
+
+
+### Bug Fixes
+
+* **distributions:** correctness & NumPyro contract for the EVT classes ([#79](https://github.com/jejjohnson/xtremax/issues/79)) ([d9e77fd](https://github.com/jejjohnson/xtremax/commit/d9e77fd40bc62fcebffadf77c79d546d85fcbf17))
+* extraction & simulations correctness (epic [#40](https://github.com/jejjohnson/xtremax/issues/40)) ([#86](https://github.com/jejjohnson/xtremax/issues/86)) ([6ee001a](https://github.com/jejjohnson/xtremax/commit/6ee001a041d7ca5d40eb77e886e1421d4b1ca6aa))
+* **point_processes:** correctness wave — thinning sign, Hawkes GOF, gradients, invariants ([#80](https://github.com/jejjohnson/xtremax/issues/80)) ([b5dc127](https://github.com/jejjohnson/xtremax/commit/b5dc127ce7d134ad39d18a7f45386190bbdeaea8))
+* **primitives:** stabilize the EVT kernels near the ξ→0 limit ([#77](https://github.com/jejjohnson/xtremax/issues/77)) ([b285925](https://github.com/jejjohnson/xtremax/commit/b285925256d911aa15ea7e9364b13cc18a1ac59a))
+
 ## 0.0.1 (2026-06-02)
 
 
