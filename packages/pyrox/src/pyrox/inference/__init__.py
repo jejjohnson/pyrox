@@ -16,6 +16,11 @@
 * `ensemble_map` — fit MAP/MLE in one call
 * `ensemble_vi` — fit mean-field VI in one call
 * `ensemble_predict` — vmap a predictive over the ensemble axis
+
+**Optimizer helpers:**
+
+* `param_group_optimizer` — different optax optimizers (typically
+  different learning rates) per labelled parameter group
 """
 
 from pyrox.inference._ensemble import (
@@ -30,6 +35,7 @@ from pyrox.inference._ensemble import (
     ensemble_step,
     ensemble_vi,
 )
+from pyrox.inference._param_groups import param_group_optimizer
 
 
 __all__ = [
@@ -43,4 +49,5 @@ __all__ = [
     "ensemble_predict",
     "ensemble_step",
     "ensemble_vi",
+    "param_group_optimizer",
 ]

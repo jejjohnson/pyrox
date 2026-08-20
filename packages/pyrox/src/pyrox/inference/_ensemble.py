@@ -240,6 +240,29 @@ class EnsembleMAP(eqx.Module):
 
     where $w_{\text{prior}}$ is `prior_weight`.
 
+    **Tempering.** Down-weighting the prior has the same argmax as
+    tempering the likelihood by $\beta = 1 / w_{\text{prior}}$, since
+
+    $$
+    \beta \mathcal{L} + \mathcal{P}
+    = \beta \left( \mathcal{L} + \tfrac{1}{\beta} \mathcal{P} \right)
+    $$
+
+    and rescaling an objective does not move its argmax. The two are
+    **not** interchangeable in general: ``prior_weight`` scales the
+    *entire* log prior — hyperpriors included — while a likelihood-side
+    $\beta$ (e.g. [`lfr_factor`][pyrox_gp.lfr_factor], which applies
+    ``numpyro.handlers.scale`` to the likelihood site only) leaves every
+    prior at unit weight. Same argmax, different gradient scaling, and
+    different behaviour under minibatching — pick the one whose gradients
+    you want.
+
+    For rotationally non-identifiable latent models (e.g.
+    `pyrox_gp.LatentFactorGPPrior`, whose objective has a flat manifold of
+    optima), ensembling over seeds is the point of this class rather than a
+    convenience: independent members land in different basins/gauges and
+    the spread is real uncertainty.
+
     Examples:
         >>> runner = EnsembleMAP(
         ...     log_joint=log_joint,

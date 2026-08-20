@@ -28,7 +28,16 @@ def init_latents_by_sampling(site):
     return init_to_sample(site) if site["name"] == "Z_T" else init_to_median(site)
 
 guide = AutoDelta(lfr_model, init_loc_fn=partial(init_latents_by_sampling))
-svi = SVI(lfr_model, guide, optax.adam(3e-3), loss=Trace_ELBO())
+
+# Z is N x Q free parameters on a well-conditioned objective; kernel
+# hyperparameters live on a log scale. Give the latents a 10x larger step.
+from pyrox.inference import param_group_optimizer
+
+optimizer = param_group_optimizer(
+    {"latents": optax.adam(1e-2), "globals": optax.adam(1e-3)},
+    lambda path, _: "latents" if "Z_T" in str(path) else "globals",
+)
+svi = SVI(lfr_model, guide, optimizer, loss=Trace_ELBO())
 result = svi.run(jax.random.PRNGKey(0), 5000, X, Y, prior)
 
 Z_map = result.params["Z_T_auto_loc"].T
@@ -38,10 +47,10 @@ mean, var = cond.predict(X_test)                    # (T, P), (T, P)
 mean, var = cond.predict(X_test, include_noise=True)
 ```
 
-A single global learning rate is a compromise for this model: ``Z`` is
-``N x Q`` free parameters on a well-conditioned objective while the
-hyperparameters are a handful of values on a log scale. See
-`pyrox.inference` for per-parameter-group optimizers when that bites.
+A single global learning rate (plain ``optax.adam``) also works, but is a
+compromise: it either crawls on ``Z`` or destabilizes the kernel
+hyperparameters. See
+[`param_group_optimizer`][pyrox.inference.param_group_optimizer].
 
 ``Y`` is assumed centered — there is no mean function; center it
 externally before fitting.
