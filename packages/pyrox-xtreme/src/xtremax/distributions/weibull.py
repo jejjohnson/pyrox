@@ -13,12 +13,16 @@ import warnings
 import jax.numpy as jnp
 import numpyro.distributions as dist
 from jax import lax
-from jax.scipy.special import gammaln
 from jax.typing import ArrayLike
 from numpyro.distributions import constraints
 from numpyro.distributions.util import promote_shapes, validate_sample
 
 from xtremax._rng import check_prng_key
+from xtremax.primitives._moments import (
+    gev_excess_kurtosis,
+    gev_skewness,
+    gev_variance,
+)
 from xtremax.primitives.weibull import (
     weibull_cdf,
     weibull_icdf,
@@ -277,12 +281,7 @@ class WeibullType3GEVD(dist.Distribution):
         Returns:
             Variance (always finite on the Type III domain).
         """
-        _loc, scale, shape = self.loc, self.scale, self.concentration
-
-        # Γ(1 - 2ξ) and Γ(1 - ξ) are finite for every ξ < 0 (argument > 1).
-        gamma1 = jnp.exp(gammaln(1.0 - 2.0 * shape))  # Γ(1-2ξ)
-        gamma2 = jnp.exp(2.0 * gammaln(1.0 - shape))  # Γ²(1-ξ)
-        return (scale**2 / shape**2) * (gamma1 - gamma2)
+        return gev_variance(self.scale, self.concentration)
 
     def kurtosis(self) -> jnp.ndarray:
         """
@@ -296,16 +295,7 @@ class WeibullType3GEVD(dist.Distribution):
         Returns:
             Excess kurtosis (always finite on the Type III domain).
         """
-        shape = self.concentration
-
-        g1 = jnp.exp(gammaln(1.0 - shape))  # Γ(1-ξ)
-        g2 = jnp.exp(gammaln(1.0 - 2.0 * shape))  # Γ(1-2ξ)
-        g3 = jnp.exp(gammaln(1.0 - 3.0 * shape))  # Γ(1-3ξ)
-        g4 = jnp.exp(gammaln(1.0 - 4.0 * shape))  # Γ(1-4ξ)
-
-        mu2 = g2 - g1**2
-        mu4 = g4 - 4.0 * g1 * g3 + 6.0 * g1**2 * g2 - 3.0 * g1**4
-        return (mu4 / mu2**2) - 3.0
+        return gev_excess_kurtosis(self.concentration)
 
     def skew(self) -> jnp.ndarray:
         """
@@ -318,18 +308,11 @@ class WeibullType3GEVD(dist.Distribution):
         Returns:
             Skewness (always finite on the Type III domain).
         """
-        shape = self.concentration
-
-        g1 = jnp.exp(gammaln(1.0 - shape))  # Γ(1-ξ)
-        g2 = jnp.exp(gammaln(1.0 - 2.0 * shape))  # Γ(1-2ξ)
-        g3 = jnp.exp(gammaln(1.0 - 3.0 * shape))  # Γ(1-3ξ)
-
-        mu2 = g2 - g1**2
-        mu3 = g3 - 3.0 * g1 * g2 + 2.0 * g1**3
-
-        # X = μ + (σ/ξ)(W − 1) with ξ < 0 statically: the (σ/ξ)³ factor in the
-        # third central moment flips the sign of the standardized skew.
-        return -mu3 / jnp.power(mu2, 1.5)
+        # X = μ + (σ/ξ)(W − 1) with ξ < 0: the (σ/ξ)³ factor in the third
+        # central moment flips the sign of the standardized skew. The
+        # reduced form carries that sign on its own, so the Type III branch
+        # needs no static ``-`` here.
+        return gev_skewness(self.concentration)
 
     def entropy(self) -> jnp.ndarray:
         """

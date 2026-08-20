@@ -12,12 +12,16 @@ import warnings
 import jax.numpy as jnp
 import numpyro.distributions as dist
 from jax import lax
-from jax.scipy.special import gammaln
 from numpyro.distributions import constraints
 from numpyro.distributions.util import promote_shapes, validate_sample
 
 from xtremax.distributions._support import concrete_sign
 from xtremax.primitives._common import GUMBEL_THRESHOLD
+from xtremax.primitives._moments import (
+    gev_excess_kurtosis,
+    gev_skewness,
+    gev_variance,
+)
 from xtremax.primitives.gev import (
     gev_cdf,
     gev_icdf,
@@ -333,32 +337,15 @@ class GeneralizedExtremeValueDistribution(dist.Distribution):
         For ξ = 0:
             Var[X] = σ² * π²/6
 
+        Thin wrapper for :func:`~xtremax.primitives._moments.gev_variance`,
+        which evaluates the Γ-difference through a cancellation-free
+        reduced form — the direct subtraction above loses every significant
+        digit for small ξ.
+
         Returns:
-            Variance or NaN/∞ when it doesn't exist
+            Variance, or +∞ when it doesn't exist (ξ ≥ 1/2)
         """
-        _loc, scale, shape = self.loc, self.scale, self.concentration
-
-        is_gumbel = jnp.abs(shape) < GUMBEL_THRESHOLD
-        var_exists = shape < 0.5
-
-        def gumbel_variance():
-            return (scale**2) * (jnp.pi**2) / 6.0
-
-        def gevd_variance():
-            gamma1 = jnp.exp(gammaln(1.0 - 2.0 * shape))
-            gamma2 = jnp.exp(2.0 * gammaln(1.0 - shape))
-            # Substitute a safe divisor where the Gumbel branch is taken:
-            # with Python-float parameters ``shape**2`` divides eagerly
-            # (both jnp.where branches evaluate), so ξ = 0 raised
-            # ZeroDivisionError before the mask could select the branch.
-            safe_shape = jnp.where(is_gumbel, 1.0, shape)
-            return (scale**2 / safe_shape**2) * (gamma1 - gamma2)
-
-        var_gumbel = gumbel_variance()
-        var_gevd = gevd_variance()
-
-        result = jnp.where(is_gumbel, var_gumbel, var_gevd)
-        return jnp.where(var_exists, result, jnp.inf)
+        return gev_variance(self.scale, self.concentration)
 
     def covariance(self) -> jnp.ndarray:
         """Marginal variance broadcast to the batch shape.
@@ -390,39 +377,16 @@ class GeneralizedExtremeValueDistribution(dist.Distribution):
 
         where μ₄ is the fourth central moment.
 
+        Thin wrapper for
+        :func:`~xtremax.primitives._moments.gev_excess_kurtosis`, which
+        evaluates the fourth-moment gamma combination through a
+        cancellation-free reduced form (it loses *two* leading orders in
+        the naive one) and reduces to the Gumbel value 12/5 at ξ = 0.
+
         Returns:
-            Excess kurtosis or NaN/∞ when it doesn't exist
+            Excess kurtosis, or NaN when it doesn't exist (ξ ≥ 1/4)
         """
-        shape = self.concentration
-
-        is_gumbel = jnp.abs(shape) < GUMBEL_THRESHOLD
-        kurt_exists = shape < 0.25
-
-        def gumbel_kurtosis():
-            # For Gumbel: excess kurtosis = 12/5
-            return 12.0 / 5.0
-
-        def gevd_kurtosis():
-            # Complex formula involving gamma functions
-            g1 = jnp.exp(gammaln(1.0 - shape))
-            g2 = jnp.exp(gammaln(1.0 - 2.0 * shape))
-            g3 = jnp.exp(gammaln(1.0 - 3.0 * shape))
-            g4 = jnp.exp(gammaln(1.0 - 4.0 * shape))
-
-            # Central moments
-            mu2 = g2 - g1**2
-            mu4 = g4 - 4.0 * g1 * g3 + 6.0 * g1**2 * g2 - 3.0 * g1**4
-
-            return (mu4 / mu2**2) - 3.0
-
-        kurt_gumbel = gumbel_kurtosis()
-        kurt_gevd = gevd_kurtosis()
-
-        result = jnp.where(is_gumbel, kurt_gumbel, kurt_gevd)
-        # NaN, not inf: beyond ξ = 1/4 the standardized fourth moment is
-        # undefined (the raw moment diverges), unlike the variance which
-        # genuinely diverges to +inf. One sentinel convention repo-wide.
-        return jnp.where(kurt_exists, result, jnp.nan)
+        return gev_excess_kurtosis(self.concentration)
 
     def skew(self) -> jnp.ndarray:
         """
@@ -433,37 +397,15 @@ class GeneralizedExtremeValueDistribution(dist.Distribution):
         For Gumbel (ξ = 0): skew ≈ 1.1396
         For general GEVD: involves third-order moments and gamma functions
 
+        Thin wrapper for :func:`~xtremax.primitives._moments.gev_skewness`,
+        which evaluates the third-moment gamma combination through a
+        cancellation-free reduced form. The reduced ratio carries the sign
+        of ξ on its own, so no explicit ``sign(ξ)`` factor is needed.
+
         Returns:
-            Skewness or NaN/∞ when it doesn't exist
+            Skewness, or NaN when it doesn't exist (ξ ≥ 1/3)
         """
-        shape = self.concentration
-
-        is_gumbel = jnp.abs(shape) < GUMBEL_THRESHOLD
-        skew_exists = shape < 1.0 / 3.0
-
-        def gumbel_skewness():
-            # Analytical value for Gumbel distribution
-            return 1.1395470994046486
-
-        def gevd_skewness():
-            g1 = jnp.exp(gammaln(1.0 - shape))
-            g2 = jnp.exp(gammaln(1.0 - 2.0 * shape))
-            g3 = jnp.exp(gammaln(1.0 - 3.0 * shape))
-
-            mu2 = g2 - g1**2
-            mu3 = g3 - 3.0 * g1 * g2 + 2.0 * g1**3
-
-            # X = μ + (σ/ξ)(W − 1): the third central moment carries (σ/ξ)³,
-            # so the standardized skew picks up sign(ξ)³ = sign(ξ).
-            return jnp.sign(shape) * mu3 / jnp.power(mu2, 1.5)
-
-        skew_gumbel = gumbel_skewness()
-        skew_gevd = gevd_skewness()
-
-        result = jnp.where(is_gumbel, skew_gumbel, skew_gevd)
-        # NaN, not inf: beyond ξ = 1/3 the standardized third moment is
-        # undefined, unlike the variance which genuinely diverges to +inf.
-        return jnp.where(skew_exists, result, jnp.nan)
+        return gev_skewness(self.concentration)
 
     def entropy(self) -> jnp.ndarray:
         r"""Differential entropy of the GEV distribution (in nats).

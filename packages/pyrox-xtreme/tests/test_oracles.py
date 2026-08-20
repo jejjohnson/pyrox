@@ -306,19 +306,15 @@ class TestClassOracles:
     @pytest.mark.parametrize(("family", "xi"), CLASS_CASES)
     def test_moments(self, family, xi):
         d, frozen = _class_and_frozen(family, xi)
-        mean, var, skew = frozen.stats(moments="mvs")
+        mean, var, skew, kurt = frozen.stats(moments="mvsk")
         np.testing.assert_allclose(float(d.mean), mean, rtol=5e-4)
-        if xi is not None and 0 < abs(xi) < 1e-3:
-            # Known float32 limitation (dead band): for tiny nonzero ξ
-            # the exact Γ-difference variance/skew formulas cancel to ~0
-            # in float32 — the class switches to the Gumbel closed forms
-            # only below GUMBEL_THRESHOLD (1e-7). Pin only finiteness
-            # here (the ξ=0 crash regression) and the mean, which uses a
-            # cancellation-free expm1∘gammaln form.
-            assert np.isfinite(float(d.variance))
-        else:
-            np.testing.assert_allclose(float(d.variance), var, rtol=1e-3)
-            np.testing.assert_allclose(float(d.skew()), skew, rtol=2e-3, atol=1e-5)
+        np.testing.assert_allclose(float(d.variance), var, rtol=1e-3)
+        np.testing.assert_allclose(float(d.skew()), skew, rtol=2e-3, atol=1e-5)
+        # scipy's own genextreme moments degrade inside |ξ| ≲ 1e-3 (its
+        # dead band, ~1e-3 relative on the excess kurtosis), so the
+        # standardized moments are pinned loosely here and exactly
+        # against mpmath in TestSmallShapeMoments.
+        np.testing.assert_allclose(float(d.kurtosis()), kurt, rtol=5e-3, atol=1e-3)
 
     @pytest.mark.parametrize(("family", "xi"), CLASS_CASES)
     def test_return_level(self, family, xi):
@@ -467,3 +463,144 @@ class TestFloat64Isolation:
         )
         assert result.returncode == 0, result.stderr
         assert "OK" in result.stdout
+
+
+# (ξ, Var, skew, excess kurtosis) at LOC/SCALE, computed to 40 decimal
+# digits with mpmath from the exact Γ-difference formulas and rounded to
+# 12 significant figures. mpmath rather than scipy because
+# ``scipy.stats.genextreme`` has a dead band of its own — inside
+# |ξ| ≲ 1e-3 its moments drift by up to ~4e-4 (skew) and ~1e-3 (excess
+# kurtosis), which is the very region this table has to pin. ξ = 0 uses
+# the exact Gumbel limits σ²π²/6, 12√6 ζ(3)/π³ and 12/5.
+GEV_MOMENT_GOLDEN = (
+    (-1.0, 4.0, -2.0, 6.0),
+    (-0.5, 3.43362938564, -0.631110657819, 0.245089300688),
+    (-0.3, 3.9138532693, -0.068742099421, -0.289399162108),
+    (-0.24, 4.19003133275, 0.119634097592, -0.234039348657),
+    (-0.2, 4.42299779831, 0.254109603707, -0.119709936218),
+    (-0.15, 4.78316749944, 0.43574332954, 0.137656966413),
+    (-0.1, 5.24018202939, 0.637637133903, 0.570166483567),
+    (-0.05, 5.82434367673, 0.867965095175, 1.26720075926),
+    (-0.01, 6.41219664801, 1.08107375981, 2.12544588659),
+    (-0.003, 6.52851835404, 1.12175681071, 2.31460271537),
+    (-0.001, 6.56257072594, 1.13359273066, 2.37123426411),
+    (-0.0001, 6.57801550513, 1.13895056093, 2.39710975666),
+    (-1e-05, 6.57956414899, 1.13948743451, 2.39971083838),
+    (-1e-06, 6.57971905513, 1.1395411328, 2.39997108246),
+    (-1e-08, 6.57973609527, 1.13954703974, 2.39999971158),
+    (0.0, 6.57973626739, 1.1395470994, 2.4),
+    (1e-08, 6.57973643952, 1.13954715907, 2.40000029032),
+    (1e-06, 6.57975347975, 1.13955306603, 2.40002891784),
+    (1e-05, 6.57990839517, 1.13960676676, 2.40028919215),
+    (0.0001, 6.58145796712, 1.14014388348, 2.40289329566),
+    (0.001, 6.59699555602, 1.14552602793, 2.42907097371),
+    (0.003, 6.63179793854, 1.15755844145, 2.48814483951),
+    (0.01, 6.75665517419, 1.20047851976, 2.70513497837),
+    (0.05, 7.57241072454, 1.4738841313, 4.33349431517),
+    (0.1, 8.90496429283, 1.91033913417, 7.97856623935),
+    (0.15, 10.7440475863, 2.53024989387, 16.2741593308),
+    (0.2, 13.3761422492, 3.53507160462, 45.0915121258),
+    (0.24, 16.3949134617, 5.02446249514, 309.608411304),
+)
+
+
+class TestSmallShapeMoments:
+    """#88 — the Γ-difference moment formulas cancelled to noise for
+    small ξ. In float32 the variance evaluated to exactly ``0`` at
+    ξ = 1e-5 (true value 6.58) and the skew/kurtosis to ``nan`` / ~1e6;
+    even in float64 the excess kurtosis came out as 3e4 instead of 2.4.
+    The Gumbel closed forms only took over below ``GUMBEL_THRESHOLD``
+    (1e-7), leaving everything between there and ξ ≈ 0.1 garbage.
+    """
+
+    @pytest.mark.parametrize(("xi", "var", "skew", "kurt"), GEV_MOMENT_GOLDEN)
+    def test_gev_moments_match_mpmath(self, xi, var, skew, kurt):
+        d = GeneralizedExtremeValueDistribution(LOC, SCALE, concentration=xi)
+        np.testing.assert_allclose(float(d.variance), var, rtol=5e-4)
+        np.testing.assert_allclose(float(d.skew()), skew, rtol=1e-3, atol=1e-3)
+        np.testing.assert_allclose(float(d.kurtosis()), kurt, rtol=1e-2, atol=5e-3)
+
+    @pytest.mark.parametrize(("xi", "var", "skew", "kurt"), GEV_MOMENT_GOLDEN)
+    def test_frechet_weibull_share_the_gev_moments(self, xi, var, skew, kurt):
+        """The ξ > 0 / ξ < 0 subclasses carried their own copies of the
+        same cancelling formulas — Fréchet's ``concentration`` constraint
+        is plain positivity, so ξ = 1e-5 was reachable there too.
+        """
+        if xi == 0.0:
+            pytest.skip("ξ = 0 is in neither the Fréchet nor Weibull domain")
+        cls = FrechetType2GEVD if xi > 0 else WeibullType3GEVD
+        d = cls(LOC, SCALE, concentration=xi)
+        np.testing.assert_allclose(float(d.variance), var, rtol=5e-4)
+        np.testing.assert_allclose(float(d.skew()), skew, rtol=1e-3, atol=1e-3)
+        np.testing.assert_allclose(float(d.kurtosis()), kurt, rtol=1e-2, atol=5e-3)
+
+    def test_variance_never_collapses_across_the_old_dead_band(self):
+        """The failure was a *collapse*, not drift: the Γ difference
+        rounded to 0 (or negative) in float32. Sweep the band densely and
+        require the variance to stay near the Gumbel value throughout.
+        """
+        xi = np.concatenate([np.logspace(-8, -2, 200), -np.logspace(-8, -2, 200)])
+        got = np.asarray(
+            GeneralizedExtremeValueDistribution(
+                LOC, SCALE, concentration=xi.astype(np.float32)
+            ).variance
+        )
+        gumbel_var = SCALE**2 * np.pi**2 / 6.0
+        assert np.all(np.isfinite(got))
+        # |ξ| ≤ 1e-2 moves the true variance by at most ~3% off the limit.
+        np.testing.assert_allclose(got, gumbel_var, rtol=0.03)
+
+    def test_integral_parameters_are_promoted_before_arithmetic(self):
+        """``scale=50000`` and ``concentration=0`` are legal arguments and
+        must not stay integral: an int32 ``scale ** 2`` wraps round to a
+        *negative* variance, and an integral concentration has no floating
+        epsilon to pick the series crossover from.
+        """
+        got = GeneralizedExtremeValueDistribution(0, 50000, concentration=0)
+        ref = GeneralizedExtremeValueDistribution(0.0, 50000.0, concentration=0.0)
+        assert float(got.variance) > 0.0
+        assert float(got.variance) == float(ref.variance)
+        assert float(got.skew()) == float(ref.skew())
+        assert float(got.kurtosis()) == float(ref.kurtosis())
+
+    def test_series_coefficients_outlive_narrow_input_dtypes(self):
+        """The Taylor tables reach ~1e18. Narrowed to the input dtype they
+        overflow anything below float32, and Horner then returns 0·inf =
+        nan at exactly the ξ = 0 limit the series exists to cover.
+        """
+        xi = jax.numpy.asarray(0.0, dtype=jax.numpy.float16)
+        d = GeneralizedExtremeValueDistribution(LOC, SCALE, concentration=xi)
+        np.testing.assert_allclose(float(d.skew()), 1.1395470994046486, rtol=1e-3)
+        np.testing.assert_allclose(float(d.kurtosis()), 2.4, rtol=1e-3)
+
+    def test_moment_gradients_stay_finite_through_zero(self):
+        """The series branch also has to be differentiable: a ``0/0``
+        reaching autodiff yields a nan gradient even where the value
+        looks right. Forward mode and the second derivative are checked
+        too — the inactive exact arm is evaluated at a fixed sentinel ξ,
+        and picking one that sits on a ``Γ(1 - kξ)`` pole would leave the
+        masking of its nan cotangent to do all the work.
+        """
+
+        def gev(shape):
+            return GeneralizedExtremeValueDistribution(LOC, SCALE, concentration=shape)
+
+        moments = (
+            lambda s: gev(s).variance,
+            lambda s: gev(s).skew(),
+            lambda s: gev(s).kurtosis(),
+        )
+        one = np.float32(1.0)
+        for xi in (0.0, 1e-8, 1e-5, 1e-2, 0.15, -0.15, -0.5):
+            x = np.float32(xi)
+            for moment in moments:
+                d1 = float(jax.grad(moment)(x))
+                fwd = float(jax.jvp(moment, (x,), (one,))[1])
+                d2 = float(jax.grad(jax.grad(moment))(x))
+                assert np.isfinite(d1) and np.isfinite(fwd) and np.isfinite(d2), (
+                    xi,
+                    d1,
+                    fwd,
+                    d2,
+                )
+                np.testing.assert_allclose(fwd, d1, rtol=1e-4, atol=1e-5)

@@ -23,13 +23,16 @@ from jaxtyping import Array, Float
 
 EULER_GAMMA = 0.5772156649015329
 
-# Single repo-wide threshold below which the class-layer *moment* formulas
-# (mode / variance / skew / kurtosis) switch to their analytic Gumbel /
-# exponential limit. The kernels themselves are smooth and threshold-free —
-# this constant only guards gamma-function moment expressions whose naive
-# form degrades near ξ = 0. Every class must import this rather than caching
-# its own copy: a class-local value (the old GPD 1e-8 vs GEV 1e-7 split) let
-# sibling methods of the same object disagree by >100% inside the gap.
+# Single repo-wide threshold below which the remaining class-layer branches
+# on the Gumbel limit switch over (``mode``, and the quantile grid inside
+# ``conditional_excess_mean``). The kernels themselves are smooth and
+# threshold-free. Variance / skew / kurtosis used to sit behind this
+# threshold too and were garbage between it and ξ ≈ 0.1 (#88); they now go
+# through the cancellation-free reduced forms in
+# :mod:`xtremax.primitives._moments`, which need no Gumbel branch at all.
+# Every class must import this rather than caching its own copy: a
+# class-local value (the old GPD 1e-8 vs GEV 1e-7 split) let sibling methods
+# of the same object disagree by >100% inside the gap.
 GUMBEL_THRESHOLD = 1e-7
 
 # Below this magnitude the exact quotient loses precision (and its gradient is

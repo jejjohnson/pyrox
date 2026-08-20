@@ -13,12 +13,16 @@ import warnings
 import jax.numpy as jnp
 import numpyro.distributions as dist
 from jax import lax
-from jax.scipy.special import gammaln
 from jax.typing import ArrayLike
 from numpyro.distributions import constraints
 from numpyro.distributions.util import promote_shapes, validate_sample
 
 from xtremax._rng import check_prng_key
+from xtremax.primitives._moments import (
+    gev_excess_kurtosis,
+    gev_skewness,
+    gev_variance,
+)
 from xtremax.primitives.frechet import (
     frechet_cdf,
     frechet_icdf,
@@ -275,18 +279,7 @@ class FrechetType2GEVD(dist.Distribution):
         Returns:
             Variance or +∞ when it doesn't exist (ξ ≥ 1/2)
         """
-        _loc, scale, shape = self.loc, self.scale, self.concentration
-
-        # Variance exists for ξ < 1/2
-        var_exists = shape < 0.5
-
-        # Compute variance using gamma functions
-        gamma1 = jnp.exp(gammaln(1.0 - 2.0 * shape))  # Γ(1-2ξ)
-        gamma2 = jnp.exp(2.0 * gammaln(1.0 - shape))  # Γ²(1-ξ)
-
-        var_val = (scale**2 / shape**2) * (gamma1 - gamma2)
-
-        return jnp.where(var_exists, var_val, jnp.inf)
+        return gev_variance(self.scale, self.concentration)
 
     def kurtosis(self) -> jnp.ndarray:
         """
@@ -296,28 +289,9 @@ class FrechetType2GEVD(dist.Distribution):
         For heavy-tailed distributions, kurtosis captures the tail heaviness.
 
         Returns:
-            Excess kurtosis or +∞ when it doesn't exist (ξ ≥ 1/4)
+            Excess kurtosis, or NaN when it doesn't exist (ξ ≥ 1/4)
         """
-        shape = self.concentration
-
-        # Kurtosis exists for ξ < 1/4
-        kurt_exists = shape < 0.25
-
-        # Complex formula involving gamma functions for fourth moment
-        g1 = jnp.exp(gammaln(1.0 - shape))  # Γ(1-ξ)
-        g2 = jnp.exp(gammaln(1.0 - 2.0 * shape))  # Γ(1-2ξ)
-        g3 = jnp.exp(gammaln(1.0 - 3.0 * shape))  # Γ(1-3ξ)
-        g4 = jnp.exp(gammaln(1.0 - 4.0 * shape))  # Γ(1-4ξ)
-
-        # Central moments
-        mu2 = g2 - g1**2
-        mu4 = g4 - 4.0 * g1 * g3 + 6.0 * g1**2 * g2 - 3.0 * g1**4
-
-        excess_kurt = (mu4 / mu2**2) - 3.0
-
-        # NaN, not inf: beyond ξ = 1/4 the standardized fourth moment is
-        # undefined, unlike the variance which genuinely diverges to +inf.
-        return jnp.where(kurt_exists, excess_kurt, jnp.nan)
+        return gev_excess_kurtosis(self.concentration)
 
     def skew(self) -> jnp.ndarray:
         """
@@ -329,27 +303,9 @@ class FrechetType2GEVD(dist.Distribution):
         heavy right tail creating right-skewed distributions.
 
         Returns:
-            Skewness or +∞ when it doesn't exist (ξ ≥ 1/3)
+            Skewness, or NaN when it doesn't exist (ξ ≥ 1/3)
         """
-        shape = self.concentration
-
-        # Skewness exists for ξ < 1/3
-        skew_exists = shape < 1.0 / 3.0
-
-        # Compute using gamma functions
-        g1 = jnp.exp(gammaln(1.0 - shape))  # Γ(1-ξ)
-        g2 = jnp.exp(gammaln(1.0 - 2.0 * shape))  # Γ(1-2ξ)
-        g3 = jnp.exp(gammaln(1.0 - 3.0 * shape))  # Γ(1-3ξ)
-
-        # Central moments
-        mu2 = g2 - g1**2
-        mu3 = g3 - 3.0 * g1 * g2 + 2.0 * g1**3
-
-        skewness = mu3 / jnp.power(mu2, 1.5)
-
-        # NaN, not inf: beyond ξ = 1/3 the standardized third moment is
-        # undefined, unlike the variance which genuinely diverges to +inf.
-        return jnp.where(skew_exists, skewness, jnp.nan)
+        return gev_skewness(self.concentration)
 
     def entropy(self) -> jnp.ndarray:
         """
