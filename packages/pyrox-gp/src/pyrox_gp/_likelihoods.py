@@ -77,6 +77,22 @@ class DistLikelihood(Likelihood):
     lik = DistLikelihood(lambda f: dist.StudentT(df=3, loc=f, scale=0.5))
     ```
 
+    !!! warning "The link function cannot carry trainable parameters"
+        ``dist_fn`` is a **static** field, so anything the callable closes
+        over is invisible to ``eqx.filter_grad``. A link function holding
+        learnable parameters will silently never train — there is no error,
+        and the loss still decreases because the kernel and guide keep
+        fitting.
+
+        ```python
+        # WRONG -- `warp` is frozen at its initial value forever
+        lik = DistLikelihood(lambda f: dist.Normal(warp(f), sigma))
+        ```
+
+        For a parameterized link, write a `Likelihood` subclass and
+        hold the parameters as child modules, so they are ordinary
+        trainable leaves.
+
     The resulting object satisfies the `Likelihood` protocol and
     can be passed to `svgp_elbo`. Because no closed-form expected
     log-likelihood is available, the ELBO uses numerical integration
