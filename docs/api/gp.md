@@ -134,6 +134,18 @@ any `numpyro.distributions.Distribution` factory for one-off models.
 ::: pyrox_gp.StudentTLikelihood
 ::: pyrox_gp.DistLikelihood
 
+### Warped (transformed-GP) likelihood
+
+A transformed Gaussian process (Maronas et al., AISTATS 2021) is an SVGP
+whose likelihood composes an elementwise monotone warp `G`; the warp
+never appears in the KL term, so every existing inference path composes
+with it unchanged. Needs an integrator (Gauss-Hermite recommended) and,
+for the smooth recommended warp `MixtureGaussianCDF`, the
+`pyrox-gp[flows]` extra.
+
+::: pyrox_gp.WarpedGaussianLikelihood
+::: pyrox_gp.warped_predictive_moments
+
 ## SVGP inference
 
 The structured SVGP ELBO as a differentiable scalar (`svgp_elbo`), its
