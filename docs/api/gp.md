@@ -180,6 +180,18 @@ per latent process (the projections delegate to `gaussx.oilmm_project`
 ::: pyrox_gp.MultiOutputInducingVariables
 ::: pyrox_gp.SharedInducingPoints
 
+## Latent factor
+
+Collapsed latent-factor regression: the linear decoder (mixing matrix)
+carries a fixed unit-normal prior and is marginalized analytically, so
+the likelihood factorizes only a `Q x Q` capacitance matrix and costs
+`O(NQP)` in the output dimension. Contrast the coregionalization
+kernels above, which hold the mixing matrix as a concrete array.
+
+::: pyrox_gp.collapsed_lfr_log_prob
+::: pyrox_gp.decoder_posterior
+::: pyrox_gp.lfr_predictive_moments
+
 ## Pathwise posterior samplers (#39)
 
 Callable posterior function draws via Matheron's rule. Each sampled

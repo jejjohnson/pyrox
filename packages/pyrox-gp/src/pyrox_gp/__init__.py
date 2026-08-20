@@ -16,6 +16,11 @@
   variational path (reusing the single-output guides), and
   `OILMMGPPrior` / `ConditionedOILMMGP` for the
   orthogonal-projection exact workflow.
+* Collapsed latent-factor regression — `collapsed_lfr_log_prob` /
+  `decoder_posterior` / `lfr_predictive_moments`: the linear decoder
+  carries a fixed unit-normal prior and is marginalized analytically,
+  so the likelihood costs `O(NQP)` in the output dimension instead of
+  the dense vec-GP `O(P^3 N^3)`.
 * Abstract protocols (`Kernel`, `Guide`,
   `Likelihood`) plus five concrete sparse
   variational guides — `FullRankGuide`, `MeanFieldGuide`,
@@ -99,6 +104,11 @@ from pyrox_gp._kernels import (
     Polynomial,
     RationalQuadratic,
     White,
+)
+from pyrox_gp._latent_factor import (
+    collapsed_lfr_log_prob,
+    decoder_posterior,
+    lfr_predictive_moments,
 )
 from pyrox_gp._likelihoods import (
     BernoulliLikelihood,
@@ -233,9 +243,12 @@ __all__ = [
     "White",
     "WhitenedGuide",
     "__version__",
+    "collapsed_lfr_log_prob",
+    "decoder_posterior",
     "funk_hecke_coefficients",
     "gp_factor",
     "gp_sample",
+    "lfr_predictive_moments",
     "markov_gp_factor",
     "markov_gp_sample",
     "mo_gp_factor",
