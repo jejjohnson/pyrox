@@ -947,6 +947,145 @@ class TestBijectToSupport:
         assert jnp.all(jnp.isfinite(x))
 
 
+class TestMaskedGevLikelihood:
+    """#31 — a masked GEV likelihood (``GEV(...).mask(m)``, or the
+    ``numpyro.handlers.mask`` context) was reported to raise "Cannot find
+    valid initial parameters" under NUTS on ragged (station, year) block
+    maxima, pushing such models onto a ``numpyro.factor`` workaround. It
+    was diagnosed on the issue as fallout from the ``biject_to``-hostile
+    support of #50 and closed out by #79.
+
+    These pin the pattern rather than the historical failure, which does
+    not reproduce on synthetic ragged data at either revision: the three
+    spellings must score identically, masked-out gaps must contribute
+    neither value nor gradient even when the filler falls outside the
+    parameter-dependent support, and NUTS must initialize for all three.
+    """
+
+    N_STATIONS, N_YEARS = 6, 24
+
+    @classmethod
+    def _ragged_maxima(cls):
+        """Per-station GEV draws on a grid where each station's record
+        starts and stops at a different year — the shape that motivated
+        the issue. Gaps are filled with the station mean, an in-support
+        value the mask then has to discard.
+        """
+        import numpy as np
+
+        rng = np.random.default_rng(0)
+        s, t = cls.N_STATIONS, cls.N_YEARS
+        loc = rng.uniform(18.0, 22.0, s)
+        scale = rng.uniform(1.0, 2.0, s)
+        conc = rng.uniform(-0.2, 0.2, s)
+        u = rng.uniform(size=(s, t))
+        y = loc[:, None] + scale[:, None] / conc[:, None] * (
+            (-np.log(u)) ** (-conc[:, None]) - 1.0
+        )
+        mask = np.zeros((s, t), dtype=bool)
+        for i in range(s):
+            mask[i, rng.integers(0, 6) : rng.integers(t - 5, t + 1)] = True
+        filled = np.where(
+            mask, y, (np.where(mask, y, 0.0).sum(1) / mask.sum(1))[:, None]
+        )
+        return jnp.asarray(mask), jnp.asarray(filled, dtype=jnp.float32)
+
+    @staticmethod
+    def _model(kind, mask, obs):
+        import numpyro
+        import numpyro.distributions as npd
+
+        n = mask.shape[0]
+
+        def model():
+            loc = numpyro.sample("loc", npd.Normal(20.0, 5.0).expand([n]).to_event(1))
+            scale = numpyro.sample("scale", npd.HalfNormal(3.0).expand([n]).to_event(1))
+            conc = numpyro.sample("conc", npd.Normal(0.0, 0.25).expand([n]).to_event(1))
+            d = GeneralizedExtremeValueDistribution(
+                loc=loc[:, None], scale=scale[:, None], concentration=conc[:, None]
+            )
+            if kind == "mask":
+                numpyro.sample("obs", d.mask(mask), obs=obs)
+            elif kind == "handler":
+                with numpyro.handlers.mask(mask=mask):
+                    numpyro.sample("obs", d, obs=obs)
+            else:
+                numpyro.factor("obs", jnp.where(mask, d.log_prob(obs), 0.0).sum())
+
+        return model
+
+    @pytest.mark.parametrize("kind", ["mask", "handler"])
+    def test_masked_log_density_equals_factor_form(self, kind):
+        """The mask wrapper and the factor workaround are the same model:
+        they must score identically, gaps contributing nothing.
+        """
+        from numpyro.infer.util import log_density
+
+        mask, obs = self._ragged_maxima()
+        params = {
+            "loc": jnp.full((self.N_STATIONS,), 20.0),
+            "scale": jnp.full((self.N_STATIONS,), 1.5),
+            "conc": jnp.full((self.N_STATIONS,), 0.1),
+        }
+        masked, _ = log_density(self._model(kind, mask, obs), (), {}, params)
+        factor, _ = log_density(self._model("factor", mask, obs), (), {}, params)
+        assert jnp.isfinite(masked)
+        assert float(masked) == pytest.approx(float(factor), rel=1e-5)
+
+    def test_masked_gaps_contribute_no_gradient_even_out_of_support(self):
+        """A gap filler is not guaranteed to land inside the support: the
+        GEV endpoint is parameter-dependent, so a per-station mean can sit
+        past a ξ < 0 upper bound at the parameters the sampler is holding.
+        The mask has to zero those entries in the *gradient* as well as
+        the value. ``find_valid_initial_params`` screens both nan and -inf
+        out with the same ``isfinite`` test, so the distinction that
+        matters is not which one it retries but whether retrying can help:
+        an out-of-support *observation* is -inf only at some parameters,
+        while a nan escaping the discarded ``jnp.where`` branch of a
+        masked-out gap is nan at every parameter, and all 100 retries
+        fail.
+        """
+        mask = jnp.array([True, True, False])
+        obs = jnp.array([0.0, 1.0, 1e3])  # last entry far past the ξ<0 endpoint
+
+        def total(params):
+            loc, scale, conc = params
+            d = GeneralizedExtremeValueDistribution(
+                loc=loc, scale=scale, concentration=conc
+            )
+            return d.mask(mask).log_prob(obs).sum()
+
+        params = (jnp.float32(0.0), jnp.float32(1.0), jnp.float32(-0.3))
+        assert jnp.isfinite(total(params))
+        assert all(jnp.isfinite(g) for g in jax.grad(total)(params))
+
+    @pytest.mark.integration
+    @pytest.mark.parametrize("kind", ["mask", "handler", "factor"])
+    def test_nuts_initializes_on_ragged_grid(self, kind):
+        """The reported shape of the failure: NUTS aborting at
+        initialization for ``mask`` / ``handler`` while ``factor``
+        sampled fine.
+        """
+        from numpyro.infer import MCMC, NUTS, init_to_median
+
+        mask, obs = self._ragged_maxima()
+        mcmc = MCMC(
+            NUTS(
+                self._model(kind, mask, obs),
+                init_strategy=init_to_median,
+                target_accept_prob=0.95,
+            ),
+            num_warmup=50,
+            num_samples=50,
+            progress_bar=False,
+        )
+        mcmc.run(jax.random.PRNGKey(0))
+        samples = mcmc.get_samples()
+        for name, value in samples.items():
+            assert jnp.all(jnp.isfinite(value)), f"{kind}: non-finite {name}"
+        assert jnp.all(samples["scale"] > 0.0)
+
+
 class TestSurvivalCdfConsistency:
     """#51 — the class-local 1e-8 threshold disagreed with the primitives'
     1e-7, so survival_function and 1 - cdf split by >100% in the gap."""
