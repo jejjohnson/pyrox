@@ -121,11 +121,15 @@ def test_kernel_scope_collision_raises():
         LatentFactorGPPrior(kernels=(RBF(), RBF()), X=X)
 
 
-def test_reserved_warp_field():
+def test_warp_field_default_and_conditional_rejection():
     X, _ = _data()
     assert LatentFactorGPPrior(kernels=_kernels(), X=X, warp=None).warp is None
-    with pytest.raises(NotImplementedError, match="warp=None"):
-        LatentFactorGPPrior(kernels=_kernels(), X=X, warp=object())
+
+    class _FakeConditionalWarp:
+        cond_shape = (2,)
+
+    with pytest.raises(ValueError, match="Conditional warps"):
+        LatentFactorGPPrior(kernels=_kernels(), X=X, warp=_FakeConditionalWarp())
 
 
 # --- NumPyro integration ------------------------------------------------

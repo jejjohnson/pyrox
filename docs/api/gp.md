@@ -196,6 +196,9 @@ kernels above, which hold the mixing matrix as a concrete array.
 ::: pyrox_gp.collapsed_lfr_log_prob
 ::: pyrox_gp.decoder_posterior
 ::: pyrox_gp.lfr_predictive_moments
+::: pyrox_gp.warp_to_base
+::: pyrox_gp.warped_lfr_log_prob
+::: pyrox_gp.warped_decoder_posterior
 
 ## Pathwise posterior samplers (#39)
 

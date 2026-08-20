@@ -58,8 +58,13 @@ externally before fitting.
 
 from __future__ import annotations
 
+from typing import cast
+
+import einx
 import equinox as eqx
+import jax
 import jax.numpy as jnp
+import numpy as np
 import numpyro
 from flowjax.bijections import AbstractBijection
 from jaxtyping import Array, Float
@@ -70,6 +75,8 @@ from pyrox_gp._latent_factor import (
     collapsed_lfr_log_prob,
     decoder_posterior,
     lfr_predictive_moments,
+    warped_decoder_posterior,
+    warped_lfr_log_prob,
 )
 from pyrox_gp._models import GPPrior
 from pyrox_gp._multi_output import _validate_kernel_scopes_unique
@@ -112,13 +119,41 @@ class LatentFactorGPPrior(eqx.Module):
       through the latent priors. The reference experiments top out at
       ``N = 800``.
 
+    Warp-specific caveats (ignore when ``warp is None``):
+
+    - **``Y`` must sit inside the warp's support.**
+      ``gauss_flows.RQSplineMarginal`` is linear outside
+      ``[-interval, interval]``; scale ``Y`` sensibly or the warp
+      degenerates to affine.
+    - **Identifiability gets worse.** A per-channel affine warp is
+      degenerate with $\\sigma$ and with the columns of $W$. Identity
+      init plus a distinct learning-rate group
+      ([`param_group_optimizer`][pyrox.inference.param_group_optimizer])
+      is the mitigation.
+    - **The warp is fitted to the marginals of ``Y``, not the residuals.**
+      A warp that Gaussianizes raw channel marginals is not necessarily
+      the one that Gaussianizes the noise — a genuine modelling
+      approximation, not a bug.
+    - **Invertibility is mandatory.** The change of variables requires a
+      bijection, unlike warped-*likelihood* GPs where a bound holds for
+      any monotone link.
+
     Attributes:
         kernels: One `pyrox_gp.Kernel` per latent process; ``len`` is ``Q``.
             Distinct `pyrox.PyroxModule` kernels must carry distinct
             ``pyrox_name`` values or their NumPyro sites collide.
         X: Training inputs of shape ``(N, D)``.
-        warp: Reserved for the warped-observation extension; must be ``None``
-            here.
+        warp: Optional bijection with event shape ``(P,)`` — one marginal
+            transform per output channel. The *warped* observations
+            $G^{-1}(Y)$ are modelled as the linear factor model, which
+            handles skewed / heavy-tailed / positive channels without
+            breaking the analytic decoder marginalization (the log-det
+            Jacobian is free of $Z$, $W$, and $\\sigma$). ``None`` keeps
+            the plain Gaussian factor model. Prefer
+            ``gauss_flows.RQSplineMarginal`` — closed-form in both
+            directions and the exact identity at initialization, so a
+            warped fit starts precisely at the unwarped fit. Conditional
+            (input-dependent) warps are rejected.
         latent_noise: Model nugget added to each latent GP covariance. A
             modelling choice that controls how tightly the latent GP
             interpolates the MAP factors — distinct from ``jitter``.
@@ -133,10 +168,11 @@ class LatentFactorGPPrior(eqx.Module):
 
     def __check_init__(self) -> None:
         _validate_kernel_scopes_unique(self.kernels)
-        if self.warp is not None:
-            raise NotImplementedError(
-                "Warped observations are not implemented in this issue; see the "
-                "warped latent-factor regression issue. Pass warp=None."
+        if self.warp is not None and self.warp.cond_shape is not None:
+            raise ValueError(
+                "Conditional warps are not supported: the log-det Jacobian "
+                "would depend on the inputs, and the per-channel marginal "
+                "interpretation no longer holds."
             )
 
     @property
@@ -183,7 +219,10 @@ class LatentFactorGPPrior(eqx.Module):
                 f"Z must have shape {(self.X.shape[0], self.num_latents)}; "
                 f"got {Z.shape}."
             )
-        mu_W, Sigma_W = decoder_posterior(Y, Z, noise_var)
+        if self.warp is None:
+            mu_W, Sigma_W = decoder_posterior(Y, Z, noise_var)
+        else:
+            mu_W, Sigma_W = warped_decoder_posterior(Y, Z, noise_var, self.warp)
         return ConditionedLatentFactorGP(
             prior=self, Z=Z, mu_W=mu_W, Sigma_W=Sigma_W, noise_var=noise_var
         )
@@ -232,6 +271,7 @@ class ConditionedLatentFactorGP(eqx.Module):
         X_new: Float[Array, "T D"],
         *,
         include_noise: bool = False,
+        quad_order: int = 32,
     ) -> tuple[Float[Array, "T P"], Float[Array, "T P"]]:
         """Posterior predictive mean and variance over all ``P`` outputs.
 
@@ -239,15 +279,43 @@ class ConditionedLatentFactorGP(eqx.Module):
         [`lfr_predictive_moments`][pyrox_gp.lfr_predictive_moments]. The
         variance decomposes into a decoder term, a latent term, and an
         interaction term; the first and third are output-independent.
+
+        With a warp, the factor-model predictive is Gaussian in the
+        *warped* space; the moments are pushed through $G$ (``transform``)
+        by Gauss-Hermite quadrature to give observation-space moments.
+        The returned mean is $\\mathbb{E}[G(f)]$, **not**
+        $G(\\mathbb{E}[f])$ — the latter is the pushforward median for a
+        monotone warp and is badly biased for a skewed one.
+
+        Args:
+            X_new: Test inputs, shape ``(T, D)``.
+            include_noise: Add the observation noise variance. With a
+                warp, the noise lives in the warped space, so it is added
+                before the pushforward.
+            quad_order: Gauss-Hermite order for the warped pushforward.
+                Ignored when ``warp is None``. A moderate order is fine —
+                the quadrature appears only here, never in training.
         """
         z_mean, z_var = self.predict_latents(X_new)
-        return lfr_predictive_moments(
+        mean, var = lfr_predictive_moments(
             z_mean,
             z_var,
             self.mu_W,
             self.Sigma_W,
             self.noise_var if include_noise else None,
         )
+        warp = self.prior.warp
+        if warp is None:
+            return mean, var
+        nodes, weights = np.polynomial.hermite_e.hermegauss(quad_order)
+        nodes = jnp.asarray(nodes)
+        weights = jnp.asarray(weights) / np.sqrt(2.0 * np.pi)
+        # fs: (order, T, P) — per-node evaluation points in the warped space.
+        fs = mean[None] + jnp.sqrt(var)[None] * nodes[:, None, None]
+        g = jax.vmap(jax.vmap(warp.transform))(fs)
+        m1 = einx.dot("s, s t p -> t p", weights, g)
+        m2 = einx.dot("s, s t p -> t p", weights, g**2)
+        return m1, m2 - m1**2
 
 
 def lfr_factor(
@@ -255,6 +323,7 @@ def lfr_factor(
     Z: Float[Array, "N Q"],
     noise_var: Float[Array, ""],
     *,
+    warp: AbstractBijection | None = None,
     beta: float | None = None,
     name: str = "collapsed_lfr",
 ) -> None:
@@ -268,7 +337,11 @@ def lfr_factor(
     Args:
         Y: Observations, ``(N, P)``.
         Z: Latent factor values, ``(N, Q)``.
-        noise_var: Scalar isotropic observation noise variance.
+        noise_var: Scalar isotropic observation noise variance (in the
+            warped space when ``warp`` is given).
+        warp: Optional bijection with event shape ``(P,)``; when given,
+            registers [`warped_lfr_log_prob`][pyrox_gp.warped_lfr_log_prob]
+            instead of the plain collapsed likelihood.
         beta: Inverse temperature on the likelihood. ``None`` selects
             ``Q / P``, which keeps the likelihood and the latent GP prior
             balanced as the output dimension grows. Tune by held-out
@@ -277,8 +350,12 @@ def lfr_factor(
     """
     if beta is None:
         beta = Z.shape[1] / Y.shape[1]
+    if warp is None:
+        log_prob = collapsed_lfr_log_prob(Y, Z, noise_var)
+    else:
+        log_prob = warped_lfr_log_prob(Y, Z, noise_var, warp)
     with numpyro.handlers.scale(scale=beta):
-        numpyro.factor(name, collapsed_lfr_log_prob(Y, Z, noise_var))
+        numpyro.factor(name, log_prob)
 
 
 def lfr_model(
@@ -305,6 +382,14 @@ def lfr_model(
             [`lfr_factor`][pyrox_gp.lfr_factor]; ``None`` means ``Q / P``.
         noise_prior_scale: Scale of the half-normal prior on the noise
             standard deviation.
+
+    With a warp on the prior, the warp's array leaves are registered as a
+    single pytree-valued ``numpyro.param`` site (``"warp_params"``) so all
+    four blocks — latents, noise, kernel hyperparameters, and the warp —
+    fit jointly under SVI. After fitting, rebuild the warp for prediction
+    with ``eqx.combine(result.params["warp_params"],
+    eqx.partition(prior.warp, eqx.is_inexact_array)[1])`` and pass it via
+    ``eqx.tree_at`` (or reconstruct the prior) before calling `condition`.
     """
     n = X.shape[0]
     q = prior.num_latents
@@ -318,7 +403,17 @@ def lfr_model(
         )
     )
     noise = jnp.asarray(numpyro.sample("noise", dist.HalfNormal(noise_prior_scale)))
-    lfr_factor(Y, Z_T.T, noise**2, beta=beta)
+    if prior.warp is None:
+        warp = None
+    else:
+        # Register the warp's array leaves as one pytree-valued numpyro.param
+        # (the same mechanism numpyro.contrib.module uses for flax/haiku
+        # params), so SVI fits the warp jointly with Z, noise, and the
+        # kernel hyperparameters.
+        params, static = eqx.partition(prior.warp, eqx.is_inexact_array)
+        params = numpyro.param("warp_params", params)
+        warp = cast(AbstractBijection, eqx.combine(params, static))
+    lfr_factor(Y, Z_T.T, noise**2, warp=warp, beta=beta)
 
 
 def latent_total_correlation(Z: Float[Array, "N Q"]) -> Float[Array, ""]:
