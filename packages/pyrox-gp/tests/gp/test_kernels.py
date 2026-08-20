@@ -7,6 +7,7 @@ stable / scalable variants live in gaussx and are not in scope here.
 
 from __future__ import annotations
 
+import einx
 import jax
 import jax.numpy as jnp
 import pytest
@@ -23,6 +24,10 @@ from pyrox_gp._src.kernels import (
     rbf_kernel,
     white_kernel,
 )
+
+
+# The ARD tests below pin the math to 1e-12 tolerances / bitwise equality.
+jax.config.update("jax_enable_x64", True)
 
 
 # --- rbf -------------------------------------------------------------------
@@ -297,3 +302,147 @@ def test_rbf_jits_and_grads():
 
     g = jax.grad(loss)(jnp.array(0.7))
     assert jnp.isfinite(g)
+
+
+# --- ARD (per-dimension) lengthscales --------------------------------------
+
+
+def _sq_dist_reference(X1, X2, lengthscale):
+    """Explicit ``(N1, N2, D)`` difference-tensor reference."""
+    diff = (X1[:, None, :] - X2[None, :, :]) / lengthscale
+    return jnp.sum(diff**2, axis=-1)
+
+
+def _ard_kernel_cases():
+    """The three ARD-capable kernels as ``(X1, X2, lengthscale) -> K``."""
+    var = jnp.array(1.3)
+    return [
+        pytest.param(
+            lambda X1, X2, ls: rbf_kernel(X1, X2, var, ls),
+            lambda sq: var * jnp.exp(-0.5 * sq),
+            id="rbf",
+        ),
+        pytest.param(
+            lambda X1, X2, ls: matern_kernel(X1, X2, var, ls, 0.5),
+            lambda sq: var * jnp.exp(-jnp.sqrt(sq)),
+            id="matern12",
+        ),
+        pytest.param(
+            lambda X1, X2, ls: matern_kernel(X1, X2, var, ls, 1.5),
+            lambda sq: var * (1.0 + jnp.sqrt(3.0 * sq)) * jnp.exp(-jnp.sqrt(3.0 * sq)),
+            id="matern32",
+        ),
+        pytest.param(
+            lambda X1, X2, ls: matern_kernel(X1, X2, var, ls, 2.5),
+            lambda sq: (
+                var
+                * (1.0 + jnp.sqrt(5.0 * sq) + 5.0 * sq / 3.0)
+                * jnp.exp(-jnp.sqrt(5.0 * sq))
+            ),
+            id="matern52",
+        ),
+        pytest.param(
+            lambda X1, X2, ls: rational_quadratic_kernel(
+                X1, X2, var, ls, jnp.array(1.7)
+            ),
+            lambda sq: var * (1.0 + sq / (2.0 * 1.7)) ** (-1.7),
+            id="rational_quadratic",
+        ),
+    ]
+
+
+@pytest.mark.parametrize("kernel_fn,closed_form", _ard_kernel_cases())
+def test_scalar_lengthscale_matches_difference_tensor_reference(kernel_fn, closed_form):
+    """Back-compat guard: a non-unit *scalar* lengthscale must match a
+    hand-written reference — this fails loudly if the lengthscale were
+    applied twice (inside the distance primitive and again post hoc)."""
+    X1 = jax.random.normal(jax.random.PRNGKey(0), (5, 3))
+    X2 = jax.random.normal(jax.random.PRNGKey(1), (4, 3))
+    ls = jnp.array(0.7)
+    K = kernel_fn(X1, X2, ls)
+    expected = closed_form(_sq_dist_reference(X1, X2, ls))
+    assert jnp.allclose(K, expected, rtol=0.0, atol=1e-12)
+
+
+@pytest.mark.parametrize("kernel_fn,closed_form", _ard_kernel_cases())
+def test_ard_lengthscale_matches_difference_tensor_reference(kernel_fn, closed_form):
+    X1 = jax.random.normal(jax.random.PRNGKey(0), (5, 3))
+    X2 = jax.random.normal(jax.random.PRNGKey(1), (4, 3))
+    ls = jnp.array([0.5, 1.0, 2.0])
+    K = kernel_fn(X1, X2, ls)
+    expected = closed_form(_sq_dist_reference(X1, X2, ls))
+    assert jnp.allclose(K, expected, rtol=0.0, atol=1e-12)
+
+
+@pytest.mark.parametrize("kernel_fn,closed_form", _ard_kernel_cases())
+def test_ard_constant_vector_bitwise_equals_scalar(kernel_fn, closed_form):
+    del closed_form
+    X1 = jax.random.normal(jax.random.PRNGKey(0), (5, 3))
+    X2 = jax.random.normal(jax.random.PRNGKey(1), (4, 3))
+    K_scalar = kernel_fn(X1, X2, jnp.array(0.7))
+    K_ard = kernel_fn(X1, X2, jnp.full((3,), 0.7))
+    assert (K_scalar == K_ard).all()
+
+
+@pytest.mark.parametrize("kernel_fn,closed_form", _ard_kernel_cases())
+def test_ard_grad_is_finite_on_self_gram(kernel_fn, closed_form):
+    """Grad w.r.t. a ``(D,)`` lengthscale must stay finite on a self-Gram,
+    where the diagonal has ``r = 0``."""
+    del closed_form
+    X = jax.random.normal(jax.random.PRNGKey(2), (6, 4))
+
+    def loss(ls):
+        return jnp.sum(kernel_fn(X, X, ls))
+
+    g = jax.grad(loss)(jnp.full((4,), 0.7))
+    assert g.shape == (4,)
+    assert jnp.all(jnp.isfinite(g))
+
+
+def test_ard_jit_vmap_over_per_latent_lengthscales():
+    """Per-latent ARD: vmap a kernel over a ``(Q, D)`` lengthscale array."""
+    X = jax.random.normal(jax.random.PRNGKey(3), (17, 4))
+    ells = jax.random.uniform(jax.random.PRNGKey(4), (6, 4), minval=0.5, maxval=2.0)
+
+    @jax.jit
+    def grams(ells):
+        return jax.vmap(lambda ls: rbf_kernel(X, X, jnp.array(1.0), ls))(ells)
+
+    K = grams(ells)
+    assert K.shape == (6, 17, 17)
+    assert jnp.all(jnp.isfinite(K))
+
+
+def test_ard_gram_never_builds_n1_n2_d_intermediate():
+    """N = 2000, D = 50 ARD Gram stays O(N^2): every jaxpr intermediate is
+    rank <= 2 (an ``(N, N, D)`` difference tensor would be 1.6 GB)."""
+    X = jax.random.normal(jax.random.PRNGKey(5), (2000, 50))
+    ls = jnp.linspace(0.5, 2.0, 50)
+    jaxpr = jax.make_jaxpr(rbf_kernel)(X, X, jnp.array(1.0), ls)
+    ranks = [len(v.aval.shape) for eqn in jaxpr.eqns for v in eqn.outvars]
+    assert max(ranks) <= 2
+    K = rbf_kernel(X, X, jnp.array(1.0), ls)
+    assert K.shape == (2000, 2000)
+    assert jnp.all(jnp.isfinite(K))
+
+
+def test_periodic_and_cosine_bit_identical_to_unscaled_distance():
+    """Periodic and Cosine are excluded from ARD: their Grams must stay
+    bit-identical to the unscaled-distance formulation."""
+    X1 = jax.random.normal(jax.random.PRNGKey(6), (5, 3))
+    X2 = jax.random.normal(jax.random.PRNGKey(7), (4, 3))
+    n1 = einx.dot("n1 d, n1 d -> n1", X1, X1)
+    n2 = einx.dot("n2 d, n2 d -> n2", X2, X2)
+    cross = einx.dot("n1 d, n2 d -> n1 n2", X1, X2)
+    sq = jnp.clip(einx.add("n1, n2 -> n1 n2", n1, n2) - 2.0 * cross, min=0.0)
+    r = jnp.sqrt(jnp.clip(sq, min=1e-30))
+    var = jnp.array(1.3)
+    ls = jnp.array(0.6)
+    period = jnp.array(1.7)
+    sinsq = jnp.sin(jnp.pi * r / period) ** 2
+    expected_periodic = var * jnp.exp(-2.0 * sinsq / (ls * ls))
+    expected_cosine = var * jnp.cos(2.0 * jnp.pi * r / period)
+    K_periodic = periodic_kernel(X1, X2, var, ls, period)
+    K_cosine = cosine_kernel(X1, X2, var, period)
+    assert (K_periodic == expected_periodic).all()
+    assert (K_cosine == expected_cosine).all()

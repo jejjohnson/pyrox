@@ -223,3 +223,67 @@ def test_distinct_pyrox_names_prevent_collision():
         model()
     assert "RBF_A.variance" in tr
     assert "RBF_B.variance" in tr
+
+
+# --- ARD opt-in via input_dim ---------------------------------------------
+
+
+X3 = jnp.array(
+    [
+        [0.0, 1.0, 2.0],
+        [0.5, 0.0, 1.0],
+        [1.0, 2.0, 0.0],
+        [1.5, 0.5, 0.5],
+    ]
+)
+
+
+@pytest.mark.parametrize(
+    "cls", [RBF, Matern, RationalQuadratic], ids=lambda c: c.__name__
+)
+def test_input_dim_registers_per_dimension_lengthscale(cls):
+    assert cls(input_dim=3).get_param("lengthscale").shape == (3,)
+    assert cls().get_param("lengthscale").shape == ()
+
+
+def test_rbf_ard_matches_primitive():
+    k = RBF(input_dim=3, init_variance=1.3, init_lengthscale=0.7)
+    with handlers.seed(rng_seed=0):
+        K = k(X3, X3)
+    expected = _k.rbf_kernel(X3, X3, jnp.array(1.3), jnp.full((3,), 0.7))
+    assert jnp.allclose(K, expected)
+
+
+@pytest.mark.parametrize("nu", [0.5, 1.5, 2.5])
+def test_matern_ard_matches_primitive(nu):
+    k = Matern(input_dim=3, init_variance=0.9, init_lengthscale=0.4, nu=nu)
+    with handlers.seed(rng_seed=0):
+        K = k(X3, X3)
+    expected = _k.matern_kernel(X3, X3, jnp.array(0.9), jnp.full((3,), 0.4), nu)
+    assert jnp.allclose(K, expected)
+
+
+def test_rational_quadratic_ard_matches_primitive():
+    k = RationalQuadratic(input_dim=3, init_lengthscale=0.5, init_alpha=2.0)
+    with handlers.seed(rng_seed=0):
+        K = k(X3, X3)
+    expected = _k.rational_quadratic_kernel(
+        X3, X3, jnp.array(1.0), jnp.full((3,), 0.5), jnp.array(2.0)
+    )
+    assert jnp.allclose(K, expected)
+
+
+def test_ard_lengthscale_prior_produces_event_shaped_site():
+    """`set_prior` on an ARD kernel: the ``(D,)`` lengthscale needs
+    ``.to_event(1)`` semantics from the caller and must produce a
+    correctly-shaped sample site."""
+    k = RBF(input_dim=3)
+    k.set_prior("lengthscale", dist.LogNormal(0.0, 1.0).expand([3]).to_event(1))
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        K = k(X3, X3)
+    site = tr["RBF.lengthscale"]
+    assert site["type"] == "sample"
+    assert site["value"].shape == (3,)
+    assert site["fn"].event_shape == (3,)
+    assert K.shape == (4, 4)
+    assert jnp.all(jnp.isfinite(K))
