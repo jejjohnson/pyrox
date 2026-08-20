@@ -110,6 +110,13 @@ from pyrox_gp._latent_factor import (
     decoder_posterior,
     lfr_predictive_moments,
 )
+from pyrox_gp._latent_factor_models import (
+    ConditionedLatentFactorGP,
+    LatentFactorGPPrior,
+    latent_total_correlation,
+    lfr_factor,
+    lfr_model,
+)
 from pyrox_gp._likelihoods import (
     BernoulliLikelihood,
     DistLikelihood,
@@ -174,6 +181,7 @@ __all__ = [
     "RBF",
     "BernoulliLikelihood",
     "ConditionedGP",
+    "ConditionedLatentFactorGP",
     "ConditionedMarkovGP",
     "ConditionedOILMMGP",
     "ConjugateVI",
@@ -202,6 +210,7 @@ __all__ = [
     "LaplaceInference",
     "LaplaceMarkovInference",
     "LaplacianInducingFeatures",
+    "LatentFactorGPPrior",
     "Likelihood",
     "Linear",
     "MarkovGPPrior",
@@ -248,6 +257,9 @@ __all__ = [
     "funk_hecke_coefficients",
     "gp_factor",
     "gp_sample",
+    "latent_total_correlation",
+    "lfr_factor",
+    "lfr_model",
     "lfr_predictive_moments",
     "markov_gp_factor",
     "markov_gp_sample",
