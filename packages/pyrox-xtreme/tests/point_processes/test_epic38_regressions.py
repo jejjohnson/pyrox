@@ -46,7 +46,6 @@ def _constant_ipp(rate: float, T: float) -> InhomogeneousPoissonProcess:
 class TestThinningCompensatorSign:
     """#55 — the retention correction ∫(1-p)λ must be ADDED."""
 
-    @pytest.mark.slow
     @pytest.mark.parametrize("p", [0.3, 0.7])
     def test_thinned_hpp_matches_closed_form(self, p):
         rate, T = 2.0, 10.0

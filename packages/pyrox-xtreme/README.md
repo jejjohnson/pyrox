@@ -1,6 +1,6 @@
 # xtremax
 
-[![Tests](https://github.com/jejjohnson/xtremax/actions/workflows/ci.yml/badge.svg)](https://github.com/jejjohnson/xtremax/actions/workflows/ci.yml)
+[![Tests](https://github.com/jejjohnson/xtremax/actions/workflows/tests-extended.yml/badge.svg?branch=main)](https://github.com/jejjohnson/xtremax/actions/workflows/tests-extended.yml)
 [![Lint](https://github.com/jejjohnson/xtremax/actions/workflows/lint.yml/badge.svg)](https://github.com/jejjohnson/xtremax/actions/workflows/lint.yml)
 [![Type Check](https://github.com/jejjohnson/xtremax/actions/workflows/typecheck.yml/badge.svg)](https://github.com/jejjohnson/xtremax/actions/workflows/typecheck.yml)
 [![Deploy Docs](https://github.com/jejjohnson/xtremax/actions/workflows/pages.yml/badge.svg)](https://github.com/jejjohnson/xtremax/actions/workflows/pages.yml)
