@@ -275,13 +275,20 @@ def warped_lfr_log_prob(
     unchanged and the cost stays linear in $P$.
 
     !!! warning "Warp direction is a performance cliff"
-        This evaluates ``G^{-1}`` (``inverse``) on every step.
+        This evaluates ``G^{-1}`` (``inverse``) on every step, so a warp
+        that is cheap forward and expensive backward costs dearly:
         ``MixtureGaussianCDF.inverse`` runs a bisection solver and is ~40x
-        its forward cost -- 459x slower end-to-end than the alternative.
-        Prefer ``gauss_flows.RQSplineMarginal`` (closed-form both ways, and
-        the exact identity at initialization), or wrap a mixture-CDF warp
-        in ``flowjax.bijections.Invert`` so the closed-form direction is
-        the one this function evaluates.
+        its own forward cost, ~459x slower end-to-end than the
+        alternative. Prefer ``gauss_flows.RQSplineMarginal`` — closed-form
+        in both directions and the exact identity at initialization.
+
+        Wrapping a mixture-CDF warp in ``flowjax.bijections.Invert`` is
+        cheap, but it is **a different model, not a faster route to the
+        same one**: this function applies ``warp.inverse``, which is
+        ``M.inverse`` for ``M`` and ``M.transform`` for ``Invert(M)``, so
+        the two map ``Y`` to different base values and define different
+        likelihoods. Choose it because the flipped map is the warp you
+        want, never as a drop-in speedup.
 
     Args:
         Y: Observations of shape ``(N, P)``. Must lie inside the warp's
