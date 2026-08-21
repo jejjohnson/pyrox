@@ -226,6 +226,34 @@ class FourierInducingFeatures(eqx.Module):
 # ---------------------------------------------------------------------------
 
 
+def _reject_anisotropic(kernel: Kernel) -> None:
+    """Reject per-dimension lengthscales in the Funk-Hecke path.
+
+    The coefficients below sample the kernel along a single meridian and
+    reuse each value for every order of a harmonic degree, which is valid
+    only for a zonal kernel — one that depends on ``x . x'`` alone. Unequal
+    axis lengthscales make the kernel orientation-dependent, so the
+    harmonic covariance stops being diagonal and the resulting ``K_uu`` /
+    ``k_ux`` would be silently wrong.
+    """
+    getter = getattr(kernel, "get_param", None)
+    if getter is None:
+        return
+    try:
+        lengthscale = getter("lengthscale")
+    except (KeyError, AttributeError):
+        return
+    if jnp.ndim(lengthscale) != 0 and jnp.size(lengthscale) > 1:
+        raise NotImplementedError(
+            "Funk-Hecke coefficients require a zonal (isotropic) kernel, but "
+            f"this kernel has a per-dimension lengthscale of shape "
+            f"{jnp.shape(lengthscale)}. An ARD kernel is orientation "
+            "dependent, so the spherical-harmonic covariance is no longer "
+            "diagonal. Use a kernel built without input_dim for the "
+            "spherical-harmonic / Slepian inducing features."
+        )
+
+
 def funk_hecke_coefficients(
     kernel: Kernel,
     l_max: int,
@@ -256,6 +284,7 @@ def funk_hecke_coefficients(
     # to any hyperparameters sampled inside ``kernel``. Taking row 0 of the
     # ``(1, Q)`` Gram is O(Q), not O(Q^2).
     with _kernel_context(kernel):
+        _reject_anisotropic(kernel)
         kt = kernel(n0[None, :], nT)[0]  # (Q,)
     # Evaluate P_l(t) for l = 0, ..., l_max via three-term recurrence.
     P_lm1 = jnp.ones_like(t)  # P_0

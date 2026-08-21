@@ -267,6 +267,14 @@ class Parameterized(PyroxModule):
         # Promote the base to the transform's domain event rank so the
         # TransformedDistribution's event structure matches the constrained
         # support (a no-op for element-wise transforms like Exp/Sigmoid).
-        event_dim = max(transform.domain.event_dim, prior_event_dim)
+        # The base lives in the transform's *domain*, while the prior's
+        # event rank is stated in its codomain, so subtract the rank the
+        # transform itself adds. For an element-wise transform the delta is
+        # zero and this is just the prior's rank; for a shape-changing one
+        # (corr_cholesky: vector domain -> matrix codomain) taking the
+        # prior's rank directly would over-promote a base that has fewer
+        # dimensions than that, and construction would fail.
+        delta = transform.codomain.event_dim - transform.domain.event_dim
+        event_dim = max(transform.domain.event_dim, prior_event_dim - delta)
         base = dist.Normal(loc, scale).to_event(event_dim)
         return self.pyrox_sample(name, dist.TransformedDistribution(base, transform))

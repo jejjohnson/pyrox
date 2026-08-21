@@ -224,6 +224,16 @@ def evaluate_rff_cosine_paths(
     # lengthscale this is identical to dividing the projection, but it is
     # also correct for a ``(D,)`` ARD lengthscale, where dividing the
     # ``(S, N, F)`` projection would broadcast F against D and fail.
+    if jnp.ndim(lengthscale) != 0:
+        d = jnp.size(lengthscale)
+        if X.shape[-1] != d or omega.shape[-2] != d:
+            raise ValueError(
+                f"ARD lengthscale of size {d} requires inputs and frequencies "
+                f"with that many features; got X with {X.shape[-1]} and omega "
+                f"with {omega.shape[-2]}. A singleton feature axis on X would "
+                "broadcast silently and repeat one coordinate across every "
+                "dimension."
+            )
     projected = einx.dot("n d, s d f -> s n f", X / lengthscale, omega)
     angles = einx.add("s n f, s f -> s n f", projected, phase)
     features = jnp.sqrt(2.0 * variance / omega.shape[-1]) * jnp.cos(angles)

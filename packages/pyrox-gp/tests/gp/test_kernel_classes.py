@@ -354,3 +354,45 @@ def test_spectral_density_singleton_ard_still_rejected_for_multidim_domain():
     kernel = RBF(pyrox_name="RBF_ard_1d_2ddomain", input_dim=1)
     with kernel._get_context(), pytest.raises(NotImplementedError, match="isotropic"):
         spectral_density(kernel, jnp.asarray([0.1, 0.5]), D=2)
+
+
+def test_rff_rejects_mismatched_feature_dimensions():
+    """The RFF evaluator must reject a singleton feature axis for the same
+    reason the distance primitive does — it would broadcast one coordinate
+    across every dimension and return plausible-looking paths."""
+    import jax.random as _jr
+    from pyrox_gp._basis import draw_rff_cosine_basis, evaluate_rff_cosine_paths
+
+    kernel = RBF(pyrox_name="RBF_ard_rff_bad", input_dim=3)
+    with kernel._get_context():
+        variance, lengthscale, omega, phase, weights = draw_rff_cosine_basis(
+            kernel,
+            _jr.PRNGKey(0),
+            n_paths=2,
+            n_features=16,
+            in_features=3,
+            dtype=jnp.float64,
+        )
+    with pytest.raises(ValueError, match="many features"):
+        evaluate_rff_cosine_paths(
+            _jr.normal(_jr.PRNGKey(1), (5, 1)),
+            variance=variance,
+            lengthscale=lengthscale,
+            omega=omega,
+            phase=phase,
+            weights=weights,
+        )
+
+
+def test_funk_hecke_rejects_ard_kernels():
+    """Funk-Hecke samples the kernel along one meridian, which is valid
+    only for a zonal kernel; an ARD kernel is orientation dependent."""
+    from pyrox_gp import funk_hecke_coefficients
+
+    kernel = RBF(pyrox_name="RBF_ard_zonal", input_dim=3)
+    with kernel._get_context(), pytest.raises(NotImplementedError, match="zonal"):
+        funk_hecke_coefficients(kernel, l_max=3)
+
+    iso = RBF(pyrox_name="RBF_iso_zonal")
+    with iso._get_context():
+        assert funk_hecke_coefficients(iso, l_max=3).shape == (4,)

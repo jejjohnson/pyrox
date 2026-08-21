@@ -530,3 +530,36 @@ def test_normal_guide_matches_event_rank_of_a_callable_prior():
     model_site = next(s for s in tm.values() if s["type"] == "sample")
     guide_site = next(s for s in tg.values() if s["type"] == "sample")
     assert guide_site["fn"].event_dim == model_site["fn"].event_dim == 1
+
+
+def test_normal_guide_handles_shape_changing_transforms():
+    """A shape-changing constraint states its prior rank in the transform's
+    codomain, so the base must not be promoted to that rank: for
+    ``corr_cholesky`` the base is a vector (domain rank 1) while
+    ``LKJCholesky`` has rank 2."""
+    import jax.random as jr
+    from numpyro import handlers
+
+    class _Chol(Parameterized):
+        pyrox_name: str = "chol"
+
+        def setup(self) -> None:
+            self.register_param(
+                "L",
+                jnp.eye(3),
+                constraint=dist.constraints.corr_cholesky,
+            )
+
+    m = _Chol()
+    m.set_prior("L", dist.LKJCholesky(3))
+    m.autoguide("L", "normal")
+
+    def _run(mode):
+        m.set_mode(mode)
+        with m._get_context():
+            m.get_param("L")
+        m.set_mode("model")
+
+    tg = handlers.trace(handlers.seed(lambda: _run("guide"), jr.PRNGKey(0))).get_trace()
+    site = next(s for s in tg.values() if s["type"] == "sample")
+    assert site["value"].shape == (3, 3)
