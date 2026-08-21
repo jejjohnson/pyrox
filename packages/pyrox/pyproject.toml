@@ -1,6 +1,6 @@
 [project]
 name = "pyrox"
-version = "0.1.0"
+version = "0.1.1"
 description = "Equinox-to-NumPyro bridge primitives (PyroxModule, Parameterized) and ensemble inference."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
