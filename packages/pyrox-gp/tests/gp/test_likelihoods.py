@@ -7,9 +7,12 @@ that ``log_prob`` matches reference numpyro distributions and that the
 
 from __future__ import annotations
 
+import equinox as eqx
+import jax
 import jax.numpy as jnp
 import numpyro.distributions as nd
 from pyrox_gp import DistLikelihood, GaussianLikelihood
+from pyrox_gp._protocols import Likelihood
 
 
 # --- GaussianLikelihood ---------------------------------------------------
@@ -67,14 +70,60 @@ def test_dist_student_t_log_prob_matches_numpyro():
 
 
 def test_dist_likelihood_is_a_pyrox_likelihood():
-    from pyrox_gp._protocols import Likelihood
-
     lik = DistLikelihood(dist_fn=lambda f: nd.Normal(f, 1.0))
     assert isinstance(lik, Likelihood)
 
 
 def test_gaussian_likelihood_is_a_pyrox_likelihood():
-    from pyrox_gp._protocols import Likelihood
-
     lik = GaussianLikelihood(noise_var=0.1)
     assert isinstance(lik, Likelihood)
+
+
+# --- DistLikelihood static dist_fn trap -----------------------------------
+
+
+class _Warp(eqx.Module):
+    """Warp with a learnable parameter ``a``."""
+
+    a: jax.Array
+
+    def __call__(self, f: jax.Array) -> jax.Array:
+        return jnp.sinh(self.a * jnp.arcsinh(f))
+
+
+class _WarpedNormalLikelihood(Likelihood):
+    """Same warped-Normal model, with the warp held as a module field."""
+
+    warp: _Warp
+
+    def log_prob(self, f: jax.Array, y: jax.Array) -> jax.Array:
+        return nd.Normal(self.warp(f), 0.5).log_prob(y).sum()
+
+
+def test_dist_fn_is_static_and_freezes_closures():
+    """``dist_fn`` closures are invisible to ``eqx.filter_grad``.
+
+    Pins the trap documented in the ``DistLikelihood`` class-docstring
+    warning: ``dist_fn`` is a static field, so parameters the callable
+    closes over never appear in the gradient pytree and silently never
+    train. This test documents the behaviour; it does not assert it is
+    fixed.
+    """
+    warp = _Warp(a=jnp.asarray(1.3))
+    lik = DistLikelihood(dist_fn=lambda f: nd.Normal(warp(f), 0.5))
+    f = jnp.array([0.0, 1.0, -1.0])
+    y = jnp.array([0.1, 0.9, -1.2])
+    grad = eqx.filter_grad(lambda lik_: -lik_.log_prob(f, y))(lik)
+    leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_inexact_array))
+    assert leaves == []
+
+
+def test_module_field_link_parameters_receive_gradients():
+    """Holding the warp as a module field makes ``a`` a trainable leaf."""
+    lik = _WarpedNormalLikelihood(warp=_Warp(a=jnp.asarray(1.3)))
+    f = jnp.array([0.0, 1.0, -1.0])
+    y = jnp.array([0.1, 0.9, -1.2])
+    grad = eqx.filter_grad(lambda lik_: -lik_.log_prob(f, y))(lik)
+    leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_inexact_array))
+    assert len(leaves) > 0
+    assert all(jnp.all(jnp.isfinite(leaf)) for leaf in leaves)
