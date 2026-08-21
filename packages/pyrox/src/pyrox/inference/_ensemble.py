@@ -253,15 +253,22 @@ class EnsembleMAP(eqx.Module):
     *entire* log prior — hyperpriors included — while a likelihood-side
     $\beta$ (e.g. [`lfr_factor`][pyrox_gp.lfr_factor], which applies
     ``numpyro.handlers.scale`` to the likelihood site only) leaves every
-    prior at unit weight. Same argmax, different gradient scaling, and
-    different behaviour under minibatching — pick the one whose gradients
-    you want.
+    prior at unit weight. When the two coincide on which terms they
+    reweight, their gradients differ by the uniform factor $\beta$ —
+    same argmax, but a scale an adaptive optimizer still responds to.
+    This holds per minibatch as well: the tempered gradient is exactly
+    $\beta$ times the prior-weighted one, so minibatching introduces no
+    further difference between the formulations.
 
-    For rotationally non-identifiable latent models (e.g.
-    `pyrox_gp.LatentFactorGPPrior`, whose objective has a flat manifold of
-    optima), ensembling over seeds is the point of this class rather than a
-    convenience: independent members land in different basins/gauges and
-    the spread is real uncertainty.
+    Ensembling over seeds is worth more than usual for multi-modal
+    objectives such as `pyrox_gp.LatentFactorGPPrior`'s. Note what the
+    spread does and does not mean: where the latent priors are identical
+    the objective is rotation-invariant, and seed-to-seed spread *along
+    that gauge* is an unidentifiable coordinate artifact, not
+    uncertainty — averaging raw parameters across members is meaningless
+    there. Ensemble gauge-invariant **predictions** instead, or align the
+    members first. (With distinct latent kernels the rotation changes the
+    objective, so no such flat manifold exists.)
 
     Examples:
         >>> runner = EnsembleMAP(
