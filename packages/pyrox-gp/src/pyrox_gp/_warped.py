@@ -38,6 +38,12 @@ def _apply_warp(warp: AbstractBijection, f: Float[Array, " ..."]) -> Array:
     predictive path and the advanced inference strategies pass full ``(N,)``
     arrays.
     """
+    if warp.cond_shape is not None:
+        raise ValueError(
+            "Conditional warps are not supported here: this likelihood never "
+            "supplies a condition, so `transform` would fail at training and "
+            "prediction time. Use an unconditional bijection."
+        )
     if warp.shape == ():
         fn = warp.transform
     elif warp.shape == (1,):
@@ -140,5 +146,9 @@ def warped_predictive_moments(
     fs = f_loc[None, :] + jnp.sqrt(f_var)[None, :] * x[:, None]
     g = _apply_warp(lik.warp, fs)
     m1 = jnp.sum(w[:, None] * g, axis=0)
-    m2 = lik.noise_var + jnp.sum(w[:, None] * g**2, axis=0) - m1**2
+    # Centered second moment. Subtracting m1**2 from the raw second moment
+    # cancels catastrophically once G's output carries a large offset
+    # relative to its spread (an Affine warp centred near 1e4 loses the
+    # whole variance in float32, and can go negative).
+    m2 = lik.noise_var + jnp.sum(w[:, None] * (g - m1[None, :]) ** 2, axis=0)
     return m1, m2

@@ -303,3 +303,39 @@ def test_filter_jit_works_and_plain_jit_fails():
 
     with pytest.raises(TypeError, match="str"):
         jax.jit(lambda m, a, b: m.log_prob(a, b))(lik, f, y)
+
+
+def test_predictive_variance_survives_a_large_offset():
+    """A warp whose output sits far from zero relative to its spread: the
+    raw ``E[G^2] - E[G]^2`` form cancels away the variance in float32, so
+    the centered accumulation is what keeps it."""
+    from flowjax.bijections import Affine
+
+    lik = WarpedGaussianLikelihood(
+        warp=Affine(loc=jnp.asarray(1e4), scale=jnp.asarray(1.0)),
+        noise_var=jnp.asarray(0.1),
+    )
+    f_loc = jnp.asarray([0.3, -0.4])
+    f_var = jnp.asarray([1.0, 4.0])
+    mean, var = warped_predictive_moments(lik, f_loc, f_var, order=32)
+    assert jnp.all(jnp.isfinite(var))
+    # Affine warp with unit scale: variance passes through unchanged.
+    assert jnp.allclose(var, f_var + lik.noise_var, rtol=1e-6)
+    assert jnp.allclose(mean, f_loc + 1e4, rtol=1e-9)
+
+
+def test_conditional_warp_is_rejected():
+    """The likelihood never supplies a condition, so a conditional warp
+    must be refused up front rather than failing inside ``transform``."""
+    gauss_flows = pytest.importorskip("gauss_flows")
+
+    warp = gauss_flows.Conditioner(
+        key=jr.key(3),
+        inner=gauss_flows.MixtureGaussianCDF(n_components=4, shape=(1,)),
+        cond_shape=(2,),
+        nn_width=8,
+        nn_depth=2,
+    )
+    lik = WarpedGaussianLikelihood(warp=warp, noise_var=jnp.asarray(0.1))
+    with pytest.raises(ValueError, match="Conditional warps"):
+        lik.log_prob(jnp.zeros(2), jnp.zeros(2))
