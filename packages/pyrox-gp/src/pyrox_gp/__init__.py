@@ -135,6 +135,10 @@ from pyrox_gp._markov import (
     markov_gp_factor,
     markov_gp_sample,
 )
+from pyrox_gp._markov_flow import (
+    NormalizingKalmanPrior,
+    normalizing_kalman_factor,
+)
 from pyrox_gp._models import (
     ConditionedGP,
     GPPrior,
@@ -231,6 +235,7 @@ __all__ = [
     "NaturalGuide",
     "NonGaussConditionedGP",
     "NonGaussConditionedMarkovGP",
+    "NormalizingKalmanPrior",
     "OILMMGPPrior",
     "OILMMKernel",
     "PathwiseFunction",
@@ -274,6 +279,7 @@ __all__ = [
     "mo_gp_factor",
     "mo_svgp_elbo",
     "mo_svgp_factor",
+    "normalizing_kalman_factor",
     "sparse_markov_elbo",
     "sparse_markov_factor",
     "svgp_elbo",

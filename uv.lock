@@ -647,8 +647,8 @@ wheels = [
 
 [[package]]
 name = "gauss-flows"
-version = "0.1.8"
-source = { git = "https://github.com/jejjohnson/gauss_flows.git?rev=ecb058fbfd3e4b8460c79d328170bd66e209d1a5#ecb058fbfd3e4b8460c79d328170bd66e209d1a5" }
+version = "0.1.9"
+source = { git = "https://github.com/jejjohnson/gauss_flows.git?rev=bdb23f076ebaaf1ba042aa52ea593487cef3204e#bdb23f076ebaaf1ba042aa52ea593487cef3204e" }
 dependencies = [
     { name = "diffrax" },
     { name = "einops" },
@@ -666,8 +666,8 @@ dependencies = [
 
 [[package]]
 name = "gaussx"
-version = "0.0.18"
-source = { git = "https://github.com/jejjohnson/gaussx.git?rev=cd6264c92d32f433515d3efb06a0672a02280339#cd6264c92d32f433515d3efb06a0672a02280339" }
+version = "0.0.22"
+source = { git = "https://github.com/jejjohnson/gaussx.git?rev=812aef3074889690dc399fffcf305dbf3d0048c2#812aef3074889690dc399fffcf305dbf3d0048c2" }
 dependencies = [
     { name = "einx" },
     { name = "equinox" },
@@ -1994,7 +1994,7 @@ wheels = [
 
 [[package]]
 name = "pyrox"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/pyrox" }
 dependencies = [
     { name = "einx" },
@@ -2028,7 +2028,7 @@ provides-extras = ["optax", "colab"]
 
 [[package]]
 name = "pyrox-gp"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/pyrox-gp" }
 dependencies = [
     { name = "einx" },
@@ -2056,8 +2056,8 @@ optax = [
 requires-dist = [
     { name = "einx", specifier = ">=0.4.3" },
     { name = "flowjax", specifier = ">=0.9" },
-    { name = "gauss-flows", marker = "extra == 'flows'", git = "https://github.com/jejjohnson/gauss_flows.git?rev=ecb058fbfd3e4b8460c79d328170bd66e209d1a5" },
-    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=cd6264c92d32f433515d3efb06a0672a02280339" },
+    { name = "gauss-flows", marker = "extra == 'flows'", git = "https://github.com/jejjohnson/gauss_flows.git?rev=bdb23f076ebaaf1ba042aa52ea593487cef3204e" },
+    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=812aef3074889690dc399fffcf305dbf3d0048c2" },
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.5" },
     { name = "lineax", specifier = ">=0.1.1" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
