@@ -46,8 +46,13 @@ def _predict():
     return cond.predict(X_test), cond.predict(X_test, include_noise=True)
 
 
+# AutoDelta stores a prior'd kernel hyperparameter as `<site>_auto_loc`,
+# not under its site name, so substituting result.params alone would miss
+# it. guide.median maps those back onto the site names; merge the two so
+# both prior'd and deterministic (`pyrox_param`) kernel parameters replay.
+fitted = {**result.params, **guide.median(result.params)}
 (mean, var), (mean_obs, var_obs) = numpyro.handlers.substitute(
-    _predict, result.params
+    _predict, fitted
 )()                                                  # each (T, P)
 ```
 
@@ -136,6 +141,11 @@ class LatentFactorGPPrior(eqx.Module):
     jitter: float = 1e-6
 
     def __check_init__(self) -> None:
+        if not self.kernels:
+            raise ValueError(
+                "kernels must contain at least one latent kernel; an empty "
+                "tuple gives Q = 0 and fails inside latent_cholesky."
+            )
         _validate_kernel_scopes_unique(self.kernels)
         if self.warp is not None:
             raise NotImplementedError(
@@ -380,4 +390,6 @@ def latent_total_correlation(Z: Float[Array, "N Q"]) -> Float[Array, ""]:
         gaussian_total_correlation,
     )
 
-    return gaussian_total_correlation(jnp.cov(Z.T))
+    # jnp.cov collapses to a scalar for a single factor; the total-
+    # correlation routine needs a (Q, Q) matrix (and returns zero there).
+    return gaussian_total_correlation(jnp.atleast_2d(jnp.cov(Z.T)))
