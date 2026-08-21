@@ -105,9 +105,11 @@ def spectral_density(
         variance = kernel.get_param("variance")
         lengthscale = kernel.get_param("lengthscale")
         if jnp.ndim(lengthscale) != 0:
-            if jnp.size(lengthscale) == 1:
+            if jnp.size(lengthscale) == 1 and D == 1:
                 # A one-element per-axis lengthscale (input_dim=1) is a
-                # scalar in disguise; the 1-D closed forms stay valid.
+                # scalar in disguise, but only on a one-dimensional domain:
+                # for D > 1 the kernel itself would reject the inputs, so
+                # the density must not describe a domain it cannot evaluate.
                 lengthscale = jnp.reshape(lengthscale, ())
             else:
                 raise NotImplementedError(

@@ -343,3 +343,14 @@ def test_spectral_density_rejects_ard_kernels():
     kernel = RBF(pyrox_name="RBF_ard_sd", input_dim=3)
     with kernel._get_context(), pytest.raises(NotImplementedError, match="isotropic"):
         spectral_density(kernel, jnp.asarray([0.1, 0.5, 1.0]), D=3)
+
+
+def test_spectral_density_singleton_ard_still_rejected_for_multidim_domain():
+    """A ``(1,)`` lengthscale is only a scalar in disguise on a 1-D domain.
+    With ``D > 1`` the kernel would reject the inputs, so the density must
+    not silently describe a domain it cannot evaluate."""
+    from pyrox_gp._basis import spectral_density
+
+    kernel = RBF(pyrox_name="RBF_ard_1d_2ddomain", input_dim=1)
+    with kernel._get_context(), pytest.raises(NotImplementedError, match="isotropic"):
+        spectral_density(kernel, jnp.asarray([0.1, 0.5]), D=2)

@@ -235,7 +235,13 @@ class Parameterized(PyroxModule):
         # ``LogNormal(...).expand([D]).to_event(1)``). The guide site has to
         # declare the same event rank or Trace_ELBO rejects the model/guide
         # pair, so read it off the prior rather than assuming element-wise.
-        prior_event_dim = getattr(entry.prior, "event_dim", 0)
+        # Callable (dependent) priors must be resolved first, exactly as
+        # `_guide_delta` and `pyrox_sample` do — reading `event_dim` off the
+        # callable itself would silently report rank 0.
+        prior = entry.prior
+        if callable(prior) and not isinstance(prior, dist.Distribution):
+            prior = prior(self)
+        prior_event_dim = prior.event_dim if isinstance(prior, dist.Distribution) else 0
         if _is_real_support(entry.constraint):
             loc = self.pyrox_param(f"{name}_loc", init)
             scale = self.pyrox_param(

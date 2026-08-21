@@ -497,3 +497,36 @@ def test_distinct_instances_have_distinct_state():
     assert k1._state() is not k2._state()
     k1.set_mode("guide")
     assert k2._state().mode == "model"
+
+
+def test_normal_guide_matches_event_rank_of_a_callable_prior():
+    """A dependent (callable) prior must be resolved before its event rank
+    is read; otherwise the guide site declares rank 0 against a rank-1
+    model site and Trace_ELBO rejects the pair."""
+    import jax.random as jr
+
+    class _ARD(Parameterized):
+        pyrox_name: str = "ard"
+
+        def setup(self) -> None:
+            self.register_param(
+                "ls",
+                jnp.ones(3),
+                constraint=dist.constraints.positive,
+            )
+
+    m = _ARD()
+    m.set_prior("ls", lambda _self: dist.LogNormal(0.0, 1.0).expand([3]).to_event(1))
+    m.autoguide("ls", "normal")
+
+    def _run(mode):
+        m.set_mode(mode)
+        with m._get_context():
+            m.get_param("ls")
+        m.set_mode("model")
+
+    tm = handlers.trace(handlers.seed(lambda: _run("model"), jr.PRNGKey(0))).get_trace()
+    tg = handlers.trace(handlers.seed(lambda: _run("guide"), jr.PRNGKey(0))).get_trace()
+    model_site = next(s for s in tm.values() if s["type"] == "sample")
+    guide_site = next(s for s in tg.values() if s["type"] == "sample")
+    assert guide_site["fn"].event_dim == model_site["fn"].event_dim == 1
