@@ -33,9 +33,25 @@ guide = AutoDelta(lfr_model, init_loc_fn=partial(init_latents_by_sampling))
 # hyperparameters live on a log scale. Give the latents a 10x larger step.
 from pyrox.inference import param_group_optimizer
 
+# Three groups. The kernel amplitudes are frozen: the decoder's N(0, I)
+# prior already fixes the scale, so a free per-latent `variance` is
+# degenerate with it (Z -> cZ, W -> W/c). See the class docstring.
+def group_of(path, _):
+    name = str(path)
+    if "Z_T" in name:
+        return "latents"
+    if "variance" in name:
+        return "frozen"
+    return "globals"
+
+
 optimizer = param_group_optimizer(
-    {"latents": optax.adam(1e-2), "globals": optax.adam(1e-3)},
-    lambda path, _: "latents" if "Z_T" in str(path) else "globals",
+    {
+        "latents": optax.adam(1e-2),
+        "globals": optax.adam(1e-3),
+        "frozen": optax.set_to_zero(),
+    },
+    group_of,
 )
 svi = SVI(lfr_model, guide, optimizer, loss=Trace_ELBO())
 result = svi.run(jax.random.PRNGKey(0), 5000, X, Y, prior)
@@ -345,6 +361,10 @@ class ConditionedLatentFactorGP(eqx.Module):
             to the mean. The unwarped path (``warp=None``) is unaffected —
             it returns the exact moments directly.
 
+        The latent variance includes the model's ``latent_noise``
+        nugget, matching the prior `lfr_model` fits. ``include_noise``
+        additionally adds the *observation* noise, a separate quantity.
+
         Args:
             X_new: Test inputs, shape ``(T, D)``.
             include_noise: Add the observation noise variance. With a
@@ -353,8 +373,15 @@ class ConditionedLatentFactorGP(eqx.Module):
             quad_order: Gauss-Hermite order for the warped pushforward.
                 Ignored when ``warp is None``. A moderate order is fine —
                 the quadrature appears only here, never in training.
+
         """
         z_mean, z_var = self.predict_latents(X_new)
+        # lfr_model gives each latent factor the covariance K + nugget*I,
+        # so a factor value at a *new* input carries an independent nugget
+        # too. predict_latents returns the smooth GP conditional (there the
+        # nugget acts as the noise the MAP factors are observed with), so
+        # add it back or the decoder propagates an understated variance.
+        z_var = z_var + self.prior.latent_noise
         mean, var = lfr_predictive_moments(
             z_mean,
             z_var,
