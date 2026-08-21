@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/jejjohnson/pyrox/compare/pyrox-v0.1.0...pyrox-v0.1.1) (2026-08-21)
+
+
+### Features
+
+* **gp:** per-dimension (ARD) lengthscales for RBF, Matern, RationalQuadratic ([#209](https://github.com/jejjohnson/pyrox/issues/209)) ([a0d3d9d](https://github.com/jejjohnson/pyrox/commit/a0d3d9d997c445d0295b7a2afa98d69b246ba6de))
+* **inference:** per-parameter-group learning rates + ensembled tempered MAP ([#211](https://github.com/jejjohnson/pyrox/issues/211)) ([e343f83](https://github.com/jejjohnson/pyrox/commit/e343f8380ed2e9d221d8fc3f9a7466ace4e2dd5b))
+
 ## 0.1.0 (2026-07-25)
 
 

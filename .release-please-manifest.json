@@ -1,5 +1,5 @@
 {
-  "packages/pyrox": "0.1.0",
-  "packages/pyrox-gp": "0.1.0",
+  "packages/pyrox": "0.1.1",
+  "packages/pyrox-gp": "0.1.1",
   "packages/pyrox-nn": "0.1.0"
 }

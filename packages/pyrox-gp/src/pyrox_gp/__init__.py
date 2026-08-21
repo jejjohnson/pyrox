@@ -182,7 +182,7 @@ from pyrox_gp._warped import (
 )
 
 
-__version__ = "0.1.0"  # x-release-please-version
+__version__ = "0.1.1"  # x-release-please-version
 
 __all__ = [
     "RBF",
