@@ -28,12 +28,20 @@ def init_latents_by_sampling(site):
     return init_to_sample(site) if site["name"] == "Z_T" else init_to_median(site)
 
 guide = AutoDelta(lfr_model, init_loc_fn=partial(init_latents_by_sampling))
-# NOTE: plain adam trains every registered kernel parameter, including
-# each latent's `variance`. The decoder's N(0, I) prior already fixes the
-# scale, so a free amplitude is degenerate with it (Z -> cZ, W -> W/c) —
-# see the class docstring. Freeze the amplitudes with a per-group
-# optimizer (`pyrox.inference.param_group_optimizer`) for a real fit.
-svi = SVI(lfr_model, guide, optax.adam(3e-3), loss=Trace_ELBO())
+
+# Z is N x Q free parameters on a well-conditioned objective; kernel
+# hyperparameters live on a log scale. Give the latents a 10x larger step.
+from pyrox.inference import param_group_optimizer
+
+# Label by parameter *path* only — see `param_group_optimizer` on why the
+# labelling must not depend on leaf values. To hold the latent amplitudes
+# fixed (a modelling choice, not a requirement — see the class docstring),
+# add a third group mapping "variance" to `optax.set_to_zero()`.
+optimizer = param_group_optimizer(
+    {"latents": optax.adam(1e-2), "globals": optax.adam(1e-3)},
+    lambda path, _: "latents" if "Z_T" in str(path) else "globals",
+)
+svi = SVI(lfr_model, guide, optimizer, loss=Trace_ELBO())
 result = svi.run(jax.random.PRNGKey(0), 5000, X, Y, prior)
 
 Z_map = result.params["Z_T_auto_loc"].T
@@ -61,10 +69,10 @@ fitted = {**result.params, **guide.median(result.params)}
 )()                                                  # each (T, P)
 ```
 
-A single global learning rate is a compromise for this model: ``Z`` is
-``N x Q`` free parameters on a well-conditioned objective while the
-hyperparameters are a handful of values on a log scale. See
-`pyrox.inference` for per-parameter-group optimizers when that bites.
+A single global learning rate (plain ``optax.adam``) also works, but is a
+compromise: it either crawls on ``Z`` or destabilizes the kernel
+hyperparameters. See
+[`param_group_optimizer`][pyrox.inference.param_group_optimizer].
 
 ``Y`` is assumed centered — there is no mean function; center it
 externally before fitting.
@@ -110,10 +118,14 @@ class LatentFactorGPPrior(eqx.Module):
       $Z \\to ZA$, $W \\to A^\\top W$ leaves the objective unchanged.
       Individual latent factors carry no physical meaning without an extra
       rotation criterion.
-    - **Scale is fixed by the decoder prior.** Do not add a free kernel
-      amplitude per latent on top — $Z \\to cZ$, $W \\to W/c$ would be
-      degenerate. Keep kernel ``variance`` fixed at ``1.0`` for latent
-      kernels, or document the degeneracy in your model.
+    - **The kernel amplitude is identifiable** (unlike the rotation above).
+      $Z \\to cZ$, $W \\to W/c$ is degenerate only when $W$ is a free
+      parameter; here $W$ carries a fixed $\\mathcal{N}(0, I)$ prior and is
+      marginalized, so scaling $Z$ changes the collapsed covariance
+      $ZZ^\\top + \\sigma^2 I$ and the amplitude has a finite,
+      data-dependent optimum. Fixing ``variance = 1.0`` per latent is a
+      legitimate modelling choice (it makes the factors comparable), not a
+      requirement for a valid fit.
     - **`predict_latents` variance understates uncertainty.** It treats the
       MAP ``Z`` as noiseless observations of the latent processes, so it
       captures input-space extrapolation but not uncertainty in the point

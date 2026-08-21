@@ -28,6 +28,10 @@ Roll your own training loop on top of the vmapped state primitives.
 
 ::: pyrox.inference.ensemble_predict
 
+## Optimizer helpers
+
+::: pyrox.inference.param_group_optimizer
+
 ## Result containers
 
 ::: pyrox.inference.EnsembleState

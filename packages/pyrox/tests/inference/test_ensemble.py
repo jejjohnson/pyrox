@@ -477,3 +477,118 @@ def test_ensemble_vi_accepts_optax_optimizer(linear_problem):
     )
     result = runner.run(jr.PRNGKey(0), 100, p["X"], p["y"])
     assert result.losses.shape == (2, 100)
+
+
+# -- param_group_optimizer inside EnsembleMAP --------------------------------
+
+
+def test_param_group_optimizer_inside_ensemble_map(linear_problem):
+    """A grouped optimizer must drop into ``EnsembleMAP`` unchanged, with
+    both groups moving under their own rates."""
+    from pyrox.inference import param_group_optimizer
+
+    p = linear_problem
+
+    def init_fn(k):
+        k1, k2 = jr.split(k)
+        return {
+            "z": 0.1 * jr.normal(k1, (p["d"],)),
+            "scale": 0.1 * jr.normal(k2, ()),
+        }
+
+    def log_joint(params, xb, yb):
+        theta = params["z"] * jnp.exp(params["scale"])
+        ll = -0.5 * jnp.sum((yb - xb @ theta) ** 2) / 0.25
+        lp = -0.5 * jnp.sum(params["z"] ** 2) - 0.5 * params["scale"] ** 2
+        return ll, lp
+
+    optimizer = param_group_optimizer(
+        {"latents": optax.adam(1e-2), "globals": optax.adam(1e-3)},
+        lambda path, _: "latents" if "z" in str(path) else "globals",
+    )
+    runner = EnsembleMAP(
+        log_joint=log_joint,
+        init_fn=init_fn,
+        optimizer=optimizer,
+        ensemble_size=4,
+    )
+    # Drive `update` from one state so "moved" compares like with like.
+    # `run` splits the seed internally and initializes from a different
+    # subkey, so comparing its output against `init(seed)` would pass even
+    # if a group were frozen.
+    state = runner.init(jr.PRNGKey(0))
+    initial = jax.tree_util.tree_map(jnp.copy, state.params)
+    for _ in range(200):
+        state, losses = runner.update(state, p["X"], p["y"])
+    assert jnp.all(jnp.isfinite(losses))
+    assert not jnp.allclose(state.params["z"], initial["z"])
+    assert not jnp.allclose(state.params["scale"], initial["scale"])
+
+    # And the frozen-group contrast: a set_to_zero group must not move,
+    # under the same initialization.
+    frozen = EnsembleMAP(
+        log_joint=log_joint,
+        init_fn=init_fn,
+        optimizer=param_group_optimizer(
+            {"latents": optax.adam(1e-2), "globals": optax.set_to_zero()},
+            lambda path, _: "latents" if "z" in str(path) else "globals",
+        ),
+        ensemble_size=4,
+    )
+    fstate = frozen.init(jr.PRNGKey(0))
+    finitial = jax.tree_util.tree_map(jnp.copy, fstate.params)
+    for _ in range(20):
+        fstate, _ = frozen.update(fstate, p["X"], p["y"])
+    assert jnp.array_equal(fstate.params["scale"], finitial["scale"])
+    assert not jnp.allclose(fstate.params["z"], finitial["z"])
+
+
+# -- tempering equivalence ---------------------------------------------------
+
+
+@pytest.mark.slow
+def test_prior_weight_matches_likelihood_side_beta(linear_problem):
+    """``prior_weight = 1/beta`` and a likelihood-side ``beta`` (via
+    ``numpyro.handlers.scale``) must reach the same argmax — the tempered
+    ridge solution — pinning the equivalence documented on `EnsembleMAP`."""
+    p = linear_problem
+    sigma2, tau2, beta = 0.25, 1.0, 0.25
+    X, y, d = p["X"], p["y"], p["d"]
+
+    # Closed form: argmax of beta * loglik + logprior.
+    A = beta * (X.T @ X) / sigma2 + jnp.eye(d) / tau2
+    theta_tempered = jnp.linalg.solve(A, beta * (X.T @ y) / sigma2)
+
+    # Route 1: EnsembleMAP with prior_weight = 1/beta.
+    runner = EnsembleMAP(
+        log_joint=p["log_joint"],
+        init_fn=p["init_fn"],
+        optimizer=optax.adam(5e-2),
+        ensemble_size=2,
+        prior_weight=1.0 / beta,
+    )
+    result = runner.run(jr.PRNGKey(0), 3000, X, y)
+    for e in range(2):
+        assert jnp.allclose(result.params[e], theta_tempered, atol=1e-3)
+
+    # Route 2: likelihood-side beta via numpyro.handlers.scale.
+    def model(X, y):
+        theta = numpyro.sample(
+            "theta",
+            dist.Normal(jnp.zeros(d), jnp.sqrt(tau2)).to_event(1),
+        )
+        with numpyro.handlers.scale(scale=beta):
+            numpyro.sample(
+                "obs",
+                dist.Normal(X @ theta, jnp.sqrt(sigma2)).to_event(1),
+                obs=y,
+            )
+
+    from numpyro.infer import SVI, Trace_ELBO
+    from numpyro.infer.autoguide import AutoDelta
+
+    guide = AutoDelta(model)
+    svi = SVI(model, guide, optax.adam(5e-2), loss=Trace_ELBO())
+    svi_result = svi.run(jr.PRNGKey(1), 3000, X, y, progress_bar=False)
+    theta_svi = svi_result.params["theta_auto_loc"]
+    assert jnp.allclose(theta_svi, theta_tempered, atol=1e-3)
