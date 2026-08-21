@@ -376,6 +376,9 @@ def test_warped_predictive_variance_survives_a_large_offset():
     assert jnp.all(jnp.isfinite(var))
     assert bool((var > 0).all())
     # An affine warp is exact under the pushforward: variance is unchanged.
+    # predict adds the latent nugget before propagating, so mirror that.
     z_mean, z_var = cond.predict_latents(X[:3])
-    _, w_var = lfr_predictive_moments(z_mean, z_var, cond.mu_W, cond.Sigma_W)
+    _, w_var = lfr_predictive_moments(
+        z_mean, z_var + cond.prior.latent_noise, cond.mu_W, cond.Sigma_W
+    )
     assert jnp.allclose(var, w_var, rtol=1e-6)
