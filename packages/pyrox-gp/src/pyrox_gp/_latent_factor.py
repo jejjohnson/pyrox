@@ -34,6 +34,22 @@ def _check_rows_match(Y: Float[Array, "N P"], Z: Float[Array, "N Q"]) -> None:
         )
 
 
+def _check_scalar_noise(noise_var: Float[Array, ""]) -> None:
+    """Reject non-scalar noise variances.
+
+    Per-output noise is not supported -- it breaks the shared-covariance
+    identity the collapse rests on. A vector would otherwise broadcast
+    silently against the ``(Q, Q)`` Gram, producing a nonsymmetric matrix
+    that Cholesky reads as valid and a plausible but wrong result.
+    """
+    if jnp.ndim(noise_var) != 0:
+        raise ValueError(
+            "noise_var must be a scalar: the collapsed likelihood assumes "
+            "isotropic noise shared across all P output channels. Got shape "
+            f"{jnp.shape(noise_var)}."
+        )
+
+
 def _psi_factor(
     Z: Float[Array, "N Q"],
     noise_var: Float[Array, ""],
@@ -89,13 +105,23 @@ def collapsed_lfr_log_prob(
         True
     """
     _check_rows_match(Y, Z)
+    _check_scalar_noise(noise_var)
     N, P = Y.shape
     s2 = noise_var + jitter
     c, low = _psi_factor(Z, s2)
     logdet_psi = 2.0 * jnp.sum(jnp.log(jnp.diagonal(c)))
     ZTY = einx.dot("n q, n p -> q p", Z, Y)
-    alpha = cho_solve((c, low), ZTY)
-    quad = jnp.sum(Y * Y) / s2 - jnp.sum(ZTY * alpha) / s2**2
+    # Cancellation-free quadratic. The direct Woodbury form
+    # ``||Y||^2 / s2 - ||Z^T Y||^2_{Psi^-1} / s2^2`` differences two terms of
+    # order ``1 / s2`` whose true difference is order one whenever Y lies
+    # close to the span of Z, losing most significant digits (and possibly
+    # going negative) at small noise in float32. The equivalent penalized
+    # residual form is a sum of non-negative terms:
+    #   y^T C^-1 y = ||Y - Z W_map||_F^2 / s2 + ||W_map||_F^2,
+    # with W_map the decoder posterior mean. Same O(NQP) cost.
+    W_map = cho_solve((c, low), ZTY) / s2
+    resid = Y - einx.dot("n q, q p -> n p", Z, W_map)
+    quad = jnp.sum(resid * resid) / s2 + jnp.sum(W_map * W_map)
     return -0.5 * (
         N * P * jnp.log(2.0 * jnp.pi) + N * P * jnp.log(s2) + P * logdet_psi + quad
     )
@@ -129,6 +155,7 @@ def decoder_posterior(
         Tuple of ``(mean, row_cov)`` with shapes ``(Q, P)`` and ``(Q, Q)``.
     """
     _check_rows_match(Y, Z)
+    _check_scalar_noise(noise_var)
     s2 = noise_var + jitter
     c, low = _psi_factor(Z, s2)
     mean = cho_solve((c, low), einx.dot("n q, n p -> q p", Z, Y)) / s2
