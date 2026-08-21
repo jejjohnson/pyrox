@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.3](https://github.com/jejjohnson/xtremax/compare/v0.0.2...v0.0.3) (2026-08-20)
+
+
+### Bug Fixes
+
+* **distributions:** stabilise GEV variance/skew/kurtosis for small ξ ([#95](https://github.com/jejjohnson/xtremax/issues/95)) ([b550c74](https://github.com/jejjohnson/xtremax/commit/b550c743f6c7898f32a2ff7758a1700d9e07e580))
+
 ## [0.0.2](https://github.com/jejjohnson/xtremax/compare/v0.0.1...v0.0.2) (2026-08-19)
 
 
