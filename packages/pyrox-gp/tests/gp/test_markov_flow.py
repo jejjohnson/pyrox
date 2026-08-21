@@ -384,3 +384,93 @@ def test_unwarped_path_works_without_gauss_flows(monkeypatch):
 
     with pytest.raises(ImportError, match=r"pyrox-gp\[flows\]"):
         NormalizingKalmanPrior(base, warp=warp)
+
+
+# --- input validation ---------------------------------------------------
+
+
+def test_mismatched_shapes_raise_instead_of_broadcasting():
+    """A ``(T, 1)`` series against an ``(T, M)`` base must raise.
+
+    Left to broadcasting, ``y - mean_grid`` replicates the single
+    observed channel across all ``M`` and returns a finite likelihood for
+    data the caller never supplied.
+    """
+    base = _base()
+    prior = NormalizingKalmanPrior(base)
+    y = base.sample(jr.key(16))
+
+    with pytest.raises(ValueError, match=r"y has shape \(8, 1\)"):
+        prior.log_marginal(y[:, :1])
+    with pytest.raises(ValueError, match=r"y has shape \(4, 2\)"):
+        prior.log_marginal(y[:4])
+    with pytest.raises(ValueError, match=r"y has shape \(8, 1\)"):
+        prior.predict(y[:, :1])
+    with pytest.raises(ValueError, match=r"mask has shape"):
+        prior.log_marginal(y, jnp.ones((T, M + 1), dtype=bool))
+
+
+def test_predict_rejects_channel_mixing_warps():
+    """``predict`` refuses a warp whose Jacobian is not diagonal.
+
+    The per-channel Gauss-Hermite rule integrates each output against
+    its own channel's marginal, which is the wrong integral when an
+    output depends on the whole vector. ``log_marginal`` is exact for
+    the same warp on an unmasked base and must keep working.
+    """
+    pytest.importorskip("gauss_flows")
+    from flowjax.bijections import TriangularAffine
+
+    base = _base()
+    # Lower-triangular arr => a triangular, and hence non-diagonal,
+    # Jacobian: output channel 1 depends on input channel 0.
+    mixing = TriangularAffine(jnp.zeros(M), jnp.array([[1.0, 0.0], [0.7, 1.0]]))
+    prior = NormalizingKalmanPrior(base, warp=mixing)
+    y = jax.vmap(mixing.transform)(base.sample(jr.key(17)))
+
+    # log_marginal stays exact for the same warp on an unmasked base —
+    # only predict is restricted. A unit-diagonal triangular map has
+    # log|det J| = sum(log|diag|) = 0, so the reference is just the
+    # unwarped marginal of the inverse-warped series. (_dense_log_marginal
+    # takes the log-det per entry, which assumes a diagonal Jacobian, so
+    # it cannot score this warp itself.)
+    log_det = jnp.linalg.slogdet(jax.jacfwd(mixing.inverse)(y[0]))[1]
+    assert jnp.abs(log_det) < 1e-13
+    got = prior.log_marginal(y)
+    want = _dense_log_marginal(base, jax.vmap(mixing.inverse)(y))
+    assert jnp.abs(got - want) < 1e-13
+
+    with pytest.raises(ValueError, match="elementwise warp"):
+        prior.predict(y)
+
+    # An elementwise warp of the same event shape is still accepted.
+    warp = _exp_warp()
+    mean, var = NormalizingKalmanPrior(base, warp=warp).predict(
+        jax.vmap(warp.transform)(base.sample(jr.key(18)))
+    )
+    assert jnp.all(jnp.isfinite(mean)) and jnp.all(var >= 0.0)
+
+
+def test_predict_variances_are_non_negative():
+    """Quadrature variances are clamped, so ``sqrt`` is always safe.
+
+    A near-deterministic predictive makes ``E[G^2]`` and ``E[G]^2``
+    agree to working precision, and the subtraction can land below zero.
+    """
+    pytest.importorskip("gauss_flows")
+    base = _base()
+    # Near-zero process and observation noise => concentrated marginals.
+    tiny = LGSSM(
+        base.A,
+        base.H,
+        1e-30 * jnp.eye(M),
+        1e-30 * jnp.eye(M),
+        jnp.zeros(M),
+        1e-30 * jnp.eye(M),
+        n_steps=T,
+    )
+    warp = _exp_warp()
+    y = jax.vmap(warp.transform)(base.sample(jr.key(19)))
+    _, var = NormalizingKalmanPrior(tiny, warp=warp).predict(y)
+    assert jnp.all(var >= 0.0)
+    assert jnp.all(jnp.isfinite(jnp.sqrt(var)))

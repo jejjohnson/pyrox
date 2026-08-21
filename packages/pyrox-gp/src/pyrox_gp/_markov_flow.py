@@ -104,11 +104,13 @@ class NormalizingKalmanPrior(eqx.Module):
             independently at each step (requires the ``flows`` extra).
             ``None`` means the identity, in which case this is exactly
             the base LGSSM. Conditional warps (non-``None``
-            ``cond_shape``) are rejected. With a mask, the warp must be
-            elementwise — ``gauss_flows`` refuses channel-mixing warps
-            over a masked base because masking and a non-diagonal
-            Jacobian do not commute; put cross-channel structure in
-            ``H`` and ``R`` instead.
+            ``cond_shape``) are rejected. A channel-mixing warp is
+            usable with `log_marginal` on an unmasked base, but nothing
+            else: ``gauss_flows`` refuses it over a masked base (masking
+            and a non-diagonal Jacobian do not commute), and `predict`
+            refuses it because its per-channel quadrature would be wrong
+            (see there). Put cross-channel structure in ``H`` and ``R``
+            instead.
         mean_fn: Optional callable ``times -> (T, M)`` evaluated on the
             integer grid ``0, ..., T-1`` of the base. The mean acts in
             **observation space** — it is subtracted from ``y`` before
@@ -189,6 +191,62 @@ class NormalizingKalmanPrior(eqx.Module):
             return self.base.obs_mask
         return None
 
+    def _check_shapes(
+        self,
+        y: Float[Array, "T M"],
+        mask: Bool[Array, "T M"] | None,
+    ) -> None:
+        """Reject ``y`` / ``mask`` that do not match the base event shape.
+
+        ``y - mean_grid`` and the filter's own broadcasting would other-
+        wise accept a ``(T, 1)`` series against an ``(T, M)`` base,
+        silently replicating the one observed channel across all ``M``
+        and returning a finite log-likelihood for data the caller never
+        supplied. Shapes are static under ``jit``, so this costs nothing
+        at trace time.
+        """
+        expected = (self.n_steps, self.n_channels)
+        if y.shape != expected:
+            raise ValueError(
+                f"y has shape {y.shape}, but the base event shape is "
+                f"{expected}. Observations must match the base exactly — "
+                "a mismatched channel or time axis would broadcast rather "
+                "than raise."
+            )
+        if mask is not None and mask.shape != expected:
+            raise ValueError(
+                f"mask has shape {mask.shape}, but the base event shape "
+                f"is {expected}. The mask marks observed entries of y, so "
+                "it must have the same shape."
+            )
+
+    def _require_elementwise_warp(self, flows: ModuleType) -> None:
+        """Raise unless ``gauss_flows`` classifies the warp as elementwise.
+
+        Asked through the public surface rather than a private helper:
+        `gauss_flows.normalizing_kalman_filter` documents that it
+        refuses a channel-mixing warp over a **conditional** (mask-
+        consuming) base, because masking and a non-diagonal Jacobian do
+        not commute. Building that form is construction-only and cheap,
+        so it doubles as the classifier — and it stays correct if
+        ``gauss_flows`` refines what counts as elementwise. Shapes were
+        already validated in ``__init__``, so a ``ValueError`` out of
+        this constructor is that rejection.
+        """
+        try:
+            self._nkf(flows, masked=True)
+        except ValueError as exc:
+            raise ValueError(
+                "predict requires an elementwise warp: it pushes the "
+                "per-channel marginal moments through the warp with a "
+                "scalar Gauss-Hermite rule, which is only the right "
+                "integral when each output channel depends on its own "
+                "input channel alone. This warp mixes channels (or "
+                "cannot be shown not to), so those moments would be "
+                "silently wrong — log_marginal is unaffected and stays "
+                "exact. Put cross-channel structure in H and R instead."
+            ) from exc
+
     def _nkf(self, flows: ModuleType, *, masked: bool):
         """Build the ``gauss_flows`` NKF density for the current warp.
 
@@ -243,9 +301,14 @@ class NormalizingKalmanPrior(eqx.Module):
 
         Returns:
             Scalar $\log p(y_{\mathrm{obs}} \mid \theta)$.
+
+        Raises:
+            ValueError: If ``y`` or ``mask`` does not match the base
+                event shape.
         """
         y = jnp.asarray(y)
         mask_eff = self._effective_mask(mask)
+        self._check_shapes(y, mask_eff)
         residual = y - self._mean_grid(y.shape[0], y.dtype)
         if self.warp is None:
             return gaussx.kalman_filter(
@@ -290,11 +353,17 @@ class NormalizingKalmanPrior(eqx.Module):
 
         The returned mean is $\mathbb{E}[G(z)]$, **not**
         $G(\mathbb{E}[z])$ — the latter is the pushforward median for a
-        monotone warp and is badly biased for a skewed one. The
-        quadrature is per-channel over the marginal warped-space
-        moments, which is exact (up to quadrature error) for an
-        elementwise warp — the recommended configuration, and the only
-        one a mask permits.
+        monotone warp and is badly biased for a skewed one.
+
+        The quadrature is per-channel over the *marginal* warped-space
+        moments, so it is the right integral only when each output
+        channel depends on its own input channel alone. **This method
+        therefore requires an elementwise warp** and raises otherwise —
+        a channel-mixing warp's outputs depend on the full joint
+        Gaussian, cross-channel covariances included, and per-channel
+        moments would be silently wrong rather than merely imprecise.
+        `log_marginal` carries no such restriction: it stays exact for
+        any unmasked warp.
 
         Gauss-Hermite converges spectrally only for analytic
         integrands. A piecewise rational-quadratic spline warp is not
@@ -316,11 +385,17 @@ class NormalizingKalmanPrior(eqx.Module):
 
         Returns:
             Tuple ``(mean, var)`` of observation-space marginal moments,
-            each of shape ``(T + n_ahead, M)``.
+            each of shape ``(T + n_ahead, M)``. Variances are clamped at
+            zero, so ``sqrt`` on them is always safe.
+
+        Raises:
+            ValueError: If ``y`` or ``mask`` does not match the base
+                event shape, or if the warp is not elementwise.
         """
         y = jnp.asarray(y)
         n_steps, n_channels = self.n_steps, self.n_channels
         mask_eff = self._effective_mask(mask)
+        self._check_shapes(y, mask_eff)
         mean_grid = self._mean_grid(n_steps + n_ahead, y.dtype)
         residual = y - mean_grid[:n_steps]
 
@@ -328,10 +403,10 @@ class NormalizingKalmanPrior(eqx.Module):
             z = residual
         else:
             flows = _require_flows()
-            # Constructing the gauss_flows NKF runs the same warp/mask
-            # validation as log_marginal (channel-mixing warps over a
-            # masked base are refused there, with the full explanation).
-            self._nkf(flows, masked=mask_eff is not None)
+            # The scalar per-channel quadrature below is only the right
+            # integral for an elementwise warp, so predict requires one
+            # even when log_marginal would not.
+            self._require_elementwise_warp(flows)
             if mask_eff is not None:
                 # Unobserved slots hold junk (often NaN); substitute an
                 # in-support reference before the inverse warp. The
@@ -373,9 +448,13 @@ class NormalizingKalmanPrior(eqx.Module):
         mz = m_smooth @ H_dense.T  # (T', M)
         # einx.dot is typed as possibly returning a tuple (multi-output
         # patterns); narrow back to a single array for the typechecker.
-        vz = (
+        # Clamped at zero: the quadratic form is PSD in exact arithmetic,
+        # but a rounding-negative entry would become NaN under the sqrt
+        # taken for the quadrature nodes below.
+        vz = jnp.maximum(
             jnp.asarray(einx.dot("m n, t n k, m k -> t m", H_dense, P_smooth, H_dense))
-            + R_diag
+            + R_diag,
+            0.0,
         )
 
         if self.warp is None:
@@ -389,7 +468,11 @@ class NormalizingKalmanPrior(eqx.Module):
         g = jax.vmap(jax.vmap(self.warp.transform))(fs)
         m1 = jnp.asarray(einx.dot("s, s t m -> t m", weights, g))
         m2 = jnp.asarray(einx.dot("s, s t m -> t m", weights, g**2))
-        return m1 + mean_grid, m2 - m1**2
+        # E[G^2] - E[G]^2 cancels catastrophically for a concentrated
+        # predictive: the two moments agree to working precision and the
+        # difference can land just below zero, which callers would turn
+        # into NaN on the first sqrt.
+        return m1 + mean_grid, jnp.maximum(m2 - m1**2, 0.0)
 
 
 def normalizing_kalman_factor(
