@@ -315,3 +315,24 @@ def test_latent_total_correlation_handles_a_single_factor():
 
     Z = jr.normal(jr.PRNGKey(0), (500, 1))
     assert jnp.allclose(latent_total_correlation(Z), 0.0, atol=1e-6)
+
+
+def test_predict_includes_the_latent_nugget(prior):
+    """``lfr_model`` gives each factor covariance ``K + latent_noise * I``,
+    so a factor at a new input carries that nugget too; dropping it would
+    understate the propagated output variance."""
+    _, Y = _data()
+    Z = jr.normal(jr.PRNGKey(2), (N, Q))
+    cond = prior.condition(Y, Z, jnp.asarray(0.1))
+    X_new = jr.uniform(jr.PRNGKey(3), (4, D))
+
+    _, var = cond.predict(X_new)
+    z_mean, z_var = cond.predict_latents(X_new)
+    from pyrox_gp import lfr_predictive_moments
+
+    _, var_without = lfr_predictive_moments(z_mean, z_var, cond.mu_W, cond.Sigma_W)
+    _, var_with = lfr_predictive_moments(
+        z_mean, z_var + prior.latent_noise, cond.mu_W, cond.Sigma_W
+    )
+    assert jnp.allclose(var, var_with)
+    assert bool((var > var_without).all())
