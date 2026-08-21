@@ -65,3 +65,46 @@ def test_unlabelled_parameter_fails_loudly(params):
     )
     with pytest.raises(ValueError, match="globals"):
         opt.init(params)
+
+
+def test_label_fn_sees_updates_not_params_during_update(params, grads):
+    """optax evaluates a callable ``param_labels`` on the parameter tree at
+    ``init`` but on the *update* tree at ``update``. This pins that fact,
+    which is why ``label_fn`` must key off the path rather than leaf values.
+    """
+    seen: list[tuple[str, float]] = []
+
+    def spy(path, leaf):
+        seen.append((str(path), float(jnp.ravel(leaf)[0])))
+        return "latents" if "z" in str(path) else "globals"
+
+    opt = param_group_optimizer(
+        {"latents": optax.sgd(1e-2), "globals": optax.sgd(1e-3)}, spy
+    )
+    params = {"z": jnp.full((2,), 5.0), "lengthscale": jnp.full((2,), 5.0)}
+    grads = {"z": jnp.full((2,), -1.0), "lengthscale": jnp.full((2,), -1.0)}
+    state = opt.init(params)
+    at_init = dict(seen)
+    seen.clear()
+    opt.update(grads, state, params)
+    at_update = dict(seen)
+
+    # Same paths both times, but the values differ (params vs gradients) —
+    # so a value-dependent label_fn would be unstable across the two.
+    assert set(at_init) == set(at_update)
+    assert any(at_init[k] != at_update[k] for k in at_init)
+
+
+def test_path_based_labels_are_stable_across_updates(params, grads):
+    """The documented contract: a path-keyed ``label_fn`` keeps each group
+    on its own transform, so a frozen group stays frozen after init."""
+    opt = param_group_optimizer(
+        {"latents": optax.sgd(1e-1), "globals": optax.set_to_zero()}, _by_name
+    )
+    state = opt.init(params)
+    current = params
+    for _ in range(3):
+        updates, state = opt.update(grads, state, current)
+        current = optax.apply_updates(current, updates)
+    assert jnp.array_equal(current["lengthscale"], params["lengthscale"])
+    assert not jnp.allclose(current["z"], params["z"])
