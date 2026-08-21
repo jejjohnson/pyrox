@@ -36,12 +36,24 @@ def param_group_optimizer(
     loudly at ``init`` time — ``optax.multi_transform`` raises a
     ``ValueError`` naming the offending labels.
 
+    !!! warning "Label by path, never by leaf value"
+        ``optax.multi_transform`` evaluates a callable ``param_labels`` on
+        the **parameter** tree at ``init`` and on the **update** tree at
+        every ``update``. A ``label_fn`` that inspects leaf *values* (a
+        sign test, say) can therefore assign one group at init and another
+        afterwards, silently applying the wrong transform or tripping a
+        masked-state structure error. Depend only on ``path`` and on
+        update-invariant leaf metadata such as ``shape`` / ``dtype``, which
+        are identical for parameters and their updates.
+
     Args:
         groups: Maps a group label to the optimizer for that group. Every
             label returned by ``label_fn`` must be a key here.
-        label_fn: Called as ``label_fn(path, leaf)`` for each parameter, where
-            ``path`` is the ``jax.tree_util`` key path. Returns the group
-            label for that parameter.
+        label_fn: Called as ``label_fn(path, leaf)`` for each parameter,
+            where ``path`` is the ``jax.tree_util`` key path. Returns the
+            group label for that parameter. Must be a function of ``path``
+            (or update-invariant leaf metadata) only — see the warning
+            above.
 
     Returns:
         A single ``optax.GradientTransformation`` suitable for

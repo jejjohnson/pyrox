@@ -512,12 +512,35 @@ def test_param_group_optimizer_inside_ensemble_map(linear_problem):
         optimizer=optimizer,
         ensemble_size=4,
     )
+    # Drive `update` from one state so "moved" compares like with like.
+    # `run` splits the seed internally and initializes from a different
+    # subkey, so comparing its output against `init(seed)` would pass even
+    # if a group were frozen.
     state = runner.init(jr.PRNGKey(0))
-    initial = state.params
-    result = runner.run(jr.PRNGKey(0), 200, p["X"], p["y"])
-    assert jnp.all(jnp.isfinite(result.losses))
-    assert not jnp.allclose(result.params["z"], initial["z"])
-    assert not jnp.allclose(result.params["scale"], initial["scale"])
+    initial = jax.tree_util.tree_map(jnp.copy, state.params)
+    for _ in range(200):
+        state, losses = runner.update(state, p["X"], p["y"])
+    assert jnp.all(jnp.isfinite(losses))
+    assert not jnp.allclose(state.params["z"], initial["z"])
+    assert not jnp.allclose(state.params["scale"], initial["scale"])
+
+    # And the frozen-group contrast: a set_to_zero group must not move,
+    # under the same initialization.
+    frozen = EnsembleMAP(
+        log_joint=log_joint,
+        init_fn=init_fn,
+        optimizer=param_group_optimizer(
+            {"latents": optax.adam(1e-2), "globals": optax.set_to_zero()},
+            lambda path, _: "latents" if "z" in str(path) else "globals",
+        ),
+        ensemble_size=4,
+    )
+    fstate = frozen.init(jr.PRNGKey(0))
+    finitial = jax.tree_util.tree_map(jnp.copy, fstate.params)
+    for _ in range(20):
+        fstate, _ = frozen.update(fstate, p["X"], p["y"])
+    assert jnp.array_equal(fstate.params["scale"], finitial["scale"])
+    assert not jnp.allclose(fstate.params["z"], finitial["z"])
 
 
 # -- tempering equivalence ---------------------------------------------------
