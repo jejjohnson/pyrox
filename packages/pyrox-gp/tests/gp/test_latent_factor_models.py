@@ -298,3 +298,20 @@ def test_predictions_use_substituted_kernel_parameters(prior):
     subs = {f"RBF_q{q}.lengthscale": jnp.asarray(5.0) for q in range(Q)}
     alt_mean, _ = handlers.substitute(_predict, subs)()
     assert not jnp.allclose(base_mean, alt_mean)
+
+
+def test_empty_kernel_tuple_is_rejected():
+    """Q = 0 constructs but fails later inside ``latent_cholesky``."""
+    X, _ = _data()
+    with pytest.raises(ValueError, match="at least one latent kernel"):
+        LatentFactorGPPrior(kernels=(), X=X)
+
+
+def test_latent_total_correlation_handles_a_single_factor():
+    """``jnp.cov`` collapses to a scalar at Q = 1; the diagnostic must
+    still return the mathematically expected zero."""
+    pytest.importorskip("gauss_flows")
+    from pyrox_gp import latent_total_correlation
+
+    Z = jr.normal(jr.PRNGKey(0), (500, 1))
+    assert jnp.allclose(latent_total_correlation(Z), 0.0, atol=1e-6)
