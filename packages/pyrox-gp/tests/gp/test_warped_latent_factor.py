@@ -345,3 +345,18 @@ def test_cost_stays_linear_in_p():
     t_small, t_mid, t_big = (_best_time(p) for p in (10**3, 10**4, 5 * 10**4))
     assert t_mid / max(t_small, 1e-9) < 50.0
     assert t_big / max(t_mid, 1e-9) < 25.0  # 5x size; quadratic would be 25x
+
+
+def test_warped_predictive_variance_survives_a_large_offset():
+    """``E[G^2] - E[G]^2`` cancels catastrophically when the transformed
+    values sit far from zero relative to their spread; the centered
+    accumulation must keep the variance."""
+    warp = Affine(loc=jnp.full((P,), 1e4), scale=jnp.ones(P))
+    cond, X = _conditioned_with_warp(warp)
+    _mean, var = cond.predict(X[:3])
+    assert jnp.all(jnp.isfinite(var))
+    assert bool((var > 0).all())
+    # An affine warp is exact under the pushforward: variance is unchanged.
+    z_mean, z_var = cond.predict_latents(X[:3])
+    _, w_var = lfr_predictive_moments(z_mean, z_var, cond.mu_W, cond.Sigma_W)
+    assert jnp.allclose(var, w_var, rtol=1e-6)
