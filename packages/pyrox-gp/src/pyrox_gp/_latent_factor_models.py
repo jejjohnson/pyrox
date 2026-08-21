@@ -33,25 +33,13 @@ guide = AutoDelta(lfr_model, init_loc_fn=partial(init_latents_by_sampling))
 # hyperparameters live on a log scale. Give the latents a 10x larger step.
 from pyrox.inference import param_group_optimizer
 
-# Three groups. The kernel amplitudes are frozen: the decoder's N(0, I)
-# prior already fixes the scale, so a free per-latent `variance` is
-# degenerate with it (Z -> cZ, W -> W/c). See the class docstring.
-def group_of(path, _):
-    name = str(path)
-    if "Z_T" in name:
-        return "latents"
-    if "variance" in name:
-        return "frozen"
-    return "globals"
-
-
+# Label by parameter *path* only — see `param_group_optimizer` on why the
+# labelling must not depend on leaf values. To hold the latent amplitudes
+# fixed (a modelling choice, not a requirement — see the class docstring),
+# add a third group mapping "variance" to `optax.set_to_zero()`.
 optimizer = param_group_optimizer(
-    {
-        "latents": optax.adam(1e-2),
-        "globals": optax.adam(1e-3),
-        "frozen": optax.set_to_zero(),
-    },
-    group_of,
+    {"latents": optax.adam(1e-2), "globals": optax.adam(1e-3)},
+    lambda path, _: "latents" if "Z_T" in str(path) else "globals",
 )
 svi = SVI(lfr_model, guide, optimizer, loss=Trace_ELBO())
 result = svi.run(jax.random.PRNGKey(0), 5000, X, Y, prior)
@@ -130,10 +118,14 @@ class LatentFactorGPPrior(eqx.Module):
       $Z \\to ZA$, $W \\to A^\\top W$ leaves the objective unchanged.
       Individual latent factors carry no physical meaning without an extra
       rotation criterion.
-    - **Scale is fixed by the decoder prior.** Do not add a free kernel
-      amplitude per latent on top — $Z \\to cZ$, $W \\to W/c$ would be
-      degenerate. Keep kernel ``variance`` fixed at ``1.0`` for latent
-      kernels, or document the degeneracy in your model.
+    - **The kernel amplitude is identifiable** (unlike the rotation above).
+      $Z \\to cZ$, $W \\to W/c$ is degenerate only when $W$ is a free
+      parameter; here $W$ carries a fixed $\\mathcal{N}(0, I)$ prior and is
+      marginalized, so scaling $Z$ changes the collapsed covariance
+      $ZZ^\\top + \\sigma^2 I$ and the amplitude has a finite,
+      data-dependent optimum. Fixing ``variance = 1.0`` per latent is a
+      legitimate modelling choice (it makes the factors comparable), not a
+      requirement for a valid fit.
     - **`predict_latents` variance understates uncertainty.** It treats the
       MAP ``Z`` as noiseless observations of the latent processes, so it
       captures input-space extrapolation but not uncertainty in the point
