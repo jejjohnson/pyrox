@@ -32,19 +32,65 @@ from jaxtyping import Array, Float
 def _pairwise_sq_dist(
     X1: Float[Array, "N1 D"],
     X2: Float[Array, "N2 D"],
+    lengthscale: Float[Array, ""] | Float[Array, " D"] | float = 1.0,
 ) -> Float[Array, "N1 N2"]:
-    """Squared Euclidean distance matrix ``||X1[i] - X2[j]||^2``.
+    """Squared Euclidean distance matrix, optionally lengthscale-scaled.
 
-    Expanded as $\\|x\\|^2 + \\|x'\\|^2 - 2\\,x^\\top x'$ so all
-    intermediates stay at ``(N1,)``, ``(N2,)``, or ``(N1, N2)`` — no
-    ``(N1, N2, D)`` broadcast tensor. Clipped at zero to absorb the
-    small negative values that arise from float cancellation on
-    near-identical points.
+    Two paths, chosen by the (statically known) rank of ``lengthscale``:
+
+    * **Isotropic.** Expand on the raw coordinates and scale the resulting
+      squared distance — bit-identical to the pre-ARD implementation, and
+      robust to a small lengthscale because the division happens after the
+      cancellation, so a self-distance of exactly zero stays zero.
+    * **ARD.** Scale the inputs before the expansion. This is what supports
+      a per-dimension lengthscale while keeping every intermediate at
+      ``(N1,)``, ``(N2,)``, or ``(N1, N2)``; no ``(N1, N2, D)`` broadcast
+      tensor is ever built.
+
+    Both clip at zero to absorb the small negative values that arise from
+    float cancellation on near-identical points.
+
+    Note:
+        The ARD path expands on scaled coordinates, so — like any
+        norm-expansion distance — it loses separations that are small
+        relative to the scaled magnitudes, and overflows once
+        ``spread / lengthscale`` exceeds the dtype's range. Centring on a
+        data-dependent offset was considered and rejected: it makes the
+        result depend on which argument is ``X1`` (breaking
+        ``K(X1, X2) == K(X2, X1).T``) and can erase locally representable
+        differences when one input set has a large spread. The isotropic
+        path divides after the expansion and is unaffected by all of this.
+
+    Args:
+        X1: ``(N1, D)`` inputs.
+        X2: ``(N2, D)`` inputs.
+        lengthscale: Scalar (isotropic) or ``(D,)`` (ARD) lengthscale.
+
+    Returns:
+        ``(N1, N2)`` scaled squared distances.
     """
+    if jnp.ndim(lengthscale) == 0:
+        n1 = einx.dot("n1 d, n1 d -> n1", X1, X1)
+        n2 = einx.dot("n2 d, n2 d -> n2", X2, X2)
+        cross = einx.dot("n1 d, n2 d -> n1 n2", X1, X2)
+        # ‖xᵢ‖² + ‖x′ⱼ‖² broadcast to (N1, N2) via a named outer sum.
+        norm_sum = einx.add("n1, n2 -> n1 n2", n1, n2)
+        sq = jnp.clip(norm_sum - 2.0 * cross, min=0.0)
+        return sq / lengthscale**2
+
+    d = jnp.size(lengthscale)
+    if X1.shape[-1] != d or X2.shape[-1] != d:
+        raise ValueError(
+            f"ARD lengthscale of size {d} requires both inputs to have that "
+            f"many features; got X1 with {X1.shape[-1]} and X2 with "
+            f"{X2.shape[-1]}. A singleton feature axis would broadcast "
+            "silently and repeat one coordinate across every dimension."
+        )
+    X1 = X1 / lengthscale
+    X2 = X2 / lengthscale
     n1 = einx.dot("n1 d, n1 d -> n1", X1, X1)
     n2 = einx.dot("n2 d, n2 d -> n2", X2, X2)
     cross = einx.dot("n1 d, n2 d -> n1 n2", X1, X2)
-    # ‖xᵢ‖² + ‖x′ⱼ‖² broadcast to (N1, N2) via a named outer sum.
     norm_sum = einx.add("n1, n2 -> n1 n2", n1, n2)
     return jnp.clip(norm_sum - 2.0 * cross, min=0.0)
 
@@ -53,7 +99,7 @@ def rbf_kernel(
     X1: Float[Array, "N1 D"],
     X2: Float[Array, "N2 D"],
     variance: Float[Array, ""],
-    lengthscale: Float[Array, ""],
+    lengthscale: Float[Array, ""] | Float[Array, " D"],
 ) -> Float[Array, "N1 N2"]:
     r"""Radial basis function (squared exponential) kernel.
 
@@ -61,24 +107,27 @@ def rbf_kernel(
     k(x, x') = \sigma^2 \exp\!\left(-\frac{\|x - x'\|^2}{2\ell^2}\right)
     $$
 
+    With a ``(D,)`` lengthscale each input dimension is scaled by its own
+    $\ell_d$ (automatic relevance determination, ARD).
+
     Args:
         X1: ``(N1, D)`` inputs.
         X2: ``(N2, D)`` inputs.
         variance: Scalar signal variance ``sigma^2``.
-        lengthscale: Scalar lengthscale ``ell``.
+        lengthscale: Scalar (isotropic) or ``(D,)`` (ARD) lengthscale ``ell``.
 
     Returns:
         ``(N1, N2)`` kernel Gram matrix.
     """
-    sq = _pairwise_sq_dist(X1, X2)
-    return variance * jnp.exp(-0.5 * sq / (lengthscale * lengthscale))
+    sq = _pairwise_sq_dist(X1, X2, lengthscale)
+    return variance * jnp.exp(-0.5 * sq)
 
 
 def matern_kernel(
     X1: Float[Array, "N1 D"],
     X2: Float[Array, "N2 D"],
     variance: Float[Array, ""],
-    lengthscale: Float[Array, ""],
+    lengthscale: Float[Array, ""] | Float[Array, " D"],
     nu: float,
 ) -> Float[Array, "N1 N2"]:
     r"""Matern kernel with closed-form ``nu in {1/2, 3/2, 5/2}``.
@@ -91,21 +140,22 @@ def matern_kernel(
     Only the three common half-integer orders are supported because those
     admit closed-form expressions without Bessel evaluations. ``nu`` is a
     static Python float (not a JAX array) so the branch specializes at
-    trace time.
+    trace time. With a ``(D,)`` lengthscale each input dimension is scaled
+    by its own $\ell_d$ (automatic relevance determination, ARD).
 
     Args:
         X1: ``(N1, D)`` inputs.
         X2: ``(N2, D)`` inputs.
         variance: Scalar signal variance.
-        lengthscale: Scalar lengthscale.
+        lengthscale: Scalar (isotropic) or ``(D,)`` (ARD) lengthscale.
         nu: Smoothness parameter; must be ``0.5``, ``1.5``, or ``2.5``.
 
     Returns:
         ``(N1, N2)`` Gram matrix.
     """
-    sq = _pairwise_sq_dist(X1, X2)
+    sq = _pairwise_sq_dist(X1, X2, lengthscale)
     # Jitter inside sqrt avoids NaN gradients at r = 0 (sqrt' is undefined).
-    r = jnp.sqrt(jnp.clip(sq, min=1e-30)) / lengthscale
+    r = jnp.sqrt(jnp.clip(sq, min=1e-30))
     if nu == 0.5:
         shape = jnp.exp(-r)
     elif nu == 1.5:
@@ -182,7 +232,7 @@ def rational_quadratic_kernel(
     X1: Float[Array, "N1 D"],
     X2: Float[Array, "N2 D"],
     variance: Float[Array, ""],
-    lengthscale: Float[Array, ""],
+    lengthscale: Float[Array, ""] | Float[Array, " D"],
     alpha: Float[Array, ""],
 ) -> Float[Array, "N1 N2"]:
     r"""Rational quadratic kernel.
@@ -194,20 +244,22 @@ def rational_quadratic_kernel(
     $$
 
     Scale mixture of RBF kernels: the limit ``alpha -> infty`` recovers the
-    RBF, small ``alpha`` yields heavier-tailed correlations.
+    RBF, small ``alpha`` yields heavier-tailed correlations. With a ``(D,)``
+    lengthscale each input dimension is scaled by its own $\ell_d$
+    (automatic relevance determination, ARD).
 
     Args:
         X1: ``(N1, D)`` inputs.
         X2: ``(N2, D)`` inputs.
         variance: Scalar signal variance.
-        lengthscale: Scalar lengthscale.
+        lengthscale: Scalar (isotropic) or ``(D,)`` (ARD) lengthscale.
         alpha: Scalar shape parameter; must be positive.
 
     Returns:
         ``(N1, N2)`` Gram matrix.
     """
-    sq = _pairwise_sq_dist(X1, X2)
-    return variance * (1.0 + sq / (2.0 * alpha * lengthscale * lengthscale)) ** (-alpha)
+    sq = _pairwise_sq_dist(X1, X2, lengthscale)
+    return variance * (1.0 + sq / (2.0 * alpha)) ** (-alpha)
 
 
 def polynomial_kernel(

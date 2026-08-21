@@ -223,3 +223,176 @@ def test_distinct_pyrox_names_prevent_collision():
         model()
     assert "RBF_A.variance" in tr
     assert "RBF_B.variance" in tr
+
+
+# --- ARD opt-in via input_dim ---------------------------------------------
+
+
+X3 = jnp.array(
+    [
+        [0.0, 1.0, 2.0],
+        [0.5, 0.0, 1.0],
+        [1.0, 2.0, 0.0],
+        [1.5, 0.5, 0.5],
+    ]
+)
+
+
+@pytest.mark.parametrize(
+    "cls", [RBF, Matern, RationalQuadratic], ids=lambda c: c.__name__
+)
+def test_input_dim_registers_per_dimension_lengthscale(cls):
+    assert cls(input_dim=3).get_param("lengthscale").shape == (3,)
+    assert cls().get_param("lengthscale").shape == ()
+
+
+def test_rbf_ard_matches_primitive():
+    k = RBF(input_dim=3, init_variance=1.3, init_lengthscale=0.7)
+    with handlers.seed(rng_seed=0):
+        K = k(X3, X3)
+    expected = _k.rbf_kernel(X3, X3, jnp.array(1.3), jnp.full((3,), 0.7))
+    assert jnp.allclose(K, expected)
+
+
+@pytest.mark.parametrize("nu", [0.5, 1.5, 2.5])
+def test_matern_ard_matches_primitive(nu):
+    k = Matern(input_dim=3, init_variance=0.9, init_lengthscale=0.4, nu=nu)
+    with handlers.seed(rng_seed=0):
+        K = k(X3, X3)
+    expected = _k.matern_kernel(X3, X3, jnp.array(0.9), jnp.full((3,), 0.4), nu)
+    assert jnp.allclose(K, expected)
+
+
+def test_rational_quadratic_ard_matches_primitive():
+    k = RationalQuadratic(input_dim=3, init_lengthscale=0.5, init_alpha=2.0)
+    with handlers.seed(rng_seed=0):
+        K = k(X3, X3)
+    expected = _k.rational_quadratic_kernel(
+        X3, X3, jnp.array(1.0), jnp.full((3,), 0.5), jnp.array(2.0)
+    )
+    assert jnp.allclose(K, expected)
+
+
+def test_ard_lengthscale_prior_produces_event_shaped_site():
+    """`set_prior` on an ARD kernel: the ``(D,)`` lengthscale needs
+    ``.to_event(1)`` semantics from the caller and must produce a
+    correctly-shaped sample site."""
+    k = RBF(input_dim=3)
+    k.set_prior("lengthscale", dist.LogNormal(0.0, 1.0).expand([3]).to_event(1))
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        K = k(X3, X3)
+    site = tr["RBF.lengthscale"]
+    assert site["type"] == "sample"
+    assert site["value"].shape == (3,)
+    assert site["fn"].event_shape == (3,)
+    assert K.shape == (4, 4)
+    assert jnp.all(jnp.isfinite(K))
+
+
+def test_ard_kernel_works_with_rff_paths():
+    """ARD lengthscales must flow through the RFF/pathwise API: the
+    lengthscale applies along the input axis, not to the projection."""
+    import jax.random as _jr
+    from pyrox_gp._basis import draw_rff_cosine_basis, evaluate_rff_cosine_paths
+
+    kernel = RBF(pyrox_name="RBF_ard_rff", input_dim=3, init_lengthscale=0.7)
+    with kernel._get_context():
+        variance, lengthscale, omega, phase, weights = draw_rff_cosine_basis(
+            kernel,
+            _jr.PRNGKey(0),
+            n_paths=2,
+            n_features=16,
+            in_features=3,
+            dtype=jnp.float64,
+        )
+    assert lengthscale.shape == (3,)
+    X = _jr.normal(_jr.PRNGKey(1), (5, 3))
+    paths = evaluate_rff_cosine_paths(
+        X,
+        variance=variance,
+        lengthscale=lengthscale,
+        omega=omega,
+        phase=phase,
+        weights=weights,
+    )
+    assert paths.shape[-1] == 5
+    assert jnp.all(jnp.isfinite(paths))
+
+
+def test_spectral_density_accepts_singleton_ard_lengthscale():
+    """``input_dim=1`` registers a ``(1,)`` lengthscale, which is a scalar
+    in disguise — the 1-D closed forms stay valid, so it must not be
+    rejected (FourierInducingFeatures relies on this)."""
+    from pyrox_gp._basis import spectral_density
+
+    ard = RBF(pyrox_name="RBF_ard_1d", input_dim=1, init_lengthscale=0.7)
+    iso = RBF(pyrox_name="RBF_iso_1d", init_lengthscale=0.7)
+    eigvals = jnp.asarray([0.1, 0.5, 1.0])
+    with ard._get_context():
+        got = spectral_density(ard, eigvals, D=1)
+    with iso._get_context():
+        expected = spectral_density(iso, eigvals, D=1)
+    assert jnp.allclose(got, expected, atol=1e-12)
+
+
+def test_spectral_density_rejects_ard_kernels():
+    """The registered closed forms are isotropic; an ARD lengthscale must
+    raise rather than silently pair dimensions with unrelated frequencies."""
+    from pyrox_gp._basis import spectral_density
+
+    kernel = RBF(pyrox_name="RBF_ard_sd", input_dim=3)
+    with kernel._get_context(), pytest.raises(NotImplementedError, match="isotropic"):
+        spectral_density(kernel, jnp.asarray([0.1, 0.5, 1.0]), D=3)
+
+
+def test_spectral_density_singleton_ard_still_rejected_for_multidim_domain():
+    """A ``(1,)`` lengthscale is only a scalar in disguise on a 1-D domain.
+    With ``D > 1`` the kernel would reject the inputs, so the density must
+    not silently describe a domain it cannot evaluate."""
+    from pyrox_gp._basis import spectral_density
+
+    kernel = RBF(pyrox_name="RBF_ard_1d_2ddomain", input_dim=1)
+    with kernel._get_context(), pytest.raises(NotImplementedError, match="isotropic"):
+        spectral_density(kernel, jnp.asarray([0.1, 0.5]), D=2)
+
+
+def test_rff_rejects_mismatched_feature_dimensions():
+    """The RFF evaluator must reject a singleton feature axis for the same
+    reason the distance primitive does — it would broadcast one coordinate
+    across every dimension and return plausible-looking paths."""
+    import jax.random as _jr
+    from pyrox_gp._basis import draw_rff_cosine_basis, evaluate_rff_cosine_paths
+
+    kernel = RBF(pyrox_name="RBF_ard_rff_bad", input_dim=3)
+    with kernel._get_context():
+        variance, lengthscale, omega, phase, weights = draw_rff_cosine_basis(
+            kernel,
+            _jr.PRNGKey(0),
+            n_paths=2,
+            n_features=16,
+            in_features=3,
+            dtype=jnp.float64,
+        )
+    with pytest.raises(ValueError, match="many features"):
+        evaluate_rff_cosine_paths(
+            _jr.normal(_jr.PRNGKey(1), (5, 1)),
+            variance=variance,
+            lengthscale=lengthscale,
+            omega=omega,
+            phase=phase,
+            weights=weights,
+        )
+
+
+def test_funk_hecke_rejects_ard_kernels():
+    """Funk-Hecke samples the kernel along one meridian, which is valid
+    only for a zonal kernel; an ARD kernel is orientation dependent."""
+    from pyrox_gp import funk_hecke_coefficients
+
+    kernel = RBF(pyrox_name="RBF_ard_zonal", input_dim=3)
+    with kernel._get_context(), pytest.raises(NotImplementedError, match="zonal"):
+        funk_hecke_coefficients(kernel, l_max=3)
+
+    iso = RBF(pyrox_name="RBF_iso_zonal")
+    with iso._get_context():
+        assert funk_hecke_coefficients(iso, l_max=3).shape == (4,)

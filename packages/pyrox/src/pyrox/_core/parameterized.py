@@ -231,6 +231,17 @@ class Parameterized(PyroxModule):
         of ``init_value`` so guide and prior agree at step zero.
         """
         init = jnp.asarray(entry.init_value)
+        # A vector parameter usually carries a joint prior (e.g.
+        # ``LogNormal(...).expand([D]).to_event(1)``). The guide site has to
+        # declare the same event rank or Trace_ELBO rejects the model/guide
+        # pair, so read it off the prior rather than assuming element-wise.
+        # Callable (dependent) priors must be resolved first, exactly as
+        # `_guide_delta` and `pyrox_sample` do — reading `event_dim` off the
+        # callable itself would silently report rank 0.
+        prior = entry.prior
+        if callable(prior) and not isinstance(prior, dist.Distribution):
+            prior = prior(self)
+        prior_event_dim = prior.event_dim if isinstance(prior, dist.Distribution) else 0
         if _is_real_support(entry.constraint):
             loc = self.pyrox_param(f"{name}_loc", init)
             scale = self.pyrox_param(
@@ -238,7 +249,9 @@ class Parameterized(PyroxModule):
                 jnp.ones_like(init) * 0.1,
                 constraint=dist.constraints.positive,
             )
-            return self.pyrox_sample(name, dist.Normal(loc, scale))
+            return self.pyrox_sample(
+                name, dist.Normal(loc, scale).to_event(prior_event_dim)
+            )
         transform = _biject_to(entry.constraint)
         # loc AND scale live in unconstrained space. For shape-changing
         # transforms (e.g. StickBreaking for a simplex: K -> K-1) the
@@ -254,5 +267,14 @@ class Parameterized(PyroxModule):
         # Promote the base to the transform's domain event rank so the
         # TransformedDistribution's event structure matches the constrained
         # support (a no-op for element-wise transforms like Exp/Sigmoid).
-        base = dist.Normal(loc, scale).to_event(transform.domain.event_dim)
+        # The base lives in the transform's *domain*, while the prior's
+        # event rank is stated in its codomain, so subtract the rank the
+        # transform itself adds. For an element-wise transform the delta is
+        # zero and this is just the prior's rank; for a shape-changing one
+        # (corr_cholesky: vector domain -> matrix codomain) taking the
+        # prior's rank directly would over-promote a base that has fewer
+        # dimensions than that, and construction would fail.
+        delta = transform.codomain.event_dim - transform.domain.event_dim
+        event_dim = max(transform.domain.event_dim, prior_event_dim - delta)
+        base = dist.Normal(loc, scale).to_event(event_dim)
         return self.pyrox_sample(name, dist.TransformedDistribution(base, transform))

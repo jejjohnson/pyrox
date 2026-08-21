@@ -497,3 +497,69 @@ def test_distinct_instances_have_distinct_state():
     assert k1._state() is not k2._state()
     k1.set_mode("guide")
     assert k2._state().mode == "model"
+
+
+def test_normal_guide_matches_event_rank_of_a_callable_prior():
+    """A dependent (callable) prior must be resolved before its event rank
+    is read; otherwise the guide site declares rank 0 against a rank-1
+    model site and Trace_ELBO rejects the pair."""
+    import jax.random as jr
+
+    class _ARD(Parameterized):
+        pyrox_name: str = "ard"
+
+        def setup(self) -> None:
+            self.register_param(
+                "ls",
+                jnp.ones(3),
+                constraint=dist.constraints.positive,
+            )
+
+    m = _ARD()
+    m.set_prior("ls", lambda _self: dist.LogNormal(0.0, 1.0).expand([3]).to_event(1))
+    m.autoguide("ls", "normal")
+
+    def _run(mode):
+        m.set_mode(mode)
+        with m._get_context():
+            m.get_param("ls")
+        m.set_mode("model")
+
+    tm = handlers.trace(handlers.seed(lambda: _run("model"), jr.PRNGKey(0))).get_trace()
+    tg = handlers.trace(handlers.seed(lambda: _run("guide"), jr.PRNGKey(0))).get_trace()
+    model_site = next(s for s in tm.values() if s["type"] == "sample")
+    guide_site = next(s for s in tg.values() if s["type"] == "sample")
+    assert guide_site["fn"].event_dim == model_site["fn"].event_dim == 1
+
+
+def test_normal_guide_handles_shape_changing_transforms():
+    """A shape-changing constraint states its prior rank in the transform's
+    codomain, so the base must not be promoted to that rank: for
+    ``corr_cholesky`` the base is a vector (domain rank 1) while
+    ``LKJCholesky`` has rank 2."""
+    import jax.random as jr
+    from numpyro import handlers
+
+    class _Chol(Parameterized):
+        pyrox_name: str = "chol"
+
+        def setup(self) -> None:
+            self.register_param(
+                "L",
+                jnp.eye(3),
+                constraint=dist.constraints.corr_cholesky,
+            )
+
+    m = _Chol()
+    m.set_prior("L", dist.LKJCholesky(3))
+    m.autoguide("L", "normal")
+
+    def _run(mode):
+        m.set_mode(mode)
+        with m._get_context():
+            m.get_param("L")
+        m.set_mode("model")
+
+    tg = handlers.trace(handlers.seed(lambda: _run("guide"), jr.PRNGKey(0))).get_trace()
+    site = next(s for s in tg.values() if s["type"] == "sample")
+    assert site["value"].shape == (3, 3)

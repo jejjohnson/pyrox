@@ -45,11 +45,17 @@ class _ParameterizedKernel(Parameterized, Kernel):
 
 
 class RBF(_ParameterizedKernel):
-    """Radial basis function (squared exponential) kernel."""
+    """Radial basis function (squared exponential) kernel.
+
+    ``input_dim``: set to the input dimension ``D`` to fit a separate
+    lengthscale per input dimension (ARD). Leave as ``None`` for a single
+    isotropic lengthscale.
+    """
 
     pyrox_name: str = "RBF"
     init_variance: float = 1.0
     init_lengthscale: float = 1.0
+    input_dim: int | None = None
 
     def setup(self) -> None:
         self.register_param(
@@ -57,9 +63,14 @@ class RBF(_ParameterizedKernel):
             jnp.asarray(self.init_variance),
             constraint=dist.constraints.positive,
         )
+        lengthscale = (
+            jnp.asarray(self.init_lengthscale)
+            if self.input_dim is None
+            else jnp.full((self.input_dim,), self.init_lengthscale)
+        )
         self.register_param(
             "lengthscale",
-            jnp.asarray(self.init_lengthscale),
+            lengthscale,
             constraint=dist.constraints.positive,
         )
 
@@ -79,12 +90,17 @@ class Matern(_ParameterizedKernel):
 
     ``nu`` is a static class attribute — it selects a code path in the
     underlying math primitive and is not a trainable parameter.
+
+    ``input_dim``: set to the input dimension ``D`` to fit a separate
+    lengthscale per input dimension (ARD). Leave as ``None`` for a single
+    isotropic lengthscale.
     """
 
     pyrox_name: str = "Matern"
     init_variance: float = 1.0
     init_lengthscale: float = 1.0
     nu: float = 2.5
+    input_dim: int | None = None
 
     def setup(self) -> None:
         self.register_param(
@@ -92,9 +108,14 @@ class Matern(_ParameterizedKernel):
             jnp.asarray(self.init_variance),
             constraint=dist.constraints.positive,
         )
+        lengthscale = (
+            jnp.asarray(self.init_lengthscale)
+            if self.input_dim is None
+            else jnp.full((self.input_dim,), self.init_lengthscale)
+        )
         self.register_param(
             "lengthscale",
-            jnp.asarray(self.init_lengthscale),
+            lengthscale,
             constraint=dist.constraints.positive,
         )
 
@@ -194,12 +215,18 @@ class Linear(_ParameterizedKernel):
 
 
 class RationalQuadratic(_ParameterizedKernel):
-    """Rational quadratic kernel."""
+    """Rational quadratic kernel.
+
+    ``input_dim``: set to the input dimension ``D`` to fit a separate
+    lengthscale per input dimension (ARD). Leave as ``None`` for a single
+    isotropic lengthscale.
+    """
 
     pyrox_name: str = "RationalQuadratic"
     init_variance: float = 1.0
     init_lengthscale: float = 1.0
     init_alpha: float = 1.0
+    input_dim: int | None = None
 
     def setup(self) -> None:
         self.register_param(
@@ -207,9 +234,14 @@ class RationalQuadratic(_ParameterizedKernel):
             jnp.asarray(self.init_variance),
             constraint=dist.constraints.positive,
         )
+        lengthscale = (
+            jnp.asarray(self.init_lengthscale)
+            if self.input_dim is None
+            else jnp.full((self.input_dim,), self.init_lengthscale)
+        )
         self.register_param(
             "lengthscale",
-            jnp.asarray(self.init_lengthscale),
+            lengthscale,
             constraint=dist.constraints.positive,
         )
         self.register_param(
