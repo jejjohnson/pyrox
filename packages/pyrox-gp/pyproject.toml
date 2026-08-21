@@ -25,6 +25,9 @@ dependencies = [
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.5",
     "lineax>=0.1.1",
     "einx>=0.4.3",
+    "flowjax>=0.9",     # AbstractBijection protocol (typed warp fields). Shares
+                        # equinox/jax/jaxtyping with pyrox-gp already; matches
+                        # the gauss-flows constraint.
 ]
 
 [project.optional-dependencies]
@@ -40,6 +43,13 @@ colab = [
     "matplotlib>=3.10.9",
     "watermark>=2.6.0",
     "pandas>=3.0.3",
+]
+# `pip install pyrox-gp[flows]` enables the flow-facing helpers
+# (`latent_total_correlation`, warped model surfaces). Pulls
+# scikit-learn / diffrax / matfree transitively, hence an extra rather
+# than a hard dependency. Pinned by commit, matching gaussx / geonnax.
+flows = [
+    "gauss-flows @ git+https://github.com/jejjohnson/gauss_flows.git@ecb058fbfd3e4b8460c79d328170bd66e209d1a5",
 ]
 
 [project.urls]

@@ -486,6 +486,24 @@ wheels = [
 ]
 
 [[package]]
+name = "diffrax"
+version = "0.7.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "equinox" },
+    { name = "jax" },
+    { name = "jaxtyping" },
+    { name = "lineax" },
+    { name = "optimistix" },
+    { name = "typing-extensions" },
+    { name = "wadler-lindig" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5a/ea/a22853377a840d70d1d174d43183f12990c66eecf34ba7e76eec781249d0/diffrax-0.7.2.tar.gz", hash = "sha256:9adc70fe90dba83f7dd839845839b2531a3dd736a3944fe1aa26598507cfb48e", size = 155159, upload-time = "2026-02-18T01:14:04.964Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6c/48/c42f657f3d6b4d9d9674c9bc48e763d024511ea4cc1d6e0c68c7b4380c43/diffrax-0.7.2-py3-none-any.whl", hash = "sha256:1beee2f991cd049962fe3c89da28f933753aa66d80bef857533276c9f23301ed", size = 199673, upload-time = "2026-02-18T01:14:03.38Z" },
+]
+
+[[package]]
 name = "distlib"
 version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -560,6 +578,24 @@ wheels = [
 ]
 
 [[package]]
+name = "flowjax"
+version = "19.1.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "equinox" },
+    { name = "jax" },
+    { name = "jaxtyping" },
+    { name = "lineax" },
+    { name = "optax" },
+    { name = "paramax" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2a/1a/4e92c45f55be918b65d9a1765cf54d101a6e9a2702212bfa7c5048c10729/flowjax-19.1.1.tar.gz", hash = "sha256:a85ee01726c1e0fe03adea605ce721e9122fbb51644dc579736939d457ca1148", size = 477538, upload-time = "2026-06-21T18:36:47.7Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/50/8b/fe24e022d76126c6a54c57527964b2f8e12b830c84a681cfaa18fecfd2d4/flowjax-19.1.1-py3-none-any.whl", hash = "sha256:899784a90f2149e1f97fbd056562bec601407bccaab9018f6c716d28f8638f22", size = 61409, upload-time = "2026-06-21T18:36:46.272Z" },
+]
+
+[[package]]
 name = "fonttools"
 version = "4.62.1"
 source = { registry = "https://pypi.org/simple" }
@@ -607,6 +643,25 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/90/b2/2a3d1374b7780999d3184e171e25439a8358c47b481f68be883c14086b4c/frozendict-2.4.7.tar.gz", hash = "sha256:e478fb2a1391a56c8a6e10cc97c4a9002b410ecd1ac28c18d780661762e271bd", size = 317082, upload-time = "2025-11-11T22:40:14.251Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/38/74/f94141b38a51a553efef7f510fc213894161ae49b88bffd037f8d2a7cb2f/frozendict-2.4.7-py3-none-any.whl", hash = "sha256:972af65924ea25cf5b4d9326d549e69a9a4918d8a76a9d3a7cd174d98b237550", size = 16264, upload-time = "2025-11-11T22:40:12.836Z" },
+]
+
+[[package]]
+name = "gauss-flows"
+version = "0.1.8"
+source = { git = "https://github.com/jejjohnson/gauss_flows.git?rev=ecb058fbfd3e4b8460c79d328170bd66e209d1a5#ecb058fbfd3e4b8460c79d328170bd66e209d1a5" }
+dependencies = [
+    { name = "diffrax" },
+    { name = "einops" },
+    { name = "equinox" },
+    { name = "flowjax" },
+    { name = "jax" },
+    { name = "jaxlib" },
+    { name = "jaxtyping" },
+    { name = "matfree" },
+    { name = "numpyro" },
+    { name = "optimistix" },
+    { name = "paramax" },
+    { name = "scikit-learn" },
 ]
 
 [[package]]
@@ -1598,6 +1653,22 @@ wheels = [
 ]
 
 [[package]]
+name = "optimistix"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "equinox" },
+    { name = "jax" },
+    { name = "jaxtyping" },
+    { name = "lineax" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5c/0b/3bdc0e698cb0d264e5dca0b5bb171342a950a43fa6e046d8c57189298422/optimistix-0.1.0.tar.gz", hash = "sha256:f05c9104748e87e1dc10a0b4a2be94e427f98c3eab0b1d41ea24a593d76be03d", size = 70164, upload-time = "2026-02-16T13:35:43.991Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/63/53/6a81a6ebb1739f19c32002139719d4ee021a349d5bdbe066910feed327a1/optimistix-0.1.0-py3-none-any.whl", hash = "sha256:c8edda7bf7fe48839c93fcd72bce750c950ed9f7033158303150b7ab395add81", size = 101740, upload-time = "2026-02-16T13:35:42.971Z" },
+]
+
+[[package]]
 name = "packaging"
 version = "26.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1674,6 +1745,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/70/6f/3dd4940bbe001c06a65f88e36bad298bc7a0de5036115639926b0c5c0458/pandocfilters-1.5.1.tar.gz", hash = "sha256:002b4a555ee4ebc03f8b66307e287fa492e4a77b4ea14d3f934328297bb4939e", size = 8454, upload-time = "2024-01-18T20:08:13.726Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ef/af/4fbc8cab944db5d21b7e2a5b8e9211a03a79852b1157e2c102fcc61ac440/pandocfilters-1.5.1-py2.py3-none-any.whl", hash = "sha256:93be382804a9cdb0a7267585f157e5d1731bbe5545a85b268d6f5fe6232de2bc", size = 8663, upload-time = "2024-01-18T20:08:11.28Z" },
+]
+
+[[package]]
+name = "paramax"
+version = "0.0.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "equinox" },
+    { name = "jax" },
+    { name = "jaxtyping" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6b/ea/291616b6007b274a677baa984c2886638b4f3a64d4c40943687c3b78ef63/paramax-0.0.5.tar.gz", hash = "sha256:b6710faeb6534f00f44c49f7fff80ebe9364d23636d6e62985ef6cb9b4e60b31", size = 11351, upload-time = "2026-01-23T19:00:46.859Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f6/f9/57a9a2b706e706cdf89c46e2a3875c9a63b4824c7327d980799f11a49aa2/paramax-0.0.5-py3-none-any.whl", hash = "sha256:c1184d6eadb323588deaaef883c78dbbe4a896376517845b87e19c6108dad707", size = 7757, upload-time = "2026-01-23T19:00:45.273Z" },
 ]
 
 [[package]]
@@ -1947,6 +2032,7 @@ version = "0.1.0"
 source = { editable = "packages/pyrox-gp" }
 dependencies = [
     { name = "einx" },
+    { name = "flowjax" },
     { name = "gaussx" },
     { name = "geonnax" },
     { name = "lineax" },
@@ -1959,6 +2045,9 @@ colab = [
     { name = "pandas" },
     { name = "watermark" },
 ]
+flows = [
+    { name = "gauss-flows" },
+]
 optax = [
     { name = "optax" },
 ]
@@ -1966,6 +2055,8 @@ optax = [
 [package.metadata]
 requires-dist = [
     { name = "einx", specifier = ">=0.4.3" },
+    { name = "flowjax", specifier = ">=0.9" },
+    { name = "gauss-flows", marker = "extra == 'flows'", git = "https://github.com/jejjohnson/gauss_flows.git?rev=ecb058fbfd3e4b8460c79d328170bd66e209d1a5" },
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=cd6264c92d32f433515d3efb06a0672a02280339" },
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.5" },
     { name = "lineax", specifier = ">=0.1.1" },
@@ -1975,7 +2066,7 @@ requires-dist = [
     { name = "pyrox", editable = "packages/pyrox" },
     { name = "watermark", marker = "extra == 'colab'", specifier = ">=2.6.0" },
 ]
-provides-extras = ["optax", "colab"]
+provides-extras = ["optax", "colab", "flows"]
 
 [[package]]
 name = "pyrox-monorepo"

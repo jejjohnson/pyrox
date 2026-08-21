@@ -188,6 +188,11 @@ the likelihood factorizes only a `Q x Q` capacitance matrix and costs
 `O(NQP)` in the output dimension. Contrast the coregionalization
 kernels above, which hold the mixing matrix as a concrete array.
 
+::: pyrox_gp.LatentFactorGPPrior
+::: pyrox_gp.ConditionedLatentFactorGP
+::: pyrox_gp.lfr_model
+::: pyrox_gp.lfr_factor
+::: pyrox_gp.latent_total_correlation
 ::: pyrox_gp.collapsed_lfr_log_prob
 ::: pyrox_gp.decoder_posterior
 ::: pyrox_gp.lfr_predictive_moments
