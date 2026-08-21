@@ -109,6 +109,9 @@ from pyrox_gp._latent_factor import (
     collapsed_lfr_log_prob,
     decoder_posterior,
     lfr_predictive_moments,
+    warp_to_base,
+    warped_decoder_posterior,
+    warped_lfr_log_prob,
 )
 from pyrox_gp._latent_factor_models import (
     ConditionedLatentFactorGP,
@@ -270,4 +273,7 @@ __all__ = [
     "sparse_markov_factor",
     "svgp_elbo",
     "svgp_factor",
+    "warp_to_base",
+    "warped_decoder_posterior",
+    "warped_lfr_log_prob",
 ]

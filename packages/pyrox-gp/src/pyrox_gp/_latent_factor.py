@@ -15,7 +15,9 @@ arXiv:2606.06576), MIT licensed.
 from __future__ import annotations
 
 import einx
+import jax
 import jax.numpy as jnp
+from flowjax.bijections import AbstractBijection
 from jax.scipy.linalg import cho_factor, cho_solve
 from jaxtyping import Array, Float
 
@@ -203,3 +205,130 @@ def lfr_predictive_moments(
     cross = z_var @ jnp.diagonal(Sigma_W)[:, None]
     var = decoder + latent + cross
     return mean, var if noise_var is None else var + noise_var
+
+
+def warp_to_base(
+    warp: AbstractBijection,
+    Y: Float[Array, "N P"],
+) -> tuple[Float[Array, "N P"], Float[Array, ""]]:
+    """Map observations into the space where the factor model is linear.
+
+    The warp has event shape ``(P,)`` -- one marginal transform per output
+    channel -- and is applied independently to each of the ``N`` rows.
+
+    !!! warning "The warp must be elementwise"
+        The event shape check below cannot tell a per-channel bijection
+        from a *coupled* one (a triangular affine transform has the same
+        ``(P,)`` event shape and passes). A coupled warp trains and
+        conditions without complaint, but prediction keeps only per-channel
+        marginal moments and evaluates every channel at the same scalar
+        quadrature node, which silently imposes perfect standardized
+        correlation. Pass a genuinely marginal transform such as
+        ``gauss_flows.RQSplineMarginal``; a coupled one would need the full
+        joint covariance and multidimensional integration.
+
+    Args:
+        warp: Elementwise bijection with event shape ``(P,)`` — one marginal
+            transform per output channel. flowjax convention:
+            ``transform`` maps base to data, ``inverse`` maps data to base,
+            so this uses ``inverse``.
+        Y: Observations of shape ``(N, P)``.
+
+    Returns:
+        Tuple of ``(Y_tilde, total_log_det)``.
+    """
+    if warp.cond_shape is not None:
+        raise ValueError(
+            "Conditional warps are not supported here: the log-det Jacobian "
+            "would depend on the inputs, and the per-channel marginal "
+            "interpretation no longer holds."
+        )
+    if warp.shape != (Y.shape[1],):
+        raise ValueError(
+            f"Warp event shape must be (P,) = {(Y.shape[1],)} -- one marginal "
+            f"transform per output channel; got {warp.shape}."
+        )
+    Ytil, log_det = jax.vmap(warp.inverse_and_log_det)(Y)
+    return Ytil, jnp.sum(log_det)
+
+
+def warped_lfr_log_prob(
+    Y: Float[Array, "N P"],
+    Z: Float[Array, "N Q"],
+    noise_var: Float[Array, ""],
+    warp: AbstractBijection,
+    *,
+    jitter: float = 1e-12,
+) -> Float[Array, ""]:
+    r"""Collapsed latent-factor log-likelihood on warped observations.
+
+    Models $G^{-1}(y_j) = Z w_j + \epsilon$, so
+
+    $$
+    \log p(Y) = \log p_{\mathrm{collapsed}}(G^{-1}(Y), Z, \sigma^2)
+              + \sum_{n,j} \log \left| \partial G^{-1} / \partial y \right|
+    $$
+
+    The Jacobian term is free of $Z$, $W$ and $\sigma$, so the analytic
+    decoder marginalization of
+    [`collapsed_lfr_log_prob`][pyrox_gp.collapsed_lfr_log_prob] is
+    unchanged and the cost stays linear in $P$.
+
+    !!! warning "Warp direction is a performance cliff"
+        This evaluates ``G^{-1}`` (``inverse``) on every step, so a warp
+        that is cheap forward and expensive backward costs dearly:
+        ``MixtureGaussianCDF.inverse`` runs a bisection solver and is ~40x
+        its own forward cost, ~459x slower end-to-end than the
+        alternative. Prefer ``gauss_flows.RQSplineMarginal`` — closed-form
+        in both directions and the exact identity at initialization.
+
+        Wrapping a mixture-CDF warp in ``flowjax.bijections.Invert`` is
+        cheap, but it is **a different model, not a faster route to the
+        same one**: this function applies ``warp.inverse``, which is
+        ``M.inverse`` for ``M`` and ``M.transform`` for ``Invert(M)``, so
+        the two map ``Y`` to different base values and define different
+        likelihoods. Choose it because the flipped map is the warp you
+        want, never as a drop-in speedup.
+
+    Args:
+        Y: Observations of shape ``(N, P)``. Must lie inside the warp's
+            support.
+        Z: Latent factor values at the training inputs, shape ``(N, Q)``.
+        noise_var: Scalar isotropic observation noise variance, in the
+            warped space.
+        warp: Bijection with event shape ``(P,)``.
+        jitter: Added to ``noise_var`` before inversion.
+
+    Returns:
+        Scalar log-likelihood.
+    """
+    Ytil, log_det = warp_to_base(warp, Y)
+    return collapsed_lfr_log_prob(Ytil, Z, noise_var, jitter=jitter) + log_det
+
+
+def warped_decoder_posterior(
+    Y: Float[Array, "N P"],
+    Z: Float[Array, "N Q"],
+    noise_var: Float[Array, ""],
+    warp: AbstractBijection,
+    *,
+    jitter: float = 1e-12,
+) -> tuple[Float[Array, "Q P"], Float[Array, "Q Q"]]:
+    """Matrix-normal decoder posterior, read in the warped space.
+
+    Identical to [`decoder_posterior`][pyrox_gp.decoder_posterior] applied
+    to ``G^{-1}(Y)`` -- the warp does not change the conjugacy.
+
+    Args:
+        Y: Observations of shape ``(N, P)``.
+        Z: Latent factor values, shape ``(N, Q)``.
+        noise_var: Scalar isotropic observation noise variance, in the
+            warped space.
+        warp: Bijection with event shape ``(P,)``.
+        jitter: Added to ``noise_var`` before inversion.
+
+    Returns:
+        Tuple of ``(mean, row_cov)`` with shapes ``(Q, P)`` and ``(Q, Q)``.
+    """
+    Ytil, _ = warp_to_base(warp, Y)
+    return decoder_posterior(Ytil, Z, noise_var, jitter=jitter)
