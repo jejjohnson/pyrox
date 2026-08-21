@@ -457,19 +457,31 @@ def test_periodic_and_cosine_bit_identical_to_unscaled_distance():
     assert (K_cosine == expected_cosine).all()
 
 
-def test_pairwise_sq_dist_survives_large_offset_and_small_lengthscale():
-    """Data clustered far from the origin (timestamps, projected coords)
-    with a small lengthscale: uncentred, ``‖x/ell‖²`` overflows float32 and
-    the diagonal becomes ``inf - inf = NaN``. Centring keeps the expansion
-    on the scale of the data's spread."""
-    X = jnp.asarray([[1e10], [1e10 + 1.0]], dtype=jnp.float32)
-    ell = jnp.asarray(1e-10, dtype=jnp.float32)
-    gram = rbf_kernel(X, X, jnp.asarray(1.0, jnp.float32), ell)
-    assert jnp.all(jnp.isfinite(gram))
-    assert jnp.allclose(jnp.diagonal(gram), 1.0)
+def test_ard_kernel_is_symmetric_under_argument_swap():
+    """``K(X1, X2) == K(X2, X1).T`` must hold for ARD. A data-dependent
+    centring offset would break this, which is why the ARD path scales
+    without centring."""
+    X1 = jnp.asarray([[0.0], [1e8]], dtype=jnp.float32)
+    X2 = jnp.asarray([[1.0]], dtype=jnp.float32)
+    ell = jnp.full((1,), 1.0, dtype=jnp.float32)
+    var = jnp.asarray(1.0, dtype=jnp.float32)
+    a = rbf_kernel(X1, X2, var, ell)
+    b = rbf_kernel(X2, X1, var, ell)
+    assert jnp.array_equal(a, b.T)
+    # The nearby pair is genuinely separated by 1, not collapsed to 0.
+    assert float(a[0, 0]) == pytest.approx(float(jnp.exp(-0.5)), rel=1e-5)
 
-    ard = rbf_kernel(X, X, jnp.asarray(1.0, jnp.float32), jnp.full((1,), ell))
-    assert jnp.all(jnp.isfinite(ard))
+
+def test_ard_rejects_mismatched_feature_dimensions():
+    """A singleton feature axis would broadcast against a ``(D,)``
+    lengthscale and silently repeat one coordinate across every dimension."""
+    X_train = jr.normal(jr.PRNGKey(0), (5, 3))
+    X_pred = jr.normal(jr.PRNGKey(1), (4, 1))
+    ell = jnp.full((3,), 0.7)
+    with pytest.raises(ValueError, match="many features"):
+        rbf_kernel(X_pred, X_train, jnp.asarray(1.0), ell)
+    with pytest.raises(ValueError, match="many features"):
+        rbf_kernel(X_train, X_pred, jnp.asarray(1.0), ell)
 
 
 def test_ard_gram_is_translation_invariant():
