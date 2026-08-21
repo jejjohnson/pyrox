@@ -132,14 +132,21 @@ def warped_predictive_moments(
         lik: The warped likelihood.
         f_loc: Posterior means of the base GP, shape ``(N,)``.
         f_var: Posterior marginal variances of the base GP, shape ``(N,)``.
-        order: Gauss-Hermite nodes. Values above ~256 are numerically
-            unreliable (``hermegauss`` overflows to ``NaN`` by order 512).
+        order: Gauss-Hermite nodes; at least 2, since one node carries no
+            spread. Values above ~256 are numerically unreliable
+            (``hermegauss`` overflows to ``NaN`` by order 512).
 
     Returns:
         Tuple of ``(mean, variance)`` in observation space, both ``(N,)``.
     """
-    if not 1 <= order <= 256:
-        raise ValueError(f"order must be in [1, 256]; got {order}.")
+    if not 2 <= order <= 256:
+        # order == 1 places a single node at the mean, so the centered
+        # second moment is identically zero and every bit of latent
+        # uncertainty would be silently discarded.
+        raise ValueError(
+            f"order must be in [2, 256]; got {order}. A single quadrature "
+            "node cannot represent any spread."
+        )
     x, w = np.polynomial.hermite_e.hermegauss(order)
     x = jnp.asarray(x)
     w = jnp.asarray(w) / np.sqrt(2.0 * np.pi)

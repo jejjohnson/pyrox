@@ -286,6 +286,10 @@ def test_order_out_of_range_raises():
         warped_predictive_moments(lik, f, jnp.ones(2), order=512)
     with pytest.raises(ValueError, match="order"):
         warped_predictive_moments(lik, f, jnp.ones(2), order=0)
+    # A single node sits at the mean, so the centered second moment would
+    # be identically zero and discard all latent uncertainty.
+    with pytest.raises(ValueError, match="single quadrature node"):
+        warped_predictive_moments(lik, f, jnp.ones(2), order=1)
 
 
 # --- jit ----------------------------------------------------------------
