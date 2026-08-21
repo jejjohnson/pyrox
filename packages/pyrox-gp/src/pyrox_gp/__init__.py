@@ -176,6 +176,10 @@ from pyrox_gp._sparse_markov import (
     sparse_markov_elbo,
     sparse_markov_factor,
 )
+from pyrox_gp._warped import (
+    WarpedGaussianLikelihood,
+    warped_predictive_moments,
+)
 
 
 __version__ = "0.1.0"  # x-release-please-version
@@ -252,6 +256,7 @@ __all__ = [
     "SphericalHarmonicInducingFeatures",
     "StudentTLikelihood",
     "SumSDE",
+    "WarpedGaussianLikelihood",
     "White",
     "WhitenedGuide",
     "__version__",
@@ -276,4 +281,5 @@ __all__ = [
     "warp_to_base",
     "warped_decoder_posterior",
     "warped_lfr_log_prob",
+    "warped_predictive_moments",
 ]
