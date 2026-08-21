@@ -42,9 +42,22 @@ result = svi.run(jax.random.PRNGKey(0), 5000, X, Y, prior)
 
 Z_map = result.params["Z_T_auto_loc"].T
 noise_var = result.params["noise_auto_loc"] ** 2
-cond = prior.condition(Y, Z_map, noise_var)
-mean, var = cond.predict(X_test)                    # (T, P), (T, P)
-mean, var = cond.predict(X_test, include_noise=True)
+
+# Condition and predict *under the fitted parameters*. The kernels resolve
+# their hyperparameters when they are evaluated, so outside a substitution
+# context they fall back to their initial values and the predictions come
+# from different kernels than the fit.
+import numpyro
+
+
+def _predict():
+    cond = prior.condition(Y, Z_map, noise_var)
+    return cond.predict(X_test), cond.predict(X_test, include_noise=True)
+
+
+(mean, var), (mean_obs, var_obs) = numpyro.handlers.substitute(
+    _predict, result.params
+)()                                                  # each (T, P)
 ```
 
 A single global learning rate (plain ``optax.adam``) also works, but is a
@@ -78,7 +91,7 @@ from pyrox_gp._latent_factor import (
     warped_decoder_posterior,
     warped_lfr_log_prob,
 )
-from pyrox_gp._models import GPPrior
+from pyrox_gp._models import ConditionedGP, GPPrior
 from pyrox_gp._multi_output import _validate_kernel_scopes_unique
 from pyrox_gp._protocols import Kernel
 
@@ -208,7 +221,17 @@ class LatentFactorGPPrior(eqx.Module):
         """Recover the decoder posterior for MAP latents ``Z``.
 
         Returns a `pyrox_gp.ConditionedLatentFactorGP` holding the
-        closed-form matrix-normal decoder posterior alongside the latents.
+        closed-form matrix-normal decoder posterior alongside the latents,
+        with each latent GP conditioned once so repeated `predict` calls
+        do not repeat the ``O(Q N^3)`` training solve.
+
+        !!! warning "Call this under the same context you fitted in"
+            The kernels resolve their hyperparameters when this method
+            evaluates them. Outside a NumPyro substitution context they
+            resolve to their *initial* values, so predictions would come
+            from different kernels than the fit. Wrap the call in
+            ``numpyro.handlers.substitute(fn, result.params)`` — see the
+            module docstring for the end-to-end pattern.
         """
         if Y.shape[0] != self.X.shape[0]:
             raise ValueError(
@@ -223,8 +246,22 @@ class LatentFactorGPPrior(eqx.Module):
             mu_W, Sigma_W = decoder_posterior(Y, Z, noise_var)
         else:
             mu_W, Sigma_W = warped_decoder_posterior(Y, Z, noise_var, self.warp)
+        # Condition each latent GP once, here, rather than on every predict
+        # call: the training solve is O(N^3) per factor and does not depend
+        # on the test inputs. Doing it here also captures the kernel
+        # hyperparameters under whatever context the caller conditions in.
+        with _kernel_contexts(self.kernels):
+            latents = tuple(
+                prior.condition(Z[:, q], noise_var=jnp.asarray(self.latent_noise))
+                for q, prior in enumerate(self.latent_priors())
+            )
         return ConditionedLatentFactorGP(
-            prior=self, Z=Z, mu_W=mu_W, Sigma_W=Sigma_W, noise_var=noise_var
+            prior=self,
+            Z=Z,
+            mu_W=mu_W,
+            Sigma_W=Sigma_W,
+            noise_var=noise_var,
+            latents=latents,
         )
 
 
@@ -237,6 +274,9 @@ class ConditionedLatentFactorGP(eqx.Module):
         mu_W: Decoder posterior mean, ``(Q, P)``.
         Sigma_W: Decoder posterior row covariance, ``(Q, Q)``.
         noise_var: Scalar isotropic observation noise variance.
+        latents: One conditioned scalar GP per latent process, built once
+            by `LatentFactorGPPrior.condition` so the ``O(Q N^3)``
+            training solve is not repeated on every prediction.
     """
 
     prior: LatentFactorGPPrior
@@ -244,6 +284,7 @@ class ConditionedLatentFactorGP(eqx.Module):
     mu_W: Float[Array, "Q P"]
     Sigma_W: Float[Array, "Q Q"]
     noise_var: Float[Array, ""]
+    latents: tuple[ConditionedGP, ...]
 
     def predict_latents(
         self, X_new: Float[Array, "T D"]
@@ -257,10 +298,7 @@ class ConditionedLatentFactorGP(eqx.Module):
         """
         means, variances = [], []
         with _kernel_contexts(self.prior.kernels):
-            for q, prior in enumerate(self.prior.latent_priors()):
-                cond = prior.condition(
-                    self.Z[:, q], noise_var=jnp.asarray(self.prior.latent_noise)
-                )
+            for cond in self.latents:
                 m, v = cond.predict(X_new)
                 means.append(m)
                 variances.append(v)
@@ -374,8 +412,10 @@ def lfr_model(
     batch dimension of one batched multivariate normal.
 
     Args:
-        X: Training inputs, ``(N, D)``. Present for signature symmetry —
-            the kernels evaluate ``prior.X``.
+        X: Training inputs, ``(N, D)``. Must match ``prior.X`` — the latent
+            covariance is built from the prior, so ``X`` contributes only
+            shape and dtype and a mismatch is rejected rather than fitted
+            against the wrong locations.
         Y: Centered observations, ``(N, P)``.
         prior: The `pyrox_gp.LatentFactorGPPrior` to fit.
         beta: Inverse temperature forwarded to
@@ -391,6 +431,12 @@ def lfr_model(
     eqx.partition(prior.warp, eqx.is_inexact_array)[1])`` and pass it via
     ``eqx.tree_at`` (or reconstruct the prior) before calling `condition`.
     """
+    if X.shape != prior.X.shape:
+        raise ValueError(
+            f"X must be the prior's training inputs, shape {prior.X.shape}; "
+            f"got {X.shape}. The latent covariance is built from prior.X, so "
+            "a different X would silently pair Y with the wrong locations."
+        )
     n = X.shape[0]
     q = prior.num_latents
     Z_T = jnp.asarray(

@@ -263,3 +263,42 @@ def test_gradients_reach_latents_and_noise(prior):
     )
     assert jnp.all(jnp.isfinite(g_z))
     assert jnp.isfinite(g_n)
+
+
+def test_lfr_model_rejects_x_that_is_not_the_prior_inputs(prior):
+    """``X`` contributes only shape/dtype — the latent covariance comes from
+    ``prior.X`` — so a differently-shaped ``X`` must raise rather than fit
+    against the wrong locations."""
+    _, Y = _data()
+    X_wrong = jr.uniform(jr.PRNGKey(9), (N, D + 1))
+    with pytest.raises(ValueError, match="prior's training inputs"):
+        handlers.seed(lfr_model, jr.PRNGKey(0))(X_wrong, Y, prior)
+
+
+def test_conditioned_latent_gps_are_built_once(prior):
+    """The per-latent training solves are cached on the conditioned object,
+    so repeated prediction does not repeat the O(Q N^3) work."""
+    _, Y = _data()
+    Z = jr.normal(jr.PRNGKey(2), (N, Q))
+    cond = prior.condition(Y, Z, jnp.asarray(0.1))
+    assert len(cond.latents) == Q
+    X_a = jr.uniform(jr.PRNGKey(3), (4, D))
+    m1, v1 = cond.predict(X_a)
+    m2, v2 = cond.predict(X_a)
+    assert jnp.allclose(m1, m2) and jnp.allclose(v1, v2)
+
+
+def test_predictions_use_substituted_kernel_parameters(prior):
+    """Conditioning under a substitution handler must pick up the supplied
+    lengthscales rather than the kernels' initial values."""
+    _, Y = _data()
+    Z = jr.normal(jr.PRNGKey(2), (N, Q))
+    X_new = jr.uniform(jr.PRNGKey(3), (4, D))
+
+    def _predict():
+        return prior.condition(Y, Z, jnp.asarray(0.1)).predict(X_new)
+
+    base_mean, _ = _predict()
+    subs = {f"RBF_q{q}.lengthscale": jnp.asarray(5.0) for q in range(Q)}
+    alt_mean, _ = handlers.substitute(_predict, subs)()
+    assert not jnp.allclose(base_mean, alt_mean)

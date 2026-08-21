@@ -219,3 +219,36 @@ def test_matches_gaussian_pca_oracle(problem) -> None:
     # floor through the jitter argument so the two densities are identical.
     got = collapsed_lfr_log_prob(Y, Z, s2, jitter=pca.eps)
     assert jnp.allclose(oracle, got, atol=1e-8)
+
+
+# --- numerical robustness -----------------------------------------------
+
+
+def test_quadratic_is_stable_at_small_noise_in_float32() -> None:
+    """With ``Y`` in the span of ``Z`` and small noise, the naive Woodbury
+    quadratic differences two ``O(1/s2)`` terms and loses most of its digits.
+    The penalized-residual form used here must stay accurate in float32."""
+    Z32 = jr.normal(jr.key(1), (7, 3), dtype=jnp.float32)
+    W32 = jr.normal(jr.key(2), (3, 11), dtype=jnp.float32)
+    Y32 = Z32 @ W32
+    s2 = jnp.asarray(1e-4, dtype=jnp.float32)
+
+    got = collapsed_lfr_log_prob(Y32, Z32, s2)
+    assert got.dtype == jnp.float32
+
+    ref = collapsed_lfr_log_prob(
+        Y32.astype(jnp.float64), Z32.astype(jnp.float64), s2.astype(jnp.float64)
+    )
+    assert jnp.abs(got - ref) / jnp.abs(ref) < 1e-5
+
+
+def test_non_scalar_noise_var_raises(problem) -> None:
+    """Per-output noise breaks the shared-covariance identity, and with
+    ``P == Q`` it would otherwise broadcast silently into a nonsymmetric
+    capacitance matrix."""
+    Y, Z, _ = problem
+    vector_noise = jnp.full((Z.shape[1],), 0.3)
+    with pytest.raises(ValueError, match="must be a scalar"):
+        collapsed_lfr_log_prob(Y, Z, vector_noise)
+    with pytest.raises(ValueError, match="must be a scalar"):
+        decoder_posterior(Y, Z, vector_noise)
