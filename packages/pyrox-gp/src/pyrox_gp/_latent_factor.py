@@ -216,8 +216,20 @@ def warp_to_base(
     The warp has event shape ``(P,)`` -- one marginal transform per output
     channel -- and is applied independently to each of the ``N`` rows.
 
+    !!! warning "The warp must be elementwise"
+        The event shape check below cannot tell a per-channel bijection
+        from a *coupled* one (a triangular affine transform has the same
+        ``(P,)`` event shape and passes). A coupled warp trains and
+        conditions without complaint, but prediction keeps only per-channel
+        marginal moments and evaluates every channel at the same scalar
+        quadrature node, which silently imposes perfect standardized
+        correlation. Pass a genuinely marginal transform such as
+        ``gauss_flows.RQSplineMarginal``; a coupled one would need the full
+        joint covariance and multidimensional integration.
+
     Args:
-        warp: Bijection with event shape ``(P,)``. flowjax convention:
+        warp: Elementwise bijection with event shape ``(P,)`` — one marginal
+            transform per output channel. flowjax convention:
             ``transform`` maps base to data, ``inverse`` maps data to base,
             so this uses ``inverse``.
         Y: Observations of shape ``(N, P)``.

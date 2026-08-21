@@ -318,12 +318,22 @@ class ConditionedLatentFactorGP(eqx.Module):
         variance decomposes into a decoder term, a latent term, and an
         interaction term; the first and third are output-independent.
 
-        With a warp, the factor-model predictive is Gaussian in the
-        *warped* space; the moments are pushed through $G$ (``transform``)
-        by Gauss-Hermite quadrature to give observation-space moments.
-        The returned mean is $\\mathbb{E}[G(f)]$, **not**
-        $G(\\mathbb{E}[f])$ — the latter is the pushforward median for a
-        monotone warp and is badly biased for a skewed one.
+        With a warp, the warped-space moments are pushed through $G$
+        (``transform``) by Gauss-Hermite quadrature. The returned mean is
+        $\\mathbb{E}[G(f)]$, **not** $G(\\mathbb{E}[f])$ — the latter is the
+        pushforward median for a monotone warp and is badly biased for a
+        skewed one.
+
+        !!! warning "The warped predictive is an approximation"
+            $f = z_*^\\top W$ is a *product* of two independent Gaussians,
+            which is not itself Gaussian;
+            [`lfr_predictive_moments`][pyrox_gp.lfr_predictive_moments]
+            gives its exact first two moments, and the quadrature below
+            builds Gaussian nodes from them. The observation-space moments
+            are therefore moment-matched, not exact, and the error grows
+            with the product of the latent and decoder variances relative
+            to the mean. The unwarped path (``warp=None``) is unaffected —
+            it returns the exact moments directly.
 
         Args:
             X_new: Test inputs, shape ``(T, D)``.
@@ -352,8 +362,13 @@ class ConditionedLatentFactorGP(eqx.Module):
         fs = mean[None] + jnp.sqrt(var)[None] * nodes[:, None, None]
         g = jax.vmap(jax.vmap(warp.transform))(fs)
         m1 = einx.dot("s, s t p -> t p", weights, g)
-        m2 = einx.dot("s, s t p -> t p", weights, g**2)
-        return m1, m2 - m1**2
+        # Accumulate the *centered* second moment. E[G^2] - E[G]^2 cancels
+        # catastrophically when the transformed values carry a large offset
+        # relative to their spread (a mean of 1e4 with variance 1 loses the
+        # variance entirely in float32), and can even come out negative.
+        centered = g - m1[None]
+        var = einx.dot("s, s t p -> t p", weights, centered**2)
+        return m1, var
 
 
 def lfr_factor(
