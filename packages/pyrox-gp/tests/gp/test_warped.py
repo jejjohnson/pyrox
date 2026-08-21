@@ -18,6 +18,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import numpy as np
 import optax
 import pytest
 from flowjax.bijections import RationalQuadraticSpline
@@ -306,22 +307,40 @@ def test_filter_jit_works_and_plain_jit_fails():
 
 
 def test_predictive_variance_survives_a_large_offset():
-    """A warp whose output sits far from zero relative to its spread: the
-    raw ``E[G^2] - E[G]^2`` form cancels away the variance in float32, so
-    the centered accumulation is what keeps it."""
+    """A warp whose output sits far from zero relative to its spread.
+
+    Runs with x64 *disabled* (the module enables it globally, and the
+    quadrature nodes would otherwise promote everything to float64), so
+    this actually exercises the cancellation: at an offset of 1e4 the raw
+    ``E[G^2] - E[G]^2`` form loses the variance entirely in float32, while
+    the centered accumulation keeps it.
+    """
     from flowjax.bijections import Affine
 
-    lik = WarpedGaussianLikelihood(
-        warp=Affine(loc=jnp.asarray(1e4), scale=jnp.asarray(1.0)),
-        noise_var=jnp.asarray(0.1),
-    )
-    f_loc = jnp.asarray([0.3, -0.4])
-    f_var = jnp.asarray([1.0, 4.0])
-    mean, var = warped_predictive_moments(lik, f_loc, f_var, order=32)
-    assert jnp.all(jnp.isfinite(var))
-    # Affine warp with unit scale: variance passes through unchanged.
-    assert jnp.allclose(var, f_var + lik.noise_var, rtol=1e-6)
-    assert jnp.allclose(mean, f_loc + 1e4, rtol=1e-9)
+    with jax.enable_x64(False):
+        lik = WarpedGaussianLikelihood(
+            warp=Affine(loc=jnp.asarray(1e4), scale=jnp.asarray(1.0)),
+            noise_var=jnp.asarray(0.1),
+        )
+        f_loc = jnp.asarray([0.3, -0.4])
+        f_var = jnp.asarray([1.0, 4.0])
+        expected = f_var + lik.noise_var
+
+        mean, var = warped_predictive_moments(lik, f_loc, f_var, order=32)
+        assert var.dtype == jnp.float32
+        assert jnp.all(jnp.isfinite(var))
+        # Affine warp with unit scale: variance passes through unchanged.
+        assert jnp.allclose(var, expected, rtol=1e-3)
+        assert jnp.allclose(mean, f_loc + 1e4, rtol=1e-6)
+
+        # The raw (uncentered) form is what this replaced — it must fail.
+        x, w = np.polynomial.hermite_e.hermegauss(32)
+        x32, w32 = jnp.asarray(x), jnp.asarray(w) / np.sqrt(2.0 * np.pi)
+        fs = f_loc[None, :] + jnp.sqrt(f_var)[None, :] * x32[:, None]
+        g = jax.vmap(jax.vmap(lik.warp.transform))(fs)
+        m1 = jnp.sum(w32[:, None] * g, axis=0)
+        raw = lik.noise_var + jnp.sum(w32[:, None] * g**2, axis=0) - m1**2
+        assert not jnp.allclose(raw, expected, rtol=1e-3)
 
 
 def test_conditional_warp_is_rejected():
