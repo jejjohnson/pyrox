@@ -213,24 +213,43 @@ def test_all_four_blocks_move_under_one_svi_step():
 # --- direction trap -----------------------------------------------------
 
 
-def test_direction_trap_closed_form_direction_is_equivalent(problem):
-    """Evaluating the log-likelihood through the closed-form direction
-    (what wrapping in ``flowjax.bijections.Invert`` buys) must agree with
-    the bisection direction up to the inversion tolerance — the workaround
-    changes the cost, not the model."""
+def test_inverting_a_mixture_cdf_warp_changes_the_model(problem):
+    """Wrapping a warp in ``Invert`` is not a free speedup.
+
+    ``warped_lfr_log_prob`` applies ``warp.inverse``, which is
+    ``M.inverse`` for ``M`` but ``M.transform`` for ``Invert(M)``. The two
+    therefore map ``Y`` to different base values and define different
+    likelihoods — pinned here so the docstring's warning cannot quietly
+    become a recommendation again.
+    """
+    gauss_flows = pytest.importorskip("gauss_flows")
+    from flowjax.bijections import Invert
+
+    Y, Z, s2 = problem
+    warp = gauss_flows.MixtureGaussianCDF(n_components=4, shape=(P,))
+    # Push off the identity so the two directions genuinely differ.
+    warp = jax.tree_util.tree_map(
+        lambda leaf: leaf + 0.4 if eqx.is_inexact_array(leaf) else leaf, warp
+    )
+    direct = warped_lfr_log_prob(Y, Z, s2, warp)
+    inverted = warped_lfr_log_prob(Y, Z, s2, Invert(warp))
+    assert jnp.isfinite(direct) and jnp.isfinite(inverted)
+    assert not jnp.allclose(direct, inverted, rtol=1e-3)
+
+
+def test_bisection_inverse_agrees_with_its_own_closed_form_identity(problem):
+    """The expensive ``inverse`` and the identity
+    ``log|dG^-1/dy|(y) = -log|dG/dx|(G^-1(y))`` describe the same model, so
+    they must agree to the bijection's inversion tolerance."""
     gauss_flows = pytest.importorskip("gauss_flows")
     Y, Z, s2 = problem
     warp = gauss_flows.MixtureGaussianCDF(n_components=4, shape=(P,))
 
     lp_bisection = warped_lfr_log_prob(Y, Z, s2, warp)
-
-    # Closed-form direction: invert once, then use the forward log-det at
-    # the preimage: log|dG^-1/dy|(y) = -log|dG/dx|(G^-1(y)).
     Ytil, _ = warp_to_base(warp, Y)
     _, fwd_log_det = jax.vmap(warp.transform_and_log_det)(Ytil)
-    lp_closed_form = collapsed_lfr_log_prob(Ytil, Z, s2) - jnp.sum(fwd_log_det)
-
-    assert jnp.allclose(lp_bisection, lp_closed_form, atol=1e-5)
+    lp_identity = collapsed_lfr_log_prob(Ytil, Z, s2) - jnp.sum(fwd_log_det)
+    assert jnp.allclose(lp_bisection, lp_identity, atol=1e-5)
 
 
 # --- validation ---------------------------------------------------------
