@@ -28,6 +28,11 @@ def init_latents_by_sampling(site):
     return init_to_sample(site) if site["name"] == "Z_T" else init_to_median(site)
 
 guide = AutoDelta(lfr_model, init_loc_fn=partial(init_latents_by_sampling))
+# NOTE: plain adam trains every registered kernel parameter, including
+# each latent's `variance`. The decoder's N(0, I) prior already fixes the
+# scale, so a free amplitude is degenerate with it (Z -> cZ, W -> W/c) —
+# see the class docstring. Freeze the amplitudes with a per-group
+# optimizer (`pyrox.inference.param_group_optimizer`) for a real fit.
 svi = SVI(lfr_model, guide, optax.adam(3e-3), loss=Trace_ELBO())
 result = svi.run(jax.random.PRNGKey(0), 5000, X, Y, prior)
 
@@ -278,8 +283,18 @@ class ConditionedLatentFactorGP(eqx.Module):
         [`lfr_predictive_moments`][pyrox_gp.lfr_predictive_moments]. The
         variance decomposes into a decoder term, a latent term, and an
         interaction term; the first and third are output-independent.
+
+        The latent variance includes the model's ``latent_noise`` nugget,
+        matching the prior `lfr_model` fits. ``include_noise`` additionally
+        adds the *observation* noise, which is a separate quantity.
         """
         z_mean, z_var = self.predict_latents(X_new)
+        # lfr_model gives each latent factor the covariance K + nugget*I, so
+        # a factor value at a *new* input carries an independent nugget too.
+        # predict_latents returns the smooth GP conditional (there the nugget
+        # acts as the noise the MAP factors are observed with), so add it
+        # back here or the decoder propagates an understated variance.
+        z_var = z_var + self.prior.latent_noise
         return lfr_predictive_moments(
             z_mean,
             z_var,
