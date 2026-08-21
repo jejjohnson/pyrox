@@ -34,50 +34,53 @@ def _pairwise_sq_dist(
     X1: Float[Array, "N1 D"],
     X2: Float[Array, "N2 D"],
     lengthscale: Float[Array, ""] | Float[Array, " D"] | float = 1.0,
-    *,
-    center: bool = True,
 ) -> Float[Array, "N1 N2"]:
     """Squared Euclidean distance matrix, optionally lengthscale-scaled.
 
-    Scaling the inputs *before* the
-    $\\|x\\|^2 + \\|x'\\|^2 - 2\\,x^\\top x'$ expansion supports a
-    per-dimension lengthscale while keeping every intermediate at
-    ``(N1,)``, ``(N2,)``, or ``(N1, N2)`` — no ``(N1, N2, D)`` broadcast
-    tensor is ever built. Clipped at zero to absorb the small negative
-    values that arise from float cancellation on near-identical points.
+    Two paths, chosen by the (statically known) rank of ``lengthscale``:
+
+    * **Isotropic.** Expand on the raw coordinates and scale the resulting
+      squared distance — bit-identical to the pre-ARD implementation, and
+      robust to a small lengthscale because the division happens after the
+      cancellation, so a self-distance of exactly zero stays zero.
+    * **ARD.** Scale (and first centre, on a shared offset — exact, since
+      squared distance is translation invariant) the inputs before the
+      expansion. This is what supports a per-dimension lengthscale while
+      keeping every intermediate at ``(N1,)``, ``(N2,)``, or ``(N1, N2)``;
+      no ``(N1, N2, D)`` broadcast tensor is ever built.
+
+    Both clip at zero to absorb the small negative values that arise from
+    float cancellation on near-identical points.
+
+    Note:
+        The ARD path expands on scaled coordinates, so it cannot represent
+        a spread that overflows once divided by the lengthscale (in float32,
+        roughly ``spread / lengthscale > 1e19``). Centring keeps realistic
+        data far from that limit; the isotropic path is unaffected.
 
     Args:
         X1: ``(N1, D)`` inputs.
         X2: ``(N2, D)`` inputs.
         lengthscale: Scalar (isotropic) or ``(D,)`` (ARD) lengthscale.
-            Broadcasts against the trailing input axis in both cases.
-        center: Subtract a shared offset before scaling. Exact in real
-            arithmetic (squared distance is translation invariant) but it
-            keeps the ``‖x‖²`` terms on the scale of the data's *spread*
-            rather than its absolute magnitude, which matters once inputs
-            sit far from the origin and the lengthscale is small. Callers
-            that do not scale (`periodic_kernel`, `cosine_kernel`) pass
-            ``False`` so their output stays bit-identical to the
-            pre-ARD implementation.
 
     Returns:
         ``(N1, N2)`` scaled squared distances.
     """
-    if center:
-        # Shared offset ⇒ exact, since squared distance is translation
-        # invariant. Without it, inputs far from the origin divided by a
-        # small lengthscale produce ‖x‖² terms that swamp their own
-        # difference — losing precision off the diagonal and, in the limit,
-        # overflowing to inf so the diagonal becomes inf - inf = NaN.
-        offset = jax.lax.stop_gradient(jnp.mean(X1, axis=0))
-        X1 = X1 - offset
-        X2 = X2 - offset
-    X1 = X1 / lengthscale
-    X2 = X2 / lengthscale
+    if jnp.ndim(lengthscale) == 0:
+        n1 = einx.dot("n1 d, n1 d -> n1", X1, X1)
+        n2 = einx.dot("n2 d, n2 d -> n2", X2, X2)
+        cross = einx.dot("n1 d, n2 d -> n1 n2", X1, X2)
+        # ‖xᵢ‖² + ‖x′ⱼ‖² broadcast to (N1, N2) via a named outer sum.
+        norm_sum = einx.add("n1, n2 -> n1 n2", n1, n2)
+        sq = jnp.clip(norm_sum - 2.0 * cross, min=0.0)
+        return sq / lengthscale**2
+
+    offset = jax.lax.stop_gradient(jnp.mean(X1, axis=0))
+    X1 = (X1 - offset) / lengthscale
+    X2 = (X2 - offset) / lengthscale
     n1 = einx.dot("n1 d, n1 d -> n1", X1, X1)
     n2 = einx.dot("n2 d, n2 d -> n2", X2, X2)
     cross = einx.dot("n1 d, n2 d -> n1 n2", X1, X2)
-    # ‖xᵢ‖² + ‖x′ⱼ‖² broadcast to (N1, N2) via a named outer sum.
     norm_sum = einx.add("n1, n2 -> n1 n2", n1, n2)
     return jnp.clip(norm_sum - 2.0 * cross, min=0.0)
 
@@ -184,7 +187,7 @@ def periodic_kernel(
     Returns:
         ``(N1, N2)`` Gram matrix.
     """
-    sq = _pairwise_sq_dist(X1, X2, center=False)
+    sq = _pairwise_sq_dist(X1, X2)
     # Jitter inside sqrt avoids NaN gradients at r = 0 (sqrt' is undefined).
     r = jnp.sqrt(jnp.clip(sq, min=1e-30))
     sinsq = jnp.sin(jnp.pi * r / period) ** 2
@@ -309,7 +312,7 @@ def cosine_kernel(
     Returns:
         ``(N1, N2)`` Gram matrix.
     """
-    sq = _pairwise_sq_dist(X1, X2, center=False)
+    sq = _pairwise_sq_dist(X1, X2)
     # Jitter inside sqrt avoids NaN gradients at r = 0 (sqrt' is undefined).
     r = jnp.sqrt(jnp.clip(sq, min=1e-30))
     return variance * jnp.cos(2.0 * jnp.pi * r / period)

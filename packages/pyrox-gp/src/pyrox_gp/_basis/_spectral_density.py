@@ -99,30 +99,22 @@ def spectral_density(
             spectral density, or for ARD (per-dimension) lengthscales,
             which these isotropic closed forms cannot represent.
     """
-    lengthscale = kernel.get_param("lengthscale")  # ty: ignore[unresolved-attribute]
-    if jnp.ndim(lengthscale) != 0:
-        raise NotImplementedError(
-            "Spectral densities are registered for isotropic kernels only; "
-            f"got a lengthscale of shape {jnp.shape(lengthscale)} (ARD). The "
-            "closed forms below take a scalar lengthscale and would silently "
-            "pair input dimensions with unrelated frequencies. Use a kernel "
-            "built without input_dim for the inducing-feature path."
-        )
-    if isinstance(kernel, RBF):
-        return _rbf_spectral_density(
-            eigvals,
-            kernel.get_param("variance"),
-            kernel.get_param("lengthscale"),
-            D,
-        )
-    if isinstance(kernel, Matern):
-        return _matern_spectral_density(
-            eigvals,
-            kernel.get_param("variance"),
-            kernel.get_param("lengthscale"),
-            kernel.nu,
-            D,
-        )
+    if isinstance(kernel, RBF | Matern):
+        # Resolve once: a second get_param would register a duplicate
+        # NumPyro site for a kernel carrying a prior on its lengthscale.
+        variance = kernel.get_param("variance")
+        lengthscale = kernel.get_param("lengthscale")
+        if jnp.ndim(lengthscale) != 0:
+            raise NotImplementedError(
+                "Spectral densities are registered for isotropic kernels "
+                f"only; got a lengthscale of shape {jnp.shape(lengthscale)} "
+                "(ARD). The closed forms take a scalar lengthscale and would "
+                "silently pair input dimensions with unrelated frequencies. "
+                "Use a kernel built without input_dim for this path."
+            )
+        if isinstance(kernel, RBF):
+            return _rbf_spectral_density(eigvals, variance, lengthscale, D)
+        return _matern_spectral_density(eigvals, variance, lengthscale, kernel.nu, D)
     raise NotImplementedError(
         f"Spectral density for {type(kernel).__name__} is not registered. "
         "Currently only RBF and Matern are supported; open an issue to add more."

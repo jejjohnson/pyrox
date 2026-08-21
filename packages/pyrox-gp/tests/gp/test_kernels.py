@@ -13,7 +13,6 @@ import jax.numpy as jnp
 import jax.random as jr
 import pytest
 from pyrox_gp._src.kernels import (
-    _pairwise_sq_dist,
     constant_kernel,
     cosine_kernel,
     kernel_add,
@@ -377,13 +376,21 @@ def test_ard_lengthscale_matches_difference_tensor_reference(kernel_fn, closed_f
 
 
 @pytest.mark.parametrize("kernel_fn,closed_form", _ard_kernel_cases())
-def test_ard_constant_vector_bitwise_equals_scalar(kernel_fn, closed_form):
+def test_ard_constant_vector_matches_scalar(kernel_fn, closed_form):
+    """A constant ARD vector must agree with the scalar lengthscale.
+
+    Not bitwise: the isotropic path expands on raw coordinates and divides
+    the squared distance afterwards (keeping it bit-identical to the
+    pre-ARD implementation, and exact-zero on self-distances), while the
+    ARD path centres and scales the inputs first. The two round
+    differently in the last few ulps by construction.
+    """
     del closed_form
     X1 = jax.random.normal(jax.random.PRNGKey(0), (5, 3))
     X2 = jax.random.normal(jax.random.PRNGKey(1), (4, 3))
     K_scalar = kernel_fn(X1, X2, jnp.array(0.7))
     K_ard = kernel_fn(X1, X2, jnp.full((3,), 0.7))
-    assert (K_scalar == K_ard).all()
+    assert jnp.allclose(K_scalar, K_ard, rtol=0.0, atol=1e-12)
 
 
 @pytest.mark.parametrize("kernel_fn,closed_form", _ard_kernel_cases())
@@ -461,8 +468,8 @@ def test_pairwise_sq_dist_survives_large_offset_and_small_lengthscale():
     assert jnp.all(jnp.isfinite(gram))
     assert jnp.allclose(jnp.diagonal(gram), 1.0)
 
-    uncentred = _pairwise_sq_dist(X / ell, X / ell, center=False)
-    assert not jnp.all(jnp.isfinite(uncentred))  # documents what was fixed
+    ard = rbf_kernel(X, X, jnp.asarray(1.0, jnp.float32), jnp.full((1,), ell))
+    assert jnp.all(jnp.isfinite(ard))
 
 
 def test_ard_gram_is_translation_invariant():
