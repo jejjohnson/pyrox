@@ -105,13 +105,19 @@ def spectral_density(
         variance = kernel.get_param("variance")
         lengthscale = kernel.get_param("lengthscale")
         if jnp.ndim(lengthscale) != 0:
-            raise NotImplementedError(
-                "Spectral densities are registered for isotropic kernels "
-                f"only; got a lengthscale of shape {jnp.shape(lengthscale)} "
-                "(ARD). The closed forms take a scalar lengthscale and would "
-                "silently pair input dimensions with unrelated frequencies. "
-                "Use a kernel built without input_dim for this path."
-            )
+            if jnp.size(lengthscale) == 1:
+                # A one-element per-axis lengthscale (input_dim=1) is a
+                # scalar in disguise; the 1-D closed forms stay valid.
+                lengthscale = jnp.reshape(lengthscale, ())
+            else:
+                raise NotImplementedError(
+                    "Spectral densities are registered for isotropic kernels "
+                    f"only; got a lengthscale of shape "
+                    f"{jnp.shape(lengthscale)} (ARD). The closed forms take a "
+                    "scalar lengthscale and would silently pair input "
+                    "dimensions with unrelated frequencies. Use a kernel "
+                    "built without input_dim for this path."
+                )
         if isinstance(kernel, RBF):
             return _rbf_spectral_density(eigvals, variance, lengthscale, D)
         return _matern_spectral_density(eigvals, variance, lengthscale, kernel.nu, D)

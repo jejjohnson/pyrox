@@ -319,6 +319,22 @@ def test_ard_kernel_works_with_rff_paths():
     assert jnp.all(jnp.isfinite(paths))
 
 
+def test_spectral_density_accepts_singleton_ard_lengthscale():
+    """``input_dim=1`` registers a ``(1,)`` lengthscale, which is a scalar
+    in disguise — the 1-D closed forms stay valid, so it must not be
+    rejected (FourierInducingFeatures relies on this)."""
+    from pyrox_gp._basis import spectral_density
+
+    ard = RBF(pyrox_name="RBF_ard_1d", input_dim=1, init_lengthscale=0.7)
+    iso = RBF(pyrox_name="RBF_iso_1d", init_lengthscale=0.7)
+    eigvals = jnp.asarray([0.1, 0.5, 1.0])
+    with ard._get_context():
+        got = spectral_density(ard, eigvals, D=1)
+    with iso._get_context():
+        expected = spectral_density(iso, eigvals, D=1)
+    assert jnp.allclose(got, expected, atol=1e-12)
+
+
 def test_spectral_density_rejects_ard_kernels():
     """The registered closed forms are isotropic; an ARD lengthscale must
     raise rather than silently pair dimensions with unrelated frequencies."""
