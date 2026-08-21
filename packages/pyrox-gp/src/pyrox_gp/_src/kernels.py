@@ -25,6 +25,7 @@ at the call site.
 from __future__ import annotations
 
 import einx
+import jax
 import jax.numpy as jnp
 from jaxtyping import Array, Float
 
@@ -33,6 +34,8 @@ def _pairwise_sq_dist(
     X1: Float[Array, "N1 D"],
     X2: Float[Array, "N2 D"],
     lengthscale: Float[Array, ""] | Float[Array, " D"] | float = 1.0,
+    *,
+    center: bool = True,
 ) -> Float[Array, "N1 N2"]:
     """Squared Euclidean distance matrix, optionally lengthscale-scaled.
 
@@ -48,10 +51,27 @@ def _pairwise_sq_dist(
         X2: ``(N2, D)`` inputs.
         lengthscale: Scalar (isotropic) or ``(D,)`` (ARD) lengthscale.
             Broadcasts against the trailing input axis in both cases.
+        center: Subtract a shared offset before scaling. Exact in real
+            arithmetic (squared distance is translation invariant) but it
+            keeps the ``‖x‖²`` terms on the scale of the data's *spread*
+            rather than its absolute magnitude, which matters once inputs
+            sit far from the origin and the lengthscale is small. Callers
+            that do not scale (`periodic_kernel`, `cosine_kernel`) pass
+            ``False`` so their output stays bit-identical to the
+            pre-ARD implementation.
 
     Returns:
         ``(N1, N2)`` scaled squared distances.
     """
+    if center:
+        # Shared offset ⇒ exact, since squared distance is translation
+        # invariant. Without it, inputs far from the origin divided by a
+        # small lengthscale produce ‖x‖² terms that swamp their own
+        # difference — losing precision off the diagonal and, in the limit,
+        # overflowing to inf so the diagonal becomes inf - inf = NaN.
+        offset = jax.lax.stop_gradient(jnp.mean(X1, axis=0))
+        X1 = X1 - offset
+        X2 = X2 - offset
     X1 = X1 / lengthscale
     X2 = X2 / lengthscale
     n1 = einx.dot("n1 d, n1 d -> n1", X1, X1)
@@ -164,7 +184,7 @@ def periodic_kernel(
     Returns:
         ``(N1, N2)`` Gram matrix.
     """
-    sq = _pairwise_sq_dist(X1, X2)
+    sq = _pairwise_sq_dist(X1, X2, center=False)
     # Jitter inside sqrt avoids NaN gradients at r = 0 (sqrt' is undefined).
     r = jnp.sqrt(jnp.clip(sq, min=1e-30))
     sinsq = jnp.sin(jnp.pi * r / period) ** 2
@@ -289,7 +309,7 @@ def cosine_kernel(
     Returns:
         ``(N1, N2)`` Gram matrix.
     """
-    sq = _pairwise_sq_dist(X1, X2)
+    sq = _pairwise_sq_dist(X1, X2, center=False)
     # Jitter inside sqrt avoids NaN gradients at r = 0 (sqrt' is undefined).
     r = jnp.sqrt(jnp.clip(sq, min=1e-30))
     return variance * jnp.cos(2.0 * jnp.pi * r / period)

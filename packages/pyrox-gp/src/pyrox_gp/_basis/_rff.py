@@ -199,7 +199,7 @@ def evaluate_rff_cosine_paths(
     X: Float[Array, "N D"],
     *,
     variance: Float[Array, ""],
-    lengthscale: Float[Array, ""],
+    lengthscale: Float[Array, ""] | Float[Array, " D"],
     omega: Float[Array, "S D F"],
     phase: Float[Array, "S F"],
     weights: Float[Array, "S F"],
@@ -220,7 +220,11 @@ def evaluate_rff_cosine_paths(
     """
     # Project inputs onto each path's frequencies (contract feature dim d),
     # then add the per-path phase broadcast over the input axis n → (S, N, F).
-    projected = einx.dot("n d, s d f -> s n f", X, omega) / lengthscale
+    # Scale along the *input* axis before contracting it. For a scalar
+    # lengthscale this is identical to dividing the projection, but it is
+    # also correct for a ``(D,)`` ARD lengthscale, where dividing the
+    # ``(S, N, F)`` projection would broadcast F against D and fail.
+    projected = einx.dot("n d, s d f -> s n f", X / lengthscale, omega)
     angles = einx.add("s n f, s f -> s n f", projected, phase)
     features = jnp.sqrt(2.0 * variance / omega.shape[-1]) * jnp.cos(angles)
     # Weighted sum over the F random features → (S, N).

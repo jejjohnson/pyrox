@@ -10,8 +10,10 @@ from __future__ import annotations
 import einx
 import jax
 import jax.numpy as jnp
+import jax.random as jr
 import pytest
 from pyrox_gp._src.kernels import (
+    _pairwise_sq_dist,
     constant_kernel,
     cosine_kernel,
     kernel_add,
@@ -446,3 +448,27 @@ def test_periodic_and_cosine_bit_identical_to_unscaled_distance():
     K_cosine = cosine_kernel(X1, X2, var, period)
     assert (K_periodic == expected_periodic).all()
     assert (K_cosine == expected_cosine).all()
+
+
+def test_pairwise_sq_dist_survives_large_offset_and_small_lengthscale():
+    """Data clustered far from the origin (timestamps, projected coords)
+    with a small lengthscale: uncentred, ``‖x/ell‖²`` overflows float32 and
+    the diagonal becomes ``inf - inf = NaN``. Centring keeps the expansion
+    on the scale of the data's spread."""
+    X = jnp.asarray([[1e10], [1e10 + 1.0]], dtype=jnp.float32)
+    ell = jnp.asarray(1e-10, dtype=jnp.float32)
+    gram = rbf_kernel(X, X, jnp.asarray(1.0, jnp.float32), ell)
+    assert jnp.all(jnp.isfinite(gram))
+    assert jnp.allclose(jnp.diagonal(gram), 1.0)
+
+    uncentred = _pairwise_sq_dist(X / ell, X / ell, center=False)
+    assert not jnp.all(jnp.isfinite(uncentred))  # documents what was fixed
+
+
+def test_ard_gram_is_translation_invariant():
+    """The shared centring offset must not change any Gram value."""
+    X = jr.normal(jr.PRNGKey(0), (6, 3))
+    ell = jnp.asarray([0.5, 1.0, 2.0])
+    base = rbf_kernel(X, X, jnp.asarray(1.0), ell)
+    shifted = rbf_kernel(X + 17.0, X + 17.0, jnp.asarray(1.0), ell)
+    assert jnp.allclose(base, shifted, atol=1e-10)

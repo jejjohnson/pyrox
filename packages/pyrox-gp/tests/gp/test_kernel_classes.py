@@ -287,3 +287,43 @@ def test_ard_lengthscale_prior_produces_event_shaped_site():
     assert site["fn"].event_shape == (3,)
     assert K.shape == (4, 4)
     assert jnp.all(jnp.isfinite(K))
+
+
+def test_ard_kernel_works_with_rff_paths():
+    """ARD lengthscales must flow through the RFF/pathwise API: the
+    lengthscale applies along the input axis, not to the projection."""
+    import jax.random as _jr
+    from pyrox_gp._basis import draw_rff_cosine_basis, evaluate_rff_cosine_paths
+
+    kernel = RBF(pyrox_name="RBF_ard_rff", input_dim=3, init_lengthscale=0.7)
+    with kernel._get_context():
+        variance, lengthscale, omega, phase, weights = draw_rff_cosine_basis(
+            kernel,
+            _jr.PRNGKey(0),
+            n_paths=2,
+            n_features=16,
+            in_features=3,
+            dtype=jnp.float64,
+        )
+    assert lengthscale.shape == (3,)
+    X = _jr.normal(_jr.PRNGKey(1), (5, 3))
+    paths = evaluate_rff_cosine_paths(
+        X,
+        variance=variance,
+        lengthscale=lengthscale,
+        omega=omega,
+        phase=phase,
+        weights=weights,
+    )
+    assert paths.shape[-1] == 5
+    assert jnp.all(jnp.isfinite(paths))
+
+
+def test_spectral_density_rejects_ard_kernels():
+    """The registered closed forms are isotropic; an ARD lengthscale must
+    raise rather than silently pair dimensions with unrelated frequencies."""
+    from pyrox_gp._basis import spectral_density
+
+    kernel = RBF(pyrox_name="RBF_ard_sd", input_dim=3)
+    with kernel._get_context(), pytest.raises(NotImplementedError, match="isotropic"):
+        spectral_density(kernel, jnp.asarray([0.1, 0.5, 1.0]), D=3)

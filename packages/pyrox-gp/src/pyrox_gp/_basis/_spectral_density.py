@@ -96,8 +96,18 @@ def spectral_density(
 
     Raises:
         NotImplementedError: For kernels without a registered closed-form
-            spectral density.
+            spectral density, or for ARD (per-dimension) lengthscales,
+            which these isotropic closed forms cannot represent.
     """
+    lengthscale = kernel.get_param("lengthscale")  # ty: ignore[unresolved-attribute]
+    if jnp.ndim(lengthscale) != 0:
+        raise NotImplementedError(
+            "Spectral densities are registered for isotropic kernels only; "
+            f"got a lengthscale of shape {jnp.shape(lengthscale)} (ARD). The "
+            "closed forms below take a scalar lengthscale and would silently "
+            "pair input dimensions with unrelated frequencies. Use a kernel "
+            "built without input_dim for the inducing-feature path."
+        )
     if isinstance(kernel, RBF):
         return _rbf_spectral_density(
             eigvals,
