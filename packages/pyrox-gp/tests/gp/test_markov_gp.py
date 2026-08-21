@@ -8,11 +8,13 @@ posterior variance, all to numerical precision.
 
 from __future__ import annotations
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import jax.scipy.linalg as jsl
 import numpyro
 import pytest
+from gaussx import SDEParams
 from numpyro.infer.util import log_density
 from pyrox_gp import (
     ConditionedMarkovGP,
@@ -374,3 +376,41 @@ def test_conditioned_object_carries_log_marginal() -> None:
 # numpyro shouldn't trace anything weird; sanity-check we can still import it.
 def test_numpyro_import_smoke() -> None:
     assert hasattr(numpyro, "factor")
+
+
+# --- missing stationary covariance --------------------------------------
+
+
+class _NoStationarySDE(eqx.Module):
+    """SDE kernel that reports no stationary covariance.
+
+    `gaussx.SumSDE` does exactly this when a component lacks a ``P_inf``
+    — it defers to matrix-fraction discretisation rather than fabricating
+    one. Every Markov GP surface here seeds the Kalman recursion with
+    $P_\\infty$, so it has to say so instead of failing inside the scan.
+    """
+
+    inner: MaternSDE
+
+    @property
+    def state_dim(self) -> int:
+        return self.inner.state_dim
+
+    def sde_params(self) -> SDEParams:
+        p = self.inner.sde_params()
+        return SDEParams(F=p.F, L=p.L, H=p.H, Q_c=p.Q_c, P_inf=None)
+
+    def discretise_sequence(self, dt):
+        return self.inner.discretise_sequence(dt)
+
+
+def test_missing_stationary_covariance_raises_a_named_error():
+    """A kernel without ``P_inf`` fails up front, naming the kernel."""
+    times = jnp.linspace(0.0, 1.0, 5)
+    y = jnp.zeros_like(times)
+    prior = MarkovGPPrior(
+        sde_kernel=_NoStationarySDE(MaternSDE(variance=1.0, lengthscale=0.5, order=1)),
+        times=times,
+    )
+    with pytest.raises(ValueError, match=r"_NoStationarySDE.*no stationary covariance"):
+        prior.log_marginal(y, jnp.asarray(0.1))

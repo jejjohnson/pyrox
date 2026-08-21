@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "pyrox",
-    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@cd6264c92d32f433515d3efb06a0672a02280339",
+    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@812aef3074889690dc399fffcf305dbf3d0048c2",
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.5",
     "lineax>=0.1.1",
     "einx>=0.4.3",
@@ -45,11 +45,12 @@ colab = [
     "pandas>=3.0.3",
 ]
 # `pip install pyrox-gp[flows]` enables the flow-facing helpers
-# (`latent_total_correlation`, warped model surfaces). Pulls
-# scikit-learn / diffrax / matfree transitively, hence an extra rather
-# than a hard dependency. Pinned by commit, matching gaussx / geonnax.
+# (`latent_total_correlation`, warped model surfaces, and the
+# `NormalizingKalmanPrior` observation warp). Pulls scikit-learn /
+# diffrax / matfree transitively, hence an extra rather than a hard
+# dependency. Pinned by commit, matching gaussx / geonnax.
 flows = [
-    "gauss-flows @ git+https://github.com/jejjohnson/gauss_flows.git@ecb058fbfd3e4b8460c79d328170bd66e209d1a5",
+    "gauss-flows @ git+https://github.com/jejjohnson/gauss_flows.git@bdb23f076ebaaf1ba042aa52ea593487cef3204e",
 ]
 
 [project.urls]
@@ -57,7 +58,7 @@ Repository = "https://github.com/jejjohnson/pyrox"
 
 [tool.uv.sources]
 # gaussx is not yet on PyPI; resolve from GitHub until the first release.
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", rev = "cd6264c92d32f433515d3efb06a0672a02280339" }
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", rev = "812aef3074889690dc399fffcf305dbf3d0048c2" }
 
 [build-system]
 requires = ["hatchling"]

@@ -35,7 +35,12 @@ from pyrox_gp._inference_nongauss import (
     _log_prob_per_point_factory,
     _per_point_grad_hess,
 )
-from pyrox_gp._markov import _build_dt_full, _kalman_filter, _rts_smoother
+from pyrox_gp._markov import (
+    _build_dt_full,
+    _kalman_filter,
+    _require_stationary,
+    _rts_smoother,
+)
 from pyrox_gp._protocols import Likelihood
 
 
@@ -55,6 +60,7 @@ def _prior_marginal_variance(prior: MarkovGPPrior) -> Float[Array, " N"]:
     and EP without hard-coding ``1.0`` on rescaled kernels.
     """
     _F, _L, H, _Qc, P_inf = prior.sde_kernel.sde_params()
+    P_inf = _require_stationary(prior.sde_kernel, P_inf)
     var0 = (H @ P_inf @ H.T)[0, 0]
     return jnp.broadcast_to(var0, prior.times.shape)
 
@@ -74,6 +80,7 @@ def _markov_smoothed_posterior(
     (used as a Laplace-style approximation to the true marginal).
     """
     F, _L, H, _Qc, P_inf = prior.sde_kernel.sde_params()
+    P_inf = _require_stationary(prior.sde_kernel, P_inf)
     times = prior.times
     dt_full = _build_dt_full(times)
     A_seq, Q_seq = prior.sde_kernel.discretise_sequence(dt_full)
@@ -142,6 +149,7 @@ class NonGaussConditionedMarkovGP(eqx.Module):
         masked out of the update step. Cost is $O((N + M)\,d^3)$.
         """
         F, _L, H, _Qc, P_inf = self.prior.sde_kernel.sde_params()
+        P_inf = _require_stationary(self.prior.sde_kernel, P_inf)
         times = self.prior.times
         t_star = jnp.asarray(t_star)
 

@@ -53,6 +53,7 @@ from jaxtyping import Array, Float
 
 from pyrox_gp._inference import _ell_numerical
 from pyrox_gp._likelihoods import GaussianLikelihood
+from pyrox_gp._markov import _require_stationary
 from pyrox_gp._protocols import Guide, Likelihood, SDEKernel
 
 
@@ -129,6 +130,7 @@ class SparseMarkovGPPrior(eqx.Module):
     def _stationary_variance(self) -> Float[Array, ""]:
         r"""Stationary marginal variance ``H P_inf H^T`` (= kernel variance)."""
         _F, _L, H, _Qc, P_inf = self.sde_kernel.sde_params()
+        P_inf = _require_stationary(self.sde_kernel, P_inf)
         return (H @ P_inf @ H.T)[0, 0]
 
     def inducing_operator(self) -> lx.AbstractLinearOperator:

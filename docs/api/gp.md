@@ -349,6 +349,45 @@ for inducing-grid scalability, the [sparse Markov GP](#sparse-markov-gp).
 ::: pyrox_gp.markov_gp_factor
 ::: pyrox_gp.markov_gp_sample
 
+## Normalizing Kalman Filter
+
+`NormalizingKalmanPrior` wraps a `gaussx.LGSSM` (or `gaussx.MaskedLGSSM`)
+base and an optional per-timestep observation warp into the same
+model surface: exact collapsed marginal via `log_marginal`, NumPyro
+registration via `normalizing_kalman_factor`, and observation-space
+predictive moments via `predict` (RTS smoothing followed by a
+Gauss-Hermite pushforward through the warp — the mean is `E[G(z)]`,
+not `G(E[z])`).
+
+The unwarped model (`warp=None`) works with the base install — `LGSSM`
+is a hard dependency. **Passing a `warp` requires the `flows` extra**:
+`pip install 'pyrox-gp[flows]'`. Because the warp acts on observations,
+the log-det term is independent of the latent state, the Kalman
+recursion stays exact, and none of the non-Gaussian Markov strategies
+below are involved.
+
+```python
+import jax.numpy as jnp
+import numpyro
+from numpyro import distributions as dist
+from gaussx import LGSSM
+from pyrox_gp import NormalizingKalmanPrior, normalizing_kalman_factor
+
+def nkf_model(y, warp=None, mask=None):
+    T, M = y.shape
+    log_q = numpyro.sample("log_q", dist.Normal(0.0, 1.0).expand([M]).to_event(1))
+    log_r = numpyro.sample("log_r", dist.Normal(0.0, 1.0).expand([M]).to_event(1))
+    base = LGSSM(0.9 * jnp.eye(M), jnp.eye(M),
+                 jnp.diag(jnp.exp(jnp.asarray(log_q))),
+                 jnp.diag(jnp.exp(jnp.asarray(log_r))),
+                 jnp.zeros(M), jnp.eye(M), n_steps=T)
+    prior = NormalizingKalmanPrior(base, warp=warp)
+    normalizing_kalman_factor("nkf", prior, y, mask)
+```
+
+::: pyrox_gp.NormalizingKalmanPrior
+::: pyrox_gp.normalizing_kalman_factor
+
 ## Non-Gaussian inference (Markov)
 
 The Markov-aware counterparts of the site-based strategies above: same

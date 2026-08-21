@@ -137,6 +137,30 @@ def _rts_smoother(
     return gaussx.rts_smoother(filter_state, A_seq, Q_dummy)
 
 
+def _require_stationary(
+    sde_kernel: SDEKernel,
+    P_inf: Float[Array, "d d"] | None,
+) -> Float[Array, "d d"]:
+    r"""Narrow ``sde_params().P_inf`` to an array, or raise.
+
+    `gaussx.SDEParams` types ``P_inf`` as optional because some
+    compositions genuinely have no stationary covariance (a
+    `gaussx.ProductSDE` over a factor without one) and fall back to
+    matrix-fraction discretisation. Every Markov GP surface here seeds
+    the Kalman recursion with $P_\infty$, so a missing one is a
+    modelling error rather than a fallback path — say so up front
+    instead of failing inside the scan.
+    """
+    if P_inf is None:
+        raise ValueError(
+            f"{type(sde_kernel).__name__} reports no stationary covariance "
+            "(sde_params().P_inf is None), so it cannot seed a Markov GP "
+            "prior. Use a stationary SDE kernel, or one whose factors all "
+            "define P_inf."
+        )
+    return P_inf
+
+
 def _build_dt_full(times: Float[Array, " N"]) -> Float[Array, " N"]:
     """Pad ``diff(times)`` with a leading zero so step 0 is the prior."""
     dt = jnp.diff(times)
@@ -254,6 +278,7 @@ class MarkovGPPrior(eqx.Module):
             ``log p(y | theta)``.
         """
         F, _L, H, _Qc, P_inf = self.sde_kernel.sde_params()
+        P_inf = _require_stationary(self.sde_kernel, P_inf)
         dt_full = _build_dt_full(self.times)
         A_seq, Q_seq = self.sde_kernel.discretise_sequence(dt_full)
         residual = self._residual(y)
@@ -281,6 +306,7 @@ class MarkovGPPrior(eqx.Module):
         times.
         """
         F, _L, H, _Qc, P_inf = self.sde_kernel.sde_params()
+        P_inf = _require_stationary(self.sde_kernel, P_inf)
         dt_full = _build_dt_full(self.times)
         A_seq, Q_seq = self.sde_kernel.discretise_sequence(dt_full)
         residual = self._residual(y)
@@ -357,6 +383,7 @@ def _dense_sde_gram(
     filter instead.
     """
     F, _L, H, _Qc, P_inf = sde_kernel.sde_params()
+    P_inf = _require_stationary(sde_kernel, P_inf)
     # Pairwise absolute time lags |tᵢ - tⱼ| as an (N, N) grid.
     diffs = jnp.abs(einx.subtract("i, j -> i j", times, times))
     # Vectorise H exp(F |dt|) P_inf H^T over the (N, N) lag grid.
@@ -411,6 +438,7 @@ class ConditionedMarkovGP(eqx.Module):
         backcasting, and within-window interpolation under one code path.
         """
         F, _L, H, _Qc, P_inf = self.prior.sde_kernel.sde_params()
+        P_inf = _require_stationary(self.prior.sde_kernel, P_inf)
         times = self.prior.times
         t_star = jnp.asarray(t_star)
 
