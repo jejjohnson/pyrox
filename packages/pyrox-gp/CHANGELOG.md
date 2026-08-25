@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.1...pyrox-gp-v0.1.2) (2026-08-24)
+
+
+### Features
+
+* **gp:** normalizing Kalman filter model surface with NumPyro hyperpriors ([#216](https://github.com/jejjohnson/pyrox/issues/216)) ([aa8d258](https://github.com/jejjohnson/pyrox/commit/aa8d2585d6706c109c04a1c2b89b6c3e8dd95516))
+
 ## [0.1.1](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.0...pyrox-gp-v0.1.1) (2026-08-21)
 
 
