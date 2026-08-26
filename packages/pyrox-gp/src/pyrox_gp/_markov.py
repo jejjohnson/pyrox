@@ -58,7 +58,7 @@ class _NonGaussMarkovStrategy(Protocol):
 def _kalman_filter(
     F: Float[Array, "d d"],
     H: Float[Array, "1 d"],
-    P_inf: Float[Array, "d d"],
+    init_cov: Float[Array, "d d"],
     A_seq: Float[Array, "N d d"],
     Q_seq: Float[Array, "N d d"],
     residual: Float[Array, " N"],
@@ -90,7 +90,7 @@ def _kalman_filter(
     # gaussx Kalman filter expects for a scalar observation model.
     obs = einx.id("n -> n 1", residual)
     R_3d = einx.id("n -> n 1 1", R_seq)
-    init_mean = jnp.zeros(P_inf.shape[0], dtype=P_inf.dtype)
+    init_mean = jnp.zeros(init_cov.shape[0], dtype=init_cov.dtype)
     state = gaussx.kalman_filter(
         transition=A_seq,
         obs_model=H,
@@ -98,7 +98,7 @@ def _kalman_filter(
         obs_noise=R_3d,
         observations=obs,
         init_mean=init_mean,
-        init_cov=P_inf,
+        init_cov=init_cov,
         mask=mask.astype(bool),
     )
     return (
@@ -143,15 +143,27 @@ def _require_stationary(
 ) -> Float[Array, "d d"]:
     r"""Narrow ``sde_params().P_inf`` to an array, or raise.
 
-    `gaussx.SDEParams` types ``P_inf`` as optional because some
-    compositions genuinely have no stationary covariance (a
+    `gaussx.SDEParams` types ``P_inf`` as optional for two different
+    reasons, and the message says which applies. Some compositions have
+    no *closed form* for the stationary covariance (a
     `gaussx.ProductSDE` over a factor without one) and fall back to
-    matrix-fraction discretisation. Every Markov GP surface here seeds
-    the Kalman recursion with $P_\infty$, so a missing one is a
-    modelling error rather than a fallback path — say so up front
-    instead of failing inside the scan.
+    matrix-fraction discretisation; a non-stationary kernel such as
+    `gaussx.IntegratedWienerSDE` has no stationary covariance at all.
+
+    Used by the surfaces that genuinely need $P_\infty$ — the
+    stationary marginal variance and the dense Gram. The Kalman
+    recursions go through `MarkovGPPrior.initial_covariance` instead,
+    which a non-stationary kernel can satisfy.
     """
     if P_inf is None:
+        if not _is_stationary(sde_kernel):
+            raise ValueError(
+                f"{type(sde_kernel).__name__} is not stationary, so it has "
+                "no stationary covariance P_inf. Filtering and smoothing "
+                "work — they seed from MarkovGPPrior.initial_covariance() "
+                "— but this path is defined in terms of P_inf and has no "
+                "meaning without it."
+            )
         raise ValueError(
             f"{type(sde_kernel).__name__} reports no stationary covariance "
             "(sde_params().P_inf is None), so it cannot seed a Markov GP "
@@ -159,6 +171,32 @@ def _require_stationary(
             "define P_inf."
         )
     return P_inf
+
+
+def _is_stationary(sde_kernel: SDEKernel) -> bool:
+    """Whether ``sde_kernel`` declares itself stationary.
+
+    ``stationary`` arrived on the gaussx kernel protocol alongside
+    `gaussx.IntegratedWienerSDE`; a hand-rolled kernel predating it is
+    read as stationary, which is what every kernel was before.
+    """
+    return bool(getattr(sde_kernel, "stationary", True))
+
+
+def _kernel_initial_covariance(
+    sde_kernel: SDEKernel,
+) -> Float[Array, "d d"]:
+    r"""Ask the kernel where the filter should start.
+
+    `gaussx.SDEKernel.initial_covariance` returns $P_\infty$ for a
+    stationary kernel — today's behaviour, unchanged — and an explicit
+    (diffuse by default) covariance for a non-stationary one. Falls back
+    to reading ``P_inf`` for a kernel that predates the method.
+    """
+    initial_covariance = getattr(sde_kernel, "initial_covariance", None)
+    if initial_covariance is None:
+        return _require_stationary(sde_kernel, sde_kernel.sde_params().P_inf)
+    return initial_covariance()
 
 
 def _build_dt_full(times: Float[Array, " N"]) -> Float[Array, " N"]:
@@ -191,6 +229,19 @@ class MarkovGPPrior(eqx.Module):
         obs_noise_floor: Small extra diagonal added to the observation
             variance ``R = noise_var + obs_noise_floor`` for stability when
             ``noise_var`` is near zero. Defaults to ``0.0``.
+        init_cov: Optional ``(d, d)`` covariance of the state at the first
+            time point. ``None`` (the default) asks the kernel via
+            ``initial_covariance()``, which is $P_\infty$ for a stationary
+            kernel — so nothing changes for the kernels that have one — and
+            an explicit diffuse covariance for a non-stationary one such as
+            `gaussx.IntegratedWienerSDE`. Supply it to state what is known
+            about the level (and its derivatives) before the first
+            observation. Worth supplying for the site-based non-Gaussian
+            strategies in particular: `pyrox_gp.PosteriorLinearizationMarkov`
+            and `pyrox_gp.ExpectationPropagationMarkov` seed their cavities
+            from the prior marginal variance, and a very diffuse prior can
+            overflow their quadrature under an exponential-link likelihood
+            — as a stationary kernel with an equally large variance does.
 
     Examples:
         >>> import jax.numpy as jnp
@@ -211,6 +262,7 @@ class MarkovGPPrior(eqx.Module):
     times: Float[Array, " N"]
     mean_fn: Callable[[Float[Array, " N"]], Float[Array, " N"]] | None = None
     obs_noise_floor: float = eqx.field(static=True, default=0.0)
+    init_cov: Float[Array, "d d"] | None = None
 
     def __init__(
         self,
@@ -218,6 +270,7 @@ class MarkovGPPrior(eqx.Module):
         times: Float[Array, " N"],
         mean_fn: Callable[[Float[Array, " N"]], Float[Array, " N"]] | None = None,
         obs_noise_floor: float = 0.0,
+        init_cov: Float[Array, "d d"] | None = None,
     ) -> None:
         if obs_noise_floor < 0:
             raise ValueError(
@@ -236,15 +289,40 @@ class MarkovGPPrior(eqx.Module):
                     raise ValueError("times must be strictly increasing")
             except jax.errors.TracerBoolConversionError:
                 pass
+        if init_cov is not None:
+            # Promoted like ``times``: an integer covariance would seed the
+            # scan with an int carry and fail inside it on a dtype mismatch.
+            init_cov = jnp.asarray(init_cov, dtype=jnp.result_type(init_cov, 0.0))
+            d = sde_kernel.state_dim
+            if init_cov.shape != (d, d):
+                raise ValueError(
+                    f"init_cov must be ({d}, {d}) for a state dimension of "
+                    f"{d}, got shape {tuple(init_cov.shape)!r}"
+                )
         self.sde_kernel = sde_kernel
         self.times = times_arr
         self.mean_fn = mean_fn
         self.obs_noise_floor = float(obs_noise_floor)
+        self.init_cov = init_cov
 
     @property
     def state_dim(self) -> int:
         """SDE state dimension $d$ for this kernel."""
         return self.sde_kernel.state_dim
+
+    def initial_covariance(self) -> Float[Array, "d d"]:
+        r"""Covariance the Kalman recursions start from.
+
+        The ``init_cov`` given at construction if there is one, otherwise
+        whatever the kernel reports — $P_\infty$ for a stationary kernel,
+        an explicit diffuse covariance for a non-stationary one. This is
+        the single seed every filtering surface here uses, so a kernel
+        with no $P_\infty$ is only a problem for the paths that are
+        *defined* in terms of it (`log_prob`, the dense Gram).
+        """
+        if self.init_cov is not None:
+            return self.init_cov
+        return _kernel_initial_covariance(self.sde_kernel)
 
     def mean(self, times: Float[Array, " M"]) -> Float[Array, " M"]:
         """Evaluate the mean function at ``times``; zero by default."""
@@ -277,14 +355,14 @@ class MarkovGPPrior(eqx.Module):
             ``(N, d, d)`` and ``log_marginal`` is the scalar log-likelihood
             ``log p(y | theta)``.
         """
-        F, _L, H, _Qc, P_inf = self.sde_kernel.sde_params()
-        P_inf = _require_stationary(self.sde_kernel, P_inf)
+        F, _L, H, _Qc, _P_inf = self.sde_kernel.sde_params()
+        init_cov = self.initial_covariance()
         dt_full = _build_dt_full(self.times)
         A_seq, Q_seq = self.sde_kernel.discretise_sequence(dt_full)
         residual = self._residual(y)
         mask = jnp.ones_like(self.times)
         R_seq = jnp.broadcast_to(self._R(noise_var), self.times.shape)
-        return _kalman_filter(F, H, P_inf, A_seq, Q_seq, residual, mask, R_seq)
+        return _kalman_filter(F, H, init_cov, A_seq, Q_seq, residual, mask, R_seq)
 
     def log_marginal(
         self,
@@ -305,15 +383,15 @@ class MarkovGPPrior(eqx.Module):
         Returns ``(m_smooth, P_smooth, log_marginal)`` over the training
         times.
         """
-        F, _L, H, _Qc, P_inf = self.sde_kernel.sde_params()
-        P_inf = _require_stationary(self.sde_kernel, P_inf)
+        F, _L, H, _Qc, _P_inf = self.sde_kernel.sde_params()
+        init_cov = self.initial_covariance()
         dt_full = _build_dt_full(self.times)
         A_seq, Q_seq = self.sde_kernel.discretise_sequence(dt_full)
         residual = self._residual(y)
         mask = jnp.ones_like(self.times)
         R_seq = jnp.broadcast_to(self._R(noise_var), self.times.shape)
         m_pred, P_pred, m_filt, P_filt, log_marg = _kalman_filter(
-            F, H, P_inf, A_seq, Q_seq, residual, mask, R_seq
+            F, H, init_cov, A_seq, Q_seq, residual, mask, R_seq
         )
         m_smooth, P_smooth = _rts_smoother(m_pred, P_pred, m_filt, P_filt, A_seq)
         return m_smooth, P_smooth, log_marg
@@ -382,6 +460,16 @@ def _dense_sde_gram(
     `markov_gp_sample`); scalable inference goes through the Kalman
     filter instead.
     """
+    if not _is_stationary(sde_kernel):
+        raise ValueError(
+            f"{type(sde_kernel).__name__} is not stationary, so it has no "
+            "dense Gram of this form: K_ij = H exp(F |t_i - t_j|) P_inf H^T "
+            "is a function of the lag alone, while a non-stationary "
+            "covariance depends on both times (an integrated Wiener "
+            "process has Cov(f(s), f(t)) = q (min(s,t)^3/3 + |t-s| "
+            "min(s,t)^2/2)). Use log_marginal / condition, which filter "
+            "rather than form a Gram."
+        )
     F, _L, H, _Qc, P_inf = sde_kernel.sde_params()
     P_inf = _require_stationary(sde_kernel, P_inf)
     # Pairwise absolute time lags |tᵢ - tⱼ| as an (N, N) grid.
@@ -437,8 +525,8 @@ class ConditionedMarkovGP(eqx.Module):
         $O((N + M)\\,d^3)$. Handles training-grid lookups, forecasting,
         backcasting, and within-window interpolation under one code path.
         """
-        F, _L, H, _Qc, P_inf = self.prior.sde_kernel.sde_params()
-        P_inf = _require_stationary(self.prior.sde_kernel, P_inf)
+        F, _L, H, _Qc, _P_inf = self.prior.sde_kernel.sde_params()
+        init_cov = self.prior.initial_covariance()
         times = self.prior.times
         t_star = jnp.asarray(t_star)
 
@@ -462,7 +550,7 @@ class ConditionedMarkovGP(eqx.Module):
         A_seq, Q_seq = self.prior.sde_kernel.discretise_sequence(dt_full)
         R_seq = jnp.broadcast_to(self.prior._R(self.noise_var), merged_sorted.shape)
         m_pred, P_pred, m_filt, P_filt, _ = _kalman_filter(
-            F, H, P_inf, A_seq, Q_seq, residual_full, is_obs, R_seq
+            F, H, init_cov, A_seq, Q_seq, residual_full, is_obs, R_seq
         )
         m_smooth, P_smooth = _rts_smoother(m_pred, P_pred, m_filt, P_filt, A_seq)
 

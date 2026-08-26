@@ -50,6 +50,7 @@ accept any ``gaussx.AbstractSolverStrategy``; the default is
 from gaussx import (
     ConstantSDE,
     CosineSDE,
+    IntegratedWienerSDE,
     MaternSDE,
     PeriodicSDE,
     ProductSDE,
@@ -216,6 +217,7 @@ __all__ = [
     "HeteroscedasticGaussianLikelihood",
     "ICMKernel",
     "InducingFeatures",
+    "IntegratedWienerSDE",
     "Kernel",
     "LMCKernel",
     "LaplaceInference",

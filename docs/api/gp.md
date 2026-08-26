@@ -287,12 +287,45 @@ damped = ProductSDE(matern, cos)                  # state dim = 2 * 2 = 4
 qp = QuasiPeriodicSDE(matern, per)                # state dim = 2 * 15 = 30
 ```
 
+### Non-stationary priors
+
+Every kernel above is stationary: the process is started in its
+stationary distribution, so the filter seeds from `P_inf` and
+`sde_autocovariance` reports `K(tau)`.
+
+[`IntegratedWienerSDE`][pyrox_gp.IntegratedWienerSDE] is not. At
+`order=1` it is the *local linear trend* — smooth, and linear unless the
+data push back, with no lengthscale to choose — and its marginal
+variance grows without bound, so there is no `P_inf` at all. It reports
+`stationary = False` and `sde_params().P_inf = None`, and the filter
+starts from an explicit initial covariance instead:
+
+```python
+import jax.numpy as jnp
+from pyrox_gp import IntegratedWienerSDE, MarkovGPPrior
+
+trend = IntegratedWienerSDE(diffusion=1e-4)       # state = [level, slope]
+prior = MarkovGPPrior(trend, times)               # diffuse default P_0
+# ... or state what is known before the first observation:
+prior = MarkovGPPrior(trend, times, init_cov=jnp.diag(jnp.array([1e2, 1.0])))
+```
+
+Filtering, smoothing, prediction and the site-based non-Gaussian
+strategies all work; the *dense* paths ([`log_prob`][pyrox_gp.MarkovGPPrior.log_prob]
+and [`markov_gp_sample`][pyrox_gp.markov_gp_sample]) raise, because
+`K_ij = H exp(F |t_i - t_j|) P_inf H^T` is a function of the lag alone,
+while a non-stationary covariance depends on both times.
+
+A `SumSDE` may mix the two — a trend plus a stationary seasonal — and
+starts from the block-diagonal of its components' initial covariances.
+
 ::: pyrox_gp.SDEKernel
 ::: pyrox_gp.SDEParams
 ::: pyrox_gp.MaternSDE
 ::: pyrox_gp.ConstantSDE
 ::: pyrox_gp.CosineSDE
 ::: pyrox_gp.PeriodicSDE
+::: pyrox_gp.IntegratedWienerSDE
 ::: pyrox_gp.SumSDE
 ::: pyrox_gp.ProductSDE
 ::: pyrox_gp.QuasiPeriodicSDE
