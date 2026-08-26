@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "pyrox",
-    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@812aef3074889690dc399fffcf305dbf3d0048c2",
+    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@73d6d57c302aa263784238a9bb5a5cd25dda642d",
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.5",
     "lineax>=0.1.1",
     "einx>=0.4.3",
@@ -58,7 +58,7 @@ Repository = "https://github.com/jejjohnson/pyrox"
 
 [tool.uv.sources]
 # gaussx is not yet on PyPI; resolve from GitHub until the first release.
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", rev = "812aef3074889690dc399fffcf305dbf3d0048c2" }
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", rev = "73d6d57c302aa263784238a9bb5a5cd25dda642d" }
 
 [build-system]
 requires = ["hatchling"]

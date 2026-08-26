@@ -18,10 +18,12 @@ from gaussx import SDEParams
 from numpyro.infer.util import log_density
 from pyrox_gp import (
     ConditionedMarkovGP,
+    IntegratedWienerSDE,
     MarkovGPPrior,
     MaternSDE,
     SumSDE,
     markov_gp_factor,
+    markov_gp_sample,
 )
 from pyrox_gp._src.kernels import matern_kernel
 
@@ -414,3 +416,132 @@ def test_missing_stationary_covariance_raises_a_named_error():
     )
     with pytest.raises(ValueError, match=r"_NoStationarySDE.*no stationary covariance"):
         prior.log_marginal(y, jnp.asarray(0.1))
+
+
+# --- non-stationary priors (gh-222) --------------------------------------
+
+
+def _trend_kernel(diffusion: float = 1e-4) -> IntegratedWienerSDE:
+    return IntegratedWienerSDE(diffusion=jnp.asarray(diffusion))
+
+
+def test_initial_covariance_defaults_to_the_kernels() -> None:
+    """Stationary kernels keep starting from ``P_inf`` — nothing changes."""
+    times = jnp.linspace(0.0, 5.0, 10)
+    matern = MaternSDE(variance=1.3, lengthscale=0.8, order=1)
+
+    stationary = MarkovGPPrior(matern, times)
+    assert jnp.allclose(stationary.initial_covariance(), matern.sde_params().P_inf)
+
+    # The trend prior has no P_inf at all; it supplies its own diffuse one.
+    trend = _trend_kernel()
+    assert jnp.allclose(
+        MarkovGPPrior(trend, times).initial_covariance(),
+        trend.initial_covariance(),
+    )
+
+
+def test_explicit_init_cov_is_used_and_validated() -> None:
+    times = jnp.linspace(0.0, 5.0, 10)
+    P_0 = jnp.diag(jnp.asarray([10.0, 0.1]))
+
+    prior = MarkovGPPrior(_trend_kernel(), times, init_cov=P_0)
+    assert jnp.allclose(prior.initial_covariance(), P_0)
+
+    # A supplied init_cov overrides a stationary kernel's P_inf too.
+    matern = MaternSDE(variance=1.3, lengthscale=0.8, order=1)
+    assert jnp.allclose(
+        MarkovGPPrior(matern, times, init_cov=P_0).initial_covariance(), P_0
+    )
+
+    with pytest.raises(ValueError, match=r"init_cov must be \(2, 2\)"):
+        MarkovGPPrior(_trend_kernel(), times, init_cov=jnp.eye(3))
+
+
+def test_trend_prior_filters_and_recovers_a_linear_trend() -> None:
+    """The prior the kernel exists for, end to end through the filter."""
+    times = jnp.linspace(0.0, 20.0, 40)
+    slope, noise_std = 0.3, 0.05
+    y = (
+        0.5
+        + slope * times
+        + noise_std * jax.random.normal(jax.random.key(0), times.shape)
+    )  # key pinned: the test is about the recursion, not a particular draw.
+
+    prior = MarkovGPPrior(_trend_kernel(), times)
+    m_smooth, P_smooth, log_marg = prior.smooth(y, jnp.asarray(noise_std**2))
+
+    assert jnp.isfinite(log_marg)
+    assert m_smooth.shape == (times.shape[0], 2)
+    # State is [level, slope]; the smoothed slope is the estimated trend.
+    assert jnp.allclose(m_smooth[-1, 1], slope, atol=0.02)
+    assert jnp.all(jnp.diagonal(P_smooth, axis1=1, axis2=2) > 0.0)
+
+
+def test_trend_prior_forecasts_along_the_trend() -> None:
+    """Forecasting is where a non-stationary prior differs from a Matern.
+
+    A stationary kernel reverts to the mean beyond the data; the local
+    linear trend continues the line, with variance that keeps growing.
+    """
+    times = jnp.linspace(0.0, 20.0, 40)
+    y = 0.5 + 0.3 * times
+
+    post = MarkovGPPrior(_trend_kernel(), times).condition(y, jnp.asarray(0.05**2))
+    t_star = jnp.asarray([21.0, 25.0, 30.0])
+    mean, var = post.predict(t_star)
+
+    assert jnp.allclose(mean, 0.5 + 0.3 * t_star, atol=0.2)
+    assert jnp.all(jnp.diff(var) > 0.0)
+
+
+def test_sum_of_trend_and_matern_filters() -> None:
+    """A mixed sum starts from the block-diagonal initial covariance."""
+    times = jnp.linspace(0.0, 10.0, 30)
+    trend = _trend_kernel(1e-3)
+    matern = MaternSDE(variance=0.5, lengthscale=1.0, order=1)
+    kernel = SumSDE(kernels=(trend, matern))
+
+    prior = MarkovGPPrior(kernel, times)
+    P_0 = prior.initial_covariance()
+    assert P_0.shape == (4, 4)
+    assert jnp.allclose(P_0[:2, :2], trend.initial_covariance())
+    assert jnp.allclose(P_0[2:, 2:], matern.sde_params().P_inf)
+
+    y = 0.2 * times + jnp.sin(times)
+    assert jnp.isfinite(prior.log_marginal(y, jnp.asarray(0.01)))
+
+
+def test_dense_paths_reject_a_non_stationary_kernel() -> None:
+    """``K_ij = H exp(F|t_i - t_j|) P_inf H^T`` has no meaning here.
+
+    A non-stationary covariance depends on both times rather than their
+    difference, so the dense Gram cannot be salvaged by substitution — a
+    wrong covariance here would be hard to notice downstream.
+    """
+    times = jnp.linspace(0.0, 5.0, 8)
+    prior = MarkovGPPrior(_trend_kernel(), times)
+
+    with pytest.raises(ValueError, match=r"not stationary.*dense Gram"):
+        prior.log_prob(jnp.zeros_like(times))
+
+    def model() -> None:
+        markov_gp_sample("f", prior)
+
+    with pytest.raises(ValueError, match=r"not stationary.*dense Gram"):
+        numpyro.handlers.seed(model, jax.random.key(0))()
+
+
+def test_stationary_kernels_are_unaffected_by_the_new_seed() -> None:
+    """Passing ``P_inf`` explicitly must reproduce the default exactly."""
+    times = jnp.linspace(0.0, 5.0, 20)
+    y = jnp.sin(times)
+    matern = MaternSDE(variance=1.3, lengthscale=0.8, order=1)
+    noise = jnp.asarray(0.05)
+
+    default = MarkovGPPrior(matern, times).log_marginal(y, noise)
+    explicit = MarkovGPPrior(
+        matern, times, init_cov=matern.sde_params().P_inf
+    ).log_marginal(y, noise)
+
+    assert jnp.allclose(default, explicit)

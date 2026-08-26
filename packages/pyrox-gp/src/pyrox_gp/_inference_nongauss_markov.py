@@ -37,6 +37,7 @@ from pyrox_gp._inference_nongauss import (
 )
 from pyrox_gp._markov import (
     _build_dt_full,
+    _is_stationary,
     _kalman_filter,
     _require_stationary,
     _rts_smoother,
@@ -52,17 +53,45 @@ if TYPE_CHECKING:
 
 
 def _prior_marginal_variance(prior: MarkovGPPrior) -> Float[Array, " N"]:
-    r"""Stationary prior marginal variance ``H P_inf H^T`` per training time.
+    r"""Prior marginal variance ``Var[f(t_n)]`` per training time.
 
-    Stationary 1-D SDE kernels have a constant marginal variance equal to
-    $H P_\infty H^\top$ (equivalent to the kernel ``variance``); we
+    Stationary 1-D SDE kernels have a *constant* marginal variance equal
+    to $H P_\infty H^\top$ (equivalent to the kernel ``variance``); we
     broadcast it to ``(N,)`` so it can seed the cavity-update loops in PL
     and EP without hard-coding ``1.0`` on rescaled kernels.
+
+    A non-stationary kernel has no such constant — the marginal variance
+    of an integrated Wiener process grows with $t$ — so the prior is
+    propagated through the Kalman recursion with every observation masked
+    out, which reports $H P_k H^\top$ per step and costs one
+    $O(N d^3)$ pass. That route would give the same answer for a
+    stationary kernel, but the closed form is exact and free, so it is
+    kept for the case that has one.
     """
     _F, _L, H, _Qc, P_inf = prior.sde_kernel.sde_params()
-    P_inf = _require_stationary(prior.sde_kernel, P_inf)
-    var0 = (H @ P_inf @ H.T)[0, 0]
-    return jnp.broadcast_to(var0, prior.times.shape)
+    if _is_stationary(prior.sde_kernel):
+        P_inf = _require_stationary(prior.sde_kernel, P_inf)
+        var0 = (H @ P_inf @ H.T)[0, 0]
+        return jnp.broadcast_to(var0, prior.times.shape)
+
+    times = prior.times
+    dt_full = _build_dt_full(times)
+    A_seq, Q_seq = prior.sde_kernel.discretise_sequence(dt_full)
+    zeros = jnp.zeros_like(times)
+    # mask = 0 everywhere: no update ever fires, so the filter propagates
+    # the prior alone and the residual / R values below are inert. R must
+    # still be finite to keep NaN out of the (skipped) update.
+    _m_pred, P_pred, _m_filt, _P_filt, _ll = _kalman_filter(
+        _F,
+        H,
+        prior.initial_covariance(),
+        A_seq,
+        Q_seq,
+        zeros,
+        zeros,
+        jnp.ones_like(times),
+    )
+    return jax.vmap(lambda P: (H @ P @ H.T)[0, 0])(P_pred)
 
 
 def _markov_smoothed_posterior(
@@ -79,8 +108,8 @@ def _markov_smoothed_posterior(
     ``log_marg`` is the Kalman log-likelihood of the *pseudo-observations*
     (used as a Laplace-style approximation to the true marginal).
     """
-    F, _L, H, _Qc, P_inf = prior.sde_kernel.sde_params()
-    P_inf = _require_stationary(prior.sde_kernel, P_inf)
+    F, _L, H, _Qc, _P_inf = prior.sde_kernel.sde_params()
+    init_cov = prior.initial_covariance()
     times = prior.times
     dt_full = _build_dt_full(times)
     A_seq, Q_seq = prior.sde_kernel.discretise_sequence(dt_full)
@@ -89,7 +118,7 @@ def _markov_smoothed_posterior(
     residual = pseudo_targets - prior.mean(times)
     mask = jnp.ones_like(times)
     m_pred, P_pred, m_filt, P_filt, log_marg = _kalman_filter(
-        F, H, P_inf, A_seq, Q_seq, residual, mask, R_seq
+        F, H, init_cov, A_seq, Q_seq, residual, mask, R_seq
     )
     m_smooth, P_smooth = _rts_smoother(m_pred, P_pred, m_filt, P_filt, A_seq)
     f_mean = (m_smooth @ H.T)[:, 0] + prior.mean(times)
@@ -148,8 +177,8 @@ class NonGaussConditionedMarkovGP(eqx.Module):
         variances ``1/Λ_n`` on the training points and the test points
         masked out of the update step. Cost is $O((N + M)\,d^3)$.
         """
-        F, _L, H, _Qc, P_inf = self.prior.sde_kernel.sde_params()
-        P_inf = _require_stationary(self.prior.sde_kernel, P_inf)
+        F, _L, H, _Qc, _P_inf = self.prior.sde_kernel.sde_params()
+        init_cov = self.prior.initial_covariance()
         times = self.prior.times
         t_star = jnp.asarray(t_star)
 
@@ -178,7 +207,7 @@ class NonGaussConditionedMarkovGP(eqx.Module):
         dt_full = _build_dt_full(merged_sorted)
         A_seq, Q_seq = self.prior.sde_kernel.discretise_sequence(dt_full)
         m_pred, P_pred, m_filt, P_filt, _ = _kalman_filter(
-            F, H, P_inf, A_seq, Q_seq, residual_full, is_obs, R_full
+            F, H, init_cov, A_seq, Q_seq, residual_full, is_obs, R_full
         )
         m_smooth, P_smooth = _rts_smoother(m_pred, P_pred, m_filt, P_filt, A_seq)
 
