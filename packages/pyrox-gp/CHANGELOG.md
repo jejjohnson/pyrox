@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.2...pyrox-gp-v0.1.3) (2026-08-26)
+
+
+### Features
+
+* **gp:** let MarkovGPPrior take a non-stationary SDE kernel (gh-222) ([#223](https://github.com/jejjohnson/pyrox/issues/223)) ([e8c8b59](https://github.com/jejjohnson/pyrox/commit/e8c8b59a24d0ddd95c7681dfa3ad78fd2994f1bd))
+
 ## [0.1.2](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.1...pyrox-gp-v0.1.2) (2026-08-24)
 
 

@@ -1,6 +1,6 @@
 [project]
 name = "pyrox-gp"
-version = "0.1.2"
+version = "0.1.3"
 description = "Gaussian process building blocks on top of pyrox: kernels, guides, likelihoods, Markov/sparse GPs, and pathwise sampling."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
