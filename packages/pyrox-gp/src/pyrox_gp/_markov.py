@@ -290,7 +290,9 @@ class MarkovGPPrior(eqx.Module):
             except jax.errors.TracerBoolConversionError:
                 pass
         if init_cov is not None:
-            init_cov = jnp.asarray(init_cov)
+            # Promoted like ``times``: an integer covariance would seed the
+            # scan with an int carry and fail inside it on a dtype mismatch.
+            init_cov = jnp.asarray(init_cov, dtype=jnp.result_type(init_cov, 0.0))
             d = sde_kernel.state_dim
             if init_cov.shape != (d, d):
                 raise ValueError(

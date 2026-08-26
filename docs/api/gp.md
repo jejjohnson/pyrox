@@ -301,6 +301,7 @@ variance grows without bound, so there is no `P_inf` at all. It reports
 starts from an explicit initial covariance instead:
 
 ```python
+import jax.numpy as jnp
 from pyrox_gp import IntegratedWienerSDE, MarkovGPPrior
 
 trend = IntegratedWienerSDE(diffusion=1e-4)       # state = [level, slope]

@@ -458,6 +458,17 @@ def test_explicit_init_cov_is_used_and_validated() -> None:
         MarkovGPPrior(_trend_kernel(), times, init_cov=jnp.eye(3))
 
 
+def test_integer_init_cov_is_promoted() -> None:
+    """An integer seed would fail inside the scan on a carry dtype mismatch."""
+    times = jnp.linspace(0.0, 5.0, 10)
+    prior = MarkovGPPrior(
+        _trend_kernel(), times, init_cov=jnp.asarray([[1, 0], [0, 1]])
+    )
+
+    assert jnp.issubdtype(prior.initial_covariance().dtype, jnp.floating)
+    assert jnp.isfinite(prior.log_marginal(jnp.sin(times), jnp.asarray(0.1)))
+
+
 def test_trend_prior_filters_and_recovers_a_linear_trend() -> None:
     """The prior the kernel exists for, end to end through the filter."""
     times = jnp.linspace(0.0, 20.0, 40)
