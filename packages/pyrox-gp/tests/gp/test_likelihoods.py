@@ -137,6 +137,8 @@ def test_module_field_link_parameters_receive_gradients():
     leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_inexact_array))
     assert len(leaves) > 0
     assert all(jnp.all(jnp.isfinite(leaf)) for leaf in leaves)
+
+
 # --- optional input conditioning ------------------------------------------
 
 
