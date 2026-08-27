@@ -36,7 +36,7 @@ from jaxtyping import Array, Float
 from pyrox_gp._context import _kernel_context
 from pyrox_gp._guides import NaturalGuide
 from pyrox_gp._likelihoods import GaussianLikelihood
-from pyrox_gp._protocols import Guide, Likelihood
+from pyrox_gp._protocols import Guide, Likelihood, likelihood_accepts_inputs
 from pyrox_gp._sparse import SparseGPPrior
 
 
@@ -58,7 +58,13 @@ def _ell_numerical(
     warp); scalar observation models ignore it. When ``None`` it is
     broadcast rather than batched, so the unconditional path is
     unchanged.
+
+    A `Likelihood` written against the pre-gh-204 ``log_prob(f, y)``
+    signature is never handed the third argument -- it could not consume
+    it, and passing it would raise ``TypeError`` at the first quadrature
+    evaluation.
     """
+    pass_x = X is not None and likelihood_accepts_inputs(lik)
 
     def _ell_one(
         mu_n: Float[Array, ""],
@@ -73,7 +79,9 @@ def _ell_numerical(
             ),
         )
         return log_likelihood_expectation(
-            lambda f: lik.log_prob(f, y_n[None], X_n),
+            (lambda f: lik.log_prob(f, y_n[None], X_n))
+            if pass_x
+            else (lambda f: lik.log_prob(f, y_n[None])),
             state,
             integrator,
         )

@@ -19,6 +19,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
+import numpyro.distributions as nd
 import optax
 import pytest
 from flowjax.bijections import RationalQuadraticSpline
@@ -26,12 +27,15 @@ from gaussx import GaussHermiteIntegrator
 from pyrox_gp import (
     RBF,
     FullRankGuide,
+    GaussianLikelihood,
     SparseGPPrior,
     WarpedGaussianLikelihood,
     svgp_elbo,
     warped_predictive_moments,
 )
 from pyrox_gp._inference import _ell_numerical
+from pyrox_gp._protocols import Likelihood
+from pyrox_gp._warped import _apply_warp
 
 
 jax.config.update("jax_enable_x64", True)
@@ -383,8 +387,6 @@ def test_nonstationarity_is_real():
     warp = _conditioner()
     f = jnp.full((5,), 0.7)
     X = jnp.linspace(-2.0, 2.0, 10).reshape(5, 2)
-    from pyrox_gp._warped import _apply_warp
-
     g = _apply_warp(warp, f, X)
     assert g.shape == (5,)
     assert float(g.std()) > 1e-3
@@ -460,3 +462,63 @@ def test_end_to_end_conditional_warp_through_svgp_elbo():
     before = jax.tree_util.tree_leaves(eqx.filter(lik.warp, eqx.is_inexact_array))
     after = jax.tree_util.tree_leaves(eqx.filter(new_lik.warp, eqx.is_inexact_array))
     assert any(not jnp.allclose(a, b) for a, b in zip(before, after, strict=True))
+
+
+def test_conditional_warp_broadcasts_over_a_sample_batch():
+    """Vectorized latent samples ``(S, N)`` against per-point ``(N, D)``.
+
+    The unconditional path accepts any leading batch, so the conditional
+    one must too: each ``X[n]`` tiles across the ``S`` axis rather than
+    the caller having to materialize ``(S, N, D)``. Regression for the
+    reshape that produced only ``N`` condition rows and then failed to
+    broadcast them to ``S * N``.
+    """
+    warp = _conditioner()
+    S, N = 4, 3
+    f = jr.normal(jr.key(1), (S, N))
+    X = jnp.asarray([[0.0, 1.0], [1.0, -1.0], [0.5, 0.5]])
+
+    g = _apply_warp(warp, f, X)
+    assert g.shape == (S, N)
+    # Row s must equal the plain (N,) call, and each element the scalar one.
+    for s in range(S):
+        assert jnp.allclose(g[s], _apply_warp(warp, f[s], X), atol=1e-12)
+        for n in range(N):
+            assert jnp.allclose(
+                g[s, n], _apply_warp(warp, f[s, n][None], X[n])[0], atol=1e-12
+            )
+
+
+def test_legacy_two_argument_likelihood_still_reaches_svgp_elbo():
+    """A `Likelihood` written before gh-204 widened the protocol.
+
+    ``log_prob(self, f, y)`` subclasses stay concrete and valid, so
+    `svgp_elbo` must not hand them the third positional argument -- that
+    raised ``TypeError`` at the first quadrature evaluation.
+    """
+
+    class LegacyLikelihood(Likelihood):
+        noise: jax.Array
+
+        def log_prob(self, f, y):
+            return nd.Normal(f, self.noise).log_prob(y).sum()
+
+    prior, X, y = _toy()
+    guide = FullRankGuide.init(num_inducing=prior.num_inducing)
+    lik = LegacyLikelihood(noise=jnp.asarray(0.3))
+
+    value = svgp_elbo(
+        prior, guide, lik, X, y, integrator=GaussHermiteIntegrator(order=8)
+    )
+    assert jnp.isfinite(value)
+
+    # And it matches the equivalent updated-signature likelihood exactly.
+    reference = svgp_elbo(
+        prior,
+        guide,
+        GaussianLikelihood(noise_var=jnp.asarray(0.3) ** 2),
+        X,
+        y,
+        integrator=GaussHermiteIntegrator(order=8),
+    )
+    assert jnp.allclose(value, reference, atol=1e-8)

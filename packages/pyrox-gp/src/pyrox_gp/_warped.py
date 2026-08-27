@@ -42,10 +42,13 @@ def _apply_warp(
     predictive path and the advanced inference strategies pass full ``(N,)``
     arrays.
 
-    For conditional warps, ``X`` is broadcast against ``f``: `svgp_elbo`
-    integrates per point, so ``f`` has shape ``(1,)`` and ``X`` is that
-    point's ``(D,)`` input, while the predictive path passes ``(N,)`` and
-    ``(N, D)``.
+    For conditional warps, ``X`` is broadcast to ``f.shape + cond_shape``
+    before flattening, so a per-point ``(N, D)`` works against any
+    leading batch: `svgp_elbo` integrates per point, so ``f`` is ``(1,)``
+    and ``X`` that point's ``(D,)`` input; the predictive path passes
+    ``(N,)`` and ``(N, D)``; and vectorized latent samples of shape
+    ``(S, N)`` tile each ``X[n]`` across the ``S`` axis rather than
+    requiring the caller to materialize ``(S, N, D)``.
     """
     if warp.shape == ():
         fn = lambda v, c: warp.transform(v, c)
@@ -70,9 +73,11 @@ def _apply_warp(
                 "paths do not, so use `svgp_elbo` (or plain MAP/VI) with "
                 "a conditional warp, and an unconditional warp elsewhere."
             )
-        cond = jnp.broadcast_to(
-            jnp.reshape(X, (-1, *warp.cond_shape)),
-            (flat.shape[0], *warp.cond_shape),
+        # Broadcast to f's shape *then* flatten, so the condition rows
+        # line up with `flat` row-major under any leading batch axes.
+        cond = jnp.reshape(
+            jnp.broadcast_to(X, (*jnp.shape(f), *warp.cond_shape)),
+            (-1, *warp.cond_shape),
         )
         out = jax.vmap(fn)(flat, cond)
     return jnp.reshape(out, jnp.shape(f))
@@ -185,13 +190,8 @@ def warped_predictive_moments(
     x = jnp.asarray(x)
     w = jnp.asarray(w) / np.sqrt(2.0 * np.pi)
     fs = f_loc[None, :] + jnp.sqrt(f_var)[None, :] * x[:, None]
-    # _apply_warp flattens (order, N) row-major, so the per-point inputs
-    # tile across the node axis.
-    g = _apply_warp(
-        lik.warp,
-        fs,
-        None if X is None else jnp.broadcast_to(X, (order, *X.shape)),
-    )
+    # _apply_warp broadcasts the (N, D) inputs across the node axis.
+    g = _apply_warp(lik.warp, fs, X)
     m1 = jnp.sum(w[:, None] * g, axis=0)
     # Centered second moment. Subtracting m1**2 from the raw second moment
     # cancels catastrophically once G's output carries a large offset
