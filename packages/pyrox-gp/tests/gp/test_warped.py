@@ -347,18 +347,116 @@ def test_predictive_variance_survives_a_large_offset():
         assert not jnp.allclose(raw, expected, rtol=1e-3)
 
 
-def test_conditional_warp_is_rejected():
-    """The likelihood never supplies a condition, so a conditional warp
-    must be refused up front rather than failing inside ``transform``."""
-    gauss_flows = pytest.importorskip("gauss_flows")
+# --- input-dependent (conditional) warps --------------------------------
 
-    warp = gauss_flows.Conditioner(
-        key=jr.key(3),
+
+def _conditioner(seed: int = 3, D: int = 2):
+    gauss_flows = pytest.importorskip("gauss_flows")
+    return gauss_flows.Conditioner(
+        key=jr.key(seed),
         inner=gauss_flows.MixtureGaussianCDF(n_components=4, shape=(1,)),
-        cond_shape=(2,),
+        cond_shape=(D,),
         nn_width=8,
         nn_depth=2,
     )
+
+
+def test_x_none_path_is_not_silently_batched():
+    """With an unconditional warp, passing ``X`` must change nothing — this
+    pins the ``in_axes=(0, 0, 0, None)`` broadcast branch."""
+    lik = WarpedGaussianLikelihood(
+        warp=_perturbed(_identity_spline(), scale=0.5),
+        noise_var=jnp.asarray(0.1),
+    )
+    y = jnp.asarray([1.4, -0.3, 0.8])
+    f_loc = jnp.asarray([0.3, 0.1, -0.5])
+    f_var = jnp.asarray([0.7, 0.2, 1.1])
+    X = jnp.arange(6.0).reshape(3, 2)
+    integ = GaussHermiteIntegrator(order=16)
+    without = _ell_numerical(lik, y, f_loc, f_var, integ)
+    with_x = _ell_numerical(lik, y, f_loc, f_var, integ, X)
+    assert jnp.allclose(without, with_x, atol=1e-12)
+
+
+def test_nonstationarity_is_real():
+    """Hold ``f`` fixed and vary ``X``: the warped output must spread."""
+    warp = _conditioner()
+    f = jnp.full((5,), 0.7)
+    X = jnp.linspace(-2.0, 2.0, 10).reshape(5, 2)
+    from pyrox_gp._warped import _apply_warp
+
+    g = _apply_warp(warp, f, X)
+    assert g.shape == (5,)
+    assert float(g.std()) > 1e-3
+
+
+def test_gradients_reach_conditioner_network():
+    warp = _conditioner()
     lik = WarpedGaussianLikelihood(warp=warp, noise_var=jnp.asarray(0.1))
-    with pytest.raises(ValueError, match="Conditional warps"):
+    y = jnp.asarray([1.4, -0.3])
+    f = jnp.asarray([0.3, 0.5])
+    X = jnp.asarray([[0.0, 1.0], [1.0, -1.0]])
+    grad = eqx.filter_grad(lambda m: -m.log_prob(f, y, X))(lik)
+    leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_inexact_array))
+    assert len(leaves) >= 5  # conditioner MLP layers + inner + noise
+    assert all(jnp.all(jnp.isfinite(leaf)) for leaf in leaves)
+
+
+def test_conditional_warp_without_x_raises():
+    warp = _conditioner()
+    lik = WarpedGaussianLikelihood(warp=warp, noise_var=jnp.asarray(0.1))
+    with pytest.raises(ValueError, match="conditional warp"):
         lik.log_prob(jnp.zeros(2), jnp.zeros(2))
+
+
+def test_conditional_shapes_per_point_and_batched():
+    """``((1,), (D,))`` is what ``svgp_elbo`` passes; ``((N,), (N, D))`` is
+    the predictive path. Per-point must equal batched."""
+    warp = _conditioner()
+    lik = WarpedGaussianLikelihood(warp=warp, noise_var=jnp.asarray(0.1))
+    y = jnp.asarray([1.4, -0.3, 0.8])
+    f = jnp.asarray([0.3, 0.1, -0.5])
+    X = jnp.asarray([[0.0, 1.0], [1.0, -1.0], [0.5, 0.5]])
+
+    batched = float(lik.log_prob(f, y, X))
+    per_point = sum(float(lik.log_prob(f[i][None], y[i][None], X[i])) for i in range(3))
+    assert batched == pytest.approx(per_point, abs=1e-10)
+
+
+def test_conditional_predictive_moments_broadcast():
+    warp = _conditioner()
+    lik = WarpedGaussianLikelihood(warp=warp, noise_var=jnp.asarray(0.1))
+    f_loc = jnp.asarray([0.3, -0.4])
+    f_var = jnp.asarray([0.7, 0.4])
+    X = jnp.asarray([[0.0, 1.0], [1.0, -1.0]])
+    mean, var = warped_predictive_moments(lik, f_loc, f_var, X, order=16)
+    assert mean.shape == (2,)
+    assert bool((var > 0).all())
+    # Node-0-only sanity: the same result via explicit per-point calls.
+    m0, v0 = warped_predictive_moments(lik, f_loc[:1], f_var[:1], X[:1], order=16)
+    assert jnp.allclose(mean[0], m0[0], atol=1e-12)
+    assert jnp.allclose(var[0], v0[0], atol=1e-12)
+
+
+@pytest.mark.slow
+def test_end_to_end_conditional_warp_through_svgp_elbo():
+    prior, X, y = _toy()
+    guide = FullRankGuide.init(num_inducing=prior.num_inducing)
+    lik = WarpedGaussianLikelihood(warp=_conditioner(D=1), noise_var=jnp.asarray(0.1))
+
+    def loss(m):
+        return -svgp_elbo(
+            prior, guide, m, X, y, integrator=GaussHermiteIntegrator(order=16)
+        )
+
+    value, grads = eqx.filter_value_and_grad(loss)(lik)
+    assert jnp.isfinite(value)
+    params = eqx.filter(lik, eqx.is_inexact_array)
+    opt = optax.adam(1e-2)
+    updates, _ = opt.update(
+        eqx.filter(grads, eqx.is_inexact_array), opt.init(params), params
+    )
+    new_lik = eqx.apply_updates(lik, updates)
+    before = jax.tree_util.tree_leaves(eqx.filter(lik.warp, eqx.is_inexact_array))
+    after = jax.tree_util.tree_leaves(eqx.filter(new_lik.warp, eqx.is_inexact_array))
+    assert any(not jnp.allclose(a, b) for a, b in zip(before, after, strict=True))

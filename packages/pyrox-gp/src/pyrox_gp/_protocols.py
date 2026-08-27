@@ -131,5 +131,12 @@ class Likelihood(eqx.Module):
         self,
         f: Float[Array, " ..."],
         y: Float[Array, " ..."],
+        X: Float[Array, " ..."] | None = None,
     ) -> Float[Array, ""]:
+        """Conditional ``p(y | f)``, optionally conditioned on inputs.
+
+        ``X`` is consumed only by likelihoods whose parameters are
+        functions of the input (see `pyrox_gp.WarpedGaussianLikelihood`
+        with a conditional warp). Scalar observation models ignore it.
+        """
         raise NotImplementedError

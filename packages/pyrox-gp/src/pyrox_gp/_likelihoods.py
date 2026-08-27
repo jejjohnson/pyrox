@@ -55,6 +55,7 @@ class GaussianLikelihood(Likelihood):
         self,
         f: Float[Array, " ..."],
         y: Float[Array, " ..."],
+        X: Float[Array, " ..."] | None = None,
     ) -> Float[Array, ""]:
         r"""Sum of per-point Gaussian log-densities."""
         return nd.Normal(f, jnp.sqrt(self.noise_var)).log_prob(y).sum()
@@ -109,6 +110,7 @@ class DistLikelihood(Likelihood):
         self,
         f: Float[Array, " ..."],
         y: Float[Array, " ..."],
+        X: Float[Array, " ..."] | None = None,
     ) -> Float[Array, ""]:
         r"""Sum of per-point log-densities under the wrapped distribution."""
         return self.dist_fn(f).log_prob(y).sum()
@@ -126,6 +128,7 @@ class BernoulliLikelihood(Likelihood):
         self,
         f: Float[Array, " ..."],
         y: Float[Array, " ..."],
+        X: Float[Array, " ..."] | None = None,
     ) -> Float[Array, ""]:
         return nd.Bernoulli(logits=f).log_prob(y).sum()
 
@@ -141,6 +144,7 @@ class PoissonLikelihood(Likelihood):
         self,
         f: Float[Array, " ..."],
         y: Float[Array, " ..."],
+        X: Float[Array, " ..."] | None = None,
     ) -> Float[Array, ""]:
         return nd.Poisson(rate=jnp.exp(f)).log_prob(y).sum()
 
@@ -165,6 +169,7 @@ class StudentTLikelihood(Likelihood):
         self,
         f: Float[Array, " ..."],
         y: Float[Array, " ..."],
+        X: Float[Array, " ..."] | None = None,
     ) -> Float[Array, ""]:
         return nd.StudentT(df=self.df, loc=f, scale=self.scale).log_prob(y).sum()
 
@@ -200,6 +205,7 @@ class SoftmaxLikelihood(Likelihood):
         self,
         f: Float[Array, "N C"],
         y: Int[Array, " N"],
+        X: Float[Array, " ..."] | None = None,
     ) -> Float[Array, ""]:
         return nd.Categorical(logits=f).log_prob(y).sum()
 
@@ -221,6 +227,7 @@ class HeteroscedasticGaussianLikelihood(Likelihood):
         self,
         f: Float[Array, "N 2"],
         y: Float[Array, " N"],
+        X: Float[Array, " ..."] | None = None,
     ) -> Float[Array, ""]:
         loc = f[..., 0]
         log_scale = f[..., 1]

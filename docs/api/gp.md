@@ -143,6 +143,19 @@ with it unchanged. Needs an integrator (Gauss-Hermite recommended) and,
 for the smooth recommended warp `MixtureGaussianCDF`, the
 `pyrox-gp[flows]` extra.
 
+The warp may also be **input-dependent** (`G_{phi(x)}`) — a
+non-stationary process from a stationary kernel. Pass a conditional
+bijection (e.g. `gauss_flows.Conditioner` wrapping an unconditional
+warp); `svgp_elbo` threads the inputs through
+`Likelihood.log_prob(f, y, X)` automatically. Cost note: the expected
+log-likelihood evaluates the warp at every quadrature node, so a
+conditional warp pays `order` conditioner forward passes per point.
+
+Only `svgp_elbo` threads the inputs through. The CVI / natural-gradient
+strategies, `sparse_markov_svgp_elbo` and the multi-output ELBO do not,
+so a conditional warp raises there rather than silently dropping the
+condition — use an unconditional warp on those paths.
+
 ::: pyrox_gp.WarpedGaussianLikelihood
 ::: pyrox_gp.warped_predictive_moments
 
