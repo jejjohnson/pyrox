@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.3...pyrox-gp-v0.1.4) (2026-08-28)
+
+
+### Features
+
+* **gp:** input-dependent warps (non-stationary transformed GPs) ([#225](https://github.com/jejjohnson/pyrox/issues/225)) ([87c0a2d](https://github.com/jejjohnson/pyrox/commit/87c0a2d2ada58d6cf7e2d0151dc65de3aa13e87c))
+
 ## [0.1.3](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.2...pyrox-gp-v0.1.3) (2026-08-26)
 
 
