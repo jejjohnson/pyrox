@@ -30,6 +30,7 @@ take expectations against a ``GaussianState``.
 
 from __future__ import annotations
 
+import inspect
 from abc import abstractmethod
 from typing import Any
 
@@ -131,5 +132,43 @@ class Likelihood(eqx.Module):
         self,
         f: Float[Array, " ..."],
         y: Float[Array, " ..."],
+        X: Float[Array, " ..."] | None = None,
     ) -> Float[Array, ""]:
+        """Conditional ``p(y | f)``, optionally conditioned on inputs.
+
+        ``X`` is consumed only by likelihoods whose parameters are
+        functions of the input (see `pyrox_gp.WarpedGaussianLikelihood`
+        with a conditional warp). Scalar observation models ignore it.
+        """
         raise NotImplementedError
+
+
+def likelihood_accepts_inputs(lik: Likelihood) -> bool:
+    """Whether ``lik.log_prob`` takes the optional trailing ``X``.
+
+    The protocol widened in gh-204 to carry the inputs an
+    input-dependent observation model conditions on. Third-party
+    `Likelihood` subclasses written against the original
+    ``log_prob(self, f, y)`` are still concrete and valid, and handing
+    one a third positional argument raises ``TypeError`` at the first
+    quadrature evaluation -- so probe rather than assume.
+
+    Static Python on the unbound signature, evaluated once per trace, so
+    it costs nothing under ``jit``.
+    """
+    try:
+        params = list(inspect.signature(lik.log_prob).parameters.values())
+    except (TypeError, ValueError):  # unintrospectable callable
+        return False
+    if any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params):
+        return True
+    positional = [
+        p
+        for p in params
+        if p.kind
+        in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+    ]
+    return len(positional) >= 3

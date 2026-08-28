@@ -36,7 +36,7 @@ from jaxtyping import Array, Float
 from pyrox_gp._context import _kernel_context
 from pyrox_gp._guides import NaturalGuide
 from pyrox_gp._likelihoods import GaussianLikelihood
-from pyrox_gp._protocols import Guide, Likelihood
+from pyrox_gp._protocols import Guide, Likelihood, likelihood_accepts_inputs
 from pyrox_gp._sparse import SparseGPPrior
 
 
@@ -46,17 +46,31 @@ def _ell_numerical(
     f_loc: Float[Array, " N"],
     f_var: Float[Array, " N"],
     integrator: GaussxIntegrator,
+    X: Float[Array, "N D"] | None = None,
 ) -> Float[Array, ""]:
     r"""Per-point numerical ELL for non-conjugate likelihoods.
 
     Integrates $\mathbb{E}_{q(f_n)}[\log p(y_n \mid f_n)]$
     for each data point via the gaussx integrator, then sums.
+
+    ``X`` is consumed only by likelihoods whose parameters depend on the
+    input (see `pyrox_gp.WarpedGaussianLikelihood` with a conditional
+    warp); scalar observation models ignore it. When ``None`` it is
+    broadcast rather than batched, so the unconditional path is
+    unchanged.
+
+    A `Likelihood` written against the pre-gh-204 ``log_prob(f, y)``
+    signature is never handed the third argument -- it could not consume
+    it, and passing it would raise ``TypeError`` at the first quadrature
+    evaluation.
     """
+    pass_x = X is not None and likelihood_accepts_inputs(lik)
 
     def _ell_one(
         mu_n: Float[Array, ""],
         var_n: Float[Array, ""],
         y_n: Float[Array, ""],
+        X_n: Float[Array, " D"] | None,
     ) -> Float[Array, ""]:
         state = GaussianState(
             mean=mu_n[None],
@@ -65,12 +79,16 @@ def _ell_numerical(
             ),
         )
         return log_likelihood_expectation(
-            lambda f: lik.log_prob(f, y_n[None]),
+            (lambda f: lik.log_prob(f, y_n[None], X_n))
+            if pass_x
+            else (lambda f: lik.log_prob(f, y_n[None])),
             state,
             integrator,
         )
 
-    return jax.vmap(_ell_one)(f_loc, f_var, y).sum()
+    if X is None:
+        return jax.vmap(_ell_one, in_axes=(0, 0, 0, None))(f_loc, f_var, y, None).sum()
+    return jax.vmap(_ell_one)(f_loc, f_var, y, X).sum()
 
 
 def svgp_elbo(
@@ -149,7 +167,7 @@ def svgp_elbo(
             "(e.g. gaussx.GaussHermiteIntegrator). "
             "Pass integrator=GaussHermiteIntegrator(order=20)."
         )
-    ell = _ell_numerical(likelihood, y, f_loc, f_var, integrator)
+    ell = _ell_numerical(likelihood, y, f_loc, f_var, integrator, X)
     return ell - kl
 
 

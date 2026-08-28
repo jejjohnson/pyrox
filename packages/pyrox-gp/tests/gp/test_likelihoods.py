@@ -11,7 +11,15 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpyro.distributions as nd
-from pyrox_gp import DistLikelihood, GaussianLikelihood
+from pyrox_gp import (
+    BernoulliLikelihood,
+    DistLikelihood,
+    GaussianLikelihood,
+    HeteroscedasticGaussianLikelihood,
+    PoissonLikelihood,
+    SoftmaxLikelihood,
+    StudentTLikelihood,
+)
 from pyrox_gp._protocols import Likelihood
 
 
@@ -96,7 +104,9 @@ class _WarpedNormalLikelihood(Likelihood):
 
     warp: _Warp
 
-    def log_prob(self, f: jax.Array, y: jax.Array) -> jax.Array:
+    def log_prob(
+        self, f: jax.Array, y: jax.Array, X: jax.Array | None = None
+    ) -> jax.Array:
         return nd.Normal(self.warp(f), 0.5).log_prob(y).sum()
 
 
@@ -127,3 +137,45 @@ def test_module_field_link_parameters_receive_gradients():
     leaves = jax.tree_util.tree_leaves(eqx.filter(grad, eqx.is_inexact_array))
     assert len(leaves) > 0
     assert all(jnp.all(jnp.isfinite(leaf)) for leaf in leaves)
+
+
+# --- optional input conditioning ------------------------------------------
+
+
+def test_all_likelihoods_accept_and_ignore_optional_x():
+    """The ``Likelihood`` protocol carries an optional ``X`` for
+    input-dependent observation models (see ``WarpedGaussianLikelihood``
+    with a conditional warp). Every likelihood whose parameters do not
+    depend on the input must accept ``X`` and return the same value.
+    """
+    X = jnp.asarray([[0.1, -0.4], [0.2, 0.9]])
+
+    f = jnp.asarray([0.3, -0.2])
+    y = jnp.asarray([1.0, 0.0])
+    scalar_liks = [
+        GaussianLikelihood(noise_var=0.1),
+        DistLikelihood(lambda f_: nd.Normal(f_, 1.0)),
+        BernoulliLikelihood(),
+        PoissonLikelihood(),
+        StudentTLikelihood(df=3.0, scale=1.0),
+    ]
+
+    f_multi = jnp.asarray([[0.3, -0.2, 0.1], [0.5, 0.0, -0.7]])
+    multi_liks = [
+        (SoftmaxLikelihood(num_classes=3), f_multi, jnp.asarray([0, 2])),
+        (
+            HeteroscedasticGaussianLikelihood(),
+            f_multi[:, :2],
+            jnp.asarray([1.0, 0.0]),
+        ),
+    ]
+
+    for lik in scalar_liks:
+        base = lik.log_prob(f, y)
+        assert jnp.allclose(lik.log_prob(f, y, None), base)
+        assert jnp.allclose(lik.log_prob(f, y, X), base)
+
+    for lik, f_, y_ in multi_liks:
+        base = lik.log_prob(f_, y_)
+        assert jnp.allclose(lik.log_prob(f_, y_, None), base)
+        assert jnp.allclose(lik.log_prob(f_, y_, X), base)

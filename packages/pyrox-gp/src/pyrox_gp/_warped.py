@@ -30,30 +30,57 @@ from jaxtyping import Array, Float
 from pyrox_gp._protocols import Likelihood
 
 
-def _apply_warp(warp: AbstractBijection, f: Float[Array, " ..."]) -> Array:
-    """Apply a scalar bijection elementwise, preserving shape.
+def _apply_warp(
+    warp: AbstractBijection,
+    f: Float[Array, " ..."],
+    X: Float[Array, " ..."] | None = None,
+) -> Array:
+    """Apply a scalar bijection elementwise, preserving the shape of ``f``.
 
     Shape-agnostic on purpose: `pyrox_gp.svgp_elbo` integrates
     per point and calls ``log_prob`` with ``f`` of shape ``(1,)``, while the
     predictive path and the advanced inference strategies pass full ``(N,)``
     arrays.
+
+    For conditional warps, ``X`` is broadcast to ``f.shape + cond_shape``
+    before flattening, so a per-point ``(N, D)`` works against any
+    leading batch: `svgp_elbo` integrates per point, so ``f`` is ``(1,)``
+    and ``X`` that point's ``(D,)`` input; the predictive path passes
+    ``(N,)`` and ``(N, D)``; and vectorized latent samples of shape
+    ``(S, N)`` tile each ``X[n]`` across the ``S`` axis rather than
+    requiring the caller to materialize ``(S, N, D)``.
     """
-    if warp.cond_shape is not None:
-        raise ValueError(
-            "Conditional warps are not supported here: this likelihood never "
-            "supplies a condition, so `transform` would fail at training and "
-            "prediction time. Use an unconditional bijection."
-        )
     if warp.shape == ():
-        fn = warp.transform
+        fn = lambda v, c: warp.transform(v, c)
     elif warp.shape == (1,):
-        fn = lambda v: warp.transform(v[None])[0]
+        fn = lambda v, c: warp.transform(v[None], c)[0]
     else:
         raise ValueError(
             f"Warp event shape must be () or (1,); got {warp.shape}. "
             "A transformed GP warps each scalar function value independently."
         )
-    return jnp.reshape(jax.vmap(fn)(jnp.reshape(f, (-1,))), jnp.shape(f))
+
+    flat = jnp.reshape(f, (-1,))
+    if warp.cond_shape is None:
+        out = jax.vmap(lambda v: fn(v, None))(flat)
+    else:
+        if X is None:
+            raise ValueError(
+                "A conditional warp (cond_shape is not None) needs the "
+                "inputs it is conditioned on, but none were supplied. "
+                "`svgp_elbo` threads X through automatically; the CVI / "
+                "natural-gradient, sparse-Markov and multi-output ELL "
+                "paths do not, so use `svgp_elbo` (or plain MAP/VI) with "
+                "a conditional warp, and an unconditional warp elsewhere."
+            )
+        # Broadcast to f's shape *then* flatten, so the condition rows
+        # line up with `flat` row-major under any leading batch axes.
+        cond = jnp.reshape(
+            jnp.broadcast_to(X, (*jnp.shape(f), *warp.cond_shape)),
+            (-1, *warp.cond_shape),
+        )
+        out = jax.vmap(fn)(flat, cond)
+    return jnp.reshape(out, jnp.shape(f))
 
 
 class WarpedGaussianLikelihood(Likelihood):
@@ -104,9 +131,17 @@ class WarpedGaussianLikelihood(Likelihood):
         self,
         f: Float[Array, " ..."],
         y: Float[Array, " ..."],
+        X: Float[Array, " ..."] | None = None,
     ) -> Float[Array, ""]:
-        r"""Sum of per-point Gaussian log-densities about $G(f)$."""
-        g = _apply_warp(self.warp, f)
+        r"""Sum of per-point Gaussian log-densities about $G(f)$.
+
+        ``X`` is required when the warp is conditional (``cond_shape``
+        set) and ignored otherwise. Note the cost: the expected
+        log-likelihood evaluates the warp at every quadrature node, so a
+        conditional warp pays ``order`` conditioner forward passes per
+        data point.
+        """
+        g = _apply_warp(self.warp, f, X)
         return nd.Normal(g, jnp.sqrt(self.noise_var)).log_prob(y).sum()
 
 
@@ -114,6 +149,7 @@ def warped_predictive_moments(
     lik: WarpedGaussianLikelihood,
     f_loc: Float[Array, " N"],
     f_var: Float[Array, " N"],
+    X: Float[Array, "N D"] | None = None,
     *,
     order: int = 32,
 ) -> tuple[Float[Array, " N"], Float[Array, " N"]]:
@@ -132,6 +168,9 @@ def warped_predictive_moments(
         lik: The warped likelihood.
         f_loc: Posterior means of the base GP, shape ``(N,)``.
         f_var: Posterior marginal variances of the base GP, shape ``(N,)``.
+        X: Inputs of shape ``(N, D)``; required when the warp is
+            conditional, ignored otherwise. Broadcast over the quadrature
+            nodes.
         order: Gauss-Hermite nodes; at least 2, since one node carries no
             spread. Values above ~256 are numerically unreliable
             (``hermegauss`` overflows to ``NaN`` by order 512).
@@ -151,7 +190,8 @@ def warped_predictive_moments(
     x = jnp.asarray(x)
     w = jnp.asarray(w) / np.sqrt(2.0 * np.pi)
     fs = f_loc[None, :] + jnp.sqrt(f_var)[None, :] * x[:, None]
-    g = _apply_warp(lik.warp, fs)
+    # _apply_warp broadcasts the (N, D) inputs across the node axis.
+    g = _apply_warp(lik.warp, fs, X)
     m1 = jnp.sum(w[:, None] * g, axis=0)
     # Centered second moment. Subtracting m1**2 from the raw second moment
     # cancels catastrophically once G's output carries a large offset
