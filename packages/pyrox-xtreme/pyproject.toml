@@ -71,7 +71,7 @@ docs = [
     # pygments 2.20.0 dropped the None -> '' coercion for HtmlFormatter(filename=...),
     # but pymdownx.highlight 10.21.x still passes the untitled-code-block title
     # through as None. Pin until a fixed pymdown-extensions release ships (#38).
-    "pygments>=2.19,<2.20",
+    "pygments>=2.19,<2.22",
     # Latent-ODE notebook only: diffrax for the ODE solver, interpax for the
     # observation-path interpolation, optax for training. Not used elsewhere
     # in the package, so they live in the docs group rather than main deps.
