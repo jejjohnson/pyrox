@@ -53,7 +53,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Restore JAX compilation cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .jax-cache
           key: jax-extended-${{ matrix.python-version }}-${{ hashFiles('uv.lock') }}-${{ github.sha }}
