@@ -23,7 +23,7 @@ dependencies = [
     # numpyro >= 0.21 restored support for the jax internals that moved in
     # jax 0.7; keep the ceiling below the next major (0.11) as a guard rail.
     "jax>=0.4,<0.12",
-    "jaxlib>=0.4,<0.11",
+    "jaxlib>=0.4,<0.12",
     "numpyro>=0.21",
     "xarray>=2024.0",
     "numpy>=1.26",
