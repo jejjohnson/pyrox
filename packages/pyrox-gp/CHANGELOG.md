@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.4...pyrox-gp-v0.1.5) (2026-09-23)
+
+
+### Features
+
+* **gp:** structured Kronecker-exact multi-output GP + delegate cavity/Newton sites to gaussx ([#233](https://github.com/jejjohnson/pyrox/issues/233)) ([c831aa8](https://github.com/jejjohnson/pyrox/commit/c831aa871eed293f95ba070bd6f408a277eef0bc))
+
 ## [0.1.4](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.3...pyrox-gp-v0.1.4) (2026-08-28)
 
 
