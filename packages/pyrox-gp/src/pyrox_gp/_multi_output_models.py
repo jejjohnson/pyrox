@@ -3,12 +3,13 @@
 The model surface on top of the multi-output kernels in
 `pyrox_gp._multi_output`. Two workflows:
 
-* **Exact (dense)** — `MultiOutputGPPrior` /
+* **Exact** — `MultiOutputGPPrior` /
   `MultiOutputConditionedGP` mirror the single-output
   `pyrox_gp.GPPrior` / `pyrox_gp.ConditionedGP` pair for
   vector-valued observations ``Y`` of shape ``(N, P)`` under a Gaussian
   likelihood with scalar or per-output noise. `mo_gp_factor` is
-  the collapsed NumPyro hook.
+  the collapsed NumPyro hook. Single-Kronecker Grams (ICM, one-latent
+  LMC) stay structured end-to-end — see `MultiOutputGPPrior`.
 * **Sparse variational (inducing inputs)** —
   `MultiOutputSparseGPPrior` assembles the SVGP blocks
   (block-diagonal ``K_uu`` over the ``Q`` latent processes, the mixed
@@ -53,8 +54,10 @@ from gaussx import (
     AbstractSolverStrategy,
     BlockDiag,
     DenseSolver,
+    Kronecker,
     MultivariateNormal,
     PredictionCache,
+    SumOperator,
     build_prediction_cache,
     log_marginal_likelihood,
     predict_mean,
@@ -147,6 +150,33 @@ def _flat_noise(
     )
 
 
+def _noise_shift_operator(
+    noise_var: Float[Array, ""] | Float[Array, " P"],
+    num_points: int,
+    num_outputs: int,
+    dtype: jnp.dtype,
+) -> lx.AbstractLinearOperator:
+    """Scalar or per-output noise as an operator on the ``(p n)`` layout.
+
+    A scalar becomes ``noise * I``; a ``(P,)`` vector becomes
+    ``diag(noise) ⊗ I_N``, the same diagonal `_flat_noise` builds — both
+    are shapes gaussx's sum-of-Kroneckers reduction recognizes.
+    """
+    noise = jnp.asarray(noise_var)
+    if noise.ndim == 0:
+        identity = lx.IdentityLinearOperator(
+            jax.ShapeDtypeStruct((num_outputs * num_points,), dtype)
+        )
+        return noise * identity
+    if noise.shape == (num_outputs,):
+        identity = lx.IdentityLinearOperator(jax.ShapeDtypeStruct((num_points,), dtype))
+        return Kronecker(lx.DiagonalLinearOperator(noise), identity)
+    raise ValueError(
+        f"noise_var must be a scalar or have shape ({num_outputs},) for "
+        f"per-output noise; got shape {noise.shape}."
+    )
+
+
 def _psd_operator(K: Float[Array, "N N"]) -> lx.AbstractLinearOperator:
     """Wrap a Gram matrix as a PSD ``lineax`` operator."""
     return lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)
@@ -163,9 +193,18 @@ class MultiOutputGPPrior(eqx.Module):
 
     The prior covariance is the kernel's full ``(P*N, P*N)`` Gram over
     the isotopic observation set — every output observed at every input.
-    The dense workflow accepts all three kernel families; structured
-    (Kronecker-exact / projected) fast paths can layer on later without
-    changing this surface.
+    All three kernel families are accepted. When the Gram is a single
+    Kronecker product ``B ⊗ K`` — any `pyrox_gp.ICMKernel`, or an
+    `pyrox_gp.LMCKernel` with one latent — it is never materialized:
+    the noisy covariance ``B ⊗ K + Σ`` (scalar or per-output ``Σ``)
+    reaches gaussx as a two-term sum of Kronecker products, which
+    ``gaussx.solve`` / ``gaussx.logdet`` diagonalize per factor. Conditioning
+    and the marginal likelihood then cost ``O(P^3 + N^3)`` time and
+    ``O(P^2 + N^2 + PN)`` memory rather than ``O(P^3 N^3)`` and
+    ``O(P^2 N^2)`` — the Kronecker-exact GP of Saatçi (2011). Prediction
+    adds one ``O(PN (P + N))`` solve per test output. LMC with ``Q >= 2``
+    latents and `pyrox_gp.OILMMKernel` keep the dense ``(P*N, P*N)``
+    path (use `OILMMGPPrior` for the projected fast path).
 
     Attributes:
         kernel: A multi-output kernel exposing ``full_covariance``,
@@ -200,15 +239,40 @@ class MultiOutputGPPrior(eqx.Module):
         return _flatten_outputs(self.mean(X))
 
     def _prior_operator(self) -> lx.AbstractLinearOperator:
-        K = self.kernel.full_covariance(self.X)
-        K = K.at[jnp.diag_indices_from(K)].add(self.jitter)
-        return _psd_operator(K)
+        return self._train_operator(jnp.zeros(()))
 
     def _noisy_operator(
         self, noise_var: Float[Array, ""] | Float[Array, " P"]
     ) -> lx.AbstractLinearOperator:
-        K = self.kernel.full_covariance(self.X)
-        noise = _flat_noise(noise_var, self.X.shape[0], self.num_outputs)
+        return self._train_operator(noise_var)
+
+    def _train_operator(
+        self, noise_var: Float[Array, ""] | Float[Array, " P"]
+    ) -> lx.AbstractLinearOperator:
+        """``K_ff + (jitter + noise) I``, structured whenever gaussx can exploit it.
+
+        A single-Kronecker Gram ``B ⊗ K`` (any `ICMKernel`, or an
+        `LMCKernel` with one latent) stays lazy: with a scalar or
+        ``diag(noise) ⊗ I_N`` shift it is a two-term sum of Kronecker
+        products, which ``gaussx.solve`` / ``gaussx.logdet`` diagonalize
+        per factor at ``O(P^3 + N^3)`` instead of ``O(P^3 N^3)``. Every
+        other Gram — `LMCKernel` with ``Q >= 2`` latents (``Q + 1``
+        Kronecker terms, no closed form) and `OILMMKernel` — is
+        materialized, since gaussx would densify it anyway and the PSD tag
+        keeps its fallback on Cholesky.
+        """
+        num_points = self.X.shape[0]
+        K_op = self.kernel.full_covariance_operator(self.X)
+        if isinstance(K_op, Kronecker):
+            shift = _noise_shift_operator(
+                self.jitter + jnp.asarray(noise_var),
+                num_points,
+                self.num_outputs,
+                K_op.in_structure().dtype,
+            )
+            return SumOperator(K_op, shift, tags=lx.positive_semidefinite_tag)
+        K = K_op.as_matrix()
+        noise = _flat_noise(noise_var, num_points, self.num_outputs)
         K = K.at[jnp.diag_indices_from(K)].add(self.jitter + noise)
         return _psd_operator(K)
 

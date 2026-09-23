@@ -666,8 +666,8 @@ dependencies = [
 
 [[package]]
 name = "gaussx"
-version = "0.0.24"
-source = { git = "https://github.com/jejjohnson/gaussx.git?rev=73d6d57c302aa263784238a9bb5a5cd25dda642d#73d6d57c302aa263784238a9bb5a5cd25dda642d" }
+version = "0.0.26"
+source = { git = "https://github.com/jejjohnson/gaussx.git?rev=2054ce0a77f4d2096150f38f4482f4a5c8dbf713#2054ce0a77f4d2096150f38f4482f4a5c8dbf713" }
 dependencies = [
     { name = "einx" },
     { name = "equinox" },
@@ -2028,7 +2028,7 @@ provides-extras = ["optax", "colab"]
 
 [[package]]
 name = "pyrox-gp"
-version = "0.1.2"
+version = "0.1.4"
 source = { editable = "packages/pyrox-gp" }
 dependencies = [
     { name = "einx" },
@@ -2057,7 +2057,7 @@ requires-dist = [
     { name = "einx", specifier = ">=0.4.3" },
     { name = "flowjax", specifier = ">=0.9" },
     { name = "gauss-flows", marker = "extra == 'flows'", git = "https://github.com/jejjohnson/gauss_flows.git?rev=bdb23f076ebaaf1ba042aa52ea593487cef3204e" },
-    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=73d6d57c302aa263784238a9bb5a5cd25dda642d" },
+    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=2054ce0a77f4d2096150f38f4482f4a5c8dbf713" },
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.5" },
     { name = "lineax", specifier = ">=0.1.1" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
@@ -2128,7 +2128,7 @@ docs = [
     { name = "mkdocs-jupyter", specifier = ">=0.26.3" },
     { name = "mkdocs-material", specifier = ">=9.7.6" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0.4" },
-    { name = "pygments", specifier = ">=2.20.0,<2.21" },
+    { name = "pygments", specifier = ">=2.20.0,<2.22" },
     { name = "watermark", specifier = ">=2.6.0" },
 ]
 examples = [
