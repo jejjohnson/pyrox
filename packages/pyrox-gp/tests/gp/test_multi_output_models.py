@@ -7,15 +7,21 @@ Covers :class:`MultiOutputGPPrior` / :class:`MultiOutputConditionedGP` /
 
 from __future__ import annotations
 
+import warnings
+
+import jax
 import jax.numpy as jnp
 import jax.random as jr
+import lineax as lx
 import numpyro.distributions as dist
 import pytest
 from gaussx import (
+    DenseFallbackWarning,
     GaussHermiteIntegrator,
     is_block_diagonal,
     log_marginal_likelihood,
 )
+from gaussx._operators._sum_kronecker import _is_eigen_reducible
 from numpyro import handlers
 from pyrox_gp import (
     RBF,
@@ -169,6 +175,119 @@ def test_mo_icm_condition_matches_dense_reference():
         (icm.cross_covariance(X, X) @ jnp.linalg.solve(noisy, _vec(Y))).reshape(2, -1).T
     )
     assert jnp.allclose(mean, mean_ref, atol=1e-4)
+
+
+def _single_kronecker_kernels():
+    rbf = RBF(init_variance=1.1, init_lengthscale=0.7)
+    return {
+        "icm": ICMKernel(kernel=rbf, mixing=jnp.array([[1.0], [0.5], [-0.3]])),
+        "icm_kappa": ICMKernel(
+            kernel=rbf,
+            mixing=jnp.array([[1.0, 0.2], [0.5, -0.3], [0.1, 0.4]]),
+            kappa=jnp.array([0.1, 0.2, 0.05]),
+        ),
+        "lmc_q1": _lmc(Q=1),
+    }
+
+
+def _dense_noisy(kernel, X, jitter, noise):
+    K = kernel.full_covariance(X)
+    flat = jnp.repeat(jnp.broadcast_to(jnp.asarray(noise), (3,)), X.shape[0])
+    return K + jnp.diag(jitter + flat)
+
+
+@pytest.mark.parametrize("name", ["icm", "icm_kappa", "lmc_q1"])
+@pytest.mark.parametrize("noise", [0.05, jnp.array([0.05, 0.1, 0.2])])
+def test_mo_single_kronecker_structured_path_matches_dense(name, noise):
+    """ICM / one-latent LMC stay lazy and agree with the dense construction."""
+    X, Y = _data()
+    kernel = _single_kronecker_kernels()[name]
+    jitter = 1e-5
+    prior = MultiOutputGPPrior(kernel=kernel, X=X, jitter=jitter)
+
+    operator = prior._noisy_operator(noise)
+    assert not isinstance(operator, lx.MatrixLinearOperator)
+    assert _is_eigen_reducible(operator)
+    assert _is_eigen_reducible(prior._prior_operator())
+
+    noisy = _dense_noisy(kernel, X, jitter, noise)
+    # Only the operator is structured — every consumer must agree with dense.
+    assert jnp.allclose(operator.as_matrix(), noisy, atol=1e-6)
+
+    ref_mll = dist.MultivariateNormal(jnp.zeros(24), noisy).log_prob(_vec(Y))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DenseFallbackWarning)
+        mll = log_marginal_likelihood(jnp.zeros(24), operator, _vec(Y))
+        cond = prior.condition(Y, noise)
+        mean, var = cond.predict(X[:5])
+        prior.sample(jr.PRNGKey(0))
+        prior.log_prob(Y)
+    assert jnp.allclose(mll, ref_mll, rtol=1e-4)
+
+    X_star = X[:5]
+    K_cross = kernel.cross_covariance(X_star, X)
+    mean_ref = (K_cross @ jnp.linalg.solve(noisy, _vec(Y))).reshape(3, -1).T
+    var_ref = (
+        (
+            _vec(kernel.diag(X_star))
+            - jnp.sum(K_cross * jnp.linalg.solve(noisy, K_cross.T).T, axis=1)
+        )
+        .reshape(3, -1)
+        .T
+    )
+    assert jnp.allclose(mean, mean_ref, atol=1e-4)
+    assert jnp.allclose(var, var_ref, atol=1e-4)
+
+
+@pytest.mark.parametrize("noise", [0.05, jnp.array([0.05, 0.1, 0.2])])
+def test_mo_structured_mll_gradient_matches_dense(noise):
+    """Gradients through the structured solve match dense autodiff.
+
+    A rank-one ICM ``B = w wᵀ`` has repeated zero eigenvalues and the RBF
+    Gram a clustered tail — the degenerate spectra on which differentiating
+    through ``eigh`` goes wrong (gaussx must use an implicit JVP here).
+    """
+    X, Y = _data()
+    y = _vec(Y)
+
+    def mll(mixing, noise, structured):
+        kernel = ICMKernel(kernel=RBF(init_lengthscale=0.7), mixing=mixing)
+        prior = MultiOutputGPPrior(kernel=kernel, X=X, jitter=1e-5)
+        operator = prior._noisy_operator(noise)
+        if not structured:
+            operator = lx.MatrixLinearOperator(
+                operator.as_matrix(), lx.positive_semidefinite_tag
+            )
+        return log_marginal_likelihood(jnp.zeros(24), operator, y)
+
+    mixing = jnp.array([[1.0], [0.5], [-0.3]])
+    grad = jax.grad(mll, argnums=(0, 1))
+    structured = grad(mixing, noise, True)
+    reference = grad(mixing, noise, False)
+    for got, want in zip(structured, reference, strict=True):
+        assert jnp.allclose(got, want, rtol=1e-3, atol=1e-3)
+
+
+@pytest.mark.parametrize(
+    "kernel",
+    [
+        _lmc(Q=2),
+        OILMMKernel(
+            kernels=(
+                RBF(pyrox_name="RBF_q0"),
+                RBF(pyrox_name="RBF_q1", init_lengthscale=0.5),
+            ),
+            mixing=jnp.eye(2),
+        ),
+    ],
+    ids=["lmc_q2", "oilmm"],
+)
+def test_mo_multi_term_grams_keep_dense_operator(kernel):
+    """No closed form for Q >= 2 Kronecker terms: keep the PSD dense path."""
+    X, _ = _data(P=kernel.num_outputs)
+    operator = MultiOutputGPPrior(kernel=kernel, X=X)._noisy_operator(0.1)
+    assert isinstance(operator, lx.MatrixLinearOperator)
+    assert lx.is_positive_semidefinite(operator)
 
 
 def test_mo_oilmm_kernel_accepted_by_exact_model():

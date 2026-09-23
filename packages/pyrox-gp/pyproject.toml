@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "pyrox",
-    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@73d6d57c302aa263784238a9bb5a5cd25dda642d",
+    "gaussx>=0.0.27",
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.5",
     "lineax>=0.1.1",
     "einx>=0.4.3",
@@ -48,7 +48,7 @@ colab = [
 # (`latent_total_correlation`, warped model surfaces, and the
 # `NormalizingKalmanPrior` observation warp). Pulls scikit-learn /
 # diffrax / matfree transitively, hence an extra rather than a hard
-# dependency. Pinned by commit, matching gaussx / geonnax.
+# dependency. Pinned by commit, matching geonnax.
 flows = [
     "gauss-flows @ git+https://github.com/jejjohnson/gauss_flows.git@bdb23f076ebaaf1ba042aa52ea593487cef3204e",
 ]
@@ -57,15 +57,16 @@ flows = [
 Repository = "https://github.com/jejjohnson/pyrox"
 
 [tool.uv.sources]
-# gaussx is not yet on PyPI; resolve from GitHub until the first release.
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", rev = "73d6d57c302aa263784238a9bb5a5cd25dda642d" }
+# gaussx is not yet on PyPI; resolve the release tag from GitHub. The
+# `>=` floor in `dependencies` is what a PyPI release will satisfy later.
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.0.27" }
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.metadata]
-# gaussx/geonnax are declared via PEP 508 direct URLs until they ship to PyPI.
+# geonnax is declared via a PEP 508 direct URL until it ships to PyPI.
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
