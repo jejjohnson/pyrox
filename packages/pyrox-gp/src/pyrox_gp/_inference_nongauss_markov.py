@@ -27,7 +27,12 @@ import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from gaussx import damped_natural_update, ep_tilted_moments
+from gaussx import (
+    cavity_distribution,
+    damped_natural_update,
+    ep_tilted_moments,
+    newton_update,
+)
 from jaxtyping import Array, Float
 
 from pyrox_gp._inference_nongauss import (
@@ -266,8 +271,7 @@ class LaplaceMarkovInference(eqx.Module):
         n_iter = 0
         for it in range(self.max_iter):
             g, h = _per_point_grad_hess(log_prob_per_point, f, y)
-            Lam = jnp.maximum(-h, self.precision_floor)
-            new_nat1 = g + Lam * f
+            new_nat1, Lam = newton_update(f, g, h, precision_floor=self.precision_floor)
             nat1, nat2 = damped_natural_update(
                 nat1, nat2, new_nat1, Lam, lr=self.damping
             )
@@ -283,8 +287,7 @@ class LaplaceMarkovInference(eqx.Module):
 
         # Final site naturals at convergence.
         g, h = _per_point_grad_hess(log_prob_per_point, f, y)
-        Lam = jnp.maximum(-h, self.precision_floor)
-        nat1 = g + Lam * f
+        nat1, Lam = newton_update(f, g, h, precision_floor=self.precision_floor)
         nat2 = jnp.maximum(Lam, self.precision_floor)
         q_mean, q_var, log_marg = _markov_smoothed_posterior(prior, nat1, nat2)
         # Add the data-fit term ``log p(y | hat f)`` and subtract the
@@ -412,9 +415,10 @@ class PosteriorLinearizationMarkov(eqx.Module):
         converged = False
         n_iter = 0
         for it in range(self.max_iter):
-            cav_prec = jnp.maximum(jnp.reciprocal(q_var) - nat2, self.precision_floor)
-            cav_var = jnp.reciprocal(cav_prec)
-            cav_mean = cav_var * (q_mean / q_var - nat1)
+            cav_mean, cav_var = cavity_distribution(
+                q_mean, q_var, nat1, nat2, precision_floor=self.precision_floor
+            )
+            assert isinstance(cav_var, jax.Array)  # diagonal path in, diagonal out
 
             std = jnp.sqrt(cav_var)
             # Gauss-Hermite grid fₙ + σₙ ξ_q over (Q nodes, N sites).
@@ -427,8 +431,9 @@ class PosteriorLinearizationMarkov(eqx.Module):
             g_avg = einx.dot("q, q n -> n", w_nodes, g_grid)
             h_avg = einx.dot("q, q n -> n", w_nodes, h_grid)
 
-            new_prec = jnp.maximum(-h_avg, self.precision_floor)
-            new_nat1 = g_avg + new_prec * cav_mean
+            new_nat1, new_prec = newton_update(
+                cav_mean, g_avg, h_avg, precision_floor=self.precision_floor
+            )
             nat1, nat2 = damped_natural_update(
                 nat1, nat2, new_nat1, new_prec, lr=self.damping
             )
@@ -521,13 +526,14 @@ class ExpectationPropagationMarkov(eqx.Module):
         converged = False
         n_iter = 0
         for it in range(self.max_iter):
-            cav_prec = jnp.maximum(jnp.reciprocal(q_var) - nat2, self.precision_floor)
-            cav_var = jnp.reciprocal(cav_prec)
-            cav_mean = cav_var * (q_mean / q_var - nat1)
+            cav_mean, cav_var = cavity_distribution(
+                q_mean, q_var, nat1, nat2, precision_floor=self.precision_floor
+            )
+            assert isinstance(cav_var, jax.Array)  # diagonal path in, diagonal out
 
             tilted_mean, tilted_var = jax.vmap(_per_site_tilted)(cav_mean, cav_var, y)
 
-            new_prec = jnp.reciprocal(tilted_var) - cav_prec
+            new_prec = jnp.reciprocal(tilted_var) - jnp.reciprocal(cav_var)
             new_prec = jnp.maximum(new_prec, self.precision_floor)
             new_nat1 = tilted_mean / tilted_var - cav_mean / cav_var
             nat1, nat2 = damped_natural_update(

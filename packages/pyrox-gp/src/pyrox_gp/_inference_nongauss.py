@@ -49,9 +49,11 @@ from gaussx import (
     AbstractIntegrator,
     GaussHermiteIntegrator,
     GaussianState,
+    cavity_distribution,
     cholesky_logdet,
     damped_natural_update,
     ep_tilted_moments,
+    newton_update,
     safe_cholesky,
     symmetrize,
 )
@@ -408,8 +410,7 @@ class LaplaceInference(eqx.Module):
         for it in range(self.max_iter):
             g, h = _per_point_grad_hess(log_prob_per_point, f, y)
             # Site precision Λ = -h (positive for log-concave likelihoods).
-            Lam = jnp.maximum(-h, self.precision_floor)
-            nat1 = g + Lam * f
+            nat1, Lam = newton_update(f, g, h, precision_floor=self.precision_floor)
             f_newton, _ = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
             f_new = (1.0 - self.damping) * f + self.damping * f_newton
             delta = jnp.max(jnp.abs(f_new - f))
@@ -421,8 +422,7 @@ class LaplaceInference(eqx.Module):
 
         # Final site naturals at convergence.
         g, h = _per_point_grad_hess(log_prob_per_point, f, y)
-        Lam = jnp.maximum(-h, self.precision_floor)
-        nat1 = g + Lam * f
+        nat1, Lam = newton_update(f, g, h, precision_floor=self.precision_floor)
         q_mean, q_var = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
 
         log_marg = _laplace_log_marginal(log_prob_per_point, f, y, prior_mean, K, Lam)
@@ -492,8 +492,7 @@ class GaussNewtonInference(eqx.Module):
             # PSD curvature: clip the negative Hessian to a strictly
             # positive floor so the Newton step is always well-defined
             # even when ``-h`` goes negative (StudentT tails).
-            Lam = jnp.maximum(-h, self.precision_floor)
-            nat1 = g + Lam * f
+            nat1, Lam = newton_update(f, g, h, precision_floor=self.precision_floor)
             f_newton, _ = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
             f_new = (1.0 - self.damping) * f + self.damping * f_newton
             delta = jnp.max(jnp.abs(f_new - f))
@@ -504,8 +503,7 @@ class GaussNewtonInference(eqx.Module):
                 break
 
         g, h = _per_point_grad_hess(log_prob_per_point, f, y)
-        Lam = jnp.maximum(-h, self.precision_floor)
-        nat1 = g + Lam * f
+        nat1, Lam = newton_update(f, g, h, precision_floor=self.precision_floor)
         q_mean, q_var = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
 
         log_marg = _laplace_log_marginal(log_prob_per_point, f, y, prior_mean, K, Lam)
@@ -587,9 +585,10 @@ class PosteriorLinearization(eqx.Module):
         n_iter = 0
         for it in range(self.max_iter):
             # Cavity for diagonal sites: q_n / site_n.
-            cav_prec = jnp.maximum(jnp.reciprocal(q_var) - nat2, self.precision_floor)
-            cav_var = jnp.reciprocal(cav_prec)
-            cav_mean = cav_var * (q_mean / q_var - nat1)
+            cav_mean, cav_var = cavity_distribution(
+                q_mean, q_var, nat1, nat2, precision_floor=self.precision_floor
+            )
+            assert isinstance(cav_var, jax.Array)  # diagonal path in, diagonal out
 
             # Statistical-linearization moments under the cavity. Each
             # site gets its own 1-D ``GaussianState`` and the integrator
@@ -603,9 +602,9 @@ class PosteriorLinearization(eqx.Module):
 
             # Site update via BLR (diag): nat1_new = grad - H mu, nat2_new = -H,
             # damped.
-            H = jnp.maximum(-E_hess, self.precision_floor)
-            nat1_target = E_grad + H * cav_mean
-            nat2_target = H
+            nat1_target, nat2_target = newton_update(
+                cav_mean, E_grad, E_hess, precision_floor=self.precision_floor
+            )
             nat1, nat2 = damped_natural_update(
                 nat1, nat2, nat1_target, nat2_target, lr=self.damping
             )
@@ -706,9 +705,10 @@ class ExpectationPropagation(eqx.Module):
         converged = False
         n_iter = 0
         for it in range(self.max_iter):
-            cav_prec = jnp.maximum(jnp.reciprocal(q_var) - nat2, self.precision_floor)
-            cav_var = jnp.reciprocal(cav_prec)
-            cav_mean = cav_var * (q_mean / q_var - nat1)
+            cav_mean, cav_var = cavity_distribution(
+                q_mean, q_var, nat1, nat2, precision_floor=self.precision_floor
+            )
+            assert isinstance(cav_var, jax.Array)  # diagonal path in, diagonal out
 
             # Tilted moments via `gaussx.ep_tilted_moments`. The
             # gaussx API expects a ``log_lik_fn(f)`` with the per-site
@@ -717,7 +717,7 @@ class ExpectationPropagation(eqx.Module):
             tilted_mean, tilted_var = jax.vmap(_per_site_tilted)(cav_mean, cav_var, y)
 
             # New site naturals from matched moments minus the cavity.
-            new_prec = jnp.reciprocal(tilted_var) - cav_prec
+            new_prec = jnp.reciprocal(tilted_var) - jnp.reciprocal(cav_var)
             new_prec = jnp.maximum(new_prec, self.precision_floor)
             new_nat1 = tilted_mean / tilted_var - cav_mean / cav_var
             nat1, nat2 = damped_natural_update(
@@ -823,8 +823,7 @@ class QuasiNewtonInference(eqx.Module):
         # narrows correctly.
         f_opt = jnp.asarray(f)
         g, h = _per_point_grad_hess(log_prob_per_point, f_opt, y)
-        Lam = jnp.maximum(-h, self.precision_floor)
-        nat1 = g + Lam * f_opt
+        nat1, Lam = newton_update(f_opt, g, h, precision_floor=self.precision_floor)
         q_mean, q_var = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
 
         log_marg = _laplace_log_marginal(
