@@ -666,8 +666,8 @@ dependencies = [
 
 [[package]]
 name = "gaussx"
-version = "0.0.26"
-source = { git = "https://github.com/jejjohnson/gaussx.git?rev=77f3382e6a0c72cb63687558e333a58a4c495daa#77f3382e6a0c72cb63687558e333a58a4c495daa" }
+version = "0.0.27"
+source = { git = "https://github.com/jejjohnson/gaussx.git?tag=v0.0.27#7eb15473056875f7ad1766e282622ae8fa79ad68" }
 dependencies = [
     { name = "einx" },
     { name = "equinox" },
@@ -2057,7 +2057,7 @@ requires-dist = [
     { name = "einx", specifier = ">=0.4.3" },
     { name = "flowjax", specifier = ">=0.9" },
     { name = "gauss-flows", marker = "extra == 'flows'", git = "https://github.com/jejjohnson/gauss_flows.git?rev=bdb23f076ebaaf1ba042aa52ea593487cef3204e" },
-    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=77f3382e6a0c72cb63687558e333a58a4c495daa" },
+    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.0.27" },
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.5" },
     { name = "lineax", specifier = ">=0.1.1" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
