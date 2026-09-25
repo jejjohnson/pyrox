@@ -14,6 +14,7 @@ import jax.random as jr
 import numpyro.distributions as dist
 import pytest
 from gaussx import CGSolver, ComposedSolver, DenseLogdet, DenseSolver
+from kernellib import functional as _k
 from numpyro import handlers
 from numpyro.infer import MCMC, NUTS, SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
@@ -25,7 +26,6 @@ from pyrox_gp import (
     gp_factor,
     gp_sample,
 )
-from pyrox_gp._src import kernels as _k
 
 
 # --- Fixtures --------------------------------------------------------------

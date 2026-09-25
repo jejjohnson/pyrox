@@ -15,6 +15,7 @@ import jax.scipy.linalg as jsl
 import numpyro
 import pytest
 from gaussx import SDEParams
+from kernellib.functional import matern_kernel
 from numpyro.infer.util import log_density
 from pyrox_gp import (
     ConditionedMarkovGP,
@@ -25,7 +26,6 @@ from pyrox_gp import (
     markov_gp_factor,
     markov_gp_sample,
 )
-from pyrox_gp._src.kernels import matern_kernel
 
 
 jax.config.update("jax_enable_x64", True)

@@ -12,6 +12,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
+from kernellib import functional as _k
 from numpyro import handlers
 from pyrox_gp import (
     RBF,
@@ -25,7 +26,6 @@ from pyrox_gp import (
     RationalQuadratic,
     White,
 )
-from pyrox_gp._src import kernels as _k
 
 
 X = jnp.array([[0.0], [0.5], [1.0], [1.5]])

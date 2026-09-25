@@ -1,8 +1,9 @@
 """Gaussian process building blocks.
 
-* Pure kernel *functions* in `pyrox_gp._src.kernels` — closed-form
+* Pure kernel *functions* live in `kernellib.functional` — closed-form
   math primitives (RBF, Matern, Periodic, Linear, RationalQuadratic,
-  Polynomial, Cosine, White, Constant).
+  Polynomial, Cosine, White, Constant). ``pyrox_gp._src.kernels``
+  re-exports them with a deprecation warning.
 * `Parameterized` kernel classes that wrap those functions with
   constraints, priors, and guide metadata — re-exported from this
   module.
