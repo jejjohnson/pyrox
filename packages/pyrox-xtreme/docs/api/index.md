@@ -46,10 +46,10 @@ A few patterns hold across the whole package:
 
 ## See also
 
-- [Vision](../design_docs/vision.md) — why xtremax exists and what it
+- [Vision](../vision/) — why xtremax exists and what it
   deliberately is not.
-- [Architecture](../design_docs/architecture.md) — draft roadmap for the
+- [Architecture](../architecture/) — draft roadmap for the
   layered primitives → components → models design; parts are aspirational,
   and this reference reflects what ships today.
-- [Interop](../interop.md) — how xtremax composes with the wider ecosystem
+- [Interop](../interop/) — how xtremax composes with the wider ecosystem
   without depending on it.

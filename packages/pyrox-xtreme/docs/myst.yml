@@ -1,0 +1,158 @@
+# ---------------------------------------------------------------------------
+# mystmd builds the prose half of the documentation: home page, example
+# notebooks, tutorials, design docs, and project pages. The API reference is
+# built separately by MkDocs + mkdocstrings and mounted at `/reference/`. See
+# `docs/README.md`.
+#
+# `references.api` points at a LOCAL server because mystmd only loads
+# intersphinx inventories over http(s) — a filesystem path is rejected and a
+# `file://` URL is silently ignored. `scripts/build_docs.py` serves the freshly
+# built MkDocs `site/` on this exact port, then rewrites the resulting
+# localhost URLs to the deployed `/reference/` path. Keep the port in sync
+# with API_PORT in that script.
+#
+# Notebooks are committed pre-executed and are NOT re-run by the docs build.
+# ---------------------------------------------------------------------------
+version: 1
+
+project:
+  id: xtremax-docs
+  title: xtremax
+  description: >-
+    JAX/NumPyro-native extreme value modeling — EVT distributions, temporal /
+    spatial / spatiotemporal point processes, and xarray-native extremes
+    extraction.
+  github: https://github.com/jejjohnson/xtremax
+  authors:
+    - name: J. Emmanuel Johnson
+  references:
+    api: http://127.0.0.1:8910/
+  # Hover tooltips wherever these appear in the prose.
+  abbreviations:
+    EVT: Extreme value theory
+    GEV: Generalized extreme value (distribution)
+    GEVD: Generalized extreme value distribution
+    GPD: Generalized Pareto distribution
+    POT: Peaks over threshold
+    HPP: Homogeneous Poisson process
+    IPP: Inhomogeneous Poisson process
+    LGCP: Log-Gaussian Cox process
+    ETAS: Epidemic-type aftershock sequence
+    MCMC: Markov chain Monte Carlo
+    NUTS: No-U-Turn sampler
+    SVI: Stochastic variational inference
+    CDS: Copernicus Climate Data Store
+    ODE: Ordinary differential equation
+    SDE: Stochastic differential equation
+  toc:
+    - file: index.md
+    - title: Examples
+      children:
+        - title: Extreme Value Distributions
+          children:
+            - file: notebooks/evt_distributions_overview.ipynb
+            - file: notebooks/evt_gevd_block_maxima.ipynb
+            - file: notebooks/evt_frechet_heavy_tails.ipynb
+            - file: notebooks/evt_weibull_bounded.ipynb
+        - title: Peaks Over Threshold
+          children:
+            - file: notebooks/evt_gpd_pot.ipynb
+            - file: notebooks/evt_quantile_regression_gpd.ipynb
+        - title: Non-stationary EVT
+          children:
+            - file: notebooks/evt_nonstat_parametric.ipynb
+            - file: notebooks/evt_nonstat_splines.ipynb
+            - file: notebooks/evt_nonstat_neural_ode.ipynb
+        - title: "Point Processes: Temporal"
+          children:
+            - file: notebooks/hpp_from_scratch_and_numpyro.ipynb
+            - file: notebooks/ipp_from_scratch_and_numpyro.ipynb
+            - file: notebooks/renewal_from_scratch_and_numpyro.ipynb
+            - file: notebooks/hawkes_from_scratch_and_numpyro.ipynb
+            - file: notebooks/marked_from_scratch_and_numpyro.ipynb
+            - file: notebooks/thinning_from_scratch_and_numpyro.ipynb
+        - title: "Point Processes: Spatial"
+          children:
+            - file: notebooks/hpp_spatial_from_scratch_and_numpyro.ipynb
+            - file: notebooks/ipp_spatial_from_scratch_and_numpyro.ipynb
+            - file: notebooks/marked_spatial_from_scratch_and_numpyro.ipynb
+        - title: "Point Processes: Spatiotemporal"
+          children:
+            - file: notebooks/hpp_spatiotemporal_from_scratch_and_numpyro.ipynb
+            - file: notebooks/ipp_spatiotemporal_from_scratch_and_numpyro.ipynb
+            - file: notebooks/marked_spatiotemporal_from_scratch_and_numpyro.ipynb
+            - file: notebooks/hawkes_spatiotemporal_from_scratch_and_numpyro.ipynb
+        - title: Neural / Advanced
+          children:
+            - file: notebooks/latent_ode_ipp.ipynb
+    - title: Tutorials
+      children:
+        - file: tutorials/spatial_extremes.md
+          children:
+            - title: Data
+              children:
+                - file: tutorials/spatial_extremes/00_data/00_cds_insitu_iberia.ipynb
+            - title: EVT Foundations
+              children:
+                - file: tutorials/spatial_extremes/01_evt_foundations/01_block_maxima.ipynb
+                - file: tutorials/spatial_extremes/01_evt_foundations/02_gev_one_station.ipynb
+                - file: tutorials/spatial_extremes/01_evt_foundations/03_extremal_types.ipynb
+                - file: tutorials/spatial_extremes/01_evt_foundations/03_return_levels.ipynb
+            - title: Pooling & GPs
+              children:
+                - file: tutorials/spatial_extremes/02_pooling/04_many_stations_independent.ipynb
+                - file: tutorials/spatial_extremes/02_pooling/04_many_stations_laplace.ipynb
+                - file: tutorials/spatial_extremes/02_pooling/05_hierarchical_pooling.ipynb
+                - file: tutorials/spatial_extremes/02_pooling/06_gp_primer.ipynb
+            - title: Spatial GEV
+              children:
+                - file: tutorials/spatial_extremes/03_spatial_gev/07_spatial_gp_mu.ipynb
+                - file: tutorials/spatial_extremes/03_spatial_gev/08_spatial_gp_mu_sigma.ipynb
+                - file: tutorials/spatial_extremes/03_spatial_gev/09_spatial_gp_mu_sigma_xi.ipynb
+            - title: Non-stationary
+              children:
+                - file: tutorials/spatial_extremes/04_nonstationary/10_nonstationary_parametric.ipynb
+                - file: tutorials/spatial_extremes/04_nonstationary/11_nonstationary_ode.ipynb
+                - file: tutorials/spatial_extremes/04_nonstationary/12_nonstationary_gp.ipynb
+    - title: Design
+      children:
+        - file: design_docs/design_overview.md
+        - file: design_docs/vision.md
+        - file: design_docs/architecture.md
+        - file: design_docs/boundaries.md
+        - file: design_docs/decisions.md
+        - file: design_docs/api/api_overview.md
+          children:
+            - file: design_docs/api/api_primitives.md
+            - file: design_docs/api/api_components.md
+            - file: design_docs/api/api_models.md
+        - file: design_docs/examples/examples_overview.md
+          children:
+            - file: design_docs/examples/examples_primitives.md
+            - file: design_docs/examples/examples_components.md
+            - file: design_docs/examples/examples_models.md
+            - file: design_docs/examples/examples_integration.md
+    - title: Project
+      children:
+        - file: interop.md
+        - file: contributing.md
+        - file: changelog.md
+
+site:
+  title: xtremax
+  template: book-theme
+  options:
+    logo_text: xtremax
+  # mystmd requires a full URL here (both `/reference/` and `reference/` are
+  # rejected), so the deployed location is hard-coded the way `repo_url` is in
+  # mkdocs.yml.
+  #
+  # Do NOT rewrite this to a root-relative path at build time. The theme
+  # re-renders the nav from this config on hydration and prepends BASE_URL to
+  # any URL starting with `/`, so a rewritten value becomes
+  # `/xtremax/xtremax/reference/` and 404s. An absolute URL is treated as
+  # external and left alone. The cost is that a local preview's nav button
+  # points at the deployed site.
+  nav:
+    - title: API reference
+      url: https://jejjohnson.github.io/xtremax/reference/

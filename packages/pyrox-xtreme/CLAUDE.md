@@ -17,7 +17,9 @@ make format               # Auto-fix: ruff format . && ruff check --fix .
 make lint                 # Lint code: ruff check .
 make typecheck            # Type check: ty check src/xtremax
 make precommit            # Run pre-commit on all files
-make docs-serve           # Local docs server
+make docs                 # Build MyST prose + MkDocs API into public/, check links
+make docs-api             # API reference only (mkdocs build --strict)
+make docs-serve           # Build, then serve public/ at :8000
 ```
 
 ### Running a single test
@@ -75,9 +77,35 @@ All implementation lives in `src/xtremax/`. The public API is re-exported throug
 | `src/xtremax/point_processes/distributions/` | NumPyro `Distribution` wrappers for point processes |
 | `src/xtremax/simulations/` | Synthetic extremes generators |
 | `tests/` | Test suite |
-| `docs/` | Documentation (MkDocs); API pages in `docs/api/`, design docs in `docs/design_docs/` |
+| `docs/` | Documentation — mystmd prose (`docs/myst.yml`: notebooks, tutorials, design docs in `docs/design_docs/`) + MkDocs API pages in `docs/api/` |
 | `notebooks/` | Jupyter notebooks |
-| `scripts/` | Example scripts |
+| `scripts/` | Build scripts (`build_docs.py` assembles the docs site) |
+
+## Documentation Site
+
+The docs are built by **two tools** and deployed as one site (see
+`docs/README.md`):
+
+| Half | Tool | Source | Deployed at |
+|---|---|---|---|
+| Prose — home, example notebooks, tutorials, design docs | mystmd | `docs/*.md`, `docs/notebooks/`, `docs/tutorials/`, `docs/design_docs/` (toc in `docs/myst.yml`) | `/` |
+| API reference | MkDocs + mkdocstrings | `docs/api/` | `/reference/` |
+
+`make docs` runs `scripts/build_docs.py`: it builds the API with
+`mkdocs build --strict`, serves `site/` on port 8910 so mystmd can read its
+`objects.inv`, runs `myst build --strict`, rewrites the localhost API URLs to
+`/reference/`, and fails if any internal link in the assembled `public/`
+site does not resolve. mystmd is a Node CLI: `npm install -g mystmd`.
+
+- **Prose is MyST Markdown**, not MkDocs-Material syntax: `:::{note}`
+  directives, not `!!!` admonitions or `===` tabs.
+- **Link to the API** with the `xref:` protocol:
+  ``[`temporal_block_maxima`](xref:api#xtremax.extraction.temporal_block_maxima)``.
+  A missing target fails `myst build --strict`.
+- **URLs are flat**: a page's URL is its basename minus any leading `NN_`
+  prefix, so keep basenames (and MyST labels) unique across the prose tree.
+- API pages link back to prose with relative directory URLs such as
+  `../vision/`.
 
 ## API Reference Pages
 
@@ -98,12 +126,14 @@ unparsed and its section underlines leak into the page as headings.
 
 ## Documentation Examples
 
-Example notebooks live in `docs/notebooks/` as jupytext percent-format `.py` files. The workflow:
+Example notebooks live in `docs/notebooks/`, authored as jupytext percent-format `.py` files. The workflow:
 
 1. Write the `.py` source (jupytext percent format)
 2. Convert and execute: `jupytext --to notebook foo.py` then `jupyter nbconvert --execute --inplace foo.ipynb`
 3. Delete the `.py` — the executed `.ipynb` is the committed source of truth
-4. `mkdocs-jupyter` renders the pre-executed `.ipynb` with `execute: false`
+4. List the notebook in the `toc` of `docs/myst.yml` — mystmd renders the pre-executed `.ipynb` and never re-runs it
+
+Longer real-data curricula live in `docs/tutorials/` (e.g. `spatial_extremes/`), also shipped pre-executed; their helper code sits in a `_helpers/` folder next to the notebooks, outside the `xtremax` package.
 
 Figures render inline via `plt.show()` — do **not** use `savefig` or commit separate PNG files. The `.ipynb` cell outputs are the single source of rendered figures.
 

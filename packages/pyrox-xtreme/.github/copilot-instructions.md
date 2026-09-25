@@ -7,7 +7,7 @@
 - **CLI Framework**: cyclopts
 - **Layout**: `src/` layout (`src/xtremax/`)
 - **Testing**: pytest
-- **Docs**: MkDocs + Material + mkdocstrings + mkdocs-jupyter
+- **Docs**: mystmd (prose, notebooks — `docs/myst.yml`) + MkDocs Material + mkdocstrings (API reference at `/reference/`)
 
 ## Build & Test Commands
 
@@ -47,7 +47,7 @@ uv run --group typecheck ty check src/xtremax
 |------|---------|
 | `src/xtremax/` | Main package source code |
 | `tests/` | Test suite |
-| `docs/` | Documentation (MkDocs) |
+| `docs/` | Documentation (mystmd prose + MkDocs API reference; see `docs/README.md`) |
 | `notebooks/` | Jupyter notebooks |
 | `scripts/` | Example scripts |
 

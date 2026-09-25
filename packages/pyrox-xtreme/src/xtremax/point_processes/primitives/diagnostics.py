@@ -43,10 +43,10 @@ def time_rescaling_residuals(
         Tuple ``(residuals, residual_mask)``:
 
         * ``residuals`` with shape equal to ``event_times`` — where
-          position ``i`` holds :math:`\\Lambda(t_i) - \\Lambda(t_{i-1})`
-          with :math:`t_0 = 0`. Padding positions are ``0``.
+            position ``i`` holds :math:`\\Lambda(t_i) - \\Lambda(t_{i-1})`
+            with :math:`t_0 = 0`. Padding positions are ``0``.
         * ``residual_mask`` — ``True`` for positions that correspond to
-          real events. Same shape as ``mask``.
+            real events. Same shape as ``mask``.
 
     Notes:
         Residuals at padding positions are deliberately returned as

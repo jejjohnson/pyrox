@@ -6,7 +6,9 @@ applyTo: "docs/**/*.ipynb,docs/**/*.py,docs/**/*.md,notebooks/**/*.ipynb"
 
 ## Overview
 
-Example notebooks live in `docs/notebooks/` as **executed `.ipynb` files**. The committed `.ipynb` carries both source cells and rendered cell outputs (including matplotlib figures as embedded PNGs). `mkdocs-jupyter` renders them with `execute: false`, so the committed outputs are what users see in the docs.
+Example notebooks live in `docs/notebooks/` as **executed `.ipynb` files**. The committed `.ipynb` carries both source cells and rendered cell outputs (including matplotlib figures as embedded PNGs). The prose half of the docs site is built by [mystmd](https://mystmd.org), which renders the stored outputs and never re-executes a notebook, so the committed outputs are what users see in the docs. A notebook appears on the site only once it is listed in the `toc` of `docs/myst.yml` (see `docs/README.md` for the MyST + MkDocs split).
+
+Longer real-data curricula live under `docs/tutorials/` (e.g. `docs/tutorials/spatial_extremes/`). They follow the same pre-executed rule but may depend on external data and an optional dependency group; their overview page documents how to re-run them.
 
 Every notebook is **Google Colab compatible** — the first cell detects Colab and `pip install`s the right dependencies so users can click "Open in Colab" and run end-to-end without touching the host environment.
 
@@ -14,13 +16,17 @@ Every notebook is **Google Colab compatible** — the first cell detects Colab a
 
 ```
 docs/
+├── myst.yml            # MyST toc — every notebook must be listed here
 ├── notebooks/
 │   ├── demo_foo.ipynb
 │   ├── tutorial_bar.ipynb
 │   └── ...
-└── api/
+├── tutorials/          # longer multi-notebook curricula
+└── api/                # MkDocs API reference (mounted at /reference/)
     └── ...
 ```
+
+mystmd URLs are **flat**: a page's URL is its file basename (minus any leading `NN_` prefix), so every notebook and page basename must be unique across `docs/`. MyST labels (`(label)=`, `:label:`) are project-global — keep them unique too, or `myst build --strict` fails.
 
 No separate `images/` directory — figures live inside the `.ipynb` cell outputs.
 
@@ -46,7 +52,8 @@ No separate `images/` directory — figures live inside the `.ipynb` cell output
    ```
 
 5. Delete the `.py` — the `.ipynb` is the committed source of truth.
-6. Commit the `.ipynb`. `mkdocs-jupyter` picks it up automatically.
+6. Add the notebook to the `toc` in `docs/myst.yml` under the right group, then run `make docs` (strict MyST build + assembled-site link check).
+7. Commit the `.ipynb`.
 
 ## Jupytext Header (dev only)
 
@@ -85,7 +92,7 @@ import numpy as np
 
 ## First Markdown Cell — Title + Colab Badge
 
-Every notebook opens with a `#`-level title and a Colab badge pointing at its `main`-branch URL. Replace `OWNER/REPO` below with the actual GitHub owner and repository name (e.g. from `repo_url` in `mkdocs.yml`):
+Every notebook opens with a `#`-level title and a Colab badge pointing at its `main`-branch URL. Replace `OWNER/REPO` below with the actual GitHub owner and repository name (e.g. from `project.github` in `docs/myst.yml`):
 
 ```markdown
 # Demo — Feature Overview
@@ -195,7 +202,7 @@ The `[docs]` dependency group pulls in `watermark`, so under the documented auth
 
 ## Markdown Paragraph Wrapping
 
-**Each paragraph in a `# %% [markdown]` block must be a single long line.** Do not soft-wrap paragraph text across multiple `#` lines. jupytext preserves source newlines as soft breaks, which mkdocs-jupyter renders as awkward visual breaks.
+**Each paragraph in a `# %% [markdown]` block must be a single long line.** Do not soft-wrap paragraph text across multiple `#` lines. jupytext preserves source newlines as soft breaks, which can render as awkward visual breaks.
 
 Right:
 
@@ -231,7 +238,7 @@ Display:
 $$f(x) = \sum_{i=1}^{N} w_i \phi_i(x)$$
 ```
 
-MathJax is configured in `mkdocs.yml` — both inline and display math render in the docs.
+mystmd renders both inline and display math natively (KaTeX). MyST's stricter parser rejects a few TeX shortcuts MathJax tolerates — e.g. write `\lambda_{\max}`, not `\lambda_\max`. Numbered equations can use the MyST ```` ```{math} ```` directive with a `:label:`, referenced with `{eq}`; labels are project-global.
 
 ## Checklist for New Notebooks
 
@@ -244,4 +251,5 @@ MathJax is configured in `mkdocs.yml` — both inline and display math render in
 - [ ] Matplotlib defaults only (no `style.use`, no `rcParams`)
 - [ ] Converted to `.ipynb` and executed in place
 - [ ] `.py` deleted; `.ipynb` with embedded outputs committed
-- [ ] Listed in `mkdocs.yml` nav
+- [ ] Listed in the `docs/myst.yml` toc
+- [ ] `make docs` passes (strict MyST + link check)

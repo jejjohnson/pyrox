@@ -101,17 +101,17 @@ def ipp_sample_thinning(
         Tuple ``(times, accepted_mask, n_candidates_uncapped)``:
 
         * ``times`` with shape ``(max_candidates,)`` — the *accepted*
-          events, sorted, compacted into a contiguous prefix; padding
-          positions are set to ``T``.
+            events, sorted, compacted into a contiguous prefix; padding
+            positions are set to ``T``.
         * ``accepted_mask`` with shape ``(max_candidates,)`` — a
-          contiguous prefix of ``True`` covering the accepted events.
-          (Rejected candidates used to stay in the buffer as hole
-          masks, which silently corrupted mask-contiguity consumers
-          such as ``time_rescaling_residuals`` — the package invariant
-          is now "mask is a contiguous prefix; padding time = T".)
+            contiguous prefix of ``True`` covering the accepted events.
+            (Rejected candidates used to stay in the buffer as hole
+            masks, which silently corrupted mask-contiguity consumers
+            such as ``time_rescaling_residuals`` — the package invariant
+            is now "mask is a contiguous prefix; padding time = T".)
         * ``n_candidates_uncapped`` — the Poisson draw before capping
-          at ``max_candidates``; useful for diagnosing buffer
-          over-runs.
+            at ``max_candidates``; useful for diagnosing buffer
+            over-runs.
     """
     key_n, key_times, key_thin = random.split(key, 3)
 

@@ -19,7 +19,7 @@ Pure JAX functions. Stateless, differentiable, no NumPyro dependency.
 | `_src.max_stable` | `brown_resnick_extremal_coeff`, `smith_extremal_coeff`, `schlather_extremal_coeff`, `pairwise_log_likelihood`, `madogram` | Max-stable dependence functions and composite likelihood |
 | `_src.variogram` | `power_variogram`, `matern_variogram` | Semivariogram functions for spatial models |
 
-See: [primitives.md](primitives.md)
+See: [api_primitives.md](api_primitives.md)
 
 ### Layer 1 — Components
 
@@ -52,7 +52,7 @@ NumPyro `Distribution` subclasses (wrapping L0 functions), xarray utilities, plo
 | `datasets.*` | `ghcnd`, `gsod`, `ndbc`, `uhslc`, `gesla`, `coops`, `covariates` | Climate/ocean observation loaders |
 | `gp` | `VariationalGP`, `SparseVariationalGP` | GPJax integration wrappers |
 
-See: [components.md](components.md)
+See: [api_components.md](api_components.md)
 
 ### Layer 2 — Models (`xtremax.models`)
 
@@ -65,7 +65,7 @@ See: [components.md](components.md)
 | `models.point_process` | `point_process_extreme` | Point process extreme value models |
 | `models.max_stable` | `max_stable_composite` | Max-stable process fitting (composite likelihood) |
 
-See: [models.md](models.md)
+See: [api_models.md](api_models.md)
 
 ## Conventions
 
@@ -120,10 +120,10 @@ from numpyro.infer import MCMC, NUTS, SVI, Predictive
 
 | File | Covers |
 |---|---|
-| [primitives.md](primitives.md) | Layer 0 — pure JAX functions (GEV, GPD, point process, max-stable, variogram) |
-| [components.md](components.md) | Layer 1 — NumPyro distributions, xarray utilities, plotting, simulations, datasets, GP, copulas |
-| [models.md](models.md) | Layer 2 — model zoo (stationary, nonstationary, spatial GEV, POT, PP) |
+| [api_primitives.md](api_primitives.md) | Layer 0 — pure JAX functions (GEV, GPD, point process, max-stable, variogram) |
+| [api_components.md](api_components.md) | Layer 1 — NumPyro distributions, xarray utilities, plotting, simulations, datasets, GP, copulas |
+| [api_models.md](api_models.md) | Layer 2 — model zoo (stationary, nonstationary, spatial GEV, POT, PP) |
 
 ---
 
-*For usage patterns, see [../examples/](../examples/) — organized by layer to match this directory.*
+*For usage patterns, see [../examples/](../examples/examples_overview.md) — organized by layer to match this directory.*

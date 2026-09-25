@@ -56,12 +56,17 @@ typecheck = [
     "ty>=0.0.30",
 ]
 docs = [
+    # The prose half of the site is built by mystmd, a Node CLI installed with
+    # `npm install -g mystmd` rather than through uv. See docs/README.md.
+    # MkDocs here builds only the API reference, whose `objects.inv` is what
+    # lets the MyST prose cross-reference into it.
     "mkdocs>=1.6.1",
     "mkdocs-material>=9.7.6",
     "mkdocstrings[python]>=1.0.3",
-    "mkdocs-jupyter>=0.26.2",
     "jupytext>=1.19.1",
     "ipykernel>=7.2.0",
+    # Executes notebooks for docs/notebooks (see the docs-examples instructions).
+    "nbconvert>=7.16.6",
     # matplotlib + watermark used by the example notebooks during local
     # re-execution. The guarded watermark cell in each notebook no-ops
     # if the package is missing, but installing it here lets the version
@@ -79,6 +84,25 @@ docs = [
     "interpax>=0.3.14",
     "optax>=0.2.8",
 ]
+tutorials = [
+    # Optional: only needed to RE-RUN the spatial-extremes tutorials in
+    # docs/tutorials/spatial_extremes/. The notebooks ship pre-executed, so the
+    # docs build never needs these. Install with `uv sync --group tutorials`.
+    # See docs/tutorials/spatial_extremes.md for CDS credentials and data.
+    "xrreader[cds-insitu]",
+    "pyrox",
+    "optax>=0.2",
+    "diffrax>=0.7.2",
+    "cartopy>=0.22",
+    "shapely>=2.0",
+    "pyproj>=3.6",
+    "matplotlib>=3.8",
+    "pandas>=2.0",
+    "seaborn>=0.13",
+    "loguru>=0.7",
+    "ipykernel>=7.2.0",
+    "nbconvert>=7.16.6",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -90,6 +114,13 @@ packages = ["src/xtremax"]
 [tool.ruff]
 target-version = "py312"
 line-length = 88
+# The spatial-extremes tutorial notebooks ship pre-executed on CDS data that
+# CI cannot fetch. Reformatting or auto-fixing their sources would silently
+# desynchronise code from the committed outputs, so they are not linted. Their
+# `_helpers/` Python modules are linted as normal.
+extend-exclude = ["docs/tutorials/**/*.ipynb"]
+# Honour the exclude even when pre-commit passes the files explicitly.
+force-exclude = true
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
@@ -154,3 +185,9 @@ omit = ["tests/*"]
 show_missing = true
 # Ported snippets ship with smoke tests only; raise toward 80% as v0.1 matures.
 fail_under = 40
+
+# pyrox and xrreader are not on PyPI yet; the `tutorials` group resolves them
+# from their public git repositories.
+[tool.uv.sources]
+pyrox = { git = "https://github.com/jejjohnson/pyrox.git", rev = "395251388c8bbad50fe1bf929733b0a481d4e9ef" }
+xrreader = { git = "https://github.com/jejjohnson/xrreader.git" }

@@ -220,12 +220,12 @@ class GeneralizedExtremeValueDistribution(dist.Distribution):
         Returns:
             Constraint object reflecting the shape-dependent support:
             - ξ > 0: [μ - σ/ξ, +∞) → ``greater_than_eq(lower_bound)``
-              (closed, matching the old ``interval`` membership; the
-              density vanishes at the endpoint so ``log_prob`` is -inf)
+                (closed, matching the old ``interval`` membership; the
+                density vanishes at the endpoint so ``log_prob`` is -inf)
             - ξ = 0: (-∞, +∞) → ``real``
             - ξ < 0: (-∞, μ - σ/ξ] → ``less_than_eq(upper_bound)`` (closed:
-              the endpoint density is finite at ξ = -1 and diverges for
-              ξ < -1, so the endpoint is a genuine support point)
+                the endpoint density is finite at ξ = -1 and diverges for
+                ξ < -1, so the endpoint is a genuine support point)
 
         The constraint kind is dispatched on the *statically known* sign of
         the concentration so that ``biject_to(support)`` returns a bijector

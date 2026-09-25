@@ -24,6 +24,7 @@ transforms, or wrap the callable in an ``eqx.Module``.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 import equinox as eqx
 import jax
@@ -350,7 +351,7 @@ class InhomogeneousPoissonProcess(GoodnessOfFitMixin, LiveIntensityMixin, eqx.Mo
         cls,
         bin_edges: ArrayLike,
         rates: ArrayLike,
-        **kwargs,
+        **kwargs: Any,
     ) -> InhomogeneousPoissonProcess:
         """Build an IPP with piecewise-constant intensity.
 

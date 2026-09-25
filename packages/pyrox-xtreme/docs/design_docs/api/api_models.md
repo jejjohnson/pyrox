@@ -52,7 +52,7 @@ log σ(s) = X(s)ᵀβ_σ + f_σ(s), f_σ ~ GP(0, k_σ)
 ξ(s) = X(s)ᵀβ_ξ + f_ξ(s),    f_ξ ~ GP(0, k_ξ)
 ```
 
-Where X(s) can include elevation, latitude, distance-to-coast, etc. See api/components.md §GP Layer for the full GP layer API.
+Where X(s) can include elevation, latitude, distance-to-coast, etc. See api/api_components.md §GP Layer for the full GP layer API.
 
 ```python
 from xtremax.models import spatial_gev
@@ -68,7 +68,7 @@ mcmc.run(
 
 ## Peaks-Over-Threshold GPD
 
-Threshold exceedance modeling. Combines a Poisson rate for exceedance frequency with GPD for exceedance magnitudes. Works with any threshold from the three-tier system (see api/components.md §Threshold Selection): constant, trend, or parametric.
+Threshold exceedance modeling. Combines a Poisson rate for exceedance frequency with GPD for exceedance magnitudes. Works with any threshold from the three-tier system (see api/api_components.md §Threshold Selection): constant, trend, or parametric.
 
 ```python
 from xtremax.models import pot_gpd

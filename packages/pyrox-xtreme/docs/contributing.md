@@ -122,7 +122,7 @@ Example prompts:
 
 ## Drafting a wave backlog
 
-For large planning exercises (new wave, new release, large refactor), draft the whole backlog as one markdown file **before** opening GitHub issues. A template lives at [`docs/templates/wave-backlog.md`](templates/wave-backlog.md).
+For large planning exercises (new wave, new release, large refactor), draft the whole backlog as one markdown file **before** opening GitHub issues. A template lives at [`docs/templates/wave-backlog.md`](https://github.com/jejjohnson/xtremax/blob/main/docs/templates/wave-backlog.md).
 
 Why:
 

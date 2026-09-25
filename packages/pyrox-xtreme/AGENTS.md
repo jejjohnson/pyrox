@@ -147,16 +147,19 @@ Plans and design documents go in `.plans/` (gitignored, never committed). If a p
 
 ## Documentation
 
-This repo uses **MkDocs + Material + mkdocstrings + mkdocs-jupyter** for documentation.
+The docs are built by **two tools** and deployed as one site — see `docs/README.md`:
 
-- **Build locally**: `make docs-serve` (or `uv run --group docs mkdocs serve`)
-- **Build static site**: `make docs` (or `uv run --group docs mkdocs build`)
-- **Deploy to GitHub Pages**: `make docs-deploy` (or `uv run --group docs mkdocs gh-deploy --force`)
-- **Auto-deploy**: the `pages.yml` workflow deploys automatically on every push to `main`
+- **Prose** (home, example notebooks, tutorials, design docs) — [mystmd](https://mystmd.org), toc in `docs/myst.yml`, served at `/`. Install with `npm install -g mystmd`.
+- **API reference** — MkDocs + Material + mkdocstrings from `docs/api/`, served at `/reference/`.
 
-When writing docstrings, use **Google style** (enforced by `mkdocstrings` config).
+- **Build + verify**: `make docs` (runs `scripts/build_docs.py`: strict MkDocs, strict MyST, assembles `public/`, checks every internal link)
+- **Serve locally**: `make docs-serve`
+- **API only**: `make docs-api` (`mkdocs build --strict`)
+- **CI**: `docs.yml` builds the site on every PR; `pages.yml` deploys `public/` to GitHub Pages (Actions source) on every push to `main`
 
-Notebooks in `docs/` may be stored as `.ipynb` files or as `jupytext`-paired `.py` files.
+When writing docstrings, use **Google style** (the `extraction/` subpackage is NumPy style; `docstring_style: auto` handles both).
+
+Notebooks in `docs/` are committed as executed `.ipynb` files and must be listed in the `docs/myst.yml` toc. Link from prose into the API with `[name](xref:api#xtremax.module.name)`.
 
 ## Commit Messages
 

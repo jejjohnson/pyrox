@@ -1,17 +1,38 @@
-site_name: xtremax
-site_description: JAX/NumPyro-native library for extreme value modeling — custom distributions, Bayesian models, and spatiotemporal data extraction.
+# ---------------------------------------------------------------------------
+# MkDocs builds ONLY the API reference, which is deployed as the `/reference/`
+# subtree of the MyST site. Prose, design docs, and example notebooks are
+# built by mystmd from `docs/myst.yml`. See `docs/README.md` for the split and
+# the rationale.
+#
+# mkdocstrings publishes a Sphinx-compatible `objects.inv` into `site/`, and
+# that inventory is what lets the MyST prose cross-reference into these pages.
+# ---------------------------------------------------------------------------
+site_name: xtremax API reference
+site_description: API reference for xtremax — JAX/NumPyro-native extreme value modeling.
 site_author: J. Emmanuel Johnson
 repo_url: https://github.com/jejjohnson/xtremax
 repo_name: jejjohnson/xtremax
 
+docs_dir: docs/api
+site_dir: site
+
+# The prose pages live in the MyST half of the site, so links to them point
+# outside `docs_dir` by design. The assembled-site link checker in
+# `scripts/build_docs.py` validates them instead — across both halves, which
+# neither tool can do on its own.
+validation:
+  links:
+    unrecognized_links: ignore
+    absolute_links: ignore
+
 theme:
   name: material
   features:
-    - navigation.tabs
     - navigation.sections
     - navigation.top
     - content.code.copy
     - content.code.annotate
+    - toc.follow
   palette:
     - scheme: default
       primary: indigo
@@ -50,73 +71,17 @@ plugins:
             signature_crossrefs: true
             merge_init_into_class: true
             filters: ["!^_"]
-  - mkdocs-jupyter:
-      execute: false
-      ignore_h1_titles: true
 
 nav:
-  - Home: index.md
-  - Examples:
-      - Extreme Value Distributions:
-          - Distributions overview: notebooks/evt_distributions_overview.ipynb
-          - "GEVD: annual block maxima": notebooks/evt_gevd_block_maxima.ipynb
-          - "Fréchet: heavy-tailed maxima": notebooks/evt_frechet_heavy_tails.ipynb
-          - "Weibull: bounded extremes": notebooks/evt_weibull_bounded.ipynb
-      - Peaks Over Threshold:
-          - "GPD: peaks-over-threshold": notebooks/evt_gpd_pot.ipynb
-          - "GPD: quantile-regression threshold": notebooks/evt_quantile_regression_gpd.ipynb
-      - Non-stationary EVT:
-          - Parametric trend: notebooks/evt_nonstat_parametric.ipynb
-          - P-splines: notebooks/evt_nonstat_splines.ipynb
-          - Neural ODE: notebooks/evt_nonstat_neural_ode.ipynb
-      - "Point Processes: Temporal":
-          - Homogeneous Poisson: notebooks/hpp_from_scratch_and_numpyro.ipynb
-          - Inhomogeneous Poisson: notebooks/ipp_from_scratch_and_numpyro.ipynb
-          - Renewal: notebooks/renewal_from_scratch_and_numpyro.ipynb
-          - Hawkes: notebooks/hawkes_from_scratch_and_numpyro.ipynb
-          - Marked: notebooks/marked_from_scratch_and_numpyro.ipynb
-          - Thinning / observation operator: notebooks/thinning_from_scratch_and_numpyro.ipynb
-      - "Point Processes: Spatial":
-          - Homogeneous Poisson: notebooks/hpp_spatial_from_scratch_and_numpyro.ipynb
-          - Inhomogeneous Poisson: notebooks/ipp_spatial_from_scratch_and_numpyro.ipynb
-          - Marked: notebooks/marked_spatial_from_scratch_and_numpyro.ipynb
-      - "Point Processes: Spatiotemporal":
-          - Homogeneous Poisson: notebooks/hpp_spatiotemporal_from_scratch_and_numpyro.ipynb
-          - Inhomogeneous Poisson: notebooks/ipp_spatiotemporal_from_scratch_and_numpyro.ipynb
-          - Marked: notebooks/marked_spatiotemporal_from_scratch_and_numpyro.ipynb
-          - Hawkes: notebooks/hawkes_spatiotemporal_from_scratch_and_numpyro.ipynb
-      - Neural / Advanced:
-          - Latent ODE for irregular IPPs: notebooks/latent_ode_ipp.ipynb
-  - Design:
-      - Overview: design_docs/README.md
-      - Vision: design_docs/vision.md
-      - Architecture: design_docs/architecture.md
-      - Boundaries: design_docs/boundaries.md
-      - Decisions: design_docs/decisions.md
-      - API:
-          - Overview: design_docs/api/README.md
-          - Primitives: design_docs/api/primitives.md
-          - Components: design_docs/api/components.md
-          - Models: design_docs/api/models.md
-      - Examples:
-          - Overview: design_docs/examples/README.md
-          - Primitives: design_docs/examples/primitives.md
-          - Components: design_docs/examples/components.md
-          - Models: design_docs/examples/models.md
-          - Integration: design_docs/examples/integration.md
-  - API Reference:
-      - Overview: api/index.md
-      - Distributions: api/distributions.md
-      - Primitives: api/primitives.md
-      - Extraction: api/extraction.md
-      - "Point Processes — Overview": api/point-processes.md
-      - "Point Processes — Primitives": api/point-process-primitives.md
-      - "Point Processes — Operators": api/point-process-operators.md
-      - "Point Processes — Distributions": api/point-process-distributions.md
-      - Simulations: api/simulations.md
-  - Interop: interop.md
-  - Contributing: contributing.md
-  - Changelog: changelog.md
+  - Overview: index.md
+  - Distributions: distributions.md
+  - Primitives: primitives.md
+  - Extraction: extraction.md
+  - "Point Processes — Overview": point-processes.md
+  - "Point Processes — Primitives": point-process-primitives.md
+  - "Point Processes — Operators": point-process-operators.md
+  - "Point Processes — Distributions": point-process-distributions.md
+  - Simulations: simulations.md
 
 markdown_extensions:
   - admonition
@@ -128,9 +93,6 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.details
-  - pymdownx.snippets:
-      base_path: [!relative $docs_dir/..]
-      check_paths: true
   - attr_list
   - md_in_html
   - toc:

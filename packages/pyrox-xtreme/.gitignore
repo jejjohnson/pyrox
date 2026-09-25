@@ -97,8 +97,9 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs documentation
+# mkdocs documentation (API half) and the assembled docs site
 /site
+public/
 
 # mypy
 .mypy_cache/
@@ -121,3 +122,8 @@ venv.bak/
 
 # Local Claude Code worktrees (not part of the project)
 .claude/worktrees/
+
+# Spatial-extremes tutorials: CDS cache, derived features and fetch logs are
+# reproducible via docs/tutorials/spatial_extremes/_helpers/scripts/.
+docs/tutorials/spatial_extremes/data/
+docs/tutorials/spatial_extremes/logs/

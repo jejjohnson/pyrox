@@ -97,15 +97,15 @@ def hpp_spatial_sample(
         Tuple ``(locations, mask, n_events)``:
 
         * ``locations`` shape ``(max_events, d)`` — sorted along axis 0
-          by the **first coordinate only** (a deterministic order that
-          pushes padding rows to the tail; ties between equal first
-          coordinates keep their sampled order), with padding rows set
-          to ``domain.lo`` (an arbitrary in-domain anchor that keeps
-          downstream intensity calls inside the support).
+            by the **first coordinate only** (a deterministic order that
+            pushes padding rows to the tail; ties between equal first
+            coordinates keep their sampled order), with padding rows set
+            to ``domain.lo`` (an arbitrary in-domain anchor that keeps
+            downstream intensity calls inside the support).
         * ``mask`` shape ``(max_events,)`` — ``True`` at real events.
         * ``n_events`` — uncapped Poisson draw; if greater than
-          ``max_events`` the buffer truncated and the user should
-          increase the cap.
+            ``max_events`` the buffer truncated and the user should
+            increase the cap.
     """
     rate = jnp.asarray(rate)
     vol = domain.volume()

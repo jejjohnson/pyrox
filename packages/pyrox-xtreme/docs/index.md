@@ -4,7 +4,7 @@
 
 Built on [JAX](https://github.com/jax-ml/jax), [NumPyro](https://github.com/pyro-ppl/numpyro), [equinox](https://github.com/patrick-kidger/equinox), and [xarray](https://github.com/pydata/xarray).
 
-**New here?** Start with the [Vision](design_docs/vision.md) to understand why xtremax exists. The [Architecture](design_docs/architecture.md) design doc is a draft roadmap — it sketches where the library is headed, not the current module layout; the [API Reference](api/index.md) reflects what ships today.
+**New here?** Start with the [Vision](design_docs/vision.md) to understand why xtremax exists. The [Architecture](design_docs/architecture.md) design doc is a draft roadmap — it sketches where the library is headed, not the current module layout; the [API Reference](https://jejjohnson.github.io/xtremax/reference/) reflects what ships today.
 
 ## Installation
 
@@ -87,10 +87,14 @@ peaks = xtx.decluster_runs(da, threshold=u)
 - *Spatiotemporal*: [homogeneous](notebooks/hpp_spatiotemporal_from_scratch_and_numpyro.ipynb), [inhomogeneous](notebooks/ipp_spatiotemporal_from_scratch_and_numpyro.ipynb), [marked](notebooks/marked_spatiotemporal_from_scratch_and_numpyro.ipynb), [Hawkes / ETAS](notebooks/hawkes_spatiotemporal_from_scratch_and_numpyro.ipynb)
 - *Neural*: [latent ODE for irregular IPPs](notebooks/latent_ode_ipp.ipynb)
 
+**Tutorials** — a longer, real-data curriculum:
+
+- [Spatial extremes](tutorials/spatial_extremes.md) — from one station's annual maxima to spatial GEV fields and non-stationary trends, on CDS station data over Spain
+
 ## Links
 
-- [API Reference](api/index.md)
-- [Design docs](design_docs/README.md)
+- [API Reference](https://jejjohnson.github.io/xtremax/reference/)
+- [Design docs](design_docs/design_overview.md)
 - [Interop](interop.md)
 - [Changelog](changelog.md)
 - [GitHub](https://github.com/jejjohnson/xtremax)

@@ -82,13 +82,13 @@ def hpp_spatiotemporal_sample(
         Tuple ``(locations, times, mask, n_events)``:
 
         * ``locations`` shape ``(max_events, d)`` — sorted by time,
-          padding rows set to ``spatial.lo``.
+            padding rows set to ``spatial.lo``.
         * ``times`` shape ``(max_events,)`` — sorted ascending, padding
-          rows set to ``temporal.t1`` (so they live just outside the
-          half-open interval but inside any quadrature support).
+            rows set to ``temporal.t1`` (so they live just outside the
+            half-open interval but inside any quadrature support).
         * ``mask`` shape ``(max_events,)`` — ``True`` at real events.
         * ``n_events`` — uncapped Poisson draw; if greater than
-          ``max_events`` the buffer is truncated.
+            ``max_events`` the buffer is truncated.
     """
     rate = jnp.asarray(rate)
     vol = spatial.volume()

@@ -73,10 +73,10 @@ def thinning_sample(
         Tuple ``(times, mask, n_proposals)``:
 
         * ``times`` with shape ``(max_events,)`` — sorted, padding
-          positions filled with ``T``.
+            positions filled with ``T``.
         * ``mask`` — ``True`` at accepted positions.
         * ``n_proposals`` — number of thinning proposals actually
-          consumed (useful for diagnosing buffer over-runs).
+            consumed (useful for diagnosing buffer over-runs).
     """
     T_arr = jnp.asarray(T)
     if max_candidates is None:

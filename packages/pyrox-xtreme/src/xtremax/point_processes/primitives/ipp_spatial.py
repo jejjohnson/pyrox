@@ -87,13 +87,13 @@ def ipp_spatial_sample_thinning(
         Tuple ``(locations, accepted_mask, n_candidates_uncapped)``:
 
         * ``locations`` shape ``(max_candidates, d)`` — the *accepted*
-          points compacted into a contiguous prefix, ordered by the
-          first coordinate; padding rows are set to ``domain.lo``.
+            points compacted into a contiguous prefix, ordered by the
+            first coordinate; padding rows are set to ``domain.lo``.
         * ``accepted_mask`` shape ``(max_candidates,)`` — a contiguous
-          prefix of ``True`` covering the accepted points (the package
-          invariant: masks are contiguous prefixes).
+            prefix of ``True`` covering the accepted points (the package
+            invariant: masks are contiguous prefixes).
         * ``n_candidates_uncapped`` — Poisson draw before capping;
-          useful for diagnosing buffer over-runs.
+            useful for diagnosing buffer over-runs.
     """
     key_n, key_locs, key_thin = random.split(key, 3)
 

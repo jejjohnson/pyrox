@@ -125,7 +125,9 @@ Generators for testing and teaching: `simulate_temp_extremes`, `simulate_precip_
 
 - **[Documentation site](https://jejjohnson.github.io/xtremax/)** — examples, design docs, and full API reference
 - **[Examples](https://jejjohnson.github.io/xtremax/)** — 20+ executed notebooks: GEV on block maxima, GPD peaks-over-threshold, non-stationary GEV (parametric trends, P-splines, neural ODEs), and every point process from scratch *and* through NumPyro
-- **[Design docs](https://jejjohnson.github.io/xtremax/design_docs/)** — vision, architecture, API design, and decision records
+- **[Spatial extremes tutorials](https://jejjohnson.github.io/xtremax/spatial-extremes/)** — a real-data curriculum on CDS station temperatures over Spain: block maxima → GEV → hierarchical pooling → spatial GP-GEV fields → non-stationary trends
+- **[API reference](https://jejjohnson.github.io/xtremax/reference/)** — every public symbol, generated from the docstrings
+- **[Design docs](https://jejjohnson.github.io/xtremax/design-overview/)** — vision, architecture, API design, and decision records
 - **[Interop](https://jejjohnson.github.io/xtremax/interop/)** — how xtremax composes with the wider ecosystem (NumPyro, pipekit) without depending on it
 
 ## Development

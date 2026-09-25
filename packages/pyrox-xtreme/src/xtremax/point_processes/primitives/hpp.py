@@ -77,12 +77,12 @@ def hpp_sample(
         Tuple ``(times, mask, n_events)``:
 
         * ``times`` with shape ``sample_shape + batch_shape + (max_events,)``
-          — sorted, with padding positions set to ``T``.
+            — sorted, with padding positions set to ``T``.
         * ``mask`` with the same shape as ``times`` — ``True`` where
-          ``times`` is a real event, ``False`` for padding.
+            ``times`` is a real event, ``False`` for padding.
         * ``n_events`` with shape ``sample_shape + batch_shape`` — the
-          uncapped Poisson draw. If ``n_events > max_events`` the
-          returned events have been truncated to the first ``max_events``.
+            uncapped Poisson draw. If ``n_events > max_events`` the
+            returned events have been truncated to the first ``max_events``.
 
     Notes:
         The algorithm draws ``n`` from :math:`\\mathrm{Poisson}(\\lambda T)`

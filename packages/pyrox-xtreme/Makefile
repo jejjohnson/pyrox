@@ -63,7 +63,7 @@ check-env-%:
 # Phony declarations
 # ---------------------------------------------------------------------------
 .PHONY: help install lint format typecheck test test-fast test-heavy test-cov \
-        precommit build clean version docs docs-serve docs-deploy \
+        precommit build clean version docs docs-check docs-api docs-serve \
         gh-labels gh-sub gh-block gh-show
 
 .DEFAULT_GOAL := help
@@ -92,7 +92,7 @@ version: ## 📋 Display package version and git hash
 
 install: ## 📦 Install all dependency groups via uv + pre-commit hooks
 	@printf "$(YELLOW)>>> Installing all dependencies...$(RESET)\n"
-	uv sync --all-groups
+	uv sync --all-groups --no-group tutorials
 	uv run pre-commit install
 	@printf "$(GREEN)>>> ✅ Installation complete!$(RESET)\n"
 
@@ -171,6 +171,7 @@ clean: ## 🗑️  Remove build artefacts and cache directories
 	@printf "$(YELLOW)>>> Cleaning up...$(RESET)\n"
 	rm -rf dist/ build/ .eggs/ *.egg-info
 	rm -rf .pytest_cache/ .ruff_cache/ .mypy_cache/
+	rm -rf site/ public/ docs/_build/
 	rm -f .coverage coverage.xml
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 	@printf "$(GREEN)>>> ✅ Clean complete!$(RESET)\n"
@@ -179,14 +180,18 @@ clean: ## 🗑️  Remove build artefacts and cache directories
 ##@ Docs
 # ===========================================================================
 
-docs: ## 📖 Build documentation with mkdocs
-	uv run --group docs mkdocs build
+docs: ## 📖 Build the full site (MyST prose + MkDocs API) into public/
+	uv run python scripts/build_docs.py
 
-docs-serve: ## 🌐 Serve documentation locally
-	uv run --group docs mkdocs serve
+docs-check: ## ✅ Validate docs sources without rendering the MyST theme
+	uv run python scripts/build_docs.py --check
 
-docs-deploy: ## 🚀 Deploy documentation to GitHub Pages
-	uv run --group docs mkdocs gh-deploy --force
+docs-api: ## 📚 Build only the MkDocs API reference into site/
+	uv run --group docs mkdocs build --strict
+
+docs-serve: docs ## 🌐 Build, then serve the assembled site at :8000
+	@printf "$(GREEN)>>> http://127.0.0.1:8000$(RESET)\n"
+	cd public && uv run python -m http.server 8000
 
 gh-labels: ## 🏷️  Bootstrap the GitHub label taxonomy (type / area / layer / wave / priority)
 	bash .github/scripts/create-labels.sh
