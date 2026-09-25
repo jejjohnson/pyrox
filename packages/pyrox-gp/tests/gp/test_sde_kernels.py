@@ -16,6 +16,7 @@ import jax
 import jax.numpy as jnp
 import jax.scipy.linalg as jsl
 import pytest
+from kernellib.functional import matern_kernel
 from pyrox_gp import (
     ConstantSDE,
     CosineSDE,
@@ -25,7 +26,6 @@ from pyrox_gp import (
     QuasiPeriodicSDE,
     SumSDE,
 )
-from pyrox_gp._src.kernels import matern_kernel
 
 
 # --- structural shape contract -------------------------------------------

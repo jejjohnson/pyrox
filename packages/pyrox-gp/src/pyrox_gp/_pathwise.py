@@ -28,6 +28,7 @@ import jax
 import jax.numpy as jnp
 from gaussx import cholesky, solve_rows, unwhiten
 from jaxtyping import Array, Float
+from kernellib import functional as _kernel_fns
 
 from pyrox_gp._basis._rff import (
     draw_rff_cosine_basis,
@@ -39,7 +40,6 @@ from pyrox_gp._kernels import RBF, Matern
 from pyrox_gp._models import ConditionedGP
 from pyrox_gp._protocols import Guide, Kernel
 from pyrox_gp._sparse import SparseGPPrior
-from pyrox_gp._src import kernels as _kernel_fns
 
 
 def _frozen_kernel_fn(

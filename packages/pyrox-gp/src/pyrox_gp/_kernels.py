@@ -4,7 +4,7 @@ Each class registers its hyperparameters with constraints through
 `pyrox._core.Parameterized`, so users can attach priors and
 autoguides via `set_prior` / `autoguide` and flip between
 prior/guide modes with `set_mode`. The numerical body delegates to
-the pure closed-form functions in `pyrox_gp._src.kernels`.
+the pure closed-form functions in `kernellib.functional`.
 
 Kernels with a static structural parameter (``Matern.nu``,
 ``Polynomial.degree``) take that parameter as a class field rather than
@@ -12,7 +12,7 @@ a registered JAX param — those numbers choose code paths, not
 optimization targets.
 
 Scalable matrix construction (mixed-precision accumulation, implicit
-operators, batched matvec) lives in `gaussx`; these wrappers own
+operators, batched matvec) lives in `kernellib`; these wrappers own
 the NumPyro-aware surface only.
 """
 
@@ -21,10 +21,10 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpyro.distributions as dist
 from jaxtyping import Array, Float
+from kernellib import functional as _k
 from pyrox._core import Parameterized, pyrox_method
 
 from pyrox_gp._protocols import Kernel
-from pyrox_gp._src import kernels as _k
 
 
 class _ParameterizedKernel(Parameterized, Kernel):

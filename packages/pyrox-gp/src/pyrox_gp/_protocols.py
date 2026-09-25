@@ -22,7 +22,8 @@ Gaussian-expectation integrators live in `gaussx` too — use
 ``UnscentedIntegrator``, ``TaylorIntegrator``) wherever pyrox needs to
 take expectations against a ``GaussianState``.
 
-* `Kernel` — covariance structure, ``(X1, X2) -> Gram``.
+* `Kernel` — covariance structure, ``(X1, X2) -> Gram``; an alias of
+  ``kernellib.AbstractKernel``.
 * `SDEKernel` — re-exported from `gaussx._ssm`.
 * `Guide` — variational posterior structure.
 * `Likelihood` — observation model.
@@ -35,40 +36,16 @@ from abc import abstractmethod
 from typing import Any
 
 import equinox as eqx
-import jax.numpy as jnp
 from gaussx import SDEKernel as SDEKernel
 from jaxtyping import Array, Float
+from kernellib import AbstractKernel
 
 
-class Kernel(eqx.Module):
-    """Abstract base for GP covariance functions.
-
-    Subclasses implement `__call__` returning the Gram matrix on a pair
-    of input batches. `gram` and `diag` are convenience defaults
-    that derive from `__call__`; structured subclasses (Kronecker,
-    state-space, etc.) should override them for efficiency.
-    """
-
-    @abstractmethod
-    def __call__(
-        self,
-        X1: Float[Array, "N1 D"],
-        X2: Float[Array, "N2 D"],
-    ) -> Float[Array, "N1 N2"]:
-        raise NotImplementedError
-
-    def gram(self, X: Float[Array, "N D"]) -> Float[Array, "N N"]:
-        """Symmetric Gram matrix ``K(X, X)``."""
-        return self(X, X)
-
-    def diag(self, X: Float[Array, "N D"]) -> Float[Array, " N"]:
-        """Diagonal of ``K(X, X)``.
-
-        Default implementation extracts the diagonal of the full Gram. For
-        stationary kernels with constant diagonal, override with a vectorized
-        broadcast for the ``O(N)`` shortcut.
-        """
-        return jnp.diag(self(X, X))
+# ``Kernel`` is kernellib's ``AbstractKernel``: same abstract ``__call__``,
+# same ``gram`` / ``diag`` defaults, so every subclass here is unaffected.
+# kernellib adds ``pairwise`` / ``is_pointwise`` (Gram-only by default) and
+# ``+`` / ``*`` composition, which pyrox kernels inherit.
+Kernel = AbstractKernel
 
 
 # ``SDEKernel`` lives in `gaussx._ssm` since gaussx 0.0.11; we

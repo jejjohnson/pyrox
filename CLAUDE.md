@@ -62,7 +62,7 @@ packages/
 ├── pyrox-gp/                 # GP building blocks (depends on pyrox)
 │   ├── src/pyrox_gp/
 │   │   ├── __init__.py       # Public API: GPPrior, ConditionedGP, SparseGPPrior, kernels, guides, …
-│   │   ├── _src/kernels.py   # Pure kernel functions (closed-form math primitives)
+│   │   ├── _src/kernels.py   # Deprecated re-exports of kernellib.functional
 │   │   ├── _basis/           # Kernel spectral densities + RFF draws (shared with pyrox-nn)
 │   │   └── _*.py             # kernels, guides, likelihoods, models, markov, sparse, pathwise, …
 │   └── tests/                # tests/gp, tests/basis
@@ -82,7 +82,9 @@ top-level `pyproject.toml` only configures `[tool.uv.workspace]`.
 ### Dependency rules
 
 - `pyrox` has no internal deps (jax, equinox, numpyro, einx).
-- `pyrox-gp` depends on `pyrox` only (+ gaussx, geonnax, lineax).
+- `pyrox-gp` depends on `pyrox` only (+ kernellib, gaussx, geonnax, lineax).
+  Kernel math, the `Kernel` base class (`kernellib.AbstractKernel`) and
+  kernel operators come from kernellib; pyrox-gp adds priors and guides.
 - `pyrox-nn` depends on `pyrox` and `pyrox-gp` (+ geonnax); pandas and
   optax are gated behind the `[bnf]` optional extra.
 
