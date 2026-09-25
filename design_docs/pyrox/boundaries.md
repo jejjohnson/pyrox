@@ -7,13 +7,13 @@ version: 0.1.0
 
 ## Overview
 
-pyrox owns the Equinox-NumPyro bridge, Edward2-style probabilistic layers, GP kernels/priors/guides, and solver protocols. It delegates inference to NumPyro, neural network primitives to Equinox, structured linear algebra to gaussx, and domain-specific modeling to downstream packages.
+pyrox owns the Equinox-NumPyro bridge, Edward2-style probabilistic layers, GP priors/guides (including the prior-carrying kernel wrappers), and solver protocols. It delegates inference to NumPyro, neural network primitives to Equinox, kernel math and kernel operators to kernellib, structured linear algebra to gaussx, and domain-specific modeling to downstream packages.
 
 The package is organized into three submodules:
 
-- **`pyrox._core`** — shared foundations: `Parameterized`, `PyroxModule`, `PyroxParam`, `PyroxSample`, context cache, RFF spectral densities
+- **`pyrox._core`** — shared foundations: `Parameterized`, `PyroxModule`, `PyroxParam`, `PyroxSample`, context cache
 - **`pyrox.nn`** — Edward2-style probabilistic NN layers (dense, dropout, NCP, spectral norm)
-- **`pyrox.gp`** — GP kernels, mean functions, priors, guides, solver protocol, temporal GP, Gaussian integration
+- **`pyrox.gp`** — `Parameterized` kernel wrappers over kernellib, mean functions, priors, guides, solver protocol, temporal GP, Gaussian integration
 
 ---
 
@@ -24,11 +24,14 @@ The package is organized into three submodules:
 | Equinox-NumPyro bridge (`PyroxModule`, `PyroxParam`, `PyroxSample`) | **pyrox._core** | Core competency |
 | `Parameterized` (prior/guide management) | **pyrox._core** | Shared by nn and gp |
 | Per-call context cache | **pyrox._core** | Prevents duplicate sample sites |
-| RFF spectral density samplers | **pyrox._core** | Shared by nn (RFF layers) and gp (pathwise sampling) |
+| Spectral densities and RFF frequency draws | **kernellib** | `pyrox_gp._basis` wraps them for pyrox kernels; shared by nn (RFF layers, HSGP features) and gp (pathwise sampling, inducing features) |
 | Edward2-style probabilistic layers | **pyrox.nn** | Dense, dropout, RFF, NCP, flipout |
 | MC-Dropout layers | **pyrox.nn** | Dropout-based uncertainty |
 | Spectral normalization | **pyrox.nn** | SNGP-style distance awareness |
-| GP kernels and mean functions | **pyrox.gp** | Kernels subclass `_core.Parameterized` |
+| Kernel math, the `Kernel` base class, kernel composition | **kernellib** | `pyrox_gp.Kernel` is `kernellib.AbstractKernel`; pyrox kernels evaluate `kernellib.functional` |
+| Kernel operators (implicit, cross, Nyström, RFF, FastFood) and the kernel → operator bridge | **kernellib** | Moved out of gaussx in gaussx 0.2.0 |
+| Kernel methods that are not GPs (KRR, Falkon, EigenPro, HSIC, CKA, MMD) | **kernellib** | pyrox does not reimplement them |
+| Kernel hyperparameter priors and guides, mean functions | **pyrox.gp** | Kernels subclass `_core.Parameterized` and wrap kernellib math |
 | GP priors, guides, inference strategies | **pyrox.gp** | Laplace, EP, VI, PL |
 | GP solver protocol (dispatch to LA backend) | **pyrox.gp** | Thin wrapper over gaussx |
 | Temporal GP via state-space | **pyrox.gp** | Kalman, Bayes-Newton |
@@ -57,6 +60,8 @@ The package is organized into three submodules:
 | Bayesian linear regression | `PyroxModule` with `pyrox_sample` for weights, NumPyro MCMC or SVI |
 | Variational BNN | Stack `pyrox.nn.DenseVariational` / `DenseFlipout` layers, SVI with AutoNormal |
 | GP with learnable kernel | `pyrox.gp` kernel (subclasses `Parameterized`) with `set_prior()`, SVI |
+| Kernel with fixed or optimiser-fitted hyperparameters, no priors | A `kernellib` kernel; it satisfies `pyrox_gp.Kernel` directly |
+| Kernel ridge regression, HSIC / MMD, kernel approximation outside a GP | `kernellib` |
 | MC-Dropout uncertainty | `pyrox.nn.MCDropout` layers, multiple forward passes at inference |
 | Add priors to existing Equinox model | Wrap with `PyroxModule`, use `pyrox_sample()` for selected parameters |
 | MAP estimation | `PyroxModule`, SVI with AutoDelta |
@@ -75,6 +80,7 @@ The package is organized into three submodules:
 |---|---|---|
 | **equinox** | `eqx.Module` base, `eqx.tree_at` injection | All pyrox modules are `eqx.Module` subclasses. `eqx.tree_at` for immutable parameter injection. |
 | **numpyro** | `numpyro.sample`, `numpyro.param`, distributions, inference | pyrox registers sample/param sites; NumPyro traces and runs inference. All AutoGuide families work out of the box. `GPPrior` is a native `numpyro.distributions.Distribution`. |
+| **kernellib** | Kernel functions, `Kernel` base class, kernel operators, spectral densities | `pyrox_gp.Kernel = kernellib.AbstractKernel`; pyrox-gp kernels call `kernellib.functional`; `pyrox_gp._basis` delegates spectral densities and RFF draws. kernellib never imports numpyro. |
 | **gaussx** | Solver protocol backend, structured operators, `MultivariateNormal`, Matheron sampling | `pyrox.gp.Solver.solve/log_det` delegates to `gaussx.ops.solve/logdet`; `CovarianceRepresentation` maps to gaussx operators; `PathwiseSampler` uses `gaussx.matheron_update`. |
 | **lineax** | Base operator abstraction (`AbstractLinearOperator`) | Transitive via gaussx; pyrox doesn't import lineax directly. |
 | **matfree** | SLQ logdet, Hutchinson trace, partial eig/SVD | Transitive via gaussx solvers (CG, BBMM). |
@@ -92,7 +98,6 @@ The package is organized into three submodules:
 - GP-style `Parameterized` base class (register_param, set_prior, autoguide, mode switching)
 - Per-call context cache preventing duplicate sample sites
 - Dependent priors via callables
-- Shared RFF spectral density samplers (multi-kernel, variational frequencies)
 
 ### In Scope (`nn`)
 
@@ -116,6 +121,7 @@ The package is organized into three submodules:
 - Custom inference (MCMC, SVI, guides) -- NumPyro
 - Neural network primitives -- Equinox
 - Standalone GP regression (use GPJax for that)
+- Kernel math, kernel operators and non-GP kernel methods (KRR, HSIC, MMD, kernel PCA) -- kernellib
 - Weight-space / HSGP methods that reduce the GP to a linear model in feature space
 - Data loading, preprocessing, visualization -- user code
 - Multi-backend abstraction -- pure JAX/Equinox only
@@ -132,7 +138,7 @@ The package is organized into three submodules:
 | **Parameterized** | register/prior/guide/mode switching | `_core` | `set_mode("guide")` uses learned posterior |
 | **NN layers** | Each layer produces correct output shapes | `nn` | `DenseVariational(50)(x)` yields shape `(N, 50)` |
 | **NN inference round-trip** | Layers work with MCMC and SVI | `nn` | NUTS runs, SVI converges on toy problem |
-| **Kernel contract** | All kernels produce PSD Gram matrices | `gp` | `eigvals(K) >= 0` for all kernel types |
+| **Kernel contract** | Parameterized kernels match the kernellib math they wrap; the PSD / symmetry / spectral tests of the math itself live in kernellib | `gp` | `pyrox_gp.RBF()(X, X) == kernellib.RBF()(X, X)` |
 | **Solver correctness** | Solver results match dense Cholesky reference | `gp` | `CG.solve(K, y) ~ cholesky_solve(K, y)` |
 | **GP posterior** | Predictions match analytical GP posterior | `gp` | `ConditionedGP.predict` vs dense formula |
 | **Kalman** | Filter/smoother match dense GP on temporal data | `gp` | KalmanSolver result ~ CholeskySolver result |
@@ -148,7 +154,7 @@ The package is organized into three submodules:
 4. **NN layer correctness** -- output shapes, gradient flow, prior sampling (`nn`)
 5. **Solver-representation correctness** -- all (Solver x Representation) pairs produce matching results (`gp`)
 6. **Kalman = dense** -- temporal GP via Kalman matches exact GP on same data (`gp`)
-7. **Kernel PSD** -- all kernels produce valid covariance matrices (`gp`)
+7. **Kernel wrappers** -- parameterized kernels agree with kernellib under priors and guides (`gp`)
 
 ---
 
@@ -168,7 +174,7 @@ The package is organized into three submodules:
 ## Future Work
 
 1. **Additional NN layer families** -- convolutional, recurrent, attention probabilistic layers (`nn`)
-2. **Extended random features** -- multi-kernel spectral densities, variational frequencies (VSSGP), orthogonal RFF (`_core` + `nn`)
+2. **Extended random features** -- variational frequencies (VSSGP) in `nn`; spectral densities for more kernels and orthogonal / FastFood feature maps land in kernellib
 3. **Multi-output GPs** -- LMC, ICM, OILMM via latent-space inference + mixing (`gp`)
 4. **Inter-domain inducing features** -- VISH (spherical harmonics), VFF (Fourier), Laplacian eigenfunctions as SVGP inducing variables (`gp`)
 5. **Scalable Kronecker methods** -- for large spatiotemporal grids (`gp`)
