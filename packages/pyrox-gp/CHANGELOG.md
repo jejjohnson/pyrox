@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.5...pyrox-gp-v0.1.6) (2026-09-25)
+
+
+### Features
+
+* **gp:** take kernel math and the Kernel base class from kernellib ([#235](https://github.com/jejjohnson/pyrox/issues/235)) ([127fe16](https://github.com/jejjohnson/pyrox/commit/127fe163371c971cf2247cb84e62c52a3f5a39cf))
+
 ## [0.1.5](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.4...pyrox-gp-v0.1.5) (2026-09-23)
 
 
