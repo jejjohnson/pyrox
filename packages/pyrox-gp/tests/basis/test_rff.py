@@ -54,15 +54,15 @@ def test_rff_cosine_paths_reconstruct_matern_1d():
     )
     empirical = paths.T @ paths / paths.shape[0]
     exact = kernel(X, X)
-    # Matern RFF with coord-wise t-draws converges more slowly than RBF,
-    # so the tolerance is loose; the test exists to catch sign / scale
-    # regressions (e.g. wrong spectral density).
+    # Matern RFF (heavy-tailed Student-t frequencies) converges more
+    # slowly than RBF, so the tolerance is loose; the test exists to catch
+    # sign / scale regressions (e.g. wrong spectral density).
     assert jnp.allclose(empirical, exact, atol=0.3)
 
 
 def test_rff_cosine_paths_rejects_unsupported_kernel():
     kernel = Periodic()
-    with pytest.raises(NotImplementedError, match="RBF and Matern"):
+    with pytest.raises(NotImplementedError, match="Periodic"):
         draw_rff_cosine_basis(
             kernel,
             jax.random.PRNGKey(0),

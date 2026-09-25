@@ -4,75 +4,35 @@ For a stationary kernel $k(r)$ on $\mathbb{R}^D$ with spectral
 density $S(\omega)$ (Bochner), the inter-domain inducing-feature
 reduction gives a diagonal $K_{uu}$ whose entries are
 $S(\sqrt{\lambda_j})$ evaluated at the basis eigenvalues. This
-module computes $S(\sqrt{\lambda})$ for each kernel in
-`pyrox_gp._kernels` that has a registered closed-form spectral density.
+module computes $S(\sqrt{\lambda})$ by delegating to kernellib:
+a pyrox kernel is frozen to its kernellib counterpart
+(`_ParameterizedKernel.frozen`) and kernellib's
+`AbstractStationaryKernel.unit_spectral_density` supplies the closed form.
 
-Supported (1D, isotropic):
+Supported: kernels whose kernellib counterpart has a closed-form density,
+`pyrox_gp.RBF` and `pyrox_gp.Matern` (and the kernellib ``RBF`` /
+``Matern`` directly):
 
-- `pyrox_gp.RBF` —
-  $S(\omega) = \sigma^2 \ell \sqrt{2\pi}\,\exp(-\ell^2 \omega^2 / 2)$.
-- `pyrox_gp.Matern` (``nu in {0.5, 1.5, 2.5, ...}``) —
-  $S(\omega) = c_\nu\,(2\nu/\ell^2 + \omega^2)^{-(\nu+1/2)}$ with
-  $c_\nu = \sigma^2\,\tfrac{2\sqrt{\pi}\,\Gamma(\nu+1/2)}{\Gamma(\nu)}\,
-  (2\nu/\ell^2)^\nu$.
+- RBF — $S(\omega) = \sigma^2 \ell^D (2\pi)^{D/2}\,\exp(-\ell^2 \omega^2 / 2)$.
+- Matern — $S(\omega) = \sigma^2
+  \frac{2^D \pi^{D/2} \Gamma(\nu+D/2) (2\nu)^\nu}{\Gamma(\nu)\,\ell^{2\nu}}
+  \,(2\nu/\ell^2 + \omega^2)^{-(\nu + D/2)}$.
 
-For higher input dimensions the density is the radial form raised to the
-``D``-th power for the lengthscale prefactor (RBF) or the standard ``D``-d
-Matern formula. The two stationary kernels above carry the lengthscale
-exponent of ``D``; non-stationary kernels (``Linear``, ``Polynomial``)
-and bounded-spectrum kernels (``Periodic``, ``Cosine``) raise
+The density here is radial: it takes squared frequency *magnitudes*, so it is
+defined for isotropic lengthscales only. Non-stationary kernels
+(``Linear``, ``Polynomial``), bounded-spectrum kernels (``Periodic``,
+``Cosine``) and ``RationalQuadratic`` (no closed form in kernellib) raise
 `NotImplementedError`.
 """
 
 from __future__ import annotations
 
-import math
-
 import jax.numpy as jnp
+import kernellib as kl
 from jaxtyping import Array, Float
 
-from pyrox_gp._kernels import RBF, Matern
+from pyrox_gp._context import _kernel_context
 from pyrox_gp._protocols import Kernel
-
-
-def _rbf_spectral_density(
-    eigvals: Float[Array, " M"],
-    variance: Float[Array, ""],
-    lengthscale: Float[Array, ""],
-    D: int,
-) -> Float[Array, " M"]:
-    r"""$S(\omega) = \sigma^2 \ell^D (2\pi)^{D/2} \exp(-\ell^2 \omega^2 / 2)$."""
-    omega_sq = eigvals  # eigvals are squared frequencies
-    prefactor = variance * (lengthscale**D) * (2.0 * math.pi) ** (D / 2.0)
-    return prefactor * jnp.exp(-0.5 * (lengthscale**2) * omega_sq)
-
-
-def _matern_spectral_density(
-    eigvals: Float[Array, " M"],
-    variance: Float[Array, ""],
-    lengthscale: Float[Array, ""],
-    nu: float,
-    D: int,
-) -> Float[Array, " M"]:
-    r"""Matern spectral density.
-
-    $$
-    S(\omega) = \sigma^2
-    \frac{2^D \pi^{D/2} \Gamma(\nu+D/2) (2\nu)^\nu}{\Gamma(\nu)\,\ell^{2\nu}}
-    \,(2\nu/\ell^2 + \omega^2)^{-(\nu + D/2)}.
-    $$
-    """
-    omega_sq = eigvals
-    alpha = 2.0 * nu / (lengthscale**2)
-    log_c = (
-        D * math.log(2.0)
-        + (D / 2.0) * math.log(math.pi)
-        + math.lgamma(nu + D / 2.0)
-        - math.lgamma(nu)
-    )
-    # alpha^nu = (2nu)^nu / lengthscale^(2nu) — carries the lengthscale exponent.
-    prefactor = variance * jnp.exp(log_c) * alpha**nu
-    return prefactor * (alpha + omega_sq) ** (-(nu + D / 2.0))
 
 
 def spectral_density(
@@ -81,11 +41,11 @@ def spectral_density(
     *,
     D: int = 1,
 ) -> Float[Array, " M"]:
-    """Dispatch to the kernel-specific spectral density at ``sqrt(eigvals)``.
+    """Kernel spectral density at ``sqrt(eigvals)``.
 
     Args:
-        kernel: A stationary kernel. Currently `pyrox_gp.RBF` and
-            `pyrox_gp.Matern` are registered.
+        kernel: A stationary kernel with a closed-form density: a pyrox
+            `pyrox_gp.RBF` / `pyrox_gp.Matern`, or a kernellib kernel.
         eigvals: Squared frequency magnitudes $\\lambda_j = \\omega_j^2$,
             shape ``(M,)``.
         D: Input dimension of the underlying domain (the kernel itself does
@@ -95,35 +55,47 @@ def spectral_density(
         ``S(sqrt(eigvals))`` of shape ``(M,)``.
 
     Raises:
-        NotImplementedError: For kernels without a registered closed-form
-            spectral density, or for ARD (per-dimension) lengthscales,
-            which these isotropic closed forms cannot represent.
+        NotImplementedError: For kernels without a closed-form spectral
+            density, or for ARD (per-dimension) lengthscales, which a radial
+            density cannot represent.
     """
-    if isinstance(kernel, RBF | Matern):
-        # Resolve once: a second get_param would register a duplicate
-        # NumPyro site for a kernel carrying a prior on its lengthscale.
-        variance = kernel.get_param("variance")
-        lengthscale = kernel.get_param("lengthscale")
-        if jnp.ndim(lengthscale) != 0:
-            if jnp.size(lengthscale) == 1 and D == 1:
-                # A one-element per-axis lengthscale (input_dim=1) is a
-                # scalar in disguise, but only on a one-dimensional domain:
-                # for D > 1 the kernel itself would reject the inputs, so
-                # the density must not describe a domain it cannot evaluate.
-                lengthscale = jnp.reshape(lengthscale, ())
-            else:
-                raise NotImplementedError(
-                    "Spectral densities are registered for isotropic kernels "
-                    f"only; got a lengthscale of shape "
-                    f"{jnp.shape(lengthscale)} (ARD). The closed forms take a "
-                    "scalar lengthscale and would silently pair input "
-                    "dimensions with unrelated frequencies. Use a kernel "
-                    "built without input_dim for this path."
-                )
-        if isinstance(kernel, RBF):
-            return _rbf_spectral_density(eigvals, variance, lengthscale, D)
-        return _matern_spectral_density(eigvals, variance, lengthscale, kernel.nu, D)
-    raise NotImplementedError(
-        f"Spectral density for {type(kernel).__name__} is not registered. "
-        "Currently only RBF and Matern are supported; open an issue to add more."
-    )
+    frozen = _freeze(kernel)
+    if not isinstance(frozen, kl.AbstractStationaryKernel):
+        raise NotImplementedError(
+            f"Spectral density for {type(kernel).__name__} is not registered. "
+            "Currently only RBF and Matern are supported; open an issue to add more."
+        )
+    lengthscale = frozen.lengthscale
+    if jnp.ndim(lengthscale) != 0:
+        if jnp.size(lengthscale) == 1 and D == 1:
+            # A one-element per-axis lengthscale (input_dim=1) is a scalar in
+            # disguise, but only on a one-dimensional domain: for D > 1 the
+            # kernel itself would reject the inputs, so the density must not
+            # describe a domain it cannot evaluate.
+            lengthscale = jnp.reshape(lengthscale, ())
+        else:
+            raise NotImplementedError(
+                "Spectral densities are registered for isotropic kernels "
+                f"only; got a lengthscale of shape {jnp.shape(lengthscale)} "
+                "(ARD). The closed forms take a scalar lengthscale and would "
+                "silently pair input dimensions with unrelated frequencies. Use "
+                "a kernel built without input_dim for this path."
+            )
+    # S(w) = variance * l^D * s(l^2 |w|^2), with s kernellib's
+    # unit-lengthscale density. Working in squared magnitudes avoids a sqrt,
+    # whose gradient is infinite at a zero eigenvalue.
+    unit = frozen.unit_spectral_density(lengthscale**2 * eigvals, D)
+    return frozen.variance * lengthscale**D * unit
+
+
+def _freeze(kernel: Kernel) -> kl.AbstractKernel:
+    """kernellib kernel for ``kernel``, resolving pyrox params once."""
+    frozen_fn = getattr(kernel, "frozen", None)
+    if frozen_fn is None:
+        return kernel
+    try:
+        # One context for every parameter, so a prior registers one site.
+        with _kernel_context(kernel):
+            return frozen_fn()
+    except NotImplementedError:
+        return kernel
