@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.6...pyrox-gp-v0.1.7) (2026-09-26)
+
+
+### Features
+
+* **gp:** frozen() on kernels; _basis delegates to kernellib ([#238](https://github.com/jejjohnson/pyrox/issues/238)) ([53303ee](https://github.com/jejjohnson/pyrox/commit/53303eedb1e7a90d5c8841beeefcb235aa41fac5))
+
 ## [0.1.6](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.5...pyrox-gp-v0.1.6) (2026-09-25)
 
 
