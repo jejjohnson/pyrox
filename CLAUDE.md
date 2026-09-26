@@ -63,7 +63,7 @@ packages/
 │   ├── src/pyrox_gp/
 │   │   ├── __init__.py       # Public API: GPPrior, ConditionedGP, SparseGPPrior, kernels, guides, …
 │   │   ├── _src/kernels.py   # Deprecated re-exports of kernellib.functional
-│   │   ├── _basis/           # Kernel spectral densities + RFF draws (shared with pyrox-nn)
+│   │   ├── _basis/           # Spectral densities + RFF draws via kernellib (shared with pyrox-nn)
 │   │   └── _*.py             # kernels, guides, likelihoods, models, markov, sparse, pathwise, …
 │   └── tests/                # tests/gp, tests/basis
 └── pyrox-nn/                 # Bayesian NN layers (depends on pyrox + pyrox-gp)

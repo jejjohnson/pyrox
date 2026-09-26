@@ -14,11 +14,17 @@ optimization targets.
 Scalable matrix construction (mixed-precision accumulation, implicit
 operators, batched matvec) lives in `kernellib`; these wrappers own
 the NumPyro-aware surface only.
+``frozen()`` resolves the hyperparameters once and returns the plain
+kernellib kernel of the same family, which is what kernellib's spectral
+methods, feature maps and operators take.
 """
 
 from __future__ import annotations
 
+from typing import Any, ClassVar
+
 import jax.numpy as jnp
+import kernellib as kl
 import numpyro.distributions as dist
 from jaxtyping import Array, Float
 from kernellib import functional as _k
@@ -31,8 +37,57 @@ class _ParameterizedKernel(Parameterized, Kernel):
     """Shared base — mixes `Parameterized` state with the `Kernel`.
 
     Subclasses only need to implement `setup` (register params +
-    priors) and `__call__` (evaluate the math primitive).
+    priors) and `__call__` (evaluate the math primitive). Setting
+    ``_frozen_cls`` / ``_frozen_params`` / ``_frozen_static`` enables
+    `frozen`.
     """
+
+    # The kernellib class `frozen` builds, the registered params it reads,
+    # and the static fields it copies. Field names match kernellib's.
+    _frozen_cls: ClassVar[type[kl.AbstractKernel] | None] = None
+    _frozen_params: ClassVar[tuple[str, ...]] = ()
+    _frozen_static: ClassVar[tuple[str, ...]] = ()
+
+    @pyrox_method
+    def frozen(self, **resolved: Any) -> kl.AbstractKernel:
+        """The plain kernellib kernel at the current hyperparameter values.
+
+        Each registered parameter is resolved once, inside this kernel's
+        per-call context, so a prior contributes one sample site (under
+        ``numpyro.handlers.trace``) and one draw (under ``seed``); call it
+        inside an enclosing `_kernel_context` to share that draw with other
+        evaluations. The result has no priors and no NumPyro state: it is the
+        object kernellib's spectral methods, feature maps and operators take.
+
+        Args:
+            **resolved: Values to use instead of resolving a parameter, e.g.
+                the ``variance`` / ``lengthscale`` a conditioned GP cached.
+                Parameters given here are not read, so no site is registered
+                for them.
+
+        Returns:
+            The kernellib kernel of the same family.
+
+        Raises:
+            NotImplementedError: If the class has no kernellib counterpart.
+            ValueError: For a name in ``resolved`` the kernel does not have.
+        """
+        if self._frozen_cls is None:
+            raise NotImplementedError(
+                f"{type(self).__name__} has no kernellib counterpart to freeze to."
+            )
+        unknown = set(resolved) - set(self._frozen_params)
+        if unknown:
+            raise ValueError(
+                f"{type(self).__name__} has no parameters {sorted(unknown)}; "
+                f"expected a subset of {self._frozen_params}."
+            )
+        params = {
+            name: resolved[name] if name in resolved else self.get_param(name)
+            for name in self._frozen_params
+        }
+        static = {name: getattr(self, name) for name in self._frozen_static}
+        return self._frozen_cls(**params, **static)
 
     def diag(self, X: Float[Array, "N D"]) -> Float[Array, " N"]:
         """Stationary-kernel fast diagonal: constant variance on every point.
@@ -51,6 +106,9 @@ class RBF(_ParameterizedKernel):
     lengthscale per input dimension (ARD). Leave as ``None`` for a single
     isotropic lengthscale.
     """
+
+    _frozen_cls = kl.RBF
+    _frozen_params = ("variance", "lengthscale")
 
     pyrox_name: str = "RBF"
     init_variance: float = 1.0
@@ -96,6 +154,10 @@ class Matern(_ParameterizedKernel):
     isotropic lengthscale.
     """
 
+    _frozen_cls = kl.Matern
+    _frozen_params = ("variance", "lengthscale")
+    _frozen_static = ("nu",)
+
     pyrox_name: str = "Matern"
     init_variance: float = 1.0
     init_lengthscale: float = 1.0
@@ -136,6 +198,9 @@ class Matern(_ParameterizedKernel):
 
 class Periodic(_ParameterizedKernel):
     """Periodic (MacKay) kernel."""
+
+    _frozen_cls = kl.Periodic
+    _frozen_params = ("variance", "lengthscale", "period")
 
     pyrox_name: str = "Periodic"
     init_variance: float = 1.0
@@ -181,6 +246,9 @@ class Linear(_ParameterizedKernel):
     is only PSD for ``b >= 0`` (e.g. ``X = 0`` gives eigenvalue ``N*b``).
     """
 
+    _frozen_cls = kl.Linear
+    _frozen_params = ("variance", "bias")
+
     pyrox_name: str = "Linear"
     init_variance: float = 1.0
     init_bias: float = 0.0
@@ -221,6 +289,9 @@ class RationalQuadratic(_ParameterizedKernel):
     lengthscale per input dimension (ARD). Leave as ``None`` for a single
     isotropic lengthscale.
     """
+
+    _frozen_cls = kl.RationalQuadratic
+    _frozen_params = ("variance", "lengthscale", "alpha")
 
     pyrox_name: str = "RationalQuadratic"
     init_variance: float = 1.0
@@ -274,6 +345,10 @@ class Polynomial(_ParameterizedKernel):
     PSD-requires-``b>=0`` failure mode.
     """
 
+    _frozen_cls = kl.Polynomial
+    _frozen_params = ("variance", "bias")
+    _frozen_static = ("degree",)
+
     pyrox_name: str = "Polynomial"
     init_variance: float = 1.0
     init_bias: float = 0.0
@@ -314,6 +389,9 @@ class Polynomial(_ParameterizedKernel):
 class Cosine(_ParameterizedKernel):
     """Cosine kernel ``sigma^2 cos(2 pi ||x - x'|| / period)``."""
 
+    _frozen_cls = kl.Cosine
+    _frozen_params = ("variance", "period")
+
     pyrox_name: str = "Cosine"
     init_variance: float = 1.0
     init_period: float = 1.0
@@ -344,6 +422,9 @@ class Cosine(_ParameterizedKernel):
 class White(_ParameterizedKernel):
     """White-noise kernel ``sigma^2 delta(x, x')``."""
 
+    _frozen_cls = kl.White
+    _frozen_params = ("variance",)
+
     pyrox_name: str = "White"
     init_variance: float = 1.0
 
@@ -365,6 +446,9 @@ class White(_ParameterizedKernel):
 
 class Constant(_ParameterizedKernel):
     """Constant kernel ``k(x, x') = sigma^2``."""
+
+    _frozen_cls = kl.Constant
+    _frozen_params = ("variance",)
 
     pyrox_name: str = "Constant"
     init_variance: float = 1.0

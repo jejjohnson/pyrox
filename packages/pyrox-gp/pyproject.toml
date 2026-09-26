@@ -21,8 +21,8 @@ classifiers = [
 ]
 dependencies = [
     "pyrox",
-    "gaussx>=0.1.0",
-    "kernellib>=0.0.2",
+    "gaussx>=0.2.0",
+    "kernellib>=0.0.5",
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.5",
     "lineax>=0.1.1",
     "einx>=0.4.3",
@@ -60,10 +60,10 @@ Repository = "https://github.com/jejjohnson/pyrox"
 [tool.uv.sources]
 # gaussx is not yet on PyPI; resolve the release tag from GitHub. The
 # `>=` floor in `dependencies` is what a PyPI release will satisfy later.
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.1.0" }
-# kernellib is not yet on PyPI either; same pattern. It needs gaussx >= 0.1.0,
-# which is why the gaussx tag above moved from v0.0.27.
-kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.2" }
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.2.0" }
+# kernellib is not yet on PyPI either; same pattern. 0.0.5 carries the
+# spectral methods and RFF draws `_basis` delegates to, and needs gaussx >= 0.2.0.
+kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.5" }
 
 [build-system]
 requires = ["hatchling"]
