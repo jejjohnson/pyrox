@@ -982,8 +982,8 @@ wheels = [
 
 [[package]]
 name = "kernellib"
-version = "0.0.4"
-source = { git = "https://github.com/jejjohnson/kernellib.git?rev=fb0789836ed1bb824cee518dcf80db8803d0f7c5#fb0789836ed1bb824cee518dcf80db8803d0f7c5" }
+version = "0.0.5"
+source = { git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.5#ee25219d5ee6df15c041534e14559eee09ca1c56" }
 dependencies = [
     { name = "einx" },
     { name = "equinox" },
@@ -2075,7 +2075,7 @@ requires-dist = [
     { name = "gauss-flows", marker = "extra == 'flows'", git = "https://github.com/jejjohnson/gauss_flows.git?rev=bdb23f076ebaaf1ba042aa52ea593487cef3204e" },
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.2.0" },
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.5" },
-    { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?rev=fb0789836ed1bb824cee518dcf80db8803d0f7c5" },
+    { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.5" },
     { name = "lineax", specifier = ">=0.1.1" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
     { name = "optax", marker = "extra == 'optax'", specifier = ">=0.2.8" },

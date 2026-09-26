@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
     "pyrox",
     "gaussx>=0.2.0",
-    "kernellib>=0.0.2",
+    "kernellib>=0.0.5",
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.5",
     "lineax>=0.1.1",
     "einx>=0.4.3",
@@ -61,10 +61,9 @@ Repository = "https://github.com/jejjohnson/pyrox"
 # gaussx is not yet on PyPI; resolve the release tag from GitHub. The
 # `>=` floor in `dependencies` is what a PyPI release will satisfy later.
 gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.2.0" }
-# kernellib is not yet on PyPI either; same pattern. The spectral methods and
-# RFF draws `_basis` delegates to need kernellib's phase-4 spectral PR, which
-# needs gaussx >= 0.2.0. Pinned to that PR's commit until it is released.
-kernellib = { git = "https://github.com/jejjohnson/kernellib.git", rev = "fb0789836ed1bb824cee518dcf80db8803d0f7c5" }
+# kernellib is not yet on PyPI either; same pattern. 0.0.5 carries the
+# spectral methods and RFF draws `_basis` delegates to, and needs gaussx >= 0.2.0.
+kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.5" }
 
 [build-system]
 requires = ["hatchling"]
