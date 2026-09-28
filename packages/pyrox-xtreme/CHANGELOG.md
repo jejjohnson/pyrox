@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.4](https://github.com/jejjohnson/xtremax/compare/v0.0.3...v0.0.4) (2026-09-25)
+
+
+### Features
+
+* add spatial extremes curriculum and dual-tool documentation build ([#104](https://github.com/jejjohnson/xtremax/issues/104)) ([c0fe6e7](https://github.com/jejjohnson/xtremax/commit/c0fe6e7e895c9141c399e3c946989dbb5e29e89e))
+
 ## [0.0.3](https://github.com/jejjohnson/xtremax/compare/v0.0.2...v0.0.3) (2026-08-20)
 
 
