@@ -15,7 +15,14 @@ MODULES = sorted(
 )
 
 
-@pytest.mark.parametrize("name", MODULES)
+# The inla() example runs a full fit (~20 s of compilation): slow tier.
+_SLOW = {"pyrox_lgm._inla"}
+
+
+@pytest.mark.parametrize(
+    "name",
+    [pytest.param(m, marks=pytest.mark.slow) if m in _SLOW else m for m in MODULES],
+)
 def test_doctests(name):
     result = doctest.testmod(
         importlib.import_module(name), optionflags=doctest.ELLIPSIS

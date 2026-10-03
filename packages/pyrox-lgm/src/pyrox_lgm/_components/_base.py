@@ -82,6 +82,19 @@ class AbstractComponent(eqx.Module):
                 constraint $V^\top x \sim \mathcal N(0, s^2 I)$.
         """
 
+    def constraint_basis(
+        self, gmrf: gx.GaussianMRF | gx.IntrinsicGMRF
+    ) -> Float[Array, "n c"] | None:
+        """Orthonormal basis of the hard constraints ``inla()`` imposes.
+
+        The intrinsic field's null space by default (sum-to-zero per
+        connected component, say). A component may constrain fewer
+        directions and leave the rest to the data, as R-INLA's ``rw2``
+        constrains only the sum and keeps the linear trend; the density's
+        rank is unchanged.
+        """
+        return gmrf.null_space if isinstance(gmrf, gx.IntrinsicGMRF) else None
+
     def projector(self, index: Int[ArrayLike, " n_obs"]) -> gx.SparseOperator:
         """``(n_obs, n_nodes)`` selector with a one where observation i sits.
 
