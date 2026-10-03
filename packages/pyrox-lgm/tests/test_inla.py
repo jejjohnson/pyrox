@@ -336,8 +336,34 @@ def test_a_mode_that_needs_the_retry_reruns_the_whole_fit(gaussian_fit, monkeypa
     assert np.allclose(res.theta_weights, clean.theta_weights, atol=1e-6)
 
     monkeypatch.setattr(inla_mod, "_fit_point", fails_below(10_000))
-    with pytest.raises(RuntimeError, match="theta-mode did not converge"):
+    with pytest.raises(RuntimeError, match="along its search did not converge"):
         lgm.inla(model, data, strategy="gaussian")
+
+
+@pytest.mark.slow
+def test_the_mode_search_rejects_unconverged_inner_fits():
+    # At u = 0 this Poisson model's inner Newton fit needs 21 iterations: with
+    # 8 the search must not run on the unconverged log-posterior, so inla()
+    # escalates to 32 and lands on the same fit as the default budget.
+    import pyrox_lgm._inla as inla_mod
+
+    n = 20
+    t = np.arange(n)
+    y = np.random.default_rng(0).poisson(np.exp(2.0 + np.sin(t / 3.0)))
+    model = lgm.LGM(
+        (lgm.RW1(n, name="t"),), lgm.FixedEffects(("intercept",)), lgm.Poisson()
+    )
+    data = {"y": y.astype(float), "t": t}
+    A = model.projector(data)
+    jdata = {k: jnp.asarray(v) for k, v in data.items()}
+    _, _, ok = inla_mod._theta_mode(
+        model, A, jdata, 8, jnp.zeros(1), max_iter=50, tol=1e-5, verbose=False
+    )
+    assert not ok
+    with pytest.warns(UserWarning, match="re-running the whole fit"):
+        res = lgm.inla(model, data, max_newton=8, strategy="gaussian")
+    clean = lgm.inla(model, data, strategy="gaussian")
+    assert np.allclose(res.theta_mode, clean.theta_mode, atol=1e-6)
 
 
 @pytest.mark.slow

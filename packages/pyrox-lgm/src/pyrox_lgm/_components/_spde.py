@@ -195,7 +195,8 @@ def _path_laplacians(shape: tuple[int, ...]) -> lx.AbstractLinearOperator:
 
     def path(n: int) -> gx.SparseOperator:
         deg = np.full(n, 2.0)
-        deg[[0, -1]] = 1.0
+        deg[0] -= 1.0  # one neighbour at each end; a single node has none
+        deg[-1] -= 1.0
         i = np.arange(n - 1)
         return gx.SparseOperator.from_coo(
             np.concatenate([np.arange(n), i + 1, i]),
