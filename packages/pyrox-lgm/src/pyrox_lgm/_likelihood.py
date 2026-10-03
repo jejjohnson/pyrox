@@ -16,7 +16,7 @@ import equinox as eqx
 import gaussx as gx
 import jax.numpy as jnp
 import numpyro.distributions as dist
-from jaxtyping import Array
+from jaxtyping import Array, ArrayLike
 from numpyro.distributions.transforms import Transform
 
 from pyrox_lgm._components._base import default_transform
@@ -34,7 +34,7 @@ class AbstractObservation(eqx.Module):
 
     @abc.abstractmethod
     def build(
-        self, y: Array, theta: dict[str, Array], data: Mapping[str, Array]
+        self, y: Array, theta: dict[str, Array], data: Mapping[str, ArrayLike]
     ) -> gx.AbstractLikelihood:
         """The gaussx likelihood holding ``y`` at hyperparameters ``theta``."""
 

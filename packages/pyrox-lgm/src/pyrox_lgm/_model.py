@@ -44,7 +44,7 @@ class FixedEffects(eqx.Module):
     Column ``"intercept"`` is all ones unless ``data`` has its own; every
     other name is read from ``data[name]``.
 
-    Args:
+    Attributes:
         names: Fixed-effect names, in the order they enter the latent vector.
         prior_precision: $\lambda$ (R-INLA's default is 0.001).
     """
@@ -79,6 +79,12 @@ def _block(gmrf) -> lx.AbstractLinearOperator:
 
 class _Latent:
     """Shared log-density of the assembled latent prior."""
+
+    parts: tuple
+    slices: tuple[tuple[int, int], ...]
+    consts: tuple
+    n_fixed: int
+    fixed_precision: float
 
     def _sum_log_prob(self, x):
         total = jnp.zeros((), dtype=x.dtype)
@@ -273,7 +279,7 @@ class LGM(eqx.Module):
     def _normaliser(self, comp: AbstractComponent) -> Float[Array, ""]:
         """The theta-free constant an intrinsic component's log_prob omits."""
         probe = {
-            k: transform(jnp.zeros(prior.event_shape))
+            k: jnp.asarray(transform(jnp.zeros(prior.event_shape)))
             for k, (prior, transform) in comp.theta_spec().items()
         }
         gmrf = comp.prior(probe)
