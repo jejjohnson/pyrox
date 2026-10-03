@@ -14,8 +14,10 @@ from collections.abc import Mapping
 
 import equinox as eqx
 import gaussx as gx
+import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
+from jax.scipy.special import betainc, gammaincc
 from jaxtyping import Array, ArrayLike
 from numpyro.distributions.transforms import Transform
 
@@ -38,6 +40,24 @@ class AbstractObservation(eqx.Module):
     ) -> gx.AbstractLikelihood:
         """The gaussx likelihood holding ``y`` at hyperparameters ``theta``."""
 
+    @abc.abstractmethod
+    def site_distribution(
+        self, eta: Array, theta: dict[str, Array], data: Mapping[str, ArrayLike]
+    ) -> dist.Distribution:
+        """``p(y_i | eta_i)`` per site as a NumPyro distribution (batched in eta).
+
+        The diagnostics evaluate it on quadrature nodes, so ``eta`` may carry
+        leading axes beyond the sites'.
+        """
+
+    def site_log_prob(self, y, eta, theta, data) -> Array:
+        """``log p(y_i | eta_i)`` per site."""
+        return jnp.asarray(self.site_distribution(eta, theta, data).log_prob(y))
+
+    def site_cdf(self, y, eta, theta, data) -> Array:
+        """``P(Y_i <= y_i | eta_i)`` per site."""
+        return jnp.asarray(self.site_distribution(eta, theta, data).cdf(y))
+
 
 class Gaussian(AbstractObservation):
     """``y ~ N(eta, 1/prec)``; ``prec`` under ``PCPrecision(1, 0.01)``."""
@@ -53,6 +73,9 @@ class Gaussian(AbstractObservation):
     def build(self, y, theta, data):
         return gx.GaussianLikelihood(y, 1.0 / theta["prec"])
 
+    def site_distribution(self, eta, theta, data):
+        return dist.Normal(eta, jax.lax.rsqrt(theta["prec"]))
+
 
 class Poisson(AbstractObservation):
     """``y ~ Poisson(exp(eta))``; put the log exposure in ``data["offset"]``."""
@@ -61,6 +84,9 @@ class Poisson(AbstractObservation):
 
     def build(self, y, theta, data):
         return gx.PoissonLikelihood(y)
+
+    def site_distribution(self, eta, theta, data):
+        return _Poisson(jnp.exp(eta))
 
 
 class Bernoulli(AbstractObservation):
@@ -71,6 +97,9 @@ class Bernoulli(AbstractObservation):
     def build(self, y, theta, data):
         return gx.BernoulliLikelihood(y)
 
+    def site_distribution(self, eta, theta, data):
+        return _Binomial(jnp.ones_like(eta), eta)
+
 
 class Binomial(AbstractObservation):
     """``y ~ Binomial(n, sigmoid(eta))`` with ``n = data["n_trials"]``."""
@@ -79,6 +108,9 @@ class Binomial(AbstractObservation):
 
     def build(self, y, theta, data):
         return gx.BinomialLikelihood(y, jnp.asarray(data["n_trials"]))
+
+    def site_distribution(self, eta, theta, data):
+        return _Binomial(jnp.asarray(data["n_trials"], dtype=eta.dtype), eta)
 
 
 class NegativeBinomial(AbstractObservation):
@@ -94,3 +126,35 @@ class NegativeBinomial(AbstractObservation):
 
     def build(self, y, theta, data):
         return gx.NegativeBinomialLikelihood(y, theta["size"])
+
+    def site_distribution(self, eta, theta, data):
+        return _NegativeBinomial(jnp.exp(eta), theta["size"])
+
+
+# Count distributions with a closed-form CDF (NumPyro's do not all define
+# ``cdf``): P(Y <= k) through regularised incomplete gamma / beta functions.
+
+
+class _Poisson(dist.Poisson):
+    def cdf(self, value):
+        return gammaincc(jnp.floor(value) + 1.0, self.rate)
+
+
+class _Binomial(dist.BinomialLogits):
+    def __init__(self, total_count, logits):
+        super().__init__(logits, total_count=total_count)
+
+    def cdf(self, value):
+        k = jnp.floor(value)
+        n = self.total_count
+        p = jax.nn.sigmoid(self.logits)
+        inside = betainc(jnp.maximum(n - k, 1e-12), k + 1.0, 1.0 - p)
+        return jnp.where(k >= n, 1.0, jnp.where(k < 0, 0.0, inside))
+
+
+class _NegativeBinomial(dist.NegativeBinomial2):
+    def cdf(self, value):
+        k = jnp.floor(value)
+        r = self.concentration
+        p = r / (r + self.mean)
+        return jnp.where(k < 0, 0.0, betainc(r, k + 1.0, p))

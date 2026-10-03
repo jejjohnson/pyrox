@@ -271,10 +271,10 @@ def test_non_converged_design_points_are_dropped_with_a_warning(
     calls = {"n": 0}
 
     def flaky(*args):
-        mean, var, ok, lp = real(*args)
+        mean, var, ok, lp, *rest = real(*args)
         calls["n"] += 1
         # The second design point (not the mode) fails its fit and its retry.
-        return mean, var, ok & (calls["n"] not in (2, 3)), lp
+        return mean, var, ok & (calls["n"] not in (2, 3)), lp, *rest
 
     monkeypatch.setattr(inla_mod, "_fit_point", flaky)
     with warnings.catch_warnings(record=True) as caught:
@@ -297,11 +297,11 @@ def test_a_retried_point_is_reweighted_with_its_converged_fit(
     calls = {"n": 0}
 
     def flaky(*args):
-        mean, var, ok, lp = real(*args)
+        mean, var, ok, lp, *rest = real(*args)
         calls["n"] += 1
         if calls["n"] == 2:
-            return mean, var, ok & False, lp - 50.0
-        return mean, var, ok, lp
+            return mean, var, ok & False, lp - 50.0, *rest
+        return mean, var, ok, lp, *rest
 
     monkeypatch.setattr(inla_mod, "_fit_point", flaky)
     res = lgm.inla(model, data, strategy="gaussian")
@@ -324,8 +324,8 @@ def test_a_mode_that_needs_the_retry_reruns_the_whole_fit(gaussian_fit, monkeypa
 
     def fails_below(budget):
         def fit(model_, A, d, u, n_iter, subspace):
-            mean, var, ok, lp = real(model_, A, d, u, n_iter, subspace)
-            return mean, var, ok & (n_iter >= budget), lp
+            mean, var, ok, lp, *rest = real(model_, A, d, u, n_iter, subspace)
+            return mean, var, ok & (n_iter >= budget), lp, *rest
 
         return fit
 
