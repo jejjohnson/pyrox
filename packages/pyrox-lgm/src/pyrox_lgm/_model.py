@@ -206,6 +206,13 @@ class LGM(eqx.Module):
         self.components = tuple(components)
         self.fixed = fixed
         self.likelihood = Gaussian() if likelihood is None else likelihood
+        # Hyperparameters are keyed f"{name}.{k}": the observation model's
+        # namespace must not be a component's.
+        if self.likelihood.name in {c.name for c in self.components}:
+            raise ValueError(
+                f"the observation model's name {self.likelihood.name!r} is also "
+                "a component's; rename one"
+            )
         self.consts = tuple(self._normaliser(c) for c in self.components)
 
     # -- hyperparameters --------------------------------------------------

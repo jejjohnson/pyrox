@@ -15,6 +15,7 @@ from __future__ import annotations
 import time
 import warnings
 
+import gaussx as gx
 import jax
 import jax.numpy as jnp
 import kernellib as kl
@@ -124,6 +125,8 @@ def test_lgm_validation():
         lgm.LGM((lgm.IID(3, name="y"),))
     with pytest.raises(ValueError, match="observation data"):
         lgm.LGM((lgm.IID(3, name="b"),), lgm.FixedEffects(("offset",)))
+    with pytest.raises(ValueError, match="observation model's name"):
+        lgm.LGM((lgm.IID(3, name="lik"),))
 
 
 def test_any_generic_structure_assembles():
@@ -134,14 +137,16 @@ def test_any_generic_structure_assembles():
     d, e = jnp.array([2.0, 3.0, 4.0]), jnp.array([-1.0, -0.5])
     tri = lx.TridiagonalLinearOperator(d, e, e)
     other = lx.AddLinearOperator(tri, lx.IdentityLinearOperator(tri.in_structure()))
-    for op in (tri, other):
+    kron = gx.Kronecker(tri, tri, tri)  # more than two factors
+    for op in (tri, other, kron):
         r, c, v = full_coo(op)
-        dense = np.zeros((3, 3))
+        n = op.in_size()
+        dense = np.zeros((n, n))
         np.add.at(dense, (r, c), np.asarray(v))
         assert np.allclose(dense, op.as_matrix())
         model = lgm.LGM((lgm.Generic(op, name="g"),))
         prior = model.latent_prior(model.unflatten(jnp.zeros(model.n_theta)))
-        assert np.allclose(prior.precision.as_matrix()[:3, :3], op.as_matrix())
+        assert np.allclose(prior.precision.as_matrix()[:n, :n], op.as_matrix())
 
 
 def test_combinators_lift_the_inner_constraint_basis():
