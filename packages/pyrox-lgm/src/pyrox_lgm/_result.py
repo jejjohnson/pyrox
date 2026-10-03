@@ -78,6 +78,8 @@ class INLAResult(eqx.Module):
             over $\\theta$ (R-INLA's "Gaussian" mlik).
         n_dropped: Design points dropped because their inner Newton did not
             converge.
+        newton_iters: The Newton budget each kept point converged with
+            (``max_newton``, or four times it after a retry).
     """
 
     fixed: dict[str, Summary]
@@ -92,7 +94,7 @@ class INLAResult(eqx.Module):
     n_dropped: int = eqx.field(static=True)
     model: Any
     data: Mapping[str, Any]
-    max_newton: int = eqx.field(static=True)
+    newton_iters: tuple[int, ...] = eqx.field(static=True)
 
     def sample_latent(self, key: jax.Array, n: int) -> Float[Array, "n N"]:
         """Draws of the latent vector from the mixture over design points.
@@ -114,8 +116,13 @@ class INLAResult(eqx.Module):
         for k in np.unique(picks):
             rows = np.flatnonzero(picks == k)
             fit = self.model.laplace(
-                self.theta_points[k], self.data, projector=A, max_newton=self.max_newton
+                self.theta_points[k],
+                self.data,
+                projector=A,
+                max_newton=self.newton_iters[k],
             )
+            if not bool(fit.converged):
+                raise RuntimeError(f"refit of design point {k} did not converge")
             prior = self.model.latent_prior(self.model.unflatten(self.theta_points[k]))
             z = jax.random.normal(keys[k], (rows.size, fit.mode.shape[0]))
             draws = jax.vmap(fit.factor.solve_lower_transpose)(z)

@@ -195,8 +195,12 @@ class LGM(eqx.Module):
         from pyrox_lgm._likelihood import Gaussian
 
         names = [c.name for c in components]
+        if fixed is not None:
+            names += list(fixed.names)
         if len(set(names)) != len(names):
-            raise ValueError(f"component names must be distinct, got {names}")
+            raise ValueError(
+                f"component and fixed-effect names must be distinct, got {names}"
+            )
         self.components = tuple(components)
         self.fixed = fixed
         self.likelihood = Gaussian() if likelihood is None else likelihood
@@ -337,11 +341,11 @@ class LGM(eqx.Module):
             if c.name not in data:
                 raise KeyError(f"data has no index for component {c.name!r}")
             idx = np.asarray(data[c.name])
-            if idx.ndim == 2 and np.issubdtype(idx.dtype, np.floating):
+            if idx.ndim == 2:  # locations (any dtype), not node indices
                 project = getattr(c, "project_points", None)
                 if project is None:
                     raise ValueError(f"{c.name!r} takes node indices, not points")
-                blocks.append(project(idx))
+                blocks.append(project(idx.astype(float)))
             else:
                 blocks.append(c.projector(idx))
         if self.fixed is not None:

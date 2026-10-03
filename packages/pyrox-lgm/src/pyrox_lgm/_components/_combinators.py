@@ -76,6 +76,15 @@ def _parts(
     return gmrf.precision, None, jnp.asarray(1.0)
 
 
+def _probe_basis(comp: AbstractComponent):
+    """A component's own constraint basis (theta-free for the intrinsic ones)."""
+    probe = {
+        k: jnp.asarray(transform(jnp.zeros(prior.event_shape)))
+        for k, (prior, transform) in comp.theta_spec().items()
+    }
+    return comp.constraint_basis(comp.prior(probe))
+
+
 def _check_addressable(comp: AbstractComponent, role: str) -> None:
     if comp.n_index != comp.n_nodes:
         raise ValueError(
@@ -185,6 +194,16 @@ class Kronecker(AbstractComponent):
         }
         return main, group
 
+    def constraint_basis(self, gmrf):
+        # The intrinsic factor's own constraints, lifted (an RW2 main keeps
+        # its sum-only rule), not the product's whole null space.
+        main, group = _probe_basis(self.main), _probe_basis(self.group)
+        if main is not None:
+            return jnp.kron(main, jnp.eye(self.group.n_nodes))
+        if group is not None:
+            return jnp.kron(jnp.eye(self.main.n_nodes), group)
+        return None
+
     def prior(
         self,
         theta: dict[str, Array],
@@ -238,6 +257,10 @@ class Replicate(AbstractComponent):
 
     def theta_spec(self) -> dict[str, tuple[dist.Distribution, Transform]]:
         return self.component.theta_spec()
+
+    def constraint_basis(self, gmrf):
+        inner = _probe_basis(self.component)
+        return None if inner is None else jnp.kron(jnp.eye(self.n_rep), inner)
 
     def prior(
         self,

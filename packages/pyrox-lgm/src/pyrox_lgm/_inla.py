@@ -106,7 +106,7 @@ def _fit_point(model, A, data, u, n_iter, subspace):
             projector=A,
             offset=offset,
         )
-    return mean, var, fit.converged
+    return mean, var, fit.converged, fit.log_marginal + model.log_prior(u)
 
 
 def _theta_mode(model, A, data, max_newton, u0, *, max_iter, tol, verbose):
@@ -199,7 +199,7 @@ def inla(
     def log_post(u):
         return _log_post(model, A, data, max_newton, u)
 
-    # 1. theta-mode, design and marginal likelihood.
+    # 1. theta-mode and design.
     u0 = jnp.zeros(m) if theta_init is None else jnp.asarray(theta_init, dtype=float)
     if m:
         u_star, _ = _theta_mode(
@@ -219,24 +219,30 @@ def inla(
         )
         neg_h = -hessian
         cov_u = jnp.linalg.inv(neg_h)
-        log_ml = _log_marginal_likelihood(log_post, u_star, neg_h, points, log_w)
     else:
         u_star = u0
         points, log_w = u0[None, :], jnp.zeros(1)
-        log_ml = log_post(u0)
-        cov_u = jnp.zeros((0, 0))
+        neg_h = cov_u = jnp.zeros((0, 0))
+    # The design's log-weights are log(Delta_k) + lp_k up to a constant, with
+    # lp_k from the max_newton fit; keep log(Delta_k) to reweight below.
+    lp_design = jnp.stack([log_post(u) for u in points])
+    log_delta = log_w - lp_design
 
-    # 2. per-point Gaussian approximations.
+    # 2. per-point Gaussian approximations; a point that needs the retry is
+    # reweighted with its converged log-posterior, one that never converges
+    # is dropped from the mixture and from the marginal likelihood.
     subspace = tuple(_vb_subspace(model).tolist()) if strategy == "vb" else ()
-    means, variances, keep = [], [], []
+    means, variances, lps, iters, keep = [], [], [], [], []
     for k in range(points.shape[0]):
-        mean, var, ok = _fit_point(model, A, data, points[k], max_newton, subspace)
+        n_iter = max_newton
+        mean, var, ok, lp = _fit_point(model, A, data, points[k], n_iter, subspace)
         if not bool(ok):
-            mean, var, ok = _fit_point(
-                model, A, data, points[k], 4 * max_newton, subspace
-            )
+            n_iter = 4 * max_newton
+            mean, var, ok, lp = _fit_point(model, A, data, points[k], n_iter, subspace)
         means.append(mean)
         variances.append(var)
+        lps.append(lp)
+        iters.append(n_iter)
         keep.append(bool(ok))
     keep_arr = np.asarray(keep)
     n_dropped = int((~keep_arr).sum())
@@ -248,12 +254,22 @@ def inla(
             "iteration did not converge",
             stacklevel=2,
         )
-    idx = jnp.asarray(np.flatnonzero(keep_arr))
+    kept = np.flatnonzero(keep_arr)
+    idx = jnp.asarray(kept)
     points = points[idx]
-    log_w = log_w[idx]
+    lp_kept = jnp.stack(lps)[idx]
+    log_w = log_delta[idx] + lp_kept
     weights = jnp.exp(log_w - jax.scipy.special.logsumexp(log_w))
     means_arr = jnp.stack(means)[idx]
     vars_arr = jnp.maximum(jnp.stack(variances)[idx], 0.0)
+    newton_iters = tuple(iters[k] for k in kept)
+    lp_star = lps[0] if keep[0] else lp_design[0]  # point 0 is the mode
+    if m:
+        log_ml = _log_marginal_likelihood(
+            lp_star, u_star, neg_h, points, lp_kept, log_w
+        )
+    else:
+        log_ml = lp_star
 
     # 3. mixtures.
     summary = mixture_summary(means_arr, vars_arr, weights)
@@ -281,26 +297,25 @@ def inla(
         n_dropped=n_dropped,
         model=model,
         data=data,
-        max_newton=max_newton,
+        newton_iters=newton_iters,
     )
 
 
-def _log_marginal_likelihood(log_post, u_star, neg_h, points, log_w):
+def _log_marginal_likelihood(lp_star, u_star, neg_h, points, lp, log_w):
     r"""$\log\tilde\pi(y) = \log\int \tilde\pi(u \mid y)\,du$ over the design.
 
     The Gaussian approximation $\log\tilde\pi(u^\ast\mid y) + \tfrac m2
     \log 2\pi - \tfrac12\log|-\nabla^2|$ is exact for a Gaussian
     $\tilde\pi(u\mid y)$; the design corrects it by the ratio
     $r_k = \tilde\pi(u_k\mid y)/\tilde\pi_G(u_k)$ to that Gaussian. With the
-    design weights $w_k \propto \Delta_k\tilde\pi(u_k\mid y)$ (normalised),
-    $\int\tilde\pi / \int\tilde\pi_G \approx 1 / \sum_k w_k / r_k$.
-    For ``"eb"`` (one point) this is the Gaussian approximation itself.
+    design weights $w_k \propto \Delta_k\tilde\pi(u_k\mid y)$ (normalised
+    over the kept points, ``lp`` their converged log-posteriors),
+    $\int\tilde\pi / \int\tilde\pi_G \approx 1 / \sum_k w_k / r_k$. For
+    ``"eb"`` (one point) this is the Gaussian approximation itself.
     """
     m = u_star.shape[0]
-    lp_star = log_post(u_star)
     _, logdet = jnp.linalg.slogdet(neg_h)
     log_gauss = lp_star + 0.5 * m * math.log(2.0 * math.pi) - 0.5 * logdet
-    lp = jnp.stack([log_post(u) for u in points])  # reuses the compiled log_post
     d = points - u_star
     lp_gauss = lp_star - 0.5 * jnp.einsum("ki,ij,kj->k", d, neg_h, d)
     w = jnp.exp(log_w - jax.scipy.special.logsumexp(log_w))
@@ -324,12 +339,25 @@ def _hyperpar_summaries(model, u_star, cov_u, points, weights) -> dict[str, Summ
         def to_user(block, shape=shape, transform=transform):
             return transform(block.reshape(shape) if shape else block[0])
 
-        values = jax.vmap(lambda u, i=i, size=size: to_user(u[i : i + size]))(points)
-        w = weights.reshape((-1,) + (1,) * (values.ndim - 1))
-        mean = jnp.sum(w * values, axis=0)
-        sd = jnp.sqrt(jnp.maximum(jnp.sum(w * values**2, axis=0) - mean**2, 0.0))
         sd_u = jnp.sqrt(jnp.diagonal(cov_u)[i : i + size])
         qs = [to_user(u_star[i : i + size] + zq * sd_u) for zq in z]
+        if points.shape[0] > 1:
+            values = jax.vmap(lambda u, i=i, size=size: to_user(u[i : i + size]))(
+                points
+            )
+            w = weights.reshape((-1,) + (1,) * (values.ndim - 1))
+            mean = jnp.sum(w * values, axis=0)
+            var = jnp.sum(w * values**2, axis=0) - mean**2
+            sd = jnp.sqrt(jnp.maximum(var, 0.0))
+        else:
+            # Empirical Bayes: one point carries no spread, so take the mean
+            # and sd from the same Gaussian approximation as the quantiles
+            # (sd by the delta method through the bijection).
+            block = u_star[i : i + size]
+            mean = to_user(block)
+            J = jnp.reshape(jax.jacfwd(to_user)(block), (size, size))
+            cov = cov_u[i : i + size, i : i + size]
+            sd = jnp.sqrt(jnp.diagonal(J @ cov @ J.T)).reshape(jnp.shape(mean))
         out[key] = Summary(mean, sd, *qs)
         i += size
     return out

@@ -116,6 +116,42 @@ def test_lgm_validation():
         model.projector({"y": np.zeros(3)})
     with pytest.raises(KeyError, match="'x'"):
         model.projector({"y": np.zeros(3), "a": np.arange(3)})
+    with pytest.raises(ValueError, match="distinct"):  # fixed vs component
+        lgm.LGM((lgm.IID(3, name="a"),), lgm.FixedEffects(("a",)))
+    with pytest.raises(ValueError, match="distinct"):  # duplicate fixed effects
+        lgm.LGM((lgm.IID(3, name="b"),), lgm.FixedEffects(("x", "x")))
+
+
+def test_combinators_lift_the_inner_constraint_basis():
+    # A wrapped RW2 keeps R-INLA's sum-only rule: one constraint per copy
+    # (Replicate) or per group node (Kronecker), not two.
+    rep = lgm.LGM((lgm.Replicate(lgm.RW2(6, name="t"), 3),))
+    prior = rep.latent_prior(rep.unflatten(jnp.zeros(rep.n_theta)))
+    assert prior.null_space.shape == (18, 3)
+    kron = lgm.LGM((lgm.Kronecker(lgm.RW2(6, name="t"), lgm.AR1(4, name="g")),))
+    prior = kron.latent_prior(kron.unflatten(jnp.zeros(kron.n_theta)))
+    assert prior.null_space.shape == (24, 4)
+
+
+def test_mesh_points_with_integer_coordinates_are_points():
+    xs = np.linspace(0.0, 1.0, 3)
+    V = np.stack(np.meshgrid(xs, xs, indexing="ij"), -1).reshape(-1, 2)
+    T = np.array(
+        [
+            [0, 3, 4],
+            [0, 4, 1],
+            [1, 4, 5],
+            [1, 5, 2],
+            [3, 6, 7],
+            [3, 7, 4],
+            [4, 7, 8],
+            [4, 8, 5],
+        ]
+    )
+    model = lgm.LGM((lgm.SPDE(mesh=(V, T), name="s"),))
+    A = model.projector({"y": np.zeros(2), "s": np.array([[0, 0], [1, 1]])})
+    dense = np.asarray(A.as_matrix())
+    assert np.allclose(dense[0, 0], 1.0) and np.allclose(dense[1, 8], 1.0)
 
 
 def test_mixture_summary_matches_scipy():
@@ -163,8 +199,8 @@ def test_vb_correction_is_zero_for_a_gaussian_likelihood(gaussian_fit):
     A = model.projector(data)
     d = {k: jnp.asarray(v) for k, v in data.items()}
     u = res.theta_points[0]
-    plain, _, _ = _fit_point(model, A, d, u, 50, ())
-    vb, _, _ = _fit_point(model, A, d, u, 50, (N,))  # the intercept
+    plain, *_ = _fit_point(model, A, d, u, 50, ())
+    vb, *_ = _fit_point(model, A, d, u, 50, (N,))  # the intercept
     assert np.allclose(plain, vb, atol=1e-8)
 
 
@@ -235,9 +271,9 @@ def test_non_converged_design_points_are_dropped_with_a_warning(
     calls = {"n": 0}
 
     def flaky(*args):
-        mean, var, ok = real(*args)
+        mean, var, ok, lp = real(*args)
         calls["n"] += 1
-        return mean, var, ok & (calls["n"] > 2)  # first point fails twice
+        return mean, var, ok & (calls["n"] > 2), lp  # first point fails twice
 
     monkeypatch.setattr(inla_mod, "_fit_point", flaky)
     with warnings.catch_warnings(record=True) as caught:
@@ -245,6 +281,43 @@ def test_non_converged_design_points_are_dropped_with_a_warning(
         res = lgm.inla(model, data, strategy="gaussian")
     assert res.n_dropped == 1
     assert any("dropped 1" in str(w.message) for w in caught)
+
+
+@pytest.mark.slow
+def test_a_retried_point_is_reweighted_with_its_converged_fit(
+    gaussian_fit, monkeypatch
+):
+    # The first fit of point 0 "fails" with a wrong log-posterior; the retry
+    # converges, so weights and evidence must equal those of a clean run.
+    import pyrox_lgm._inla as inla_mod
+
+    model, data, clean = gaussian_fit
+    real = inla_mod._fit_point
+    calls = {"n": 0}
+
+    def flaky(*args):
+        mean, var, ok, lp = real(*args)
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return mean, var, ok & False, lp - 50.0
+        return mean, var, ok, lp
+
+    monkeypatch.setattr(inla_mod, "_fit_point", flaky)
+    res = lgm.inla(model, data, strategy="gaussian")
+    assert res.n_dropped == 0
+    assert res.newton_iters[0] == 200 and set(res.newton_iters[1:]) == {50}
+    assert np.allclose(res.theta_weights, clean.theta_weights)
+    assert np.isclose(res.log_marginal_likelihood, clean.log_marginal_likelihood)
+
+
+@pytest.mark.slow
+def test_empirical_bayes_summaries_are_consistent(gaussian_fit):
+    model, data, _ = gaussian_fit
+    res = lgm.inla(model, data, strategy="gaussian", integration="eb")
+    assert res.theta_points.shape[0] == 1
+    for s in res.hyperpar.values():
+        assert float(s.sd) > 0
+        assert float(s.q025) < float(s.mean) < float(s.q975)
 
 
 @pytest.mark.slow
