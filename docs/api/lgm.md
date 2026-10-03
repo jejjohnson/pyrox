@@ -15,3 +15,26 @@ API lands with its phases.
 | P7 | Components (RW1, RW2, AR1, ICAR, BYM2, SPDE, generic, combinators) and PC priors |
 | P8 | `LGM`, `inla()` and `INLAResult` |
 | P9 | `f(...)` formula sugar, diagnostics, simplified Laplace, MCMC-INLA hybrid |
+
+## Penalised-complexity priors
+
+Hyperpriors calibrated by a tail statement (Simpson et al., 2017). Each is a
+NumPyro distribution, usable under NUTS as well as in `inla()`.
+
+::: pyrox_lgm.PCPrecision
+
+::: pyrox_lgm.PCAR1Rho
+
+::: pyrox_lgm.PCBYM2Phi
+
+::: pyrox_lgm.PCMatern
+
+### Structure spectra
+
+`PCBYM2Phi` needs the spectrum of the scaled structure's generalised inverse,
+computed once per graph: exactly for a grid (`gaussx.KroneckerSum`) or
+`n ≤ 5000`, else by deflated stochastic Lanczos quadrature.
+
+::: pyrox_lgm.structure_spectrum
+
+::: pyrox_lgm.StructureSpectrum

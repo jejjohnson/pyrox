@@ -2094,6 +2094,7 @@ source = { editable = "packages/pyrox-lgm" }
 dependencies = [
     { name = "gaussx" },
     { name = "kernellib" },
+    { name = "matfree" },
     { name = "numpyro" },
     { name = "optax" },
     { name = "pyrox" },
@@ -2108,6 +2109,7 @@ xarray = [
 requires-dist = [
     { name = "gaussx", extras = ["numpyro"], git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.1" },
     { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.15" },
+    { name = "matfree", specifier = ">=0.6.0" },
     { name = "numpyro", specifier = ">=0.21" },
     { name = "optax", specifier = ">=0.2.8" },
     { name = "pyrox", editable = "packages/pyrox" },
