@@ -60,3 +60,15 @@ uses; `sample(index)` is the NumPyro face, for NUTS.
 ### Generic
 
 ::: pyrox_lgm.Generic
+
+### Areal
+
+On a kernellib graph (from edges, polygons' contiguity, or a grid).
+
+::: pyrox_lgm.Besag
+
+::: pyrox_lgm.BYM2
+
+::: pyrox_lgm.CAR
+
+::: pyrox_lgm.Leroux
