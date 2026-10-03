@@ -48,6 +48,17 @@
       "extra-files": [
         "src/pyrox_nn/__init__.py"
       ]
+    },
+    "packages/pyrox-lgm": {
+      "release-type": "python",
+      "package-name": "pyrox-lgm",
+      "component": "pyrox-lgm",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "extra-files": [
+        "src/pyrox_lgm/__init__.py"
+      ]
     }
   }
 }
