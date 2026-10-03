@@ -151,7 +151,11 @@ class Besag(AbstractComponent):
         return {"tau": (self.tau_prior, default_transform(self.tau_prior))}
 
     def prior(
-        self, theta: dict[str, Array], *, constraint: Constraint = "hard"
+        self,
+        theta: dict[str, Array],
+        *,
+        constraint: Constraint = "hard",
+        soft_constraint_scale: float = 1e-3,
     ) -> gx.IntrinsicGMRF:
         return gx.IntrinsicGMRF(
             jnp.zeros(self.n_nodes),
@@ -159,6 +163,7 @@ class Besag(AbstractComponent):
             self.structure,
             self.null_space,
             constraint=constraint,
+            soft_constraint_scale=soft_constraint_scale,
         )
 
 
@@ -249,7 +254,11 @@ class BYM2(AbstractComponent):
         }
 
     def prior(
-        self, theta: dict[str, Array], *, constraint: Constraint = "hard"
+        self,
+        theta: dict[str, Array],
+        *,
+        constraint: Constraint = "hard",
+        soft_constraint_scale: float = 1e-3,
     ) -> gx.BYM2GMRF:
         return gx.BYM2GMRF(
             self.structure,
@@ -342,9 +351,13 @@ class CAR(_ProperAreal):
         return self.laplacian.in_size()
 
     def prior(
-        self, theta: dict[str, Array], *, constraint: Constraint = "hard"
+        self,
+        theta: dict[str, Array],
+        *,
+        constraint: Constraint = "hard",
+        soft_constraint_scale: float = 1e-3,
     ) -> gx.GaussianMRF:
-        del constraint  # proper
+        del constraint, soft_constraint_scale  # proper
         tau, rho = theta["tau"], theta["rho"]
         # tau (D - rho W) = tau ((1 - rho) D + rho L): degrees on the
         # diagonal, rho times the Laplacian's off-diagonal.
@@ -431,9 +444,13 @@ class Leroux(_ProperAreal):
         return self.structure.in_size()
 
     def prior(
-        self, theta: dict[str, Array], *, constraint: Constraint = "hard"
+        self,
+        theta: dict[str, Array],
+        *,
+        constraint: Constraint = "hard",
+        soft_constraint_scale: float = 1e-3,
     ) -> gx.GaussianMRF:
-        del constraint  # proper
+        del constraint, soft_constraint_scale  # proper
         tau, rho = theta["tau"], theta["rho"]
         if isinstance(self.structure, gx.KroneckerSum):
             Q = _affine_kronecker_sum(self.structure, tau * rho, tau * (1.0 - rho))

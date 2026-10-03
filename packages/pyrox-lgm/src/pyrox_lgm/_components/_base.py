@@ -65,15 +65,21 @@ class AbstractComponent(eqx.Module):
 
     @abc.abstractmethod
     def prior(
-        self, theta: dict[str, Array], *, constraint: Constraint = "hard"
+        self,
+        theta: dict[str, Array],
+        *,
+        constraint: Constraint = "hard",
+        soft_constraint_scale: float = 1e-3,
     ) -> gx.GaussianMRF | gx.IntrinsicGMRF:
-        """The GMRF of the field given its hyperparameters.
+        r"""The GMRF of the field given its hyperparameters.
 
         Args:
             theta: Hyperparameter values keyed as in `theta_spec`.
             constraint: For intrinsic fields, how the null space is handled
                 (``"hard"`` for ``inla()``, ``"soft"`` for NUTS); ignored by
                 proper fields.
+            soft_constraint_scale: Standard deviation $s$ of the soft
+                constraint $V^\top x \sim \mathcal N(0, s^2 I)$.
         """
 
     def projector(self, index: Int[ArrayLike, " n_obs"]) -> gx.SparseOperator:
@@ -95,17 +101,25 @@ class AbstractComponent(eqx.Module):
             np.arange(m), index, jnp.ones(m), (m, self.n_nodes)
         )
 
-    def sample(self, index: Int[ArrayLike, " n_obs"] | None = None) -> Array:
+    def sample(
+        self,
+        index: Int[ArrayLike, " n_obs"] | None = None,
+        *,
+        soft_constraint_scale: float = 1e-2,
+    ) -> Array:
         """NumPyro face: sample $\\theta$ and the field, return it at ``index``.
 
         Draws each hyperparameter from its prior (site ``f"{name}_{k}"``),
         then the field (site ``name``) with a *soft* constraint for intrinsic
         fields, so it works under NUTS. Returns the field at ``index``, or all
-        `n_index` addressable nodes when ``index`` is ``None``.
+        `n_index` addressable nodes when ``index`` is ``None``. See
+        `pyrox_lgm._numpyro.sample_component` for ``soft_constraint_scale``.
         """
         from pyrox_lgm._numpyro import sample_component
 
-        return sample_component(self, index)
+        return sample_component(
+            self, index, soft_constraint_scale=soft_constraint_scale
+        )
 
 
 def default_transform(prior: dist.Distribution) -> Transform:

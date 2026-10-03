@@ -88,11 +88,20 @@ class Generic(AbstractComponent):
         return {"tau": (self.tau_prior, default_transform(self.tau_prior))}
 
     def prior(
-        self, theta: dict[str, Array], *, constraint: Constraint = "hard"
+        self,
+        theta: dict[str, Array],
+        *,
+        constraint: Constraint = "hard",
+        soft_constraint_scale: float = 1e-3,
     ) -> gx.GaussianMRF | gx.IntrinsicGMRF:
         loc = jnp.zeros(self.n_nodes)
         if self.null_space is None:
             return gx.GaussianMRF(loc, scale_operator(self.structure, theta["tau"]))
         return gx.IntrinsicGMRF(
-            loc, theta["tau"], self.structure, self.null_space, constraint=constraint
+            loc,
+            theta["tau"],
+            self.structure,
+            self.null_space,
+            constraint=constraint,
+            soft_constraint_scale=soft_constraint_scale,
         )
