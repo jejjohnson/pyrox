@@ -119,6 +119,9 @@ def _theta_mode(model, A, data, max_newton, u0, *, max_iter, tol, verbose):
 
     Returns the mode, the iterations taken, and whether every accepted
     iterate's inner fit converged (``False`` asks `inla` to escalate).
+
+    Raises:
+        RuntimeError: If the gradient tolerance is not met in ``max_iter``.
     """
     u, state = u0, _SOLVER.init(u0)
     for i in range(max_iter):
@@ -135,11 +138,11 @@ def _theta_mode(model, A, data, max_newton, u0, *, max_iter, tol, verbose):
         if gnorm < tol:
             return u, i, True
         u = u_new
-    warnings.warn(
-        f"theta-mode search did not reach |grad| < {tol} in {max_iter} iterations",
-        stacklevel=3,
+    raise RuntimeError(
+        f"theta-mode search did not reach |grad| < {tol} in {max_iter} "
+        "iterations; the Hessian and design would be built off the mode. Raise "
+        "max_theta_iter, loosen theta_tol or pass a closer theta_init"
     )
-    return u, max_iter, True
 
 
 def inla(
@@ -176,12 +179,18 @@ def inla(
             dropped with a warning.
         theta_init: Starting unconstrained $u$ (default zeros: every
             positive hyperparameter at 1, every interval one at its centre).
-        max_theta_iter: L-BFGS iterations for the mode.
+        max_theta_iter: L-BFGS iterations for the mode; not reaching
+            ``theta_tol`` within them raises.
         theta_tol: Stop when $\max|\nabla_u| <$ ``theta_tol``.
         verbose: Print the mode search.
 
     Returns:
         An `INLAResult`.
+
+    Raises:
+        RuntimeError: If the theta-mode search misses ``theta_tol`` within
+            ``max_theta_iter``, or the inner Newton fits along it or at the
+            mode do not converge even at four times ``max_newton``.
 
     Examples:
         >>> import jax.numpy as jnp

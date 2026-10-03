@@ -120,6 +120,28 @@ def test_lgm_validation():
         lgm.LGM((lgm.IID(3, name="a"),), lgm.FixedEffects(("a",)))
     with pytest.raises(ValueError, match="distinct"):  # duplicate fixed effects
         lgm.LGM((lgm.IID(3, name="b"),), lgm.FixedEffects(("x", "x")))
+    with pytest.raises(ValueError, match="observation data"):  # the response
+        lgm.LGM((lgm.IID(3, name="y"),))
+    with pytest.raises(ValueError, match="observation data"):
+        lgm.LGM((lgm.IID(3, name="b"),), lgm.FixedEffects(("offset",)))
+
+
+def test_any_generic_structure_assembles():
+    # Tridiagonal has a sparse form; any other operator is assembled densely.
+    import lineax as lx
+    from pyrox_lgm._assembly import full_coo
+
+    d, e = jnp.array([2.0, 3.0, 4.0]), jnp.array([-1.0, -0.5])
+    tri = lx.TridiagonalLinearOperator(d, e, e)
+    other = lx.AddLinearOperator(tri, lx.IdentityLinearOperator(tri.in_structure()))
+    for op in (tri, other):
+        r, c, v = full_coo(op)
+        dense = np.zeros((3, 3))
+        np.add.at(dense, (r, c), np.asarray(v))
+        assert np.allclose(dense, op.as_matrix())
+        model = lgm.LGM((lgm.Generic(op, name="g"),))
+        prior = model.latent_prior(model.unflatten(jnp.zeros(model.n_theta)))
+        assert np.allclose(prior.precision.as_matrix()[:3, :3], op.as_matrix())
 
 
 def test_combinators_lift_the_inner_constraint_basis():
@@ -338,6 +360,13 @@ def test_a_mode_that_needs_the_retry_reruns_the_whole_fit(gaussian_fit, monkeypa
     monkeypatch.setattr(inla_mod, "_fit_point", fails_below(10_000))
     with pytest.raises(RuntimeError, match="along its search did not converge"):
         lgm.inla(model, data, strategy="gaussian")
+
+
+@pytest.mark.slow
+def test_a_mode_search_that_misses_the_tolerance_raises(gaussian_fit):
+    model, data, _ = gaussian_fit
+    with pytest.raises(RuntimeError, match="did not reach"):
+        lgm.inla(model, data, max_theta_iter=1)
 
 
 @pytest.mark.slow

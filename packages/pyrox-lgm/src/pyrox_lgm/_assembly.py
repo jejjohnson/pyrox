@@ -20,10 +20,12 @@ from jaxtyping import Array
 def full_coo(op: lx.AbstractLinearOperator) -> tuple[np.ndarray, np.ndarray, Array]:
     """``(rows, cols, values)`` of every stored entry, both triangles.
 
-    Duplicates are allowed (they sum). Supports the operators the components
-    produce: `gaussx.SparseOperator`, diagonal, symmetric `gaussx.BlockTriDiag`,
-    dense matrices, `gaussx.Kronecker` / `gaussx.KroneckerSum` of those, and
-    scalar multiples.
+    Duplicates are allowed (they sum). Sparse forms for the operators the
+    components produce: `gaussx.SparseOperator`, diagonal, tridiagonal,
+    symmetric `gaussx.BlockTriDiag`, `gaussx.Kronecker` / `gaussx.KroneckerSum`
+    of those, and scalar multiples. Any other operator (a `Generic` structure
+    can be any lineax operator) is assembled densely: its values may be
+    traced, so its pattern cannot be read from them.
     """
     if isinstance(op, gx.SparseOperator):
         r = np.asarray(op.pattern.rows)
@@ -40,6 +42,14 @@ def full_coo(op: lx.AbstractLinearOperator) -> tuple[np.ndarray, np.ndarray, Arr
     if isinstance(op, lx.DiagonalLinearOperator):
         n = op.in_size()
         return np.arange(n), np.arange(n), op.diagonal
+    if isinstance(op, lx.TridiagonalLinearOperator):
+        n = op.in_size()
+        i = np.arange(n - 1)
+        return (
+            np.concatenate([np.arange(n), i + 1, i]),
+            np.concatenate([np.arange(n), i, i + 1]),
+            jnp.concatenate([op.diagonal, op.lower_diagonal, op.upper_diagonal]),
+        )
     if isinstance(op, gx.BlockTriDiag):
         nb, d = op.diagonal.shape[0], op.diagonal.shape[1]
         start = np.arange(nb) * d
@@ -89,14 +99,10 @@ def full_coo(op: lx.AbstractLinearOperator) -> tuple[np.ndarray, np.ndarray, Arr
         return r, c, op.scalar * v
     if isinstance(op, lx.TaggedLinearOperator):
         return full_coo(op.operator)
-    if isinstance(op, lx.MatrixLinearOperator):
-        n, m = op.matrix.shape
-        r, c = np.divmod(np.arange(n * m), m)
-        return r, c, op.matrix.reshape(-1)
-    raise NotImplementedError(
-        f"cannot assemble a {type(op).__name__} precision sparsely; for a grid "
-        "SPDE inside an LGM use SPDE(mesh=...)"
-    )
+    matrix = op.matrix if isinstance(op, lx.MatrixLinearOperator) else op.as_matrix()
+    n, m = matrix.shape
+    r, c = np.divmod(np.arange(n * m), m)
+    return r, c, matrix.reshape(-1)
 
 
 def coo_matmul(a, b, n: int):
