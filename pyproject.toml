@@ -14,6 +14,15 @@ dependencies = []
 [tool.uv.workspace]
 members = ["packages/*"]
 
+[tool.uv]
+# kernellib's own `[tool.uv.sources]` pins gaussx to its git tag (v0.6.0 for
+# kernellib v0.0.15). uv honours that for a git dependency, which conflicts with
+# the newer gaussx tag the workspace needs; the override keeps one gaussx for
+# every member. Move it in step with pyrox-gp's gaussx source.
+override-dependencies = [
+    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.6.1",
+]
+
 [tool.uv.sources]
 pyrox = { workspace = true }
 pyrox-gp = { workspace = true }
