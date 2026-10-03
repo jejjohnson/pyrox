@@ -108,9 +108,14 @@ def test_spectral_density_accepts_kernellib_kernels():
     assert jnp.allclose(pyrox, plain)
 
 
-def test_spectral_density_rational_quadratic_has_no_closed_form():
-    with pytest.raises(NotImplementedError, match="RationalQuadratic"):
-        spectral_density(RationalQuadratic(), jnp.zeros(3), D=1)
+def test_spectral_density_rational_quadratic_matches_kernellib():
+    # kernellib >= 0.0.15 has the closed-form (Gamma scale-mixture) density.
+    lam = jnp.linspace(0.0, 4.0, 5)
+    k = RationalQuadratic(init_lengthscale=0.6, init_alpha=2.0)
+    pyrox = spectral_density(k, lam, D=2)
+    plain = spectral_density(kl.RationalQuadratic(lengthscale=0.6, alpha=2.0), lam, D=2)
+    assert jnp.all(jnp.isfinite(pyrox)) and jnp.all(pyrox > 0)
+    assert jnp.allclose(pyrox, plain)
 
 
 def test_rff_draw_accepts_kernellib_kernels_and_overrides():
