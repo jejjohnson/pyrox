@@ -137,6 +137,9 @@ class LatentIntrinsicGMRF(gx.IntrinsicGMRF, _Latent):
         return self._sum_log_prob(value)
 
 
+_RESERVED = frozenset({"y", "offset", "n_trials"})
+
+
 class LGM(eqx.Module):
     r"""A latent Gaussian model: components, fixed effects and an observation model.
 
@@ -191,6 +194,14 @@ class LGM(eqx.Module):
         if len(set(names)) != len(names):
             raise ValueError(
                 f"component and fixed-effect names must be distinct, got {names}"
+            )
+        # Each effect reads its data column by name, so it cannot share one
+        # with the response or the observation model's inputs.
+        reserved = sorted(set(names) & _RESERVED)
+        if reserved:
+            raise ValueError(
+                f"{reserved} name observation data; rename the effect "
+                f"(reserved: {sorted(_RESERVED)})"
             )
         self.components = tuple(components)
         self.fixed = fixed
