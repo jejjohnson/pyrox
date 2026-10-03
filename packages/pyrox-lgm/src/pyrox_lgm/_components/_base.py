@@ -82,6 +82,20 @@ class AbstractComponent(eqx.Module):
                 constraint $V^\top x \sim \mathcal N(0, s^2 I)$.
         """
 
+    def assembly_precision(
+        self, theta: dict[str, Array], gmrf: gx.GaussianMRF | gx.IntrinsicGMRF
+    ) -> lx.AbstractLinearOperator:
+        """The precision an `LGM` assembles into its sparse block-diagonal.
+
+        ``gmrf`` is ``prior(theta)``; its precision by default (``scale *
+        structure`` for an intrinsic field). A component whose prior uses an
+        operator that cannot be assembled entry-wise (a grid SPDE's spectral
+        function) returns an equivalent sparse one here.
+        """
+        if isinstance(gmrf, gx.IntrinsicGMRF):
+            return scale_operator(gmrf.structure, gmrf.precision_scale)
+        return gmrf.precision
+
     def constraint_basis(
         self, gmrf: gx.GaussianMRF | gx.IntrinsicGMRF
     ) -> Float[Array, "n c"] | None:

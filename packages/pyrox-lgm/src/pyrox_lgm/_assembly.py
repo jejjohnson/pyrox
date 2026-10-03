@@ -10,6 +10,7 @@ reuses it across Newton steps, theta-mode iterations and design points.
 from __future__ import annotations
 
 import gaussx as gx
+import jax
 import jax.numpy as jnp
 import lineax as lx
 import numpy as np
@@ -96,6 +97,36 @@ def full_coo(op: lx.AbstractLinearOperator) -> tuple[np.ndarray, np.ndarray, Arr
         f"cannot assemble a {type(op).__name__} precision sparsely; for a grid "
         "SPDE inside an LGM use SPDE(mesh=...)"
     )
+
+
+def coo_matmul(a, b, n: int):
+    """``A @ B`` for COO triplets ``(rows, cols, values)`` of ``n x n`` matrices.
+
+    The output pattern and the pairing of factors are computed on the host
+    from the patterns alone; only the values are traced, so the product can
+    be differentiated in them and keeps a theta-free pattern.
+    """
+    ra, ca, va = a
+    rb, cb, vb = b
+    order = np.argsort(rb, kind="stable")
+    counts = np.bincount(rb[order], minlength=n)
+    starts = np.concatenate([[0], np.cumsum(counts)[:-1]])
+    per = counts[ca]  # B entries in row k for each A entry (i, k)
+    ia = np.repeat(np.arange(ra.size), per)
+    offset = np.arange(ia.size) - np.repeat(np.cumsum(per) - per, per)
+    ib = order[np.repeat(starts[ca], per) + offset]
+    keys = ra[ia].astype(np.int64) * n + cb[ib]
+    uniq, inv = np.unique(keys, return_inverse=True)
+    vals = jax.ops.segment_sum(va[ia] * vb[ib], jnp.asarray(inv), uniq.size)
+    return (uniq // n).astype(int), (uniq % n).astype(int), vals
+
+
+def coo_power(a, power: int, n: int):
+    """``A^power`` (``power >= 1``) by repeated `coo_matmul`."""
+    out = a
+    for _ in range(power - 1):
+        out = coo_matmul(out, a, n)
+    return out
 
 
 def block_diagonal(

@@ -189,6 +189,53 @@ def inla(
         >>> res.random["trend"].mean.shape
         (30,)
     """
+
+    def run(budget: int) -> tuple[INLAResult | None, bool]:
+        return _inla_once(
+            model,
+            data,
+            strategy=strategy,
+            integration=integration,
+            key=key,
+            max_newton=budget,
+            theta_init=theta_init,
+            max_theta_iter=max_theta_iter,
+            theta_tol=theta_tol,
+            verbose=verbose,
+        )
+
+    result, mode_ok = run(max_newton)
+    if mode_ok and result is not None:
+        return result
+    budget = 4 * max_newton
+    warnings.warn(
+        f"the inner Newton fit at the theta-mode did not converge in {max_newton} "
+        f"iterations; re-running the whole fit with max_newton={budget}",
+        stacklevel=2,
+    )
+    result, mode_ok = run(budget)
+    if not mode_ok or result is None:
+        raise RuntimeError(
+            f"the inner Newton fit at the theta-mode did not converge in {budget} "
+            "iterations; raise max_newton or check the model"
+        )
+    return result
+
+
+def _inla_once(
+    model: LGM,
+    data: Mapping[str, ArrayLike],
+    *,
+    strategy: Literal["vb", "gaussian"] = "vb",
+    integration: Literal["auto", "eb", "grid", "ccd"] = "auto",
+    key: jax.Array | None = None,
+    max_newton: int = 50,
+    theta_init: ArrayLike | None = None,
+    max_theta_iter: int = 200,
+    theta_tol: float = 1e-5,
+    verbose: bool = False,
+) -> tuple[INLAResult | None, bool]:
+    """One fit at a fixed Newton budget; see `inla`."""
     del key
     if strategy not in ("vb", "gaussian"):
         raise ValueError(f"strategy must be 'vb' or 'gaussian', got {strategy!r}")
@@ -247,7 +294,7 @@ def inla(
     keep_arr = np.asarray(keep)
     n_dropped = int((~keep_arr).sum())
     if n_dropped == len(keep):
-        raise RuntimeError("no design point's inner Newton iteration converged")
+        return None, False  # the mode failed too: inla() escalates or raises
     if n_dropped:
         warnings.warn(
             f"dropped {n_dropped} of {len(keep)} design points whose inner Newton "
@@ -284,7 +331,7 @@ def inla(
             fixed[name] = Summary(*(f[a] for f in summary))
     hyperpar = _hyperpar_summaries(model, u_star, cov_u, points, weights)
 
-    return INLAResult(
+    result = INLAResult(
         fixed=fixed,
         random=random,
         hyperpar=hyperpar,
@@ -299,6 +346,10 @@ def inla(
         data=data,
         newton_iters=newton_iters,
     )
+    # The mode search, Hessian and design all ran on max_newton fits: if the
+    # mode's own fit needed the retry (or never converged), they are suspect.
+    mode_ok = bool(keep[0]) and iters[0] == max_newton
+    return result, mode_ok
 
 
 def _log_marginal_likelihood(lp_star, u_star, neg_h, points, lp, log_w):

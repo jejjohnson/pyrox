@@ -68,15 +68,6 @@ class FixedEffects(eqx.Module):
         return np.stack(cols, axis=1)
 
 
-def _block(gmrf) -> lx.AbstractLinearOperator:
-    """The precision operator of a component GMRF."""
-    if isinstance(gmrf, gx.IntrinsicGMRF):
-        from pyrox_lgm._components._base import scale_operator
-
-        return scale_operator(gmrf.structure, gmrf.precision_scale)
-    return gmrf.precision
-
-
 class _Latent:
     """Shared log-density of the assembled latent prior."""
 
@@ -304,8 +295,9 @@ class LGM(eqx.Module):
         """The assembled prior of $(x_1, \\dots, x_k, \\beta)$ at ``theta``."""
         parts, blocks, nulls, slices, start = [], [], [], [], 0
         for c in self.components:
-            gmrf = c.prior(self._component_theta(theta, c), constraint="hard")
-            op, V = _block(gmrf), c.constraint_basis(gmrf)
+            theta_c = self._component_theta(theta, c)
+            gmrf = c.prior(theta_c, constraint="hard")
+            op, V = c.assembly_precision(theta_c, gmrf), c.constraint_basis(gmrf)
             parts.append(gmrf)
             blocks.append(op)
             nulls.append((start, V))

@@ -67,6 +67,20 @@ def test_spde_mesh_projector_interpolates_linear_functions_exactly():
     assert np.allclose(A @ f, 2.0 * pts[:, 0] - 3.0 * pts[:, 1] + 0.5)
 
 
+@pytest.mark.parametrize(
+    ("shape", "alpha", "spacing"), [((4, 5), 2, 1.0), ((6,), 1, 0.5), ((3, 4), 2, 0.7)]
+)
+def test_grid_spde_assembles_to_the_exact_sparse_precision(shape, alpha, spacing):
+    # inla() needs entry-wise precisions; the grid SPDE's sparse form must be
+    # exactly gaussx's spectral one.
+    spde = lgm.SPDE(grid=shape, alpha=alpha, spacing=spacing)
+    theta = {"range_sigma": jnp.array([2.5, 1.3])}
+    gmrf = spde.prior(theta)
+    Q = spde.assembly_precision(theta, gmrf)
+    assert isinstance(Q, gx.SparseOperator)
+    assert np.allclose(Q.as_matrix(), gmrf.precision.as_matrix())
+
+
 def test_spde_validation():
     with pytest.raises(ValueError, match="exactly one"):
         lgm.SPDE()

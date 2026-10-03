@@ -20,6 +20,7 @@ import numpyro.distributions as dist
 from jaxtyping import Array, ArrayLike, Float, Int
 from numpyro.distributions.transforms import Transform
 
+from pyrox_lgm._assembly import coo_power, full_coo
 from pyrox_lgm._components._base import (
     AbstractComponent,
     Constraint,
@@ -158,8 +159,53 @@ class SPDE(AbstractComponent):
             Q = gx.spde_precision(self.mass, self.stiffness, kappa, tau, alpha)
         return gx.GaussianMRF(jnp.zeros(self.n_nodes), Q)
 
+    def assembly_precision(self, theta, gmrf):
+        """The grid precision as a `gaussx.SparseOperator` (mesh: unchanged).
+
+        ``Q = tau^2 h^d (kappa^2 I + h^-2 L)^alpha``, ``L`` the Kronecker sum
+        of the axes' path-graph Laplacians, exactly `gaussx.spde_precision_grid`
+        written entry-wise: ``alpha`` sparse products on a theta-free pattern.
+        """
+        if self.shape is None:
+            return gmrf.precision
+        range_, sigma = theta["range_sigma"][0], theta["range_sigma"][1]
+        kappa, tau, alpha = gx.matern_spde_params(range_, sigma, self.nu, self.d)
+        h = self.spacing
+        laplacian = _path_laplacians(self.shape)
+        r, c, v = full_coo(laplacian)
+        n = self.n_nodes
+        diag = np.arange(n)
+        base = (
+            np.concatenate([r, diag]),
+            np.concatenate([c, diag]),
+            jnp.concatenate([v / h**2, jnp.full(n, kappa**2)]),
+        )
+        rows, cols, vals = coo_power(base, alpha, n)
+        return gx.SparseOperator.from_coo(rows, cols, tau**2 * h**self.d * vals, (n, n))
+
     def project_points(self, points: Float[ArrayLike, "n D"]) -> gx.SparseOperator:
         """Barycentric ``(n, V)`` projector from mesh vertices to ``points``."""
         if self.vertices is None or self.triangles is None:
             raise ValueError("project_points needs a mesh; index grid cells directly")
         return gx.fem_projector(self.vertices, self.triangles, points)
+
+
+def _path_laplacians(shape: tuple[int, ...]) -> lx.AbstractLinearOperator:
+    """``L_1 ⊕ ... ⊕ L_d`` of path-graph Laplacians (natural boundary)."""
+
+    def path(n: int) -> gx.SparseOperator:
+        deg = np.full(n, 2.0)
+        deg[[0, -1]] = 1.0
+        i = np.arange(n - 1)
+        return gx.SparseOperator.from_coo(
+            np.concatenate([np.arange(n), i + 1, i]),
+            np.concatenate([np.arange(n), i, i + 1]),
+            jnp.asarray(np.concatenate([deg, -np.ones(2 * (n - 1))])),
+            (n, n),
+        )
+
+    ops = [path(n) for n in shape]
+    out = ops[-1]
+    for op in reversed(ops[:-1]):
+        out = gx.KroneckerSum(op, out)
+    return out

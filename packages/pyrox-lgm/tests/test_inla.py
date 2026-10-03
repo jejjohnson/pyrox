@@ -273,7 +273,8 @@ def test_non_converged_design_points_are_dropped_with_a_warning(
     def flaky(*args):
         mean, var, ok, lp = real(*args)
         calls["n"] += 1
-        return mean, var, ok & (calls["n"] > 2), lp  # first point fails twice
+        # The second design point (not the mode) fails its fit and its retry.
+        return mean, var, ok & (calls["n"] not in (2, 3)), lp
 
     monkeypatch.setattr(inla_mod, "_fit_point", flaky)
     with warnings.catch_warnings(record=True) as caught:
@@ -287,7 +288,7 @@ def test_non_converged_design_points_are_dropped_with_a_warning(
 def test_a_retried_point_is_reweighted_with_its_converged_fit(
     gaussian_fit, monkeypatch
 ):
-    # The first fit of point 0 "fails" with a wrong log-posterior; the retry
+    # The first fit of point 1 "fails" with a wrong log-posterior; the retry
     # converges, so weights and evidence must equal those of a clean run.
     import pyrox_lgm._inla as inla_mod
 
@@ -298,16 +299,62 @@ def test_a_retried_point_is_reweighted_with_its_converged_fit(
     def flaky(*args):
         mean, var, ok, lp = real(*args)
         calls["n"] += 1
-        if calls["n"] == 1:
+        if calls["n"] == 2:
             return mean, var, ok & False, lp - 50.0
         return mean, var, ok, lp
 
     monkeypatch.setattr(inla_mod, "_fit_point", flaky)
     res = lgm.inla(model, data, strategy="gaussian")
     assert res.n_dropped == 0
-    assert res.newton_iters[0] == 200 and set(res.newton_iters[1:]) == {50}
+    assert res.newton_iters[1] == 200
+    assert {res.newton_iters[0], *res.newton_iters[2:]} == {50}
     assert np.allclose(res.theta_weights, clean.theta_weights)
     assert np.isclose(res.log_marginal_likelihood, clean.log_marginal_likelihood)
+
+
+@pytest.mark.slow
+def test_a_mode_that_needs_the_retry_reruns_the_whole_fit(gaussian_fit, monkeypatch):
+    # The mode's fit at the first budget is suspect (the mode search and the
+    # Hessian ran on it): inla() re-runs everything at 4x, and raises if the
+    # mode still fails there.
+    import pyrox_lgm._inla as inla_mod
+
+    model, data, clean = gaussian_fit
+    real = inla_mod._fit_point
+
+    def fails_below(budget):
+        def fit(model_, A, d, u, n_iter, subspace):
+            mean, var, ok, lp = real(model_, A, d, u, n_iter, subspace)
+            return mean, var, ok & (n_iter >= budget), lp
+
+        return fit
+
+    monkeypatch.setattr(inla_mod, "_fit_point", fails_below(200))
+    with pytest.warns(UserWarning, match="re-running the whole fit"):
+        res = lgm.inla(model, data, strategy="gaussian")
+    assert res.newton_iters[0] == 200
+    assert np.allclose(res.theta_weights, clean.theta_weights, atol=1e-6)
+
+    monkeypatch.setattr(inla_mod, "_fit_point", fails_below(10_000))
+    with pytest.raises(RuntimeError, match="theta-mode did not converge"):
+        lgm.inla(model, data, strategy="gaussian")
+
+
+@pytest.mark.slow
+def test_grid_spde_inside_an_lgm_is_the_exact_gaussian_marginal():
+    spde = lgm.SPDE(grid=(3, 4), spacing=0.5, name="s")
+    model = lgm.LGM((spde,), likelihood=lgm.Gaussian())
+    rng = np.random.default_rng(3)
+    y = rng.normal(size=12)
+    data = {"y": y, "s": np.arange(12)}
+    u = jnp.array([0.2, -0.1, 0.5])  # log range, log sigma, log prec
+    theta = model.unflatten(u)
+    Q = np.asarray(
+        spde.prior({"range_sigma": theta["s.range_sigma"]}).precision.as_matrix()
+    )
+    cov = np.linalg.inv(Q) + np.eye(12) / float(theta["lik.prec"])
+    ref = multivariate_normal(np.zeros(12), cov).logpdf(y) + float(model.log_prior(u))
+    assert np.isclose(float(model.log_posterior_theta(u, data)), ref, atol=1e-9)
 
 
 @pytest.mark.slow
