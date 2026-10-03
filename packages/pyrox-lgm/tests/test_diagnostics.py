@@ -87,6 +87,33 @@ def test_site_log_prob_is_consistent_with_the_gaussx_likelihood(obs, y, extra):
     assert np.isclose(float(jnp.sum(sites)), float(total), atol=1e-10)
 
 
+def test_per_site_data_broadcasts_over_quadrature_nodes():
+    # diagnostics() evaluates eta on (n, order) nodes; n_trials is (n,).
+    obs = lgm.Binomial()
+    y = jnp.array([[2.0], [5.0], [1.0]])
+    eta = jnp.linspace(-1.0, 1.0, 12).reshape(3, 4)
+    extra = {"n_trials": np.array([5.0, 6.0, 3.0])}
+    lp = obs.site_log_prob(y, eta, {}, extra)
+    assert lp.shape == (3, 4)
+    ref = obs.site_log_prob(y[:, 0], eta[:, 1], {}, extra)
+    assert np.allclose(lp[:, 1], ref)
+
+
+def test_a_custom_observation_without_site_distribution_still_builds():
+    import equinox as eqx
+    import gaussx as gx
+
+    class Custom(lgm.AbstractObservation):
+        name: str = eqx.field(static=True, default="lik")
+
+        def build(self, y, theta, data):
+            return gx.PoissonLikelihood(y)
+
+    obs = Custom()  # instantiable: only the diagnostics need site_distribution
+    with pytest.raises(NotImplementedError, match="site_distribution"):
+        obs.site_log_prob(jnp.zeros(2), jnp.zeros(2), {}, {})
+
+
 # --- slow: on fitted models ---------------------------------------------------------
 
 

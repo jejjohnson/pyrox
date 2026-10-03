@@ -40,15 +40,23 @@ class AbstractObservation(eqx.Module):
     ) -> gx.AbstractLikelihood:
         """The gaussx likelihood holding ``y`` at hyperparameters ``theta``."""
 
-    @abc.abstractmethod
     def site_distribution(
         self, eta: Array, theta: dict[str, Array], data: Mapping[str, ArrayLike]
     ) -> dist.Distribution:
         """``p(y_i | eta_i)`` per site as a NumPyro distribution (batched in eta).
 
         The diagnostics evaluate it on quadrature nodes, so ``eta`` may carry
-        leading axes beyond the sites'.
+        trailing axes after the sites' (broadcast per-site data with
+        `_per_site`). Only `pyrox_lgm.diagnostics` needs it, so a custom
+        observation model that does not define it still fits.
+
+        Raises:
+            NotImplementedError: Unless a subclass defines it.
         """
+        raise NotImplementedError(
+            f"{type(self).__name__} defines no site_distribution, which the "
+            "diagnostics need"
+        )
 
     def site_log_prob(self, y, eta, theta, data) -> Array:
         """``log p(y_i | eta_i)`` per site."""
@@ -110,7 +118,7 @@ class Binomial(AbstractObservation):
         return gx.BinomialLikelihood(y, jnp.asarray(data["n_trials"]))
 
     def site_distribution(self, eta, theta, data):
-        return _Binomial(jnp.asarray(data["n_trials"], dtype=eta.dtype), eta)
+        return _Binomial(_per_site(data["n_trials"], eta), eta)
 
 
 class NegativeBinomial(AbstractObservation):
@@ -129,6 +137,12 @@ class NegativeBinomial(AbstractObservation):
 
     def site_distribution(self, eta, theta, data):
         return _NegativeBinomial(jnp.exp(eta), theta["size"])
+
+
+def _per_site(values: ArrayLike, eta: Array) -> Array:
+    """Per-site ``values`` ``(n,)`` broadcastable against ``eta`` ``(n, ...)``."""
+    v = jnp.asarray(values, dtype=eta.dtype)
+    return v.reshape(v.shape + (1,) * (eta.ndim - v.ndim))
 
 
 # Count distributions with a closed-form CDF (NumPyro's do not all define
