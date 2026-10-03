@@ -55,7 +55,12 @@ _SOLVER = optax.lbfgs()
 
 
 def _neg_log_post(model, A, data, max_newton, u):
-    return -model.log_posterior_theta(u, data, projector=A, max_newton=max_newton)
+    # +inf where the inner Newton fit has not converged: the line search
+    # rejects such a candidate, and _theta_mode fails on an accepted one,
+    # so no unconverged fit steers the mode.
+    fit = model.laplace(u, data, projector=A, max_newton=max_newton)
+    value = -(fit.log_marginal + model.log_prior(u))
+    return jnp.where(fit.converged, value, jnp.inf)
 
 
 @eqx.filter_jit
@@ -166,10 +171,16 @@ def _predictor_variance(A, selected, G, HV):
 
 
 def _theta_mode(model, A, data, max_newton, u0, *, max_iter, tol, verbose):
-    """Minimise the negative log-posterior of ``u`` by optax L-BFGS."""
+    """Minimise the negative log-posterior of ``u`` by optax L-BFGS.
+
+    Returns the mode, the iterations taken, and whether every accepted
+    iterate's inner fit converged (``False`` asks `inla` to escalate).
+    """
     u, state = u0, _SOLVER.init(u0)
     for i in range(max_iter):
         u_new, state, value, grad = _lbfgs_step(model, A, data, max_newton, u, state)
+        if not np.isfinite(float(value)):  # the inner fit at u did not converge
+            return u, i, False
         gnorm = float(jnp.max(jnp.abs(grad)))
         if verbose:
             print(
@@ -178,13 +189,13 @@ def _theta_mode(model, A, data, max_newton, u0, *, max_iter, tol, verbose):
         if not np.all(np.isfinite(np.asarray(u_new))):
             raise FloatingPointError("theta-mode search produced non-finite values")
         if gnorm < tol:
-            return u, i
+            return u, i, True
         u = u_new
     warnings.warn(
         f"theta-mode search did not reach |grad| < {tol} in {max_iter} iterations",
         stacklevel=3,
     )
-    return u, max_iter
+    return u, max_iter, True
 
 
 def inla(
@@ -265,15 +276,16 @@ def inla(
         return result
     budget = 4 * max_newton
     warnings.warn(
-        f"the inner Newton fit at the theta-mode did not converge in {max_newton} "
-        f"iterations; re-running the whole fit with max_newton={budget}",
+        f"the inner Newton fit at the theta-mode or along its search did not "
+        f"converge in {max_newton} iterations; re-running the whole fit with "
+        f"max_newton={budget}",
         stacklevel=2,
     )
     result, mode_ok = run(budget)
     if not mode_ok or result is None:
         raise RuntimeError(
-            f"the inner Newton fit at the theta-mode did not converge in {budget} "
-            "iterations; raise max_newton or check the model"
+            f"the inner Newton fit at the theta-mode or along its search did not "
+            f"converge in {budget} iterations; raise max_newton or check the model"
         )
     return result
 
@@ -305,7 +317,7 @@ def _inla_once(
     # 1. theta-mode and design.
     u0 = jnp.zeros(m) if theta_init is None else jnp.asarray(theta_init, dtype=float)
     if m:
-        u_star, _ = _theta_mode(
+        u_star, _, search_ok = _theta_mode(
             model,
             A,
             data,
@@ -315,6 +327,8 @@ def _inla_once(
             tol=theta_tol,
             verbose=verbose,
         )
+        if not search_ok:
+            return None, False  # inla() escalates the budget or raises
         hessian = _hessian(model, A, data, max_newton, u_star)
         method = None if integration == "auto" else integration
         points, log_w = gx.theta_design(

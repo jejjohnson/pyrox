@@ -68,7 +68,8 @@ def test_spde_mesh_projector_interpolates_linear_functions_exactly():
 
 
 @pytest.mark.parametrize(
-    ("shape", "alpha", "spacing"), [((4, 5), 2, 1.0), ((6,), 1, 0.5), ((3, 4), 2, 0.7)]
+    ("shape", "alpha", "spacing"),
+    [((4, 5), 2, 1.0), ((6,), 1, 0.5), ((3, 4), 2, 0.7), ((1, 5), 2, 1.0)],
 )
 def test_grid_spde_assembles_to_the_exact_sparse_precision(shape, alpha, spacing):
     # inla() needs entry-wise precisions; the grid SPDE's sparse form must be
