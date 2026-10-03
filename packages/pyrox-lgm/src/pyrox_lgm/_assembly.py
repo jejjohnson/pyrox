@@ -70,16 +70,15 @@ def full_coo(op: lx.AbstractLinearOperator) -> tuple[np.ndarray, np.ndarray, Arr
             vals += [sub, sub]
         return np.concatenate(rows), np.concatenate(cols), jnp.concatenate(vals)
     if isinstance(op, gx.Kronecker):
-        if len(op.operators) != 2:
-            raise NotImplementedError("Kronecker of more than two factors")
-        ra, ca, va = full_coo(op.operators[0])
-        rb, cb, vb = full_coo(op.operators[1])
-        nb = op.operators[1].in_size()
-        return (
-            np.add.outer(ra * nb, rb).ravel(),
-            np.add.outer(ca * nb, cb).ravel(),
-            (va[:, None] * vb[None, :]).reshape(-1),
-        )
+        # A ⊗ B ⊗ C ... folded left to right, one pair at a time.
+        r, c, v = full_coo(op.operators[0])
+        for factor in op.operators[1:]:
+            rb, cb, vb = full_coo(factor)
+            nb = factor.in_size()
+            r = np.add.outer(r * nb, rb).ravel()
+            c = np.add.outer(c * nb, cb).ravel()
+            v = (v[:, None] * vb[None, :]).reshape(-1)
+        return r, c, v
     if isinstance(op, gx.KroneckerSum):
         ra, ca, va = full_coo(op.A)
         rb, cb, vb = full_coo(op.B)
