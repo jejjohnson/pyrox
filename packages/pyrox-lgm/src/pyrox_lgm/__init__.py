@@ -5,6 +5,14 @@ release is the package scaffold (P6); the components, priors and inference
 land in P7-P9. ``pyrox_lgm`` never imports ``pyrox_gp``.
 """
 
+from pyrox_lgm._components import (
+    AR1,
+    IID,
+    RW1,
+    RW2,
+    AbstractComponent,
+    Generic,
+)
 from pyrox_lgm._priors import (
     PCAR1Rho,
     PCBYM2Phi,
@@ -18,6 +26,12 @@ from pyrox_lgm._priors import (
 __version__ = "0.0.0"  # x-release-please-version
 
 __all__ = [
+    "AR1",
+    "IID",
+    "RW1",
+    "RW2",
+    "AbstractComponent",
+    "Generic",
     "PCAR1Rho",
     "PCBYM2Phi",
     "PCMatern",
