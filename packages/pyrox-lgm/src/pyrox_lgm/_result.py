@@ -184,6 +184,8 @@ class INLAResult(eqx.Module):
                         else tuple(f"{name}_{i}" for i in range(arr.ndim))
                     )
                     variables[f"{group}.{name}.{field}"] = (dims, arr)
+        for field, value in self.linear_predictor._asdict().items():
+            variables[f"linear_predictor.{field}"] = ("obs", np.asarray(value))
         ds = xr.Dataset(variables)
         ds.attrs["log_marginal_likelihood"] = float(self.log_marginal_likelihood)
         ds.attrs["n_dropped"] = self.n_dropped

@@ -285,6 +285,7 @@ def test_predict_and_to_xarray(gaussian_fit):
     pytest.importorskip("xarray")
     ds = res.to_xarray()
     assert "fixed.intercept.mean" in ds and "random.trend.mean" in ds
+    assert ds["linear_predictor.mean"].shape == (N,)
 
 
 @pytest.mark.slow

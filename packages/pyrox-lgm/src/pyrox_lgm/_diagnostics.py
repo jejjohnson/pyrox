@@ -150,7 +150,8 @@ def diagnostics(result: INLAResult, *, order: int = 80) -> Diagnostics:
     pit = jnp.exp(log_cpo + logsumexp(log_loo, axis=0, b=cav_pit))
     w = jnp.exp(log_w)
     mean_logp = jnp.sum(w * logp, axis=(0, 2))
-    var_logp = jnp.sum(w * logp**2, axis=(0, 2)) - mean_logp**2
+    # Centred, so a large common log-density does not cancel (float32).
+    var_logp = jnp.sum(w * (logp - mean_logp[None, :, None]) ** 2, axis=(0, 2))
     lppd = expect_log(logp)
     p_waic = jnp.sum(var_logp)
     waic = -2.0 * (jnp.sum(lppd) - p_waic)
