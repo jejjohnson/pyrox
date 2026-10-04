@@ -14,6 +14,8 @@ other factor.
 
 from __future__ import annotations
 
+import math
+
 import equinox as eqx
 import gaussx as gx
 import jax.numpy as jnp
@@ -22,7 +24,45 @@ import numpyro.distributions as dist
 from jaxtyping import Array, Float
 from numpyro.distributions.transforms import Transform
 
-from pyrox_lgm._components._base import AbstractComponent, Constraint
+from pyrox_lgm._components._base import AbstractComponent, Constraint, probe_theta
+
+
+_LOG_2PI = math.log(2.0 * math.pi)
+
+
+class KroneckerIntrinsicGMRF(gx.IntrinsicGMRF):
+    r"""Intrinsic $\mathcal N(0, (s\,R \otimes Q)^+)$ with its exact normaliser.
+
+    One factor is intrinsic ($R$, rank $r_R$, ``n_R`` nodes) and the other
+    proper ($Q$, ``n_Q`` nodes). The proper factor depends on $\theta$ (the
+    group's $\rho$), so the normaliser is not a constant and is always
+    included, from
+    $\log|R \otimes Q|_+ = n_Q \log|R|_+ + r_R \log|Q|$.
+    """
+
+    pytree_data_fields = ("intrinsic_op", "intrinsic_null", "proper_op")
+
+    def __init__(
+        self, loc, scale, structure, null, intrinsic_op, intrinsic_null, proper_op, **kw
+    ):
+        self.intrinsic_op = intrinsic_op
+        self.intrinsic_null = intrinsic_null
+        self.proper_op = proper_op
+        super().__init__(loc, scale, structure, null, **kw)
+
+    @property
+    def normalized(self) -> bool:
+        """The log-density includes its normaliser (see `pyrox_lgm.LGM`)."""
+        return True
+
+    def log_prob(self, value):
+        n_q = self.proper_op.in_size()
+        rank_r = self.intrinsic_op.in_size() - self.intrinsic_null.shape[1]
+        rank = rank_r * n_q
+        log_pdet = n_q * gx.pseudo_logdet(
+            self.intrinsic_op, null_space=self.intrinsic_null
+        ) + rank_r * gx.logdet(self.proper_op)
+        return super().log_prob(value) + 0.5 * log_pdet - 0.5 * rank * _LOG_2PI
 
 
 def _parts(
@@ -34,6 +74,11 @@ def _parts(
     if isinstance(gmrf, gx.IntrinsicGMRF):
         return gmrf.structure, gmrf.null_space, gmrf.precision_scale
     return gmrf.precision, None, jnp.asarray(1.0)
+
+
+def _probe_basis(comp: AbstractComponent):
+    """A component's own constraint basis (theta-free for the intrinsic ones)."""
+    return comp.constraint_basis(comp.prior(probe_theta(comp.theta_spec())))
 
 
 def _check_addressable(comp: AbstractComponent, role: str) -> None:
@@ -63,14 +108,17 @@ def _product(
         )
     if V_l is not None:
         null = jnp.kron(V_l, jnp.eye(n_r))
+        intrinsic = (op_l, V_l, op_r)
     else:
         assert V_r is not None
         null = jnp.kron(jnp.eye(n_l), V_r)
-    return gx.IntrinsicGMRF(
+        intrinsic = (op_r, V_r, op_l)
+    return KroneckerIntrinsicGMRF(
         loc,
         s_l * s_r,
         gx.Kronecker(op_l, op_r),
         null,
+        *intrinsic,
         constraint=constraint,
         soft_constraint_scale=soft_constraint_scale,
     )
@@ -142,6 +190,16 @@ class Kronecker(AbstractComponent):
         }
         return main, group
 
+    def constraint_basis(self, gmrf):
+        # The intrinsic factor's own constraints, lifted (an RW2 main keeps
+        # its sum-only rule), not the product's whole null space.
+        main, group = _probe_basis(self.main), _probe_basis(self.group)
+        if main is not None:
+            return jnp.kron(main, jnp.eye(self.group.n_nodes))
+        if group is not None:
+            return jnp.kron(jnp.eye(self.main.n_nodes), group)
+        return None
+
     def prior(
         self,
         theta: dict[str, Array],
@@ -195,6 +253,10 @@ class Replicate(AbstractComponent):
 
     def theta_spec(self) -> dict[str, tuple[dist.Distribution, Transform]]:
         return self.component.theta_spec()
+
+    def constraint_basis(self, gmrf):
+        inner = _probe_basis(self.component)
+        return None if inner is None else jnp.kron(jnp.eye(self.n_rep), inner)
 
     def prior(
         self,

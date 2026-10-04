@@ -82,3 +82,30 @@ On a kernellib graph (from edges, polygons' contiguity, or a grid).
 ::: pyrox_lgm.Kronecker
 
 ::: pyrox_lgm.Replicate
+
+## Models and inference
+
+An `LGM` assembles components, fixed effects and an observation model;
+`inla()` integrates over the hyperparameters (Rue, Martino & Chopin, 2009).
+
+::: pyrox_lgm.LGM
+
+::: pyrox_lgm.FixedEffects
+
+::: pyrox_lgm.inla
+
+::: pyrox_lgm.INLAResult
+
+::: pyrox_lgm.Summary
+
+### Observation models
+
+::: pyrox_lgm.Gaussian
+
+::: pyrox_lgm.Poisson
+
+::: pyrox_lgm.Bernoulli
+
+::: pyrox_lgm.Binomial
+
+::: pyrox_lgm.NegativeBinomial

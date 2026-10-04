@@ -82,6 +82,33 @@ class AbstractComponent(eqx.Module):
                 constraint $V^\top x \sim \mathcal N(0, s^2 I)$.
         """
 
+    def assembly_precision(
+        self, theta: dict[str, Array], gmrf: gx.GaussianMRF | gx.IntrinsicGMRF
+    ) -> lx.AbstractLinearOperator:
+        """The precision an `LGM` assembles into its sparse block-diagonal.
+
+        ``gmrf`` is ``prior(theta)``; its precision by default (``scale *
+        structure`` for an intrinsic field). A component whose prior uses an
+        operator that cannot be assembled entry-wise (a grid SPDE's spectral
+        function) returns an equivalent sparse one here.
+        """
+        if isinstance(gmrf, gx.IntrinsicGMRF):
+            return scale_operator(gmrf.structure, gmrf.precision_scale)
+        return gmrf.precision
+
+    def constraint_basis(
+        self, gmrf: gx.GaussianMRF | gx.IntrinsicGMRF
+    ) -> Float[Array, "n c"] | None:
+        """Orthonormal basis of the hard constraints ``inla()`` imposes.
+
+        The intrinsic field's null space by default (sum-to-zero per
+        connected component, say). A component may constrain fewer
+        directions and leave the rest to the data, as R-INLA's ``rw2``
+        constrains only the sum and keeps the linear trend; the density's
+        rank is unchanged.
+        """
+        return gmrf.null_space if isinstance(gmrf, gx.IntrinsicGMRF) else None
+
     def projector(self, index: Int[ArrayLike, " n_obs"]) -> gx.SparseOperator:
         """``(n_obs, n_nodes)`` selector with a one where observation i sits.
 
@@ -120,6 +147,20 @@ class AbstractComponent(eqx.Module):
         return sample_component(
             self, index, soft_constraint_scale=soft_constraint_scale
         )
+
+
+def prior_shape(prior: dist.Distribution) -> tuple[int, ...]:
+    """Shape of one draw: batch then event dimensions (a batched prior such
+    as ``Exponential(jnp.ones(3))`` is three hyperparameters)."""
+    return tuple(prior.batch_shape) + tuple(prior.event_shape)
+
+
+def probe_theta(spec, offset: float = 0.0) -> dict:
+    """Hyperparameters at ``u = offset`` (unconstrained), for host-side probes."""
+    return {
+        k: jnp.asarray(transform(jnp.full(prior_shape(prior), offset)))
+        for k, (prior, transform) in spec.items()
+    }
 
 
 def default_transform(prior: dist.Distribution) -> Transform:

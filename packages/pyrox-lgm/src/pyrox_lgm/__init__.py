@@ -20,6 +20,16 @@ from pyrox_lgm._components import (
     Leroux,
     Replicate,
 )
+from pyrox_lgm._inla import inla
+from pyrox_lgm._likelihood import (
+    AbstractObservation,
+    Bernoulli,
+    Binomial,
+    Gaussian,
+    NegativeBinomial,
+    Poisson,
+)
+from pyrox_lgm._model import LGM, FixedEffects
 from pyrox_lgm._priors import (
     PCAR1Rho,
     PCBYM2Phi,
@@ -28,6 +38,7 @@ from pyrox_lgm._priors import (
     StructureSpectrum,
     structure_spectrum,
 )
+from pyrox_lgm._result import INLAResult, Summary
 
 
 __version__ = "0.0.0"  # x-release-please-version
@@ -37,20 +48,31 @@ __all__ = [
     "BYM2",
     "CAR",
     "IID",
+    "LGM",
     "RW1",
     "RW2",
     "SPDE",
     "AbstractComponent",
+    "AbstractObservation",
+    "Bernoulli",
     "Besag",
+    "Binomial",
+    "FixedEffects",
+    "Gaussian",
     "Generic",
+    "INLAResult",
     "Kronecker",
     "Leroux",
+    "NegativeBinomial",
     "PCAR1Rho",
     "PCBYM2Phi",
     "PCMatern",
     "PCPrecision",
+    "Poisson",
     "Replicate",
     "StructureSpectrum",
+    "Summary",
     "__version__",
+    "inla",
     "structure_spectrum",
 ]

@@ -177,8 +177,12 @@ class RW1(_IntrinsicWalk):
 class RW2(_IntrinsicWalk):
     r"""Second-order random walk, $x_{t+1} - 2x_t + x_{t-1} \sim \mathcal N(0, 1/\tau)$.
 
-    Intrinsic of order 2: constants and linear trends form its null space,
-    removed by sum-to-zero and zero-slope constraints. For odd ``n``,
+    Intrinsic of order 2: constants and linear trends form its null space.
+    Inside ``inla()`` only the sum-to-zero constraint is imposed, as R-INLA's
+    ``rw2`` does, and the linear trend is left to the data (the density's
+    rank stays ``n - 2``); the NumPyro face soft-constrains both
+    directions, so add a linear fixed effect there if the data have a trend.
+    For odd ``n``,
     gaussx's banded structure carries one decoupled padding node
     (``n_nodes = n + 1``); it never enters a projector, and its own scale
     is taken out of ``scale_model``.
@@ -234,6 +238,11 @@ class RW2(_IntrinsicWalk):
             self.scale = s_all ** (N / self.n)
         else:
             self.scale = jnp.asarray(1.0)
+
+    def constraint_basis(self, gmrf):
+        # R-INLA's rw2 constrains the sum only: the linear trend stays in the
+        # model (flat, identified by the data) instead of being removed.
+        return self.null_space[:, :1]
 
 
 class AR1(AbstractComponent):
