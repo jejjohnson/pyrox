@@ -24,7 +24,7 @@ import numpyro.distributions as dist
 from jaxtyping import Array, Float
 from numpyro.distributions.transforms import Transform
 
-from pyrox_lgm._components._base import AbstractComponent, Constraint
+from pyrox_lgm._components._base import AbstractComponent, Constraint, probe_theta
 
 
 _LOG_2PI = math.log(2.0 * math.pi)
@@ -78,11 +78,7 @@ def _parts(
 
 def _probe_basis(comp: AbstractComponent):
     """A component's own constraint basis (theta-free for the intrinsic ones)."""
-    probe = {
-        k: jnp.asarray(transform(jnp.zeros(prior.event_shape)))
-        for k, (prior, transform) in comp.theta_spec().items()
-    }
-    return comp.constraint_basis(comp.prior(probe))
+    return comp.constraint_basis(comp.prior(probe_theta(comp.theta_spec())))
 
 
 def _check_addressable(comp: AbstractComponent, role: str) -> None:

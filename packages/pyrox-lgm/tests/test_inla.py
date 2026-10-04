@@ -129,6 +129,65 @@ def test_lgm_validation():
         lgm.LGM((lgm.IID(3, name="lik"),))
 
 
+def test_batched_hyperparameter_priors_count_every_entry():
+    import equinox as eqx
+    import gaussx as gx
+    import numpyro.distributions as dist
+
+    class Scaled(lgm.AbstractObservation):
+        name: str = eqx.field(static=True, default="lik")
+
+        def theta_spec(self):
+            prior = dist.Exponential(jnp.ones(3))  # batch (3,), event ()
+            return {"s": (prior, dist.biject_to(prior.support))}
+
+        def build(self, y, theta, data):
+            return gx.PoissonLikelihood(y)
+
+    model = lgm.LGM((lgm.IID(3, name="a"),), likelihood=Scaled())
+    assert model.n_theta == 4
+    assert model.unflatten(jnp.zeros(4))["lik.s"].shape == (3,)
+    assert jnp.shape(model.log_prior(jnp.zeros(4))) == ()
+
+
+def test_a_theta_dependent_intrinsic_structure_is_rejected():
+    import gaussx as gx
+    import lineax as lx
+    import numpyro.distributions as dist
+
+    class Moving(lgm.Generic):
+        # rho rescales the structure itself, not precision_scale, so the
+        # pseudo-determinant (the omitted normaliser) changes with theta.
+        def theta_spec(self):
+            prior = dist.LogNormal(0.0, 1.0)
+            return super().theta_spec() | {
+                "rho": (prior, dist.biject_to(prior.support))
+            }
+
+        def prior(self, theta, *, constraint="hard", soft_constraint_scale=1e-3):
+            R = self.structure.as_matrix() * theta["rho"]
+            return gx.IntrinsicGMRF(
+                jnp.zeros(self.n_nodes),
+                theta["tau"],
+                lx.MatrixLinearOperator(R, lx.positive_semidefinite_tag),
+                self.null_space,
+                constraint=constraint,
+                soft_constraint_scale=soft_constraint_scale,
+            )
+
+    R = jnp.array([[1.0, -1.0, 0.0], [-1.0, 2.0, -1.0], [0.0, -1.0, 1.0]])
+    op = lx.MatrixLinearOperator(R, lx.positive_semidefinite_tag)
+    with pytest.raises(ValueError, match="include_normalizer=True"):
+        lgm.LGM((Moving(op, jnp.ones(3), name="m"),))
+    lgm.LGM((lgm.Generic(op, jnp.ones(3), name="g"),))  # theta-free: fine
+
+
+def test_theta_init_must_match_the_hyperparameters():
+    model, data = _gaussian_rw2()
+    with pytest.raises(ValueError, match=r"theta_init must have shape \(2,\)"):
+        lgm.inla(model, data, theta_init=np.zeros(3))
+
+
 def test_any_generic_structure_assembles():
     # Tridiagonal has a sparse form; any other operator is assembled densely.
     import lineax as lx

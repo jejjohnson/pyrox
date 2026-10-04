@@ -149,6 +149,20 @@ class AbstractComponent(eqx.Module):
         )
 
 
+def prior_shape(prior: dist.Distribution) -> tuple[int, ...]:
+    """Shape of one draw: batch then event dimensions (a batched prior such
+    as ``Exponential(jnp.ones(3))`` is three hyperparameters)."""
+    return tuple(prior.batch_shape) + tuple(prior.event_shape)
+
+
+def probe_theta(spec, offset: float = 0.0) -> dict:
+    """Hyperparameters at ``u = offset`` (unconstrained), for host-side probes."""
+    return {
+        k: jnp.asarray(transform(jnp.full(prior_shape(prior), offset)))
+        for k, (prior, transform) in spec.items()
+    }
+
+
 def default_transform(prior: dist.Distribution) -> Transform:
     """The bijection from the reals onto ``prior``'s support."""
     return dist.biject_to(prior.support)
