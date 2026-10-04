@@ -19,10 +19,10 @@ Supported: kernels whose kernellib counterpart has a closed-form density,
   \,(2\nu/\ell^2 + \omega^2)^{-(\nu + D/2)}$.
 
 The density here is radial: it takes squared frequency *magnitudes*, so it is
-defined for isotropic lengthscales only. Non-stationary kernels
-(``Linear``, ``Polynomial``), bounded-spectrum kernels (``Periodic``,
-``Cosine``) and ``RationalQuadratic`` (no closed form in kernellib) raise
-`NotImplementedError`.
+defined for isotropic lengthscales only. ``RationalQuadratic`` uses
+kernellib's closed form (a Gamma scale mixture of Gaussians). Non-stationary
+kernels (``Linear``, ``Polynomial``) and bounded-spectrum kernels
+(``Periodic``, ``Cosine``) raise `NotImplementedError`.
 """
 
 from __future__ import annotations
@@ -45,7 +45,8 @@ def spectral_density(
 
     Args:
         kernel: A stationary kernel with a closed-form density: a pyrox
-            `pyrox_gp.RBF` / `pyrox_gp.Matern`, or a kernellib kernel.
+            `pyrox_gp.RBF` / `pyrox_gp.Matern` / `pyrox_gp.RationalQuadratic`,
+            or a kernellib kernel.
         eigvals: Squared frequency magnitudes $\\lambda_j = \\omega_j^2$,
             shape ``(M,)``.
         D: Input dimension of the underlying domain (the kernel itself does
@@ -63,7 +64,8 @@ def spectral_density(
     if not isinstance(frozen, kl.AbstractStationaryKernel):
         raise NotImplementedError(
             f"Spectral density for {type(kernel).__name__} is not registered. "
-            "Currently only RBF and Matern are supported; open an issue to add more."
+            "Currently RBF, Matern and RationalQuadratic are supported; open an "
+            "issue to add more."
         )
     lengthscale = frozen.lengthscale
     if jnp.ndim(lengthscale) != 0:
