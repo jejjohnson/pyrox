@@ -17,6 +17,7 @@ resolution-markers = [
 members = [
     "pyrox",
     "pyrox-gp",
+    "pyrox-lgm",
     "pyrox-monorepo",
     "pyrox-nn",
 ]
@@ -2087,6 +2088,34 @@ requires-dist = [
 provides-extras = ["optax", "colab", "flows"]
 
 [[package]]
+name = "pyrox-lgm"
+version = "0.0.0"
+source = { editable = "packages/pyrox-lgm" }
+dependencies = [
+    { name = "gaussx" },
+    { name = "kernellib" },
+    { name = "numpyro" },
+    { name = "optax" },
+    { name = "pyrox" },
+]
+
+[package.optional-dependencies]
+xarray = [
+    { name = "xarray" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gaussx", extras = ["numpyro"], git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.1" },
+    { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.15" },
+    { name = "numpyro", specifier = ">=0.21" },
+    { name = "optax", specifier = ">=0.2.8" },
+    { name = "pyrox", editable = "packages/pyrox" },
+    { name = "xarray", marker = "extra == 'xarray'", specifier = ">=2025.1" },
+]
+provides-extras = ["xarray"]
+
+[[package]]
 name = "pyrox-monorepo"
 version = "0.0.0"
 source = { editable = "." }
@@ -2098,6 +2127,7 @@ dev = [
     { name = "pre-commit" },
     { name = "pyrox" },
     { name = "pyrox-gp" },
+    { name = "pyrox-lgm" },
     { name = "pyrox-nn" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -2134,6 +2164,7 @@ dev = [
     { name = "pre-commit", specifier = ">=4.6.0" },
     { name = "pyrox", editable = "packages/pyrox" },
     { name = "pyrox-gp", editable = "packages/pyrox-gp" },
+    { name = "pyrox-lgm", editable = "packages/pyrox-lgm" },
     { name = "pyrox-nn", editable = "packages/pyrox-nn" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
@@ -2830,6 +2861,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/0b/02/ae6ceac1baeda530866a85075641cec12989bd8d31af6d5ab4a3e8c92f47/webencodings-0.5.1.tar.gz", hash = "sha256:b36a1c245f2d304965eb4e0a82848379241dc04b865afcc4aab16748587e1923", size = 9721, upload-time = "2017-04-05T20:21:34.189Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/24/2a3e3df732393fed8b3ebf2ec078f05546de641fe1b667ee316ec1dcf3b7/webencodings-0.5.1-py2.py3-none-any.whl", hash = "sha256:a0af1213f3c2226497a97e2b3aa01a7e4bee4f403f95be16fc9acd2947514a78", size = 11774, upload-time = "2017-04-05T20:21:32.581Z" },
+]
+
+[[package]]
+name = "xarray"
+version = "2026.9.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "pandas" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ff/f5/781c70b234f54e0401f4f7c4427a7486da38d50dbb138c7d7c55144b3d86/xarray-2026.9.0.tar.gz", hash = "sha256:6abc69694c22fa1f0fb2f357ff4e41d88beb4477ed71091f944b7dbf67ed54fe", size = 3176922, upload-time = "2026-09-29T23:06:25.807Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3f/44/3159af4fb3c868970a412e294320ed6bb1a9fbdfa6431050eda8e0b34b6e/xarray-2026.9.0-py3-none-any.whl", hash = "sha256:fe349fa871628b1a0a5217af3fe1283a2862d5485156e6eda354fffb81c3bb7c", size = 1445445, upload-time = "2026-09-29T23:06:23.686Z" },
 ]
 
 [[package]]
