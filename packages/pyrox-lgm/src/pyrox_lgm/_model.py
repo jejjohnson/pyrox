@@ -31,7 +31,7 @@ from jaxtyping import Array, ArrayLike, Float
 from numpyro.distributions.transforms import Transform
 
 from pyrox_lgm._assembly import block_diagonal, hstack
-from pyrox_lgm._components._base import AbstractComponent
+from pyrox_lgm._components._base import AbstractComponent, prior_shape, probe_theta
 from pyrox_lgm._likelihood import AbstractObservation
 
 
@@ -229,7 +229,7 @@ class LGM(eqx.Module):
     def _sizes(self) -> list[tuple[str, int, tuple[int, ...]]]:
         out = []
         for key, (prior, _) in self.theta_spec().items():
-            shape = tuple(prior.event_shape)
+            shape = prior_shape(prior)
             out.append((key, int(np.prod(shape)) if shape else 1, shape))
         return out
 
@@ -256,7 +256,7 @@ class LGM(eqx.Module):
             block = u[i : i + size].reshape(shape) if shape else u[i]
             prior, transform = spec[key]
             value = transform(block)
-            total = total + prior.log_prob(value)
+            total = total + jnp.sum(prior.log_prob(value))
             total = total + jnp.sum(transform.log_abs_det_jacobian(block, value))
             i += size
         return total
@@ -290,18 +290,34 @@ class LGM(eqx.Module):
         return sum(c.n_nodes for c in self.components) + self.n_fixed
 
     def _normaliser(self, comp: AbstractComponent) -> Float[Array, ""]:
-        """The theta-free constant an intrinsic component's log_prob omits."""
-        probe = {
-            k: jnp.asarray(transform(jnp.zeros(prior.event_shape)))
-            for k, (prior, transform) in comp.theta_spec().items()
-        }
-        gmrf = comp.prior(probe)
+        """The theta-free constant an intrinsic component's log_prob omits.
+
+        Computed once, so it must not depend on theta: probed at two points,
+        a structure whose pseudo-determinant moves is rejected.
+        """
+        spec = comp.theta_spec()
+        first, second = (
+            self._intrinsic_constant(comp.prior(probe_theta(spec, o)))
+            for o in (0.0, 0.5)
+        )
+        if first is None or second is None:
+            return jnp.asarray(0.0)
+        if not np.isclose(float(first), float(second), rtol=1e-8, atol=1e-8):
+            raise ValueError(
+                f"component {comp.name!r} returns an IntrinsicGMRF whose structure "
+                "depends on its hyperparameters beyond precision_scale; return it "
+                "with include_normalizer=True so its normaliser follows theta"
+            )
+        return first
+
+    @staticmethod
+    def _intrinsic_constant(gmrf) -> Float[Array, ""] | None:
         if (
             not isinstance(gmrf, gx.IntrinsicGMRF)
             or gmrf.include_normalizer
             or getattr(gmrf, "normalized", False)
         ):
-            return jnp.asarray(0.0)
+            return None
         V = gmrf.null_space
         rank = gmrf.structure.in_size() - V.shape[1]
         log_pdet = gx.pseudo_logdet(gmrf.structure, null_space=V)

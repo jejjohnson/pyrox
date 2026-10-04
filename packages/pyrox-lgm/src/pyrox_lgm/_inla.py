@@ -328,6 +328,8 @@ def _inla_once(
 
     # 1. theta-mode and design.
     u0 = jnp.zeros(m) if theta_init is None else jnp.asarray(theta_init, dtype=float)
+    if u0.shape != (m,):
+        raise ValueError(f"theta_init must have shape ({m},), got {u0.shape}")
     if m:
         u_star, _, search_ok = _theta_mode(
             model,
@@ -463,8 +465,8 @@ def _log_marginal_likelihood(lp_star, u_star, neg_h, points, lp, log_w):
     log_gauss = lp_star + 0.5 * m * math.log(2.0 * math.pi) - 0.5 * logdet
     d = points - u_star
     lp_gauss = lp_star - 0.5 * jnp.einsum("ki,ij,kj->k", d, neg_h, d)
-    w = jnp.exp(log_w - jax.scipy.special.logsumexp(log_w))
-    return log_gauss - jnp.log(jnp.sum(w * jnp.exp(-(lp - lp_gauss))))
+    log_wn = log_w - jax.scipy.special.logsumexp(log_w)
+    return log_gauss - jax.scipy.special.logsumexp(log_wn - (lp - lp_gauss))
 
 
 def _hyperpar_summaries(model, u_star, cov_u, points, weights) -> dict[str, Summary]:
