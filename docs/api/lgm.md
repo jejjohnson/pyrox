@@ -98,6 +98,21 @@ An `LGM` assembles components, fixed effects and an observation model;
 
 ::: pyrox_lgm.Summary
 
+### Formula sugar
+
+`f(column, model, ...)` builds a component named after the data column that
+indexes it, as R-INLA's `f()` does.
+
+::: pyrox_lgm.f
+
+### Diagnostics
+
+CPO, PIT, WAIC and DIC from one fit, with no refits.
+
+::: pyrox_lgm.diagnostics
+
+::: pyrox_lgm.Diagnostics
+
 ### Observation models
 
 ::: pyrox_lgm.Gaussian

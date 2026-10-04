@@ -20,6 +20,8 @@ from pyrox_lgm._components import (
     Leroux,
     Replicate,
 )
+from pyrox_lgm._diagnostics import Diagnostics, diagnostics
+from pyrox_lgm._formula import f
 from pyrox_lgm._inla import inla
 from pyrox_lgm._likelihood import (
     AbstractObservation,
@@ -57,6 +59,7 @@ __all__ = [
     "Bernoulli",
     "Besag",
     "Binomial",
+    "Diagnostics",
     "FixedEffects",
     "Gaussian",
     "Generic",
@@ -73,6 +76,8 @@ __all__ = [
     "StructureSpectrum",
     "Summary",
     "__version__",
+    "diagnostics",
+    "f",
     "inla",
     "structure_spectrum",
 ]

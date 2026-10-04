@@ -99,11 +99,13 @@ def _fit_point(model, A, data, u, n_iter, subspace):
     offset = model.offset(data)
     fit = gx.laplace_mode(prior, lik, projector=A, offset=offset, max_iter=n_iter)
     var = fit.factor.diag_inv()
+    G = HV = None
     if isinstance(prior, gx.IntrinsicGMRF):
         V = prior.null_space
         HV = jax.vmap(fit.factor.solve, in_axes=1, out_axes=1)(V)
         S = V.T @ HV
-        var = var - jnp.sum(HV * jnp.linalg.solve(S, HV.T).T, axis=1)
+        G = jnp.linalg.solve(S, HV.T).T  # Sigma_c = H^-1 - G HV^T
+        var = var - jnp.sum(HV * G, axis=1)
     mean = fit.mode
     if subspace:
         mean = gx.vb_mean_correction(
@@ -114,7 +116,61 @@ def _fit_point(model, A, data, u, n_iter, subspace):
             projector=A,
             offset=offset,
         )
-    return mean, var, fit.converged, fit.log_marginal + model.log_prior(u)
+    eta_mean = A.mv(mean) + (0.0 if offset is None else offset)
+    eta_var = _predictor_variance(A, fit.factor.selected_inverse(), G, HV)
+    return (
+        mean,
+        var,
+        fit.converged,
+        fit.log_marginal + model.log_prior(u),
+        eta_mean,
+        eta_var,
+    )
+
+
+def _predictor_variance(A, selected, G, HV):
+    r"""$\operatorname{var}(\eta_i) = \sum_{a,b} A_{ia}A_{ib}\Sigma_{ab}$ per row.
+
+    Every pair of nodes in a row of $A$ is coupled in $A^\top WA$, so
+    $\Sigma_{ab}$ is in the Takahashi selected inverse (pattern of
+    $L + L^\top$); the hard constraints subtract $G_a\cdot(H^{-1}V)_b$.
+    The pairs and their positions in the selected pattern are host work on
+    static patterns.
+    """
+    rows = np.asarray(A.pattern.rows)
+    cols = np.asarray(A.pattern.cols)
+    order = np.argsort(rows, kind="stable")
+    rows_s, cols_s = rows[order], cols[order]
+    m = A.out_size()
+    counts = np.bincount(rows_s, minlength=m)
+    starts = np.concatenate([[0], np.cumsum(counts)[:-1]])
+    # All (p, q) entry pairs within each row.
+    pair_row = np.repeat(np.arange(m), counts**2)
+    local = np.arange(pair_row.size) - np.repeat(
+        np.cumsum(counts**2) - counts**2, counts**2
+    )
+    c_row = counts[pair_row]
+    p = starts[pair_row] + local // np.maximum(c_row, 1)
+    q = starts[pair_row] + local % np.maximum(c_row, 1)
+    a, b = cols_s[p], cols_s[q]
+    coef = A.values[jnp.asarray(order[p])] * A.values[jnp.asarray(order[q])]
+    sr = np.asarray(selected.pattern.rows)
+    sc = np.asarray(selected.pattern.cols)
+    n = A.in_size()
+    lookup = {}
+    for idx, key in enumerate((sr.astype(np.int64) * n + sc).tolist()):
+        lookup[key] = idx
+    for idx, key in enumerate((sc.astype(np.int64) * n + sr).tolist()):
+        lookup.setdefault(key, idx)
+    pos = np.fromiter(
+        (lookup[k] for k in (a.astype(np.int64) * n + b).tolist()),
+        dtype=np.int64,
+        count=a.size,
+    )
+    sigma = selected.values[jnp.asarray(pos)]
+    if G is not None:
+        sigma = sigma - jnp.sum(G[jnp.asarray(a)] * HV[jnp.asarray(b)], axis=1)
+    return jax.ops.segment_sum(coef * sigma, jnp.asarray(pair_row), m)
 
 
 def _theta_mode(model, A, data, max_newton, u0, *, max_iter, tol, verbose):
@@ -308,13 +364,20 @@ def _inla_once(
     # is dropped from the mixture and from the marginal likelihood.
     subspace = tuple(_vb_subspace(model).tolist()) if strategy == "vb" else ()
     means, variances, lps, iters, keep = [], [], [], [], []
+    eta_means, eta_vars = [], []
     for k in range(points.shape[0]):
         n_iter = max_newton
-        mean, var, ok, lp = _fit_point(model, A, data, points[k], n_iter, subspace)
+        mean, var, ok, lp, eta_m, eta_v = _fit_point(
+            model, A, data, points[k], n_iter, subspace
+        )
         if not bool(ok):
             n_iter = 4 * max_newton
-            mean, var, ok, lp = _fit_point(model, A, data, points[k], n_iter, subspace)
+            mean, var, ok, lp, eta_m, eta_v = _fit_point(
+                model, A, data, points[k], n_iter, subspace
+            )
         means.append(mean)
+        eta_means.append(eta_m)
+        eta_vars.append(eta_v)
         variances.append(var)
         lps.append(lp)
         iters.append(n_iter)
@@ -337,6 +400,8 @@ def _inla_once(
     weights = jnp.exp(log_w - jax.scipy.special.logsumexp(log_w))
     means_arr = jnp.stack(means)[idx]
     vars_arr = jnp.maximum(jnp.stack(variances)[idx], 0.0)
+    eta_means_arr = jnp.stack(eta_means)[idx]
+    eta_vars_arr = jnp.maximum(jnp.stack(eta_vars)[idx], 0.0)
     newton_iters = tuple(iters[k] for k in kept)
     lp_star = lps[0] if keep[0] else lp_design[0]  # point 0 is the mode
     if m:
@@ -368,6 +433,9 @@ def _inla_once(
         theta_weights=weights,
         latent_means=means_arr,
         latent_variances=vars_arr,
+        predictor_means=eta_means_arr,
+        predictor_variances=eta_vars_arr,
+        linear_predictor=mixture_summary(eta_means_arr, eta_vars_arr, weights),
         log_marginal_likelihood=log_ml,
         n_dropped=n_dropped,
         model=model,

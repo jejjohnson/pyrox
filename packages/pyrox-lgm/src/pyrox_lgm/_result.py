@@ -74,6 +74,11 @@ class INLAResult(eqx.Module):
         latent_means: Per-point latent means ``(K, N)`` (VB-corrected under
             ``strategy="vb"``).
         latent_variances: Per-point marginal variances ``(K, N)``.
+        predictor_means: Per-point means of the linear predictor
+            $\\eta = Ax + o$ at the observations ``(K, n_obs)``.
+        predictor_variances: Their variances ``(K, n_obs)``, from the
+            Takahashi selected inverse (no solves).
+        linear_predictor: `Summary` of the mixed predictor marginals.
         log_marginal_likelihood: $\\log\\tilde\\pi(y)$, Gaussian approximation
             over $\\theta$ (R-INLA's "Gaussian" mlik).
         n_dropped: Design points dropped because their inner Newton did not
@@ -90,6 +95,9 @@ class INLAResult(eqx.Module):
     theta_weights: Float[Array, " K"]
     latent_means: Float[Array, "K N"]
     latent_variances: Float[Array, "K N"]
+    predictor_means: Float[Array, "K M"]
+    predictor_variances: Float[Array, "K M"]
+    linear_predictor: Summary
     log_marginal_likelihood: Float[Array, ""]
     n_dropped: int = eqx.field(static=True)
     model: Any
@@ -134,6 +142,12 @@ class INLAResult(eqx.Module):
             out[rows] = np.asarray(self.latent_means[k] + draws)
         return jnp.asarray(out)
 
+    def diagnostics(self, order: int = 80):
+        """DIC, WAIC, CPO and PIT, without refits (see `pyrox_lgm.diagnostics`)."""
+        from pyrox_lgm._diagnostics import diagnostics
+
+        return diagnostics(self, order=order)
+
     def predict(
         self, new_data: Mapping[str, ArrayLike], key: jax.Array, n_samples: int = 1000
     ) -> Summary:
@@ -170,6 +184,8 @@ class INLAResult(eqx.Module):
                         else tuple(f"{name}_{i}" for i in range(arr.ndim))
                     )
                     variables[f"{group}.{name}.{field}"] = (dims, arr)
+        for field, value in self.linear_predictor._asdict().items():
+            variables[f"linear_predictor.{field}"] = ("obs", np.asarray(value))
         ds = xr.Dataset(variables)
         ds.attrs["log_marginal_likelihood"] = float(self.log_marginal_likelihood)
         ds.attrs["n_dropped"] = self.n_dropped
