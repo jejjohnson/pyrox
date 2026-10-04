@@ -37,6 +37,9 @@ from pyrox_lgm._result import INLAResult, Summary, mixture_summary
 # the fixed effects), as R-INLA's ``control.vb`` limits it to small effects.
 _VB_MAX_NODES = 30
 
+# Gauss-Hermite nodes per dimension for the empirical-Bayes moments.
+_EB_ORDER = 20
+
 
 def _vb_subspace(model: LGM) -> np.ndarray:
     idx = []
@@ -493,13 +496,20 @@ def _hyperpar_summaries(model, u_star, cov_u, points, weights) -> dict[str, Summ
             sd = jnp.sqrt(jnp.maximum(var, 0.0))
         else:
             # Empirical Bayes: one point carries no spread, so take the mean
-            # and sd from the same Gaussian approximation as the quantiles
-            # (sd by the delta method through the bijection).
-            block = u_star[i : i + size]
-            mean = to_user(block)
-            J = jnp.reshape(jax.jacfwd(to_user)(block), (size, size))
-            cov = cov_u[i : i + size, i : i + size]
-            sd = jnp.sqrt(jnp.diagonal(J @ cov @ J.T)).reshape(jnp.shape(mean))
+            # and sd of the same Gaussian approximation the quantiles come
+            # from, pushed through the bijection (a tensor Gauss-Hermite rule
+            # on the block's marginal; for exp, E = exp(mu + sigma^2 / 2)).
+            nodes, gh = np.polynomial.hermite_e.hermegauss(_EB_ORDER)
+            grid = np.stack(np.meshgrid(*[nodes] * size, indexing="ij"), -1)
+            wts = np.prod(np.meshgrid(*[gh] * size, indexing="ij"), axis=0)
+            wts = jnp.asarray((wts / wts.sum()).reshape(-1))
+            L = jnp.linalg.cholesky(cov_u[i : i + size, i : i + size])
+            us = u_star[i : i + size] + jnp.asarray(grid.reshape(-1, size)) @ L.T
+            values = jax.vmap(to_user)(us)
+            w = wts.reshape((-1,) + (1,) * (values.ndim - 1))
+            mean = jnp.sum(w * values, axis=0)
+            var = jnp.sum(w * values**2, axis=0) - mean**2
+            sd = jnp.sqrt(jnp.maximum(var, 0.0))
         out[key] = Summary(mean, sd, *qs)
         i += size
     return out

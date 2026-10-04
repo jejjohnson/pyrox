@@ -417,6 +417,23 @@ def test_grid_spde_inside_an_lgm_is_the_exact_gaussian_marginal():
     assert np.isclose(float(model.log_posterior_theta(u, data)), ref, atol=1e-9)
 
 
+def test_empirical_bayes_moments_are_those_of_the_gaussian_approximation():
+    # Both hyperparameters are positive (exp bijection), so under
+    # u ~ N(mu, s^2) each is lognormal: the moments are closed form.
+    from pyrox_lgm._inla import _hyperpar_summaries
+
+    model, _ = _gaussian_rw2()
+    mu = jnp.array([0.3, -0.2])
+    cov = jnp.array([[0.5, 0.1], [0.1, 0.2]])
+    out = _hyperpar_summaries(model, mu, cov, mu[None, :], jnp.ones(1))
+    for k, key in enumerate(model.theta_spec()):
+        m, v = float(mu[k]), float(cov[k, k])
+        assert np.isclose(float(out[key].mean), np.exp(m + v / 2), rtol=1e-8)
+        sd = np.sqrt((np.exp(v) - 1) * np.exp(2 * m + v))
+        assert np.isclose(float(out[key].sd), sd, rtol=1e-6)
+        assert np.isclose(float(out[key].q50), np.exp(m), rtol=1e-12)
+
+
 @pytest.mark.slow
 def test_empirical_bayes_summaries_are_consistent(gaussian_fit):
     model, data, _ = gaussian_fit
