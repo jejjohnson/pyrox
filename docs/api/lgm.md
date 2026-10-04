@@ -72,3 +72,13 @@ On a kernellib graph (from edges, polygons' contiguity, or a grid).
 ::: pyrox_lgm.CAR
 
 ::: pyrox_lgm.Leroux
+
+### SPDE (Matérn)
+
+::: pyrox_lgm.SPDE
+
+### Combinators
+
+::: pyrox_lgm.Kronecker
+
+::: pyrox_lgm.Replicate

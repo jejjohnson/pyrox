@@ -73,9 +73,13 @@ class IID(AbstractComponent):
         return {"tau": (self.tau_prior, default_transform(self.tau_prior))}
 
     def prior(
-        self, theta: dict[str, Array], *, constraint: Constraint = "hard"
+        self,
+        theta: dict[str, Array],
+        *,
+        constraint: Constraint = "hard",
+        soft_constraint_scale: float = 1e-3,
     ) -> gx.GaussianMRF:
-        del constraint  # proper
+        del constraint, soft_constraint_scale  # proper
         return gx.GaussianMRF(jnp.zeros(self.n), gx.iid_precision(self.n, theta["tau"]))
 
 
@@ -101,7 +105,11 @@ class _IntrinsicWalk(AbstractComponent):
         return {"tau": (self.tau_prior, default_transform(self.tau_prior))}
 
     def prior(
-        self, theta: dict[str, Array], *, constraint: Constraint = "hard"
+        self,
+        theta: dict[str, Array],
+        *,
+        constraint: Constraint = "hard",
+        soft_constraint_scale: float = 1e-3,
     ) -> gx.IntrinsicGMRF:
         # tau * (s R): scale the precision, not the operator, so the
         # structure keeps its banded solver.
@@ -111,6 +119,7 @@ class _IntrinsicWalk(AbstractComponent):
             self.structure,
             self.null_space,
             constraint=constraint,
+            soft_constraint_scale=soft_constraint_scale,
         )
 
 
@@ -281,8 +290,12 @@ class AR1(AbstractComponent):
         }
 
     def prior(
-        self, theta: dict[str, Array], *, constraint: Constraint = "hard"
+        self,
+        theta: dict[str, Array],
+        *,
+        constraint: Constraint = "hard",
+        soft_constraint_scale: float = 1e-3,
     ) -> gx.GaussianMRF:
-        del constraint  # proper
+        del constraint, soft_constraint_scale  # proper
         Q = gx.ar1_precision(self.n, theta["rho"], theta["tau"])
         return gx.GaussianMRF(jnp.zeros(self.n), Q)
