@@ -7,11 +7,15 @@ land in P7-P9. ``pyrox_lgm`` never imports ``pyrox_gp``.
 
 from pyrox_lgm._components import (
     AR1,
+    BYM2,
+    CAR,
     IID,
     RW1,
     RW2,
     AbstractComponent,
+    Besag,
     Generic,
+    Leroux,
 )
 from pyrox_lgm._priors import (
     PCAR1Rho,
@@ -27,11 +31,15 @@ __version__ = "0.0.0"  # x-release-please-version
 
 __all__ = [
     "AR1",
+    "BYM2",
+    "CAR",
     "IID",
     "RW1",
     "RW2",
     "AbstractComponent",
+    "Besag",
     "Generic",
+    "Leroux",
     "PCAR1Rho",
     "PCBYM2Phi",
     "PCMatern",
