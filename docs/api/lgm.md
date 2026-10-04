@@ -38,3 +38,25 @@ computed once per graph: exactly for a grid (`gaussx.KroneckerSum`) or
 ::: pyrox_lgm.structure_spectrum
 
 ::: pyrox_lgm.StructureSpectrum
+
+## Components
+
+Each component is a GMRF over its own nodes with hyperpriors and a projector
+to observations. `prior(theta)` gives the gaussx distribution that `inla()`
+uses; `sample(index)` is the NumPyro face, for NUTS.
+
+::: pyrox_lgm.AbstractComponent
+
+### Temporal and unstructured
+
+::: pyrox_lgm.IID
+
+::: pyrox_lgm.RW1
+
+::: pyrox_lgm.RW2
+
+::: pyrox_lgm.AR1
+
+### Generic
+
+::: pyrox_lgm.Generic
