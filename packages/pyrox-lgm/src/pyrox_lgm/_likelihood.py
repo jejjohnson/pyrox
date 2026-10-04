@@ -136,7 +136,7 @@ class NegativeBinomial(AbstractObservation):
         return gx.NegativeBinomialLikelihood(y, theta["size"])
 
     def site_distribution(self, eta, theta, data):
-        return _NegativeBinomial(jnp.exp(eta), theta["size"])
+        return _NegativeBinomial(eta, theta["size"])
 
 
 def _per_site(values: ArrayLike, eta: Array) -> Array:
@@ -166,9 +166,18 @@ class _Binomial(dist.BinomialLogits):
         return jnp.where(k >= n, 1.0, jnp.where(k < 0, 0.0, inside))
 
 
-class _NegativeBinomial(dist.NegativeBinomial2):
+class _NegativeBinomial(dist.NegativeBinomialLogits):
+    """NB2 with mean ``exp(eta)`` and ``size``, parameterised by ``eta``.
+
+    ``logits = eta - log(size)`` keeps ``log_prob`` finite where ``exp(eta)``
+    underflows (NegativeBinomial2 returns NaN at a zero mean).
+    """
+
+    def __init__(self, eta, size):
+        super().__init__(size, eta - jnp.log(size))
+
     def cdf(self, value):
         k = jnp.floor(value)
-        r = self.concentration
-        p = r / (r + self.mean)
+        r = self.total_count
+        p = jax.nn.sigmoid(-self.logits)  # r / (r + mean)
         return jnp.where(k < 0, 0.0, betainc(r, k + 1.0, p))

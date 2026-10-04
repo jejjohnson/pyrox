@@ -99,6 +99,24 @@ def test_per_site_data_broadcasts_over_quadrature_nodes():
     assert np.allclose(lp[:, 1], ref)
 
 
+def test_negative_binomial_sites_are_stable_where_the_mean_underflows():
+    # exp(-800) is 0 in float64; NegativeBinomial2 returns NaN at a zero mean.
+    from scipy.stats import nbinom
+
+    obs = lgm.NegativeBinomial()
+    theta = {"size": jnp.asarray(2.5)}
+    eta = jnp.array([-800.0, 0.3, 1.2])
+    y = jnp.array([0.0, 2.0, 5.0])
+    lp = obs.site_log_prob(y, eta, theta, {})
+    assert np.all(np.isfinite(lp)) and abs(float(lp[0])) < 1e-12
+    mu = np.exp(np.asarray(eta[1:]))
+    p = 2.5 / (2.5 + mu)
+    assert np.allclose(lp[1:], nbinom.logpmf(np.asarray(y[1:]), 2.5, p))
+    cdf = obs.site_cdf(y, eta, theta, {})
+    assert np.allclose(cdf[1:], nbinom.cdf(np.asarray(y[1:]), 2.5, p))
+    assert np.isclose(float(cdf[0]), 1.0)
+
+
 def test_a_custom_observation_without_site_distribution_still_builds():
     import equinox as eqx
     import gaussx as gx
@@ -152,6 +170,22 @@ def test_cpo_and_pit_are_the_exact_leave_one_out_at_fixed_theta(gaussian_eb):
     d = res.diagnostics()
     assert np.allclose(d.cpo, norm.pdf(y, m, np.sqrt(v)), rtol=1e-9)
     assert np.allclose(d.pit, norm.cdf(y, m, np.sqrt(v)), atol=1e-7)
+
+
+@pytest.mark.slow
+def test_a_deterministic_predictor_gives_finite_diagnostics(gaussian_eb):
+    # v = 0 (e.g. a row of A that only hits fixed effects with zero
+    # covariates): the cavity reduces to evaluating p(y | m).
+    import equinox as eqx
+
+    model, data, res = gaussian_eb
+    v = res.predictor_variances.at[:, 0].set(0.0)
+    d = eqx.tree_at(lambda r: r.predictor_variances, res, v).diagnostics()
+    assert np.all(np.isfinite(d.cpo)) and np.all(np.isfinite(d.pit))
+    theta = model.unflatten(res.theta_points[0])
+    m, y = float(res.predictor_means[0, 0]), float(data["y"][0])
+    sd = 1.0 / np.sqrt(float(theta["lik.prec"]))
+    assert np.isclose(float(d.cpo[0]), norm.pdf(y, m, sd), rtol=1e-6)
 
 
 @pytest.mark.slow

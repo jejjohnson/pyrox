@@ -115,16 +115,20 @@ def diagnostics(result: INLAResult, *, order: int = 80) -> Diagnostics:
         site = lambda e: jnp.sum(lik.site_log_prob(y, e, theta, data))
         g = jax.grad(site)(m)
         W = -jax.grad(lambda e: jnp.sum(jax.grad(site)(e)))(m)
-        c = v / jnp.maximum(1.0 - W * v, 1e-12)
+        a = jnp.maximum(1.0 - W * v, 1e-12)
+        c = v / a
         cav_mean = m - g * c
         # Z_ik on the marginal's own nodes, as E[p * cavity / marginal]: the
         # ratio is constant for a Gaussian likelihood and smooth for a
         # log-concave one, where the wider cavity's nodes under-resolve p.
-        eta = nodes_of(m, v)
+        # Its log, expanded in the standard node z (eta = m + sqrt(v) z), has
+        # no division by v, so a deterministic predictor (v = 0) gives p(y|m).
+        zz = z[None, :]
         log_ratio = (
-            0.5 * z[None, :] ** 2
-            - 0.5 * (eta - cav_mean[:, None]) ** 2 / c[:, None]
-            - 0.5 * jnp.log(c / v)[:, None]
+            0.5 * zz**2 * (1.0 - a)[:, None]
+            - (jnp.sqrt(v) * g)[:, None] * zz
+            - (0.5 * g**2 * c)[:, None]
+            + 0.5 * jnp.log(a)[:, None]
         )
         log_z = logsumexp(log_g[None, :] + logp + log_ratio, axis=1)
         # F is bounded, so its cavity expectation takes the cavity's nodes.
