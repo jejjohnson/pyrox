@@ -131,7 +131,8 @@ CASES = [
     "pod_bernoulli",
 ]
 
-# Per case, measured against R-INLA 26.8.7 and bounded with a margin, all in
+# Per case, measured against R-INLA 26.8.7 and bounded with a margin (every
+# interval contains 1, so an exact match always passes), all in
 # R-INLA's own posterior sds:
 #   random_z: max |latent mean difference| / sd;  random_sd / fixed_sd: the
 #   range of sd ratios (ours / R-INLA's).
@@ -148,7 +149,7 @@ TOLERANCES = {
     },  # measured 0.012, [1.002, 1.007], 1.003
     "ar1_gaussian": {
         "random_z": 0.4,
-        "random_sd": (0.85, 1.0),
+        "random_sd": (0.85, 1.02),
         "fixed_sd": (0.98, 1.03),
     },  # measured 0.31, [0.872, 0.957], 1.001
     "scotland_bym2": {
@@ -158,8 +159,8 @@ TOLERANCES = {
     },  # measured 0.078, [0.908, 1.001], [0.985, 0.988]
     "spde_poisson": {
         "random_z": 0.15,
-        "random_sd": (0.92, 0.98),
-        "fixed_sd": (0.92, 0.98),
+        "random_sd": (0.92, 1.02),
+        "fixed_sd": (0.92, 1.02),
     },  # measured 0.076, [0.939, 0.961], 0.948
     "pod_bernoulli": {
         "random_z": 0.25,
@@ -171,9 +172,16 @@ TOLERANCES = {
 
 @pytest.mark.parametrize("name", CASES)
 def test_fixture_hyperparameters_are_all_mapped(name):
-    _, _, hyper, fx = _case(name)
+    model, _, hyper, fx = _case(name)
     assert set(hyper) == set(fx["vb"]["hyperpar"])
     assert len(fx["vb"]["theta_mode"]) == len(hyper)
+    # Every mapped key exists, and indexed ones (SPDE's pair) are in range.
+    shapes = {key: shape for key, _, shape in model._sizes()}
+    for key, idx in hyper.values():
+        assert key in shapes, key
+        assert (idx is None) == (shapes[key] == ()), key
+        if idx is not None:
+            assert 0 <= idx < shapes[key][0], key
 
 
 @pytest.fixture(scope="module")
