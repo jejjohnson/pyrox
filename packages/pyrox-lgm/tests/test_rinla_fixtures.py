@@ -182,6 +182,12 @@ def test_fixture_hyperparameters_are_all_mapped(name):
         assert (idx is None) == (shapes[key] == ()), key
         if idx is not None:
             assert 0 <= idx < shapes[key][0], key
+    # One R name per (key, index), and a vector key's indices cover it.
+    assert len(set(hyper.values())) == len(hyper)
+    for key, shape in shapes.items():
+        if shape:
+            idxs = sorted(i for k, i in hyper.values() if k == key)
+            assert idxs == list(range(shape[0])), key
 
 
 @pytest.fixture(scope="module")
