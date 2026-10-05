@@ -429,8 +429,8 @@ def test_a_mode_that_needs_the_retry_reruns_the_whole_fit(gaussian_fit, monkeypa
     real = inla_mod._fit_point
 
     def fails_below(budget):
-        def fit(model_, A, d, u, n_iter, subspace):
-            mean, var, ok, lp, *rest = real(model_, A, d, u, n_iter, subspace)
+        def fit(model_, A, d, u, n_iter, subspace, sla=False):
+            mean, var, ok, lp, *rest = real(model_, A, d, u, n_iter, subspace, sla)
             return mean, var, ok & (n_iter >= budget), lp, *rest
 
         return fit
