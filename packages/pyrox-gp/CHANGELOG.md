@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.8](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.7...pyrox-gp-v0.1.8) (2026-10-05)
+
+
+### Features
+
+* **gp:** add init_inducing for inducing-point selection (P3) ([#280](https://github.com/jejjohnson/pyrox/issues/280)) ([333e1a5](https://github.com/jejjohnson/pyrox/commit/333e1a5a2f161a55ffe861259920da7a5edf8da9)), closes [#249](https://github.com/jejjohnson/pyrox/issues/249)
+
+
+### Bug Fixes
+
+* **gp:** graph heat/Matérn spectra for LaplacianInducingFeatures (P2) ([#282](https://github.com/jejjohnson/pyrox/issues/282)) ([7cc2593](https://github.com/jejjohnson/pyrox/commit/7cc2593083cff61b2b5a0be627c316e8226d031d)), closes [#248](https://github.com/jejjohnson/pyrox/issues/248)
+
 ## [0.1.7](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.6...pyrox-gp-v0.1.7) (2026-09-26)
 
 
