@@ -1,6 +1,6 @@
 [project]
 name = "pyrox-lgm"
-version = "0.0.0"
+version = "0.1.0"
 description = "Latent Gaussian models on top of pyrox, gaussx and kernellib: GMRF components, PC priors and inla()."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
