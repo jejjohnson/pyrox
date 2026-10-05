@@ -182,6 +182,25 @@ def test_a_theta_dependent_intrinsic_structure_is_rejected():
     lgm.LGM((lgm.Generic(op, jnp.ones(3), name="g"),))  # theta-free: fine
 
 
+def test_covariates_can_be_traced_through_the_log_posterior():
+    # The MCMC-INLA hybrid: a covariate depending on a parameter phi outside
+    # the LGM; d/dphi log pi(y | theta, phi) must flow through the projector.
+    rng = np.random.default_rng(3)
+    x, y = rng.uniform(size=10), rng.normal(size=10)
+    model = lgm.LGM(
+        (lgm.IID(5, name="g"),), lgm.FixedEffects(("intercept", "z")), lgm.Gaussian()
+    )
+    u = jnp.zeros(model.n_theta)
+
+    def lp(phi):
+        data = {"y": y, "g": np.arange(10) % 5, "z": jnp.exp(-jnp.asarray(x) / phi)}
+        return model.log_posterior_theta(u, data)
+
+    h = 1e-5
+    fd = (lp(0.7 + h) - lp(0.7 - h)) / (2 * h)
+    assert np.isclose(float(jax.grad(lp)(0.7)), float(fd), rtol=1e-6)
+
+
 def test_theta_init_must_match_the_hyperparameters():
     model, data = _gaussian_rw2()
     with pytest.raises(ValueError, match=r"theta_init must have shape \(2,\)"):

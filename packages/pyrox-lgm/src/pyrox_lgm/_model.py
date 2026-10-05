@@ -52,20 +52,25 @@ class FixedEffects(eqx.Module):
     names: tuple[str, ...] = eqx.field(static=True)
     prior_precision: float = eqx.field(static=True, default=1e-3)
 
-    def design(self, data: Mapping[str, ArrayLike], n_obs: int) -> np.ndarray:
-        """The ``(n_obs, p)`` design matrix (host)."""
+    def design(self, data: Mapping[str, ArrayLike], n_obs: int) -> Array:
+        """The ``(n_obs, p)`` design matrix.
+
+        Covariates may be traced JAX values (a covariate that depends on a
+        parameter sampled outside the LGM, as in an MCMC-INLA hybrid): the
+        design is dense, so its pattern does not depend on them.
+        """
         cols = []
         for name in self.names:
             if name in data:
-                col = np.asarray(data[name], dtype=float)
+                col = jnp.asarray(data[name], dtype=float)
             elif name == "intercept":
-                col = np.ones(n_obs)
+                col = jnp.ones(n_obs)
             else:
                 raise KeyError(f"fixed effect {name!r} is not in data")
             if col.shape != (n_obs,):
                 raise ValueError(f"{name!r} has shape {col.shape}, expected ({n_obs},)")
             cols.append(col)
-        return np.stack(cols, axis=1)
+        return jnp.stack(cols, axis=1)
 
 
 class _Latent:
@@ -378,7 +383,9 @@ class LGM(eqx.Module):
             X = self.fixed.design(data, m)
             r, cidx = np.divmod(np.arange(X.size), X.shape[1])
             blocks.append(
-                gx.SparseOperator.from_coo(r, cidx, jnp.asarray(X.ravel()), X.shape)
+                gx.SparseOperator.from_coo(
+                    r, cidx, jnp.asarray(X.ravel()), (m, X.shape[1])
+                )
             )
         return hstack(blocks, m)
 
