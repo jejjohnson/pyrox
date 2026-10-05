@@ -297,6 +297,14 @@ $$
 **Literature**: Gardner et al. (2018) "GPyTorch: Blackbox Matrix-Matrix
 Gaussian Process Inference with GPU Acceleration".
 
+**In pyrox-gp today** this is `pyrox_gp.preconditioned_cg_solver`
+(roadmap P4): gaussx's CG with a randomized Nyström or randomly pivoted
+Cholesky preconditioner built from $K_y - \mu I$ with shift $\mu$ (so the
+noise is not counted twice, gaussx#345) and an SLQ log-determinant, with
+gradients through both. The pivoted-Cholesky-only description above is the
+original design; the model still assembles $K_y$ densely, so the
+matrix-free path for $n \approx 10^5$ is tracked separately.
+
 #### 5.1.4 WoodburySolver
 
 **Representation**: `LowRankPlusDiag`

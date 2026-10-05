@@ -170,6 +170,7 @@ from pyrox_gp._pathwise import (
     PathwiseFunction,
     PathwiseSampler,
 )
+from pyrox_gp._preconditioned import preconditioned_cg_solver
 from pyrox_gp._protocols import (
     Guide,
     Kernel,
@@ -285,6 +286,7 @@ __all__ = [
     "mo_svgp_elbo",
     "mo_svgp_factor",
     "normalizing_kalman_factor",
+    "preconditioned_cg_solver",
     "sparse_markov_elbo",
     "sparse_markov_factor",
     "svgp_elbo",

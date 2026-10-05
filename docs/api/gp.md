@@ -59,6 +59,7 @@ prior = GPPrior(
 ::: pyrox_gp.ConditionedGP
 ::: pyrox_gp.gp_factor
 ::: pyrox_gp.gp_sample
+::: pyrox_gp.preconditioned_cg_solver
 
 ## Concrete kernels
 
