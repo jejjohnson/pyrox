@@ -37,13 +37,17 @@ def _case(name):
     lik = {"Precision for the Gaussian observations": ("lik.prec", None)}
     if name == "rw2_gaussian":
         model = lgm.LGM(
-            (lgm.RW2(len(y), name="t"),), lgm.FixedEffects(("intercept",)), lgm.Gaussian()
+            (lgm.RW2(len(y), name="t"),),
+            lgm.FixedEffects(("intercept",)),
+            lgm.Gaussian(),
         )
         data = {"y": y, "t": np.asarray(d["t"])}
         hyper = lik | {"Precision for t": ("t.tau", None)}
     elif name == "ar1_gaussian":
         model = lgm.LGM(
-            (lgm.AR1(len(y), name="t"),), lgm.FixedEffects(("intercept",)), lgm.Gaussian()
+            (lgm.AR1(len(y), name="t"),),
+            lgm.FixedEffects(("intercept",)),
+            lgm.Gaussian(),
         )
         data = {"y": y, "t": np.asarray(d["t"])}
         hyper = lik | {"Precision for t": ("t.tau", None), "Rho for t": ("t.rho", None)}
@@ -73,7 +77,10 @@ def _case(name):
         )
         model = lgm.LGM((spde,), lgm.FixedEffects(("intercept",)), lgm.Poisson())
         data = {"y": y, "s": np.asarray(d["loc"])}
-        hyper = {"Range for s": ("s.range_sigma", 0), "Stdev for s": ("s.range_sigma", 1)}
+        hyper = {
+            "Range for s": ("s.range_sigma", 0),
+            "Stdev for s": ("s.range_sigma", 1),
+        }
     elif name == "pod_bernoulli":
         model = lgm.LGM(
             (lgm.RW2(int(d["n_bins"]), name="size"),),
@@ -89,3 +96,167 @@ def _case(name):
 
 def _fixed_key(r_name):
     return {"(Intercept)": "intercept"}.get(r_name, r_name)
+
+
+def _intrinsic_offset(name, model):
+    """Our log marginal likelihood minus R-INLA's, from the intrinsic priors.
+
+    An intrinsic prior's normalising constant is a convention. pyrox-lgm
+    keeps the exact one of the density on the constrained space,
+    ``0.5 log|S|* - 0.5 rank log(2 pi)`` for a structure ``S``; R-INLA
+    drops ``0.5 log|S|*`` for ``rw2`` and both terms for ``bym2``'s ICAR
+    part (measured at fixed hyperparameters, where the two agree to 0.02
+    once this is removed). Proper models (AR(1), SPDE) need no offset.
+    """
+    if name in ("ar1_gaussian", "spde_poisson"):
+        return 0.0
+    comp = model.components[0]
+    if isinstance(comp, lgm.RW2):
+        S = float(comp.scale) * np.asarray(comp.structure.as_matrix())
+    else:
+        S = np.asarray(comp.structure.as_matrix())
+    ev = np.linalg.eigvalsh(S)
+    ev = ev[ev > 1e-8 * ev.max()]
+    half_logpdet = 0.5 * np.sum(np.log(ev))
+    if name == "scotland_bym2":
+        return half_logpdet - 0.5 * ev.size * np.log(2 * np.pi)
+    return half_logpdet
+
+
+CASES = [
+    "rw2_gaussian",
+    "ar1_gaussian",
+    "scotland_bym2",
+    "spde_poisson",
+    "pod_bernoulli",
+]
+
+# Per case, measured against R-INLA 26.8.7 and bounded with a margin, all in
+# R-INLA's own posterior sds:
+#   random: max |mean difference| / sd, and the range of sd ratios;
+#   fixed: the range of sd ratios.
+# Where the two differ it is the integration over theta, not the per-theta
+# fits (those agree to 1e-6 at fixed hyperparameters):
+# - ar1: a flat hyperposterior (log lik.prec sd 1.8) under two different
+#   15-point CCDs, centred at modes 0.1 sd apart; a 1932-point grid of
+#   pyrox-lgm's is still 0.24 sd / sd ratio 0.90 from R-INLA's CCD;
+# - spde: pyrox-lgm's grid reaches the long-range tail, where intercept and
+#   field are confounded; refining it (dz 0.75 -> 0.35, drop 6 -> 10)
+#   converges *away* from R-INLA's sds (intercept 0.64 -> 0.66 vs 0.51), so
+#   R-INLA's default design is the one that truncates;
+# - pod: R-INLA's grid steps unevenly (skew-scaled) on a skewed 1-D
+#   hyperposterior (log tau sd 1.8).
+TOLERANCES = {
+    "rw2_gaussian": {
+        "random_z": 0.03,
+        "random_sd": (0.99, 1.03),
+        "fixed_sd": (0.99, 1.02),
+    },
+    "ar1_gaussian": {
+        "random_z": 0.4,
+        "random_sd": (0.8, 1.0),
+        "fixed_sd": (0.98, 1.03),
+    },
+    "scotland_bym2": {
+        "random_z": 0.15,
+        "random_sd": (0.9, 1.05),
+        "fixed_sd": (0.95, 1.02),
+    },
+    "spde_poisson": {
+        "random_z": 0.15,
+        "random_sd": (1.0, 1.3),
+        "fixed_sd": (1.0, 1.35),
+    },
+    "pod_bernoulli": {
+        "random_z": 0.25,
+        "random_sd": (0.88, 1.02),
+        "fixed_sd": (0.95, 1.02),
+    },
+}
+
+
+@pytest.mark.parametrize("name", CASES)
+def test_fixture_hyperparameters_are_all_mapped(name):
+    _, _, hyper, fx = _case(name)
+    assert set(hyper) == set(fx["vb"]["hyperpar"])
+    assert len(fx["vb"]["theta_mode"]) == len(hyper)
+
+
+@pytest.fixture(scope="module")
+def fits():
+    out = {}
+
+    def get(name):
+        if name not in out:
+            model, data, hyper, fx = _case(name)
+            out[name] = (model, hyper, fx, lgm.inla(model, data))
+        return out[name]
+
+    return get
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("name", CASES)
+def test_inla_matches_r_inla(fits, name):
+    model, hyper, fx, res = fits(name)
+    ref, tol = fx["vb"], TOLERANCES[name]
+
+    # Fixed effects: means within 0.1 sd (measured <= 0.055).
+    for r_name, s in ref["fixed"].items():
+        ours = res.fixed[_fixed_key(r_name)]
+        assert abs(float(ours.mean) - s["mean"]) < 0.1 * s["sd"], r_name
+        lo, hi = tol["fixed_sd"]
+        assert lo < float(ours.sd) / s["sd"] < hi, r_name
+
+    # The latent field, node by node.
+    ((_, s),) = ref["random"].items()
+    ours = res.random[model.components[0].name]
+    sd_r = np.asarray(s["sd"])
+    z = np.abs(np.asarray(ours.mean) - np.asarray(s["mean"])) / sd_r
+    assert np.max(z) < tol["random_z"]
+    ratio = np.asarray(ours.sd) / sd_r
+    lo, hi = tol["random_sd"]
+    assert lo < ratio.min() and ratio.max() < hi
+
+    # Hyperparameter medians within 0.25 posterior sd on R-INLA's internal
+    # scale, which is pyrox-lgm's unconstrained u (measured <= 0.17; the
+    # flat AR(1) noise precision and POD tau are 26 % and 15 % apart in
+    # relative terms, every other median within 1.1 %).
+    spec = model.theta_spec()
+    sd_internal = np.sqrt(np.diag(np.asarray(ref["theta_cov"])))
+    for r_name, (key, idx) in hyper.items():
+        inverse = spec[key][1].inv
+        ours_u = np.asarray(inverse(jnp.asarray(res.hyperpar[key].q50)))
+        if idx is None:
+            r_u = float(inverse(jnp.asarray(ref["hyperpar"][r_name]["q50"])))
+        else:
+            pair = jnp.asarray(
+                [ref["hyperpar"][n]["q50"] for n, (k, _) in hyper.items() if k == key]
+            )
+            r_u = float(np.asarray(inverse(pair))[idx])
+            ours_u = ours_u[idx]
+        k = _internal_index(ref["theta_mode"], r_name)
+        assert abs(float(ours_u) - r_u) < 0.25 * sd_internal[k], r_name
+
+    # Log marginal likelihood, after the intrinsic-normaliser convention:
+    # within 1.0 of R-INLA's integration estimate (measured <= 0.85; R-INLA's
+    # own "integration" and "Gaussian" estimates differ by up to 1.3 here).
+    ours_ml = float(res.log_marginal_likelihood) - _intrinsic_offset(name, model)
+    assert abs(ours_ml - ref["mlik_integration"]) < 1.0
+
+
+def _internal_index(theta_mode, r_name):
+    """Position of an R hyperparameter in R-INLA's internal theta."""
+    what, _, effect = r_name.partition(" for ")
+    key = {
+        "Precision": "precision",
+        "Rho": "rho",
+        "Phi": "phi",
+        "Range": "range",
+        "Stdev": "stdev",
+    }[what.split()[0]]
+    for k, internal in enumerate(theta_mode):
+        name = internal.lower()
+        if key in name and effect.lower() in name:
+            return k
+    raise KeyError(r_name)  # pragma: no cover

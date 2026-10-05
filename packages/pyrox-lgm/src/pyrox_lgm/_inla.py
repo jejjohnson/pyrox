@@ -495,9 +495,7 @@ def _inla_once(
         for name in model.fixed.names:
             a, _ = slices[name]
             fixed[name] = Summary(*(f[a] for f in summary))
-    hyperpar = _hyperpar_summaries(
-        model, u_star, cov_u, points, weights, theta_skew
-    )
+    hyperpar = _hyperpar_summaries(model, u_star, cov_u, points, weights, theta_skew)
 
     result = INLAResult(
         fixed=fixed,
