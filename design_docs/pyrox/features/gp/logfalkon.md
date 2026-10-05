@@ -23,8 +23,10 @@ $N \times N$ kernel matrix.
 
 ### The Nyström approximation
 
-Select $M$ centers $\{z_j\}_{j=1}^M$ (uniformly at random or via leverage-score
-sampling) from the training data. Form the rectangular kernel matrix
+Select $M$ centers $\{z_j\}_{j=1}^M$ from the training data with
+`kernellib.select_landmarks`: uniformly at random, by RPCholesky, greedily
+(pivoted Cholesky), or by ridge-leverage-score sampling. This is the same
+method set as `pyrox_gp.init_inducing`. Form the rectangular kernel matrix
 $K_{NM} \in \mathbb{R}^{N \times M}$ with $(K_{NM})_{ij} = k(x_i, z_j)$ and the
 small square $K_{MM} \in \mathbb{R}^{M \times M}$ with $(K_{MM})_{ij} = k(z_i, z_j)$.
 
@@ -56,7 +58,7 @@ for the matrix-vector product $K_{MN}\,K_{NM}\,v$.
 
 | Operation | Cost |
 |---|---|
-| Center selection | $O(N)$ or $O(NM)$ for leverage scores |
+| Center selection | $O(N)$ uniform; $O(NM^2)$ RPCholesky / greedy / leverage |
 | Kernel matrices $K_{NM}$, $K_{MM}$ | $O(NM + M^2)$ |
 | Preconditioner $T$ | $O(NM + M^3)$ |
 | Each CG iteration | $O(NM + M^2)$ |
@@ -350,7 +352,7 @@ class LogFalkonSolver(eqx.Module):
         M: int,
         penalty: float,
         *,
-        center_selection: str = "uniform",  # "uniform" or "leverage"
+        centers: Literal["uniform", "rpcholesky", "greedy", "leverage"] = "rpcholesky",
         n_newton: int = 10,
         cg_maxiter: int = 100,
         cg_tol: float = 1e-6,
@@ -365,7 +367,13 @@ class LogFalkonSolver(eqx.Module):
             kernel_fn: k(X1, X2) -> kernel matrix.
             M: Number of Nystrom centers.
             penalty: Regularization parameter lambda.
-            center_selection: "uniform" (random subset) or "leverage" (RLS).
+            centers: Center-selection method, delegated to
+                `kernellib.select_landmarks` with the kernel frozen at its
+                current hyperparameters (same semantics as
+                `pyrox_gp.init_inducing`). "uniform" is a random subset;
+                "rpcholesky" (default) samples by the residual diagonal;
+                "greedy" is deterministic pivoted Cholesky; "leverage"
+                samples by ridge leverage scores.
             key: JAX PRNG key for center selection.
 
         Complexity: O(NM + M^3) for setup.
