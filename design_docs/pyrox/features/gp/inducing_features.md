@@ -196,6 +196,13 @@ provide different $K_{uu}$ and $k_u(x)$:
 | SVGP prediction | Standard `pyrox.gp.guides.InducingPointGuide` | Unchanged — just swap $K_{uu}$, $k_u$ |
 | Diagonal $K_{uu}$ optimization | `gaussx.DiagonalLinearOperator` | $O(M)$ instead of $O(M^3)$ |
 
+**Inducing-point locations.** For plain point inducing variables,
+`pyrox_gp.init_inducing(X, M, kernel=..., method=...)` picks `Z ⊂ X`
+through `kernellib.select_landmarks` (`"uniform"`, `"rpcholesky"`,
+`"greedy"`, `"leverage"`). RPCholesky is the default: it samples
+proportional to the residual diagonal, which is the trace term in the
+Burt et al. (2020) bound on the ELBO gap.
+
 ---
 
 ## 5  References

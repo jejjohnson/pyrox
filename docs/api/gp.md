@@ -77,6 +77,22 @@ with `autoguide`, and flip `set_mode("model" | "guide")`.
 ::: pyrox_gp.White
 ::: pyrox_gp.Constant
 
+## Inducing-point initialisation
+
+Pick `Z` as a subset of the training inputs. `"rpcholesky"` (the default)
+targets the trace error that bounds the SVGP ELBO gap (Burt et al. 2020),
+so clusters of rare points still get inducing points.
+
+```python
+from pyrox_gp import RBF, SparseGPPrior, init_inducing
+
+kernel = RBF(init_lengthscale=0.3)
+Z      = init_inducing(X, 64, kernel=kernel, key=jax.random.key(0))
+prior  = SparseGPPrior(kernel=kernel, Z=Z)
+```
+
+::: pyrox_gp.init_inducing
+
 ## Sparse-GP inducing features (#49)
 
 Inter-domain inducing-feature families used to build scalable sparse GPs
