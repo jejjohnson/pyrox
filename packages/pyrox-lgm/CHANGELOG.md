@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/jejjohnson/pyrox/compare/pyrox-lgm-v0.1.0...pyrox-lgm-v0.1.1) (2026-10-05)
+
+
+### Features
+
+* **lgm:** simplified Laplace strategy (strategy="sla") ([#269](https://github.com/jejjohnson/pyrox/issues/269)) ([eec12af](https://github.com/jejjohnson/pyrox/commit/eec12af7909938f63fdeee116ce4ba7a8a18c869))
+
 ## 0.1.0 (2026-10-04)
 
 
