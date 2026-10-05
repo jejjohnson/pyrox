@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import Any, NamedTuple
 
@@ -27,14 +28,49 @@ class Summary(NamedTuple):
     q975: Array
 
 
+# A skew-normal's skewness is below (4 - pi) / 2 * (2 / (pi - 2))^1.5 ~ 0.9953.
+_MAX_SKEW = 0.99
+_GL_NODES, _GL_WEIGHTS = np.polynomial.legendre.leggauss(40)
+
+
+def skew_normal_params(mean, var, skew):
+    """``(xi, omega, alpha)`` of the skew-normal with these three moments.
+
+    The skewness is clipped to the family's range (|skew| < 0.9953).
+    """
+    s = jnp.clip(skew, -_MAX_SKEW, _MAX_SKEW)
+    r = (2.0 * jnp.abs(s) / (4.0 - math.pi)) ** (2.0 / 3.0)
+    delta = jnp.sign(s) * jnp.sqrt(0.5 * math.pi * r / (1.0 + r))
+    omega = jnp.sqrt(var / (1.0 - 2.0 * delta**2 / math.pi))
+    xi = mean - omega * delta * math.sqrt(2.0 / math.pi)
+    return xi, omega, delta / jnp.sqrt(1.0 - delta**2)
+
+
+def skew_normal_cdf(x, xi, omega, alpha):
+    """``Phi(z) - 2 T(z, alpha)`` with Owen's T by 40-node Gauss-Legendre."""
+    z = (x - xi) / omega
+    u = jnp.asarray(0.5 * (_GL_NODES + 1.0))
+    w = jnp.asarray(0.5 * _GL_WEIGHTS)
+    t2 = 1.0 + (alpha[..., None] * u) ** 2
+    owen = (
+        alpha
+        / (2.0 * math.pi)
+        * jnp.sum(w * jnp.exp(-0.5 * z[..., None] ** 2 * t2) / t2, axis=-1)
+    )
+    return ndtr(z) - 2.0 * owen
+
+
 def mixture_summary(
     means: Float[Array, "K n"],
     variances: Float[Array, "K n"],
     weights: Float[Array, " K"],
+    skewness: Float[Array, "K n"] | None = None,
 ) -> Summary:
-    """Summary of the Gaussian mixture $\\sum_k w_k\\,\\mathcal N(m_k, v_k)$ per column.
+    """Summary of the mixture $\\sum_k w_k\\,\\mathcal N(m_k, v_k)$ per column.
 
-    Quantiles by 80 bisection steps on the mixture CDF.
+    With ``skewness``, each component is the skew-normal with that mean,
+    variance and skewness (``strategy="sla"``); the mean and sd are the
+    same either way. Quantiles by 80 bisection steps on the mixture CDF.
     """
     w = weights[:, None]
     mean = jnp.sum(w * means, axis=0)
@@ -43,12 +79,22 @@ def mixture_summary(
     s = jnp.sqrt(variances)
     lo0 = jnp.min(means - 10.0 * s, axis=0)
     hi0 = jnp.max(means + 10.0 * s, axis=0)
+    if skewness is None:
+
+        def component_cdf(x):
+            return ndtr((x[None, :] - means) / s)
+
+    else:
+        xi, omega, alpha = skew_normal_params(means, variances, skewness)
+
+        def component_cdf(x):
+            return skew_normal_cdf(x[None, :], xi, omega, alpha)
 
     def quantile(p):
         def body(_, bounds):
             lo, hi = bounds
             mid = 0.5 * (lo + hi)
-            cdf = jnp.sum(w * ndtr((mid[None, :] - means) / s), axis=0)
+            cdf = jnp.sum(w * component_cdf(mid), axis=0)
             below = cdf < p
             return jnp.where(below, mid, lo), jnp.where(below, hi, mid)
 
@@ -74,6 +120,9 @@ class INLAResult(eqx.Module):
         latent_means: Per-point latent means ``(K, N)`` (VB-corrected under
             ``strategy="vb"``).
         latent_variances: Per-point marginal variances ``(K, N)``.
+        latent_skewness: Per-point marginal skewness ``(K, N)``: zero but
+            under ``strategy="sla"``, whose summaries are skew-normal
+            mixtures (`sample_latent` stays Gaussian, at the shifted means).
         predictor_means: Per-point means of the linear predictor
             $\\eta = Ax + o$ at the observations ``(K, n_obs)``.
         predictor_variances: Their variances ``(K, n_obs)``, from the
@@ -95,6 +144,7 @@ class INLAResult(eqx.Module):
     theta_weights: Float[Array, " K"]
     latent_means: Float[Array, "K N"]
     latent_variances: Float[Array, "K N"]
+    latent_skewness: Float[Array, "K N"]
     predictor_means: Float[Array, "K M"]
     predictor_variances: Float[Array, "K M"]
     linear_predictor: Summary

@@ -10,7 +10,8 @@ three steps:
    ``"grid"`` for $m \le 2$, ``"ccd"`` above, ``"eb"`` on request);
 3. per design point, the Gaussian approximation of $x\mid y, \theta_k$
    (mode, Takahashi marginal variances kriged onto the hard constraints,
-   the low-rank VB mean correction under ``strategy="vb"``), mixed over the
+   the low-rank VB mean correction under ``strategy="vb"``, the
+   simplified-Laplace skew-normal under ``strategy="sla"``), mixed over the
    design with the weights.
 """
 
@@ -90,7 +91,7 @@ def _hessian(model, A, data, max_newton, u):
 
 
 @eqx.filter_jit
-def _fit_point(model, A, data, u, n_iter, subspace):
+def _fit_point(model, A, data, u, n_iter, subspace, sla=False):
     theta = model.unflatten(u)
     prior = model.latent_prior(theta)
     lik = model.likelihood.build(
@@ -107,6 +108,9 @@ def _fit_point(model, A, data, u, n_iter, subspace):
         G = jnp.linalg.solve(S, HV.T).T  # Sigma_c = H^-1 - G HV^T
         var = var - jnp.sum(HV * G, axis=1)
     mean = fit.mode
+    skew = jnp.zeros_like(var)
+    if sla:
+        mean, skew = _simplified_laplace(fit, lik, A, offset, var, G, HV)
     if subspace:
         mean = gx.vb_mean_correction(
             fit,
@@ -125,7 +129,49 @@ def _fit_point(model, A, data, u, n_iter, subspace):
         fit.log_marginal + model.log_prior(u),
         eta_mean,
         eta_var,
+        skew,
     )
+
+
+def _simplified_laplace(fit, lik, A, offset, var, G, HV):
+    r"""Simplified-Laplace mean shift and skewness of every latent marginal.
+
+    The Laplace marginal $\pi(x_i) \propto \pi(x, y)/\pi_G(x_{-i}\mid x_i)$,
+    taken at the Gaussian conditional mean and expanded to third order in
+    the standardised $z = (x_i - \mu_i)/\sigma_i$ (Rue, Martino & Chopin,
+    2009, sec. 3.2.3), is
+    $-\tfrac12 z^2 + \gamma_1 z + \tfrac16\gamma_3 z^3$ with
+
+    $$
+    \gamma_1 = \tfrac12\sum_j d_j\,(s_j^2 b_{ij} - b_{ij}^3),\qquad
+    \gamma_3 = \sum_j d_j\, b_{ij}^3,
+    $$
+
+    $d_j$ the third derivative of $\log p(y_j\mid\eta_j)$ at the mode,
+    $b_{ij} = \operatorname{cov}(x_i, \eta_j)/\sigma_i$ and $s_j^2$ the
+    variance of $\eta_j$: the cubic term is the likelihood's own, the
+    linear one the change of $\log|H_{-i}|$ along the conditional mean.
+    To first order that density has mean $\mu_i + \sigma_i(\gamma_1 +
+    \gamma_3/2)$, variance $\sigma_i^2$ and skewness $\gamma_3$.
+
+    ``cov(x, eta) = Sigma A^T`` takes one solve per observation (kriged
+    onto the hard constraints), so the cost is ``n_obs`` solves.
+    """
+    eta_hat = A.mv(fit.mode) + (0.0 if offset is None else offset)
+    d1 = jax.grad(lik.log_prob)
+    d2 = jax.grad(lambda e: jnp.sum(d1(e)))
+    d3 = jax.grad(lambda e: jnp.sum(d2(e)))(eta_hat)  # sites are independent
+    At = A.as_matrix().T
+    C = jax.vmap(fit.factor.solve, in_axes=1, out_axes=1)(At)  # H^-1 A^T
+    if G is not None:  # Sigma_c A^T = H^-1 A^T - G (A H^-1 V)^T
+        C = C - G @ (At.T @ HV).T
+    sd = jnp.sqrt(jnp.maximum(var, 0.0))
+    B = C / jnp.where(sd > 0, sd, 1.0)[:, None]
+    eta_var = jnp.sum(At * C, axis=0)
+    gamma1 = 0.5 * ((B * eta_var[None, :] - B**3) @ d3)
+    gamma3 = (B**3) @ d3
+    shift = jnp.where(sd > 0, sd * (gamma1 + 0.5 * gamma3), 0.0)
+    return fit.mode + shift, jnp.where(sd > 0, gamma3, 0.0)
 
 
 def _predictor_variance(A, selected, G, HV):
@@ -208,7 +254,7 @@ def inla(
     model: LGM,
     data: Mapping[str, ArrayLike],
     *,
-    strategy: Literal["vb", "gaussian"] = "vb",
+    strategy: Literal["vb", "gaussian", "sla"] = "vb",
     integration: Literal["auto", "eb", "grid", "ccd"] = "auto",
     key: jax.Array | None = None,
     max_newton: int = 50,
@@ -227,7 +273,11 @@ def inla(
         strategy: ``"vb"`` (default, as R-INLA since 22.11) corrects the
             Gaussian approximation's mean by `gaussx.vb_mean_correction` on
             the fixed effects and the components with at most 30 nodes;
-            ``"gaussian"`` keeps the Laplace mode.
+            ``"gaussian"`` keeps the Laplace mode; ``"sla"`` (simplified
+            Laplace) shifts every latent marginal's mean and gives it the
+            skewness of the third-order Laplace expansion, as a skew-normal
+            (`_simplified_laplace`; it costs one solve per observation and
+            leaves a Gaussian likelihood's marginals unchanged).
         integration: The design over $\theta$: ``"auto"`` (``"grid"`` for
             $m \le 2$, ``"ccd"`` above), ``"eb"`` (the mode alone), ``"grid"``
             or ``"ccd"``.
@@ -306,7 +356,7 @@ def _inla_once(
     model: LGM,
     data: Mapping[str, ArrayLike],
     *,
-    strategy: Literal["vb", "gaussian"] = "vb",
+    strategy: Literal["vb", "gaussian", "sla"] = "vb",
     integration: Literal["auto", "eb", "grid", "ccd"] = "auto",
     key: jax.Array | None = None,
     max_newton: int = 50,
@@ -317,8 +367,10 @@ def _inla_once(
 ) -> tuple[INLAResult | None, bool]:
     """One fit at a fixed Newton budget; see `inla`."""
     del key
-    if strategy not in ("vb", "gaussian"):
-        raise ValueError(f"strategy must be 'vb' or 'gaussian', got {strategy!r}")
+    if strategy not in ("vb", "gaussian", "sla"):
+        raise ValueError(
+            f"strategy must be 'vb', 'gaussian' or 'sla', got {strategy!r}"
+        )
     A = model.projector(data)  # host work, once
     data = {k: jnp.asarray(v) for k, v in data.items()}
     m = model.n_theta
@@ -363,19 +415,21 @@ def _inla_once(
     # reweighted with its converged log-posterior, one that never converges
     # is dropped from the mixture and from the marginal likelihood.
     subspace = tuple(_vb_subspace(model).tolist()) if strategy == "vb" else ()
+    sla = strategy == "sla"
     means, variances, lps, iters, keep = [], [], [], [], []
-    eta_means, eta_vars = [], []
+    eta_means, eta_vars, skews = [], [], []
     for k in range(points.shape[0]):
         n_iter = max_newton
-        mean, var, ok, lp, eta_m, eta_v = _fit_point(
-            model, A, data, points[k], n_iter, subspace
+        mean, var, ok, lp, eta_m, eta_v, skew = _fit_point(
+            model, A, data, points[k], n_iter, subspace, sla
         )
         if not bool(ok):
             n_iter = 4 * max_newton
-            mean, var, ok, lp, eta_m, eta_v = _fit_point(
-                model, A, data, points[k], n_iter, subspace
+            mean, var, ok, lp, eta_m, eta_v, skew = _fit_point(
+                model, A, data, points[k], n_iter, subspace, sla
             )
         means.append(mean)
+        skews.append(skew)
         eta_means.append(eta_m)
         eta_vars.append(eta_v)
         variances.append(var)
@@ -400,6 +454,7 @@ def _inla_once(
     weights = jnp.exp(log_w - jax.scipy.special.logsumexp(log_w))
     means_arr = jnp.stack(means)[idx]
     vars_arr = jnp.maximum(jnp.stack(variances)[idx], 0.0)
+    skew_arr = jnp.stack(skews)[idx]
     eta_means_arr = jnp.stack(eta_means)[idx]
     eta_vars_arr = jnp.maximum(jnp.stack(eta_vars)[idx], 0.0)
     newton_iters = tuple(iters[k] for k in kept)
@@ -412,7 +467,7 @@ def _inla_once(
         log_ml = lp_star
 
     # 3. mixtures.
-    summary = mixture_summary(means_arr, vars_arr, weights)
+    summary = mixture_summary(means_arr, vars_arr, weights, skew_arr if sla else None)
     random, fixed = {}, {}
     slices = model.slices()
     for c in model.components:
@@ -433,6 +488,7 @@ def _inla_once(
         theta_weights=weights,
         latent_means=means_arr,
         latent_variances=vars_arr,
+        latent_skewness=skew_arr,
         predictor_means=eta_means_arr,
         predictor_variances=eta_vars_arr,
         linear_predictor=mixture_summary(eta_means_arr, eta_vars_arr, weights),
