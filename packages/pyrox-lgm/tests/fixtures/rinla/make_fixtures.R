@@ -58,7 +58,11 @@ summarise <- function(res) {
       )
     ),
     mlik_integration = res$mlik[1, 1],
-    mlik_gaussian = res$mlik[2, 1]
+    mlik_gaussian = res$mlik[2, 1],
+    # internal scale: log precisions, logit(phi), log((1+rho)/(1-rho)),
+    # log range, log sd; pyrox-lgm's unconstrained u uses the same maps.
+    theta_mode = as.list(setNames(res$mode$theta, names(res$mode$theta))),
+    theta_cov = res$misc$cov.intern
   )
 }
 
