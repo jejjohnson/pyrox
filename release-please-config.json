@@ -24,7 +24,12 @@
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "extra-files": [
-        "src/pyrox/__init__.py"
+        "src/pyrox/__init__.py",
+        {
+          "type": "toml",
+          "path": "/uv.lock",
+          "jsonpath": "$.package[?(@.name.value=='pyrox')].version"
+        }
       ]
     },
     "packages/pyrox-gp": {
@@ -35,7 +40,12 @@
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "extra-files": [
-        "src/pyrox_gp/__init__.py"
+        "src/pyrox_gp/__init__.py",
+        {
+          "type": "toml",
+          "path": "/uv.lock",
+          "jsonpath": "$.package[?(@.name.value=='pyrox-gp')].version"
+        }
       ]
     },
     "packages/pyrox-nn": {
@@ -46,7 +56,12 @@
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "extra-files": [
-        "src/pyrox_nn/__init__.py"
+        "src/pyrox_nn/__init__.py",
+        {
+          "type": "toml",
+          "path": "/uv.lock",
+          "jsonpath": "$.package[?(@.name.value=='pyrox-nn')].version"
+        }
       ]
     },
     "packages/pyrox-lgm": {
@@ -57,7 +72,12 @@
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "extra-files": [
-        "src/pyrox_lgm/__init__.py"
+        "src/pyrox_lgm/__init__.py",
+        {
+          "type": "toml",
+          "path": "/uv.lock",
+          "jsonpath": "$.package[?(@.name.value=='pyrox-lgm')].version"
+        }
       ]
     }
   }
