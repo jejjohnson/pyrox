@@ -120,36 +120,35 @@ class FourierFeatures(eqx.Module):
 
 ---
 
-### Gap 3: Laplacian Eigenfunctions
+### Gap 3: Laplacian Eigenfunctions — implemented (graphs)
+
+**Status:** implemented for graphs as `pyrox_gp.LaplacianInducingFeatures`.
+Eigenpairs come from `kernellib.laplacian_eigpairs`, which uses dense,
+Kronecker (grid graphs), Lanczos or ARPACK solvers. The spectra are
+`kernellib.functional.graph_heat_spectrum` (RBF) and `graph_matern_spectrum`
+(Matern).
 
 **Domain:** Compact Riemannian manifold or graph (mesh, point cloud, molecule).
 
-**Math:** Inducing variables use eigenfunctions of the Laplace-Beltrami operator $\Delta$:
+**Math:** Inducing variables use eigenpairs of the graph Laplacian:
 
-$$\Delta \phi_k = \lambda_k \phi_k, \qquad u_k = \langle f, \phi_k \rangle_{\mathcal{H}_k}$$
+$$L \phi_k = \lambda_k \phi_k, \qquad u_k = \phi_k^\top f$$
 
-For a Matern kernel, the spectral density is:
+For a graph Matérn kernel (Borovitskiy et al., 2021), the spectrum is
 
-$$S(\lambda_k) = \frac{\sigma^2 \, 2^d \pi^{d/2} \Gamma(\nu + d/2)}{\Gamma(\nu)} \left(\frac{2\nu}{\ell^2} + |\lambda_k|\right)^{-(\nu + d/2)}$$
+$$\Phi(\lambda_k) \propto \sigma^2 \left(\frac{2\nu}{\ell^2} + \lambda_k\right)^{-\nu}$$
 
-$K_{uu}$ is diagonal when the eigenfunctions are orthonormal.
+with exponent $-\nu$. No dimension enters the exponent, unlike the
+Euclidean density $-(\nu + d/2)$. The heat kernel uses
+$\Phi(\lambda) \propto \sigma^2 e^{-\ell^2 \lambda / 2}$. Both are scaled so
+that $\sum_k \Phi_k = V \sigma^2$, which makes the average marginal variance
+$\sigma^2$. $K_{uu} = \operatorname{diag}\Phi$ and
+$k_u(v) = \Phi \odot \phi(v)$.
 
-**Complexity:** $O(ND)$ for $k_u$. Precomputation: $O(V^3)$ or $O(V D)$ (Lanczos) for the eigendecomposition of the $V \times V$ graph Laplacian.
+**Complexity:** $O(NM)$ for $k_u$. Precomputation is $O(V^3)$ for dense
+eigenpairs, or Lanczos / ARPACK / Kronecker for large graphs.
 
-```python
-class LaplacianFeatures(eqx.Module):
-    """Laplacian eigenfunction inducing features on a manifold or graph."""
-    eigvecs: Float[Array, "V D"]             # precomputed eigenvectors
-    eigvals: Float[Array, " D"]              # precomputed eigenvalues
-
-    def K_uu(self, kernel: Kernel) -> Float[Array, "D D"]: ...   # diagonal
-    def k_u(self, X: Int[Array, " N"], kernel: Kernel) -> Float[Array, "N D"]: ...
-    def is_diagonal(self) -> bool: ...       # True
-```
-
-**Basis evaluation from:** `pyrox.gp._src.basis.laplacian_eigenfunctions`
-
-**Ref:** Borovitskiy et al. (2020) *Matern Gaussian Processes on Riemannian Manifolds.* NeurIPS.
+**Ref:** Borovitskiy et al. (2021) *Matérn Gaussian Processes on Graphs.* AISTATS.
 
 ---
 
