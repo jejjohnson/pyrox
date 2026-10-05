@@ -37,19 +37,20 @@ guards this end-to-end.
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+import warnings
+from typing import Literal, Protocol, runtime_checkable
 
 import einx
 import equinox as eqx
 import jax.numpy as jnp
+import kernellib as kl
 import lineax as lx
-from jaxtyping import Array, Float, Int
+from jaxtyping import Array, Float, Int, PRNGKeyArray
 
 from pyrox_gp._basis import (
     SlepianCapBasis,
     fourier_basis,
     fourier_eigenvalues,
-    graph_laplacian_eigpairs,
     harmonic_degrees,
     real_spherical_harmonics,
     slepian_cap_basis,
@@ -494,29 +495,73 @@ class SlepianInducingFeatures(eqx.Module):
 # ---------------------------------------------------------------------------
 
 
+def _graph_spectrum(
+    kernel: Kernel, eigvals: Float[Array, " M"], n_nodes: int
+) -> Float[Array, " M"]:
+    """Graph spectrum of ``kernel`` at Laplacian eigenvalues ``eigvals``.
+
+    `RBF` maps to the heat spectrum, `Matern` to the graph Matérn spectrum
+    of Borovitskiy et al. (2021), both scaled so that the average marginal
+    variance over ``n_nodes`` is the kernel's variance.
+    """
+    if not isinstance(kernel, (RBF, Matern)):
+        raise NotImplementedError(
+            "LaplacianInducingFeatures supports RBF (graph heat) and Matern "
+            f"(graph Matérn) kernels; got {type(kernel).__name__}."
+        )
+    with _kernel_context(kernel):
+        frozen = kernel.frozen()
+    if isinstance(kernel, Matern):
+        return kl.functional.graph_matern_spectrum(
+            eigvals,
+            nu=frozen.nu,
+            lengthscale=frozen.lengthscale,
+            variance=frozen.variance,
+            n_nodes=n_nodes,
+        )
+    return kl.functional.graph_heat_spectrum(
+        eigvals,
+        lengthscale=frozen.lengthscale,
+        variance=frozen.variance,
+        n_nodes=n_nodes,
+    )
+
+
 class LaplacianInducingFeatures(eqx.Module):
     r"""Inducing features from low-frequency graph Laplacian eigenvectors.
 
-    For a graph with normalized Laplacian $L$, take the smallest
-    ``num_basis`` eigenpairs $(\mu_j, v_j)$. Treating the kernel as
-    a function of the graph distance — specifically, applying the kernel
-    *spectrum* $g(\mu)$ to the Laplacian eigenvalues — gives a
-    diagonal $K_{uu}$.
+    For a graph Laplacian with smallest eigenpairs $(\lambda_k, \phi_k)$,
+    the inducing variables $u_k = \phi_k^\top f$ of a graph GP
+    $f \sim \mathcal{GP}(0, U \Phi(\Lambda) U^\top)$ satisfy
 
-    This implementation supports the *heat-kernel* family
-    $g(\mu) = \exp(-\mu / (2 \ell^2))$ (matching `pyrox_gp.RBF`
-    in spectrum) by reusing `pyrox_gp._basis.spectral_density` with the
-    eigenvalues as input.
+    $$
+    \operatorname{Cov}(u_k, u_l) = \Phi(\lambda_k)\,\delta_{kl}, \qquad
+    \operatorname{Cov}(u_k, f(v)) = \Phi(\lambda_k)\,\phi_k(v),
+    $$
+
+    so $K_{uu}$ is diagonal. $\Phi$ is the graph heat spectrum for
+    `pyrox_gp.RBF` and the graph Matérn spectrum of Borovitskiy et al.
+    (2021) for `pyrox_gp.Matern`, normalised so the average marginal
+    variance over the nodes is the kernel's variance. Eigenpairs come from
+    `kernellib.laplacian_eigpairs`, which scales past the dense
+    eigendecomposition (Kronecker on grid graphs, Lanczos, ARPACK).
 
     Attributes:
         eigvals: ``(M,)`` Laplacian eigenvalues.
         eigvecs: ``(V, M)`` Laplacian eigenvectors.
-        num_quadrature: Unused (kept for protocol uniformity).
 
     Note:
         ``X`` is a vector of *node indices* (integer-valued), not
         coordinates. The returned cross-covariance gathers the relevant
         rows of ``eigvecs``.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> import kernellib as kl
+        >>> from pyrox_gp import LaplacianInducingFeatures, Matern
+        >>> features = LaplacianInducingFeatures.fit(kl.grid_graph((10, 10)), 20)
+        >>> features.K_uu(Matern(nu=1.5)).diagonal.shape
+        (20,)
     """
 
     eigvals: Float[Array, " M"]
@@ -525,13 +570,39 @@ class LaplacianInducingFeatures(eqx.Module):
     @classmethod
     def fit(
         cls,
-        adjacency: Float[Array, "V V"],
+        graph: kl.AbstractGraph | Float[Array, "V V"],
         num_basis: int,
         *,
-        normalized: bool = True,
+        normalization: Literal["unnormalized", "symmetric"] = "symmetric",
+        method: Literal["dense", "kronecker", "lanczos", "arpack"] | None = None,
+        key: PRNGKeyArray | None = None,
+        normalized: bool | None = None,
     ) -> LaplacianInducingFeatures:
-        eigvals, eigvecs = graph_laplacian_eigpairs(
-            adjacency, num_basis, normalized=normalized
+        """Take the ``num_basis`` smallest Laplacian eigenpairs of ``graph``.
+
+        Args:
+            graph: A kernellib graph or a dense symmetric adjacency matrix.
+            num_basis: Number of eigenpairs ``M``.
+            normalization: Laplacian normalisation.
+            method: Eigensolver, passed to `kernellib.laplacian_eigpairs`
+                (``None`` picks one from the graph).
+            key: PRNG key for the randomised solvers.
+            normalized: Deprecated alias: ``True`` is ``"symmetric"``,
+                ``False`` is ``"unnormalized"``. Removed in 0.3.
+
+        Returns:
+            The fitted features.
+        """
+        if normalized is not None:
+            warnings.warn(
+                "normalized= is deprecated; use normalization="
+                '"symmetric" or "unnormalized". It is removed in 0.3.',
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            normalization = "symmetric" if normalized else "unnormalized"
+        eigvals, eigvecs = kl.laplacian_eigpairs(
+            graph, num_basis, normalization=normalization, method=method, key=key
         )
         return cls(eigvals=eigvals, eigvecs=eigvecs)
 
@@ -539,32 +610,26 @@ class LaplacianInducingFeatures(eqx.Module):
     def num_features(self) -> int:
         return int(self.eigvals.shape[0])
 
-    def _check_stationary(self, kernel: Kernel) -> None:
-        if not _is_stationary(kernel):
-            raise ValueError(
-                "LaplacianInducingFeatures requires a stationary kernel with a "
-                f"registered spectral density; got {type(kernel).__name__}."
-            )
+    @property
+    def n_nodes(self) -> int:
+        """Number of graph nodes ``V``, used for the variance normalisation."""
+        return int(self.eigvecs.shape[0])
 
     def K_uu(
         self, kernel: Kernel, *, jitter: float = 1e-6
     ) -> lx.DiagonalLinearOperator:
-        self._check_stationary(kernel)
-        with _kernel_context(kernel):
-            S = spectral_density(kernel, self.eigvals, D=1)
+        S = _graph_spectrum(kernel, self.eigvals, self.n_nodes)
         return _diagonal_with_jitter(S, jitter)
 
     def k_ux(
         self, node_indices: Int[Array, " N"], kernel: Kernel
     ) -> Float[Array, "N M"]:
-        self._check_stationary(kernel)
         if node_indices.ndim != 1:
             raise ValueError(
                 "node_indices must be a 1D integer array; got shape "
                 f"{node_indices.shape}."
             )
-        with _kernel_context(kernel):
-            S = spectral_density(kernel, self.eigvals, D=1)
+        S = _graph_spectrum(kernel, self.eigvals, self.n_nodes)
         rows = self.eigvecs[node_indices]
         return rows * S[None, :]
 

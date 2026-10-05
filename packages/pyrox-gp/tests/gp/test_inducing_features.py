@@ -278,9 +278,7 @@ def test_laplacian_inducing_k_ux_gathers_eigenvectors():
     K_ux = features.k_ux(nodes, kernel)
     assert K_ux.shape == (3, 4)
     # Sanity: row 0 corresponds to node 0's eigenvector entries scaled by S.
-    from pyrox_gp._basis import spectral_density
-
-    S = spectral_density(kernel, features.eigvals, D=1)
+    S = features.K_uu(kernel, jitter=0.0).diagonal
     expected_row0 = features.eigvecs[0] * S
     np.testing.assert_allclose(
         np.asarray(K_ux[0]), np.asarray(expected_row0), rtol=1e-5
@@ -293,7 +291,7 @@ def test_laplacian_inducing_rejects_non_stationary_kernel():
     A = 0.5 * (A + A.T)
     np.fill_diagonal(A, 0.0)
     features = LaplacianInducingFeatures.fit(jnp.asarray(A), num_basis=2)
-    with pytest.raises(ValueError, match="stationary"):
+    with pytest.raises(NotImplementedError, match="RBF"):
         features.K_uu(Periodic(init_lengthscale=1.0, init_period=1.0))
 
 
