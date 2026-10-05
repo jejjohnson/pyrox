@@ -2089,7 +2089,7 @@ provides-extras = ["optax", "colab", "flows"]
 
 [[package]]
 name = "pyrox-lgm"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/pyrox-lgm" }
 dependencies = [
     { name = "gaussx" },

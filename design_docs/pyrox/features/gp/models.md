@@ -375,7 +375,7 @@ def model(Y):
     Q = 2  # latent dimensionality
 
     # --- latent inputs (point estimate) ---
-    X_latent = numpyro.param("X_latent", pca_init(Y, Q))
+    X_latent = numpyro.param("X_latent", latent_init(Y, Q))
 
     variance = numpyro.param("variance", 1.0, constraint=positive)
     lengthscale = numpyro.param("lengthscale", jnp.ones(Q), constraint=positive)
@@ -427,7 +427,7 @@ def model(Y):
     Q = 2
 
     # --- latent inputs (variational) ---
-    X_mu = numpyro.param("X_mu", pca_init(Y, Q))
+    X_mu = numpyro.param("X_mu", latent_init(Y, Q))
     X_logstd = numpyro.param("X_logstd", -2.0 * jnp.ones((N, Q)))
     X_latent = numpyro.sample(
         "X", dist.Normal(X_mu, jnp.exp(X_logstd)).to_event(1)

@@ -218,6 +218,7 @@ kernels above, which hold the mixing matrix as a concrete array.
 ::: pyrox_gp.lfr_model
 ::: pyrox_gp.lfr_factor
 ::: pyrox_gp.latent_total_correlation
+::: pyrox_gp.latent_init
 ::: pyrox_gp.collapsed_lfr_log_prob
 ::: pyrox_gp.decoder_posterior
 ::: pyrox_gp.lfr_predictive_moments
