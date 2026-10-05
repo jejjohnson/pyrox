@@ -2045,7 +2045,7 @@ provides-extras = ["optax", "colab"]
 
 [[package]]
 name = "pyrox-gp"
-version = "0.1.7"
+version = "0.1.8"
 source = { editable = "packages/pyrox-gp" }
 dependencies = [
     { name = "einx" },
