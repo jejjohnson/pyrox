@@ -41,14 +41,6 @@ _VB_MAX_NODES = 30
 # Gauss-Hermite nodes per dimension for the empirical-Bayes moments.
 _EB_ORDER = 20
 
-# R-INLA's integration-grid defaults (control.inla dz and diff.logdens).
-_GRID_STEP = 0.75
-_GRID_THRESHOLD = 6.0
-
-# Draws of the skewness-corrected hyperparameter posterior (fixed key, so
-# the summaries are deterministic).
-_HYPER_DRAWS = 100_000
-
 
 def _vb_subspace(model: LGM) -> np.ndarray:
     idx = []
@@ -405,25 +397,15 @@ def _inla_once(
             return None, False  # inla() escalates the budget or raises
         hessian = _hessian(model, A, data, max_newton, u_star)
         method = None if integration == "auto" else integration
-        # R-INLA's grid: steps of dz = 0.75 out to a log-density drop of 6.
         points, log_w = gx.theta_design(
-            log_post,
-            u_star,
-            method=method,
-            hessian=hessian,
-            grid_step=_GRID_STEP,
-            grid_threshold=_GRID_THRESHOLD,
+            log_post, u_star, method=method, hessian=hessian
         )
         neg_h = -hessian
         cov_u = jnp.linalg.inv(neg_h)
-        theta_skew = (
-            None if points.shape[0] == 1 else _skew_scales(log_post, u_star, neg_h)
-        )
     else:
         u_star = u0
         points, log_w = u0[None, :], jnp.zeros(1)
         neg_h = cov_u = jnp.zeros((0, 0))
-        theta_skew = None
     # The design's log-weights are log(Delta_k) + lp_k up to a constant, with
     # lp_k from the max_newton fit; keep log(Delta_k) to reweight below.
     lp_design = jnp.stack([log_post(u) for u in points])
@@ -495,7 +477,7 @@ def _inla_once(
         for name in model.fixed.names:
             a, _ = slices[name]
             fixed[name] = Summary(*(f[a] for f in summary))
-    hyperpar = _hyperpar_summaries(model, u_star, cov_u, points, weights, theta_skew)
+    hyperpar = _hyperpar_summaries(model, u_star, cov_u, points, weights)
 
     result = INLAResult(
         fixed=fixed,
@@ -543,49 +525,15 @@ def _log_marginal_likelihood(lp_star, u_star, neg_h, points, lp, log_w):
     return log_gauss - jax.scipy.special.logsumexp(log_wn - (lp - lp_gauss))
 
 
-def _skew_scales(log_post, u_star, neg_h):
-    r"""R-INLA's skewness corrections along the Hessian's eigenvectors.
-
-    With $-\nabla^2 = V\Lambda V^\top$ and $u(z) = u^\ast + V\Lambda^{-1/2}z$,
-    the posterior is evaluated at $z = \pm\sqrt2\,e_k$; a Gaussian drops by
-    exactly one log-unit there, so the half-scales
-    $s_k^\pm = 1/\sqrt{-\Delta\log\tilde\pi}$ measure how much heavier
-    (or lighter) each side is (Martins et al., 2013, sec. 3.2).
-    """
-    lam, V = jnp.linalg.eigh(neg_h)
-    B = V / jnp.sqrt(lam)[None, :]  # u = u* + B z
-    lp0 = log_post(u_star)
-    scales = []
-    for k in range(u_star.shape[0]):
-        for sign in (1.0, -1.0):
-            drop = lp0 - log_post(u_star + sign * math.sqrt(2.0) * B[:, k])
-            scales.append(1.0 / jnp.sqrt(jnp.clip(drop, 1e-2, 1e2)))
-    s = jnp.reshape(jnp.stack(scales), (-1, 2))
-    return B, s[:, 0], s[:, 1]
-
-
-def _hyperpar_summaries(
-    model, u_star, cov_u, points, weights, skew=None
-) -> dict[str, Summary]:
+def _hyperpar_summaries(model, u_star, cov_u, points, weights) -> dict[str, Summary]:
     """Hyperparameter summaries on the user scale.
 
-    With the skewness corrections of `_skew_scales` (any design beyond the
-    mode), the hyperparameter posterior is R-INLA's split-normal in the
-    standardised coordinates, independent per eigen-direction with scales
-    $s_k^\\pm$; mean, sd and quantiles are those of its push-forward through
-    the bijections, by a fixed-key Monte Carlo. Under ``"eb"`` they are
-    those of the Gaussian approximation
-    $u \\sim \\mathcal N(u^\\ast, (-\\nabla^2)^{-1})$.
+    Means and sds are design-weighted averages of $T(u_k)$; quantiles map the
+    Gaussian approximation $u \\sim \\mathcal N(u^\\ast, (-\\nabla^2)^{-1})$
+    through each (monotone) bijection, which keeps them exact for that
+    approximation.
     """
     spec = model.theta_spec()
-    if skew is not None:
-        B, s_pos, s_neg = skew
-        k_side, k_mag = jax.random.split(jax.random.key(0))
-        shape = (_HYPER_DRAWS, u_star.shape[0])
-        positive = jax.random.uniform(k_side, shape) < s_pos / (s_pos + s_neg)
-        mag = jnp.abs(jax.random.normal(k_mag, shape))
-        z = jnp.where(positive, s_pos * mag, -s_neg * mag)
-        draws = u_star + z @ B.T
     out, i = {}, 0
     z = jnp.asarray([-1.959963984540054, 0.0, 1.959963984540054])
     for key, size, shape in model._sizes():
@@ -594,17 +542,9 @@ def _hyperpar_summaries(
         def to_user(block, shape=shape, transform=transform):
             return transform(block.reshape(shape) if shape else block[0])
 
-        if skew is not None:
-            values = jax.vmap(to_user)(draws[:, i : i + size])
-            q = jnp.quantile(values, jnp.asarray([0.025, 0.5, 0.975]), axis=0)
-            out[key] = Summary(
-                jnp.mean(values, axis=0), jnp.std(values, axis=0), q[0], q[1], q[2]
-            )
-            i += size
-            continue
         sd_u = jnp.sqrt(jnp.diagonal(cov_u)[i : i + size])
         qs = [to_user(u_star[i : i + size] + zq * sd_u) for zq in z]
-        if points.shape[0] > 1:  # a design without skewness corrections
+        if points.shape[0] > 1:
             values = jax.vmap(lambda u, i=i, size=size: to_user(u[i : i + size]))(
                 points
             )
