@@ -76,6 +76,7 @@ from pyrox_gp._inducing import (
     SphericalHarmonicInducingFeatures,
     funk_hecke_coefficients,
 )
+from pyrox_gp._inducing_init import init_inducing
 from pyrox_gp._inference import (
     ConjugateVI,
     svgp_elbo,
@@ -275,6 +276,7 @@ __all__ = [
     "funk_hecke_coefficients",
     "gp_factor",
     "gp_sample",
+    "init_inducing",
     "latent_init",
     "latent_total_correlation",
     "lfr_factor",
