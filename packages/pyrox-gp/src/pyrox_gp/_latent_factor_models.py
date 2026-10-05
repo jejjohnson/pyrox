@@ -12,22 +12,27 @@ from functools import partial
 import jax, optax
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoDelta
-from numpyro.infer.initialization import init_to_median, init_to_sample
-from pyrox_gp import RBF, LatentFactorGPPrior, lfr_model
+from numpyro.infer.initialization import init_to_median, init_to_value
+from pyrox_gp import RBF, LatentFactorGPPrior, latent_init, lfr_model
 
 Q = 6
 kernels = tuple(RBF(pyrox_name=f"RBF_q{q}") for q in range(Q))
 prior = LatentFactorGPPrior(kernels=kernels, X=X)
 
-# Sample Z from its GP prior to break the rotational symmetry; a median
-# (zero) init starts exactly on a saddle. Hyperparameters init
-# deterministically.
+# Start Z at the principal components of Y (`latent_init`; Z_T is stored
+# transposed, (Q, N)): a median (zero) init starts exactly on a saddle, and
+# a data-driven start converges more reproducibly than `init_to_sample`.
+# Hyperparameters init deterministically.
 # NumPyro treats a bare callable as a strategy *factory*, so a custom
 # init function must be wrapped in functools.partial.
-def init_latents_by_sampling(site):
-    return init_to_sample(site) if site["name"] == "Z_T" else init_to_median(site)
+Z0 = latent_init(Y, Q)
 
-guide = AutoDelta(lfr_model, init_loc_fn=partial(init_latents_by_sampling))
+def init_latents(site):
+    if site["name"] == "Z_T":
+        return init_to_value(site, values={"Z_T": Z0.T})
+    return init_to_median(site)
+
+guide = AutoDelta(lfr_model, init_loc_fn=partial(init_latents))
 
 # Z is N x Q free parameters on a well-conditioned objective; kernel
 # hyperparameters live on a log scale. Give the latents a 10x larger step.

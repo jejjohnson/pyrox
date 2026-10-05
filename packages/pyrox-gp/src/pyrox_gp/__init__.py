@@ -122,6 +122,7 @@ from pyrox_gp._latent_factor_models import (
     lfr_factor,
     lfr_model,
 )
+from pyrox_gp._latent_init import latent_init
 from pyrox_gp._likelihoods import (
     BernoulliLikelihood,
     DistLikelihood,
@@ -273,6 +274,7 @@ __all__ = [
     "funk_hecke_coefficients",
     "gp_factor",
     "gp_sample",
+    "latent_init",
     "latent_total_correlation",
     "lfr_factor",
     "lfr_model",

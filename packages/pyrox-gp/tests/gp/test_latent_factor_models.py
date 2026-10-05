@@ -242,6 +242,7 @@ def test_public_names_exported():
         "lfr_factor",
         "lfr_model",
         "latent_total_correlation",
+        "latent_init",
     ):
         assert name in pyrox_gp.__all__
         assert hasattr(pyrox_gp, name)
