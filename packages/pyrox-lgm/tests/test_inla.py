@@ -504,7 +504,7 @@ def test_empirical_bayes_moments_are_those_of_the_gaussian_approximation():
     model, _ = _gaussian_rw2()
     mu = jnp.array([0.3, -0.2])
     cov = jnp.array([[0.5, 0.1], [0.1, 0.2]])
-    out = _hyperpar_summaries(model, mu, cov, mu[None, :], jnp.ones(1))
+    out = _hyperpar_summaries(model, mu, cov)
     for k, key in enumerate(model.theta_spec()):
         m, v = float(mu[k]), float(cov[k, k])
         assert np.isclose(float(out[key].mean), np.exp(m + v / 2), rtol=1e-8)
@@ -589,3 +589,139 @@ def test_poisson_bym2_agrees_with_nuts():
         # errors of the NUTS mean, from the chain's effective sample size.
         assert abs(float(s.mean) - draws.mean()) < 0.15 * draws.std() + 4 * mcse
         assert abs(float(s.sd) / draws.std() - 1.0) < 0.2, name
+
+
+# ---------------------------------------------------------------------------
+# R-INLA's integration over theta (jejjohnson/pyrox#274)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(("m", "k"), [(1, 11), (2, 45), (3, 15), (4, 25), (5, 27)])
+def test_rinla_design_sizes_and_centre(m, k):
+    from pyrox_lgm._inla import _rinla_design
+
+    x, log_w = _rinla_design(m)
+    assert x.shape == (k, m) and log_w.shape == (k,)
+    assert np.all(x[0] == 0.0)  # the mode first
+    if m > 4:  # a resolution-V fraction need not be closed under z -> -z
+        return
+    # Symmetric under z -> -z, with equal weights.
+    for i in range(k):
+        j = np.flatnonzero(np.all(np.isclose(x, -x[i]), axis=1))
+        assert j.size == 1 and np.isclose(log_w[i], log_w[j[0]])
+
+
+@pytest.mark.parametrize("m", [3, 4, 5, 6])
+def test_rinla_ccd_integrates_a_gaussian_to_second_order(m):
+    # The CCD weights (Rue, Martino & Chopin, 2009, sec. 6.5) make the design
+    # exact for the mean and covariance of a standard Gaussian posterior.
+    from pyrox_lgm._inla import _rinla_design
+
+    x, log_w = _rinla_design(m)
+    lw = log_w - 0.5 * np.sum(x**2, axis=1)
+    w = np.exp(lw - lw.max())
+    w /= w.sum()
+    assert np.allclose(w @ x, 0.0, atol=1e-12)
+    assert np.allclose(np.einsum("k,ki,kj->ij", w, x, x), np.eye(m), atol=1e-12)
+    assert np.allclose(np.linalg.norm(x[1:], axis=1), 1.1 * np.sqrt(m))
+
+
+def test_rinla_fixed_grids_are_its_tables():
+    # R-INLA's m = 1 grid (scaled by f0 = 1.1) gives a standard Gaussian
+    # variance 1.004; its m = 2 grid, scaled by f0 sqrt(2) as R-INLA does,
+    # gives 0.874 (both measured on R-INLA 26.8.7's tables).
+    from pyrox_lgm._inla import _rinla_design
+
+    for m, var in [(1, 1.0041), (2, 0.8738)]:
+        x, log_w = _rinla_design(m)
+        lw = log_w - 0.5 * np.sum(x**2, axis=1)
+        w = np.exp(lw - lw.max())
+        w /= w.sum()
+        assert np.allclose(np.sum(w[:, None] * x**2, axis=0), var, atol=1e-4)
+
+
+def test_skewness_corrections_keep_the_scale_and_find_the_asymmetry():
+    from pyrox_lgm._inla import _skewness_corrections
+
+    scale = np.diag([2.0, 0.5])
+    u_star = np.array([1.0, -1.0])
+
+    def gaussian(u):
+        z = np.linalg.solve(scale, np.asarray(u) - u_star)
+        return -0.5 * float(z @ z)
+
+    lo, hi = _skewness_corrections(gaussian, u_star, scale, 0.0)
+    assert np.allclose(lo, 1.0) and np.allclose(hi, 1.0)
+
+    def split(u):  # half-scales 0.5 below and 2 above on the first axis
+        z = np.linalg.solve(scale, np.asarray(u) - u_star)
+        s = np.where(z > 0, [2.0, 1.0], [0.5, 1.0])
+        return -0.5 * float(np.sum((z / s) ** 2))
+
+    lo, hi = _skewness_corrections(split, u_star, scale, 0.0)
+    assert np.allclose(lo * hi, 1.0)  # skewness only (R-INLA's default)
+    assert np.allclose(hi / lo, [4.0, 1.0])
+
+
+def test_theta_marginals_of_a_symmetric_posterior_are_its_gaussian():
+    from pyrox_lgm._inla import _hyperpar_summaries, _theta_marginals
+
+    model, _ = _gaussian_rw2()
+    mu = np.array([0.3, -0.2])
+    cov = np.array([[0.5, 0.1], [0.1, 0.2]])
+    evals, evecs = np.linalg.eigh(np.linalg.inv(cov))
+    ones = (np.ones(2), np.ones(2))
+    out = _hyperpar_summaries(
+        model,
+        jnp.asarray(mu),
+        jnp.asarray(cov),
+        _theta_marginals(mu, cov, evecs, evals, ones),
+    )
+    for k, key in enumerate(model.theta_spec()):
+        m, v = mu[k], cov[k, k]
+        assert np.isclose(float(out[key].q50), np.exp(m), rtol=1e-4)
+        assert np.isclose(
+            float(out[key].q975), np.exp(m + 1.959964 * np.sqrt(v)), rtol=1e-3
+        )
+        assert np.isclose(float(out[key].mean), np.exp(m + v / 2), rtol=1e-4)
+
+
+def test_vb_subspace_is_r_inlas_node_selection():
+    # f.enable.limit = 30: a component of n > 30 nodes contributes 30 nodes
+    # j * (n // 30) + max(1, (n // 30) // 2); R-INLA's verbose log of the
+    # SPDE fixture (234 nodes) lists 3, 10, ..., 206 and the intercept.
+    from pyrox_lgm._inla import _vb_subspace
+
+    for n, nodes in [
+        (20, list(range(20))),
+        (50, list(range(1, 31))),
+        (234, list(range(3, 207, 7))),
+    ]:
+        model = lgm.LGM(
+            (lgm.RW2(n, name="t"),), lgm.FixedEffects(("intercept",)), lgm.Gaussian()
+        )
+        assert _vb_subspace(model).tolist() == [*nodes, n]
+
+
+def test_range_limited_mixture_summary():
+    # One Gaussian: +-5 sds hold all but 6e-7 of it. A wide component that
+    # reaches far beyond the mixture's +-5 sds loses that mass.
+    means = jnp.array([[0.0], [0.0]])
+    variances = jnp.array([[1.0], [400.0]])
+    w = jnp.array([0.99, 0.01])
+    one = mixture_summary(means[:1], variances[:1], w[:1] / w[0], limit=5.0)
+    assert np.isclose(float(one.sd[0]), 1.0, atol=1e-5)
+    assert np.isclose(float(one.q975[0]), 1.959964, atol=1e-4)
+    full = mixture_summary(means, variances, w)
+    cut = mixture_summary(means, variances, w, limit=5.0)
+    sd_full = np.sqrt(0.99 + 0.01 * 400.0)
+    assert np.isclose(float(full.sd[0]), sd_full)
+    a = 5.0 * sd_full  # the mixture restricted to [-a, a], in closed form
+    mass = 0.99 * (2 * norm.cdf(a) - 1) + 0.01 * (2 * norm.cdf(a / 20) - 1)
+
+    def second(s):  # int_{-a}^{a} x^2 N(x; 0, s^2) dx
+        return s**2 * (2 * norm.cdf(a / s) - 1) - 2 * a * s * norm.pdf(a / s)
+
+    sd_cut = np.sqrt((0.99 * second(1.0) + 0.01 * second(20.0)) / mass)
+    assert np.isclose(float(cut.sd[0]), sd_cut, rtol=1e-6)
+    assert float(cut.sd[0]) < 0.9 * sd_full

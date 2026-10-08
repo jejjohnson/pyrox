@@ -31,6 +31,8 @@ class Summary(NamedTuple):
 # A skew-normal's skewness is below (4 - pi) / 2 * (2 / (pi - 2))^1.5 ~ 0.9953.
 _MAX_SKEW = 0.99
 _GL_NODES, _GL_WEIGHTS = np.polynomial.legendre.leggauss(40)
+# Simpson points (odd) for the moments of a range-limited mixture.
+_N_LIMIT = 801
 
 
 def skew_normal_params(mean, var, skew):
@@ -65,12 +67,20 @@ def mixture_summary(
     variances: Float[Array, "K n"],
     weights: Float[Array, " K"],
     skewness: Float[Array, "K n"] | None = None,
+    limit: float | None = None,
 ) -> Summary:
     """Summary of the mixture $\\sum_k w_k\\,\\mathcal N(m_k, v_k)$ per column.
 
     With ``skewness``, each component is the skew-normal with that mean,
     variance and skewness (``strategy="sla"``); the mean and sd are the
     same either way. Quantiles by 80 bisection steps on the mixture CDF.
+
+    With ``limit``, the summary is of the mixture restricted to its mean
+    $\\pm$ ``limit`` sds, as R-INLA reports it (its combined marginal is a
+    spline-corrected Gaussian on $\\pm 5$ sds, ``GMRFLib_density_combine``):
+    a component far wider than the mixture, from a design point in a long
+    tail of $\\theta$, then loses the mass outside that range. Moments by
+    Simpson's rule on ``_N_LIMIT`` points.
     """
     w = weights[:, None]
     mean = jnp.sum(w * means, axis=0)
@@ -90,7 +100,41 @@ def mixture_summary(
         def component_cdf(x):
             return skew_normal_cdf(x[None, :], xi, omega, alpha)
 
+    def mixture_pdf(x):  # x of shape (G, n)
+        def add(k, acc):
+            if skewness is None:
+                sk = jnp.maximum(s[k], 1e-300)
+                z = (x - means[k]) / sk
+                pdf = jnp.exp(-0.5 * z**2) / (math.sqrt(2.0 * math.pi) * sk)
+            else:
+                z = (x - xi[k]) / omega[k]
+                pdf = 2.0 * jnp.exp(-0.5 * z**2) * ndtr(alpha[k] * z)
+                pdf = pdf / (math.sqrt(2.0 * math.pi) * omega[k])
+            return acc + weights[k] * pdf
+
+        return jax.lax.fori_loop(0, means.shape[0], add, jnp.zeros_like(x))
+
+    p_lo = p_mass = None
+    if limit is not None:
+        a, b = mean - limit * sd, mean + limit * sd
+        t = jnp.linspace(0.0, 1.0, _N_LIMIT)
+        simpson = np.ones(_N_LIMIT)
+        simpson[1:-1:2], simpson[2:-1:2] = 4.0, 2.0
+        x = a[None, :] + (b - a)[None, :] * t[:, None]
+        f = mixture_pdf(x) * jnp.asarray(simpson)[:, None]
+        m0 = jnp.sum(f, axis=0)
+        mean_t = jnp.sum(f * x, axis=0) / m0
+        var_t = jnp.sum(f * (x - mean_t) ** 2, axis=0) / m0
+        p_lo = jnp.sum(w * component_cdf(a), axis=0)
+        p_mass = jnp.sum(w * component_cdf(b), axis=0) - p_lo
+        ok = sd > 0
+        mean = jnp.where(ok, mean_t, mean)
+        sd = jnp.where(ok, jnp.sqrt(jnp.maximum(var_t, 0.0)), sd)
+
     def quantile(p):
+        if p_lo is not None:
+            p = p_lo + p * p_mass
+
         def body(_, bounds):
             lo, hi = bounds
             mid = 0.5 * (lo + hi)
