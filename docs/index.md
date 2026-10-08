@@ -9,18 +9,19 @@ pyrox bridges [Equinox](https://docs.kidger.site/equinox/) modules and [NumPyro]
 - **`pyrox._core`** — the Equinox-to-NumPyro bridge. `PyroxModule`, `PyroxParam`, `PyroxSample`, `Parameterized`, `pyrox_method`.
 - **`pyrox_gp`** — Gaussian process building blocks: kernels, sparse/variational GPs, non-Gaussian inference, pathwise samplers, Markov (Kalman) GPs, multi-output GPs.
 - **`pyrox_nn`** — Bayesian and uncertainty-aware NN layers: dense variants, spectral layers, SNGP, ensembles, the Bayesian Neural Field stack.
+- **`pyrox_lgm`** — latent Gaussian models in precision form: GMRF components, PC priors, `inla()`.
 
 ## Installation
 
-```bash
-pip install pyrox
-```
-
-Or with `uv`:
+pyrox is not on PyPI yet, and the name `pyrox` on PyPI belongs to an unrelated project, so `pip install pyrox` installs the wrong package.
+Install from GitHub with `uv`:
 
 ```bash
-uv add pyrox
+uv add "pyrox @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox"
+uv add "pyrox-gp @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-gp"
 ```
+
+`pyrox-gp`, `pyrox-nn` and `pyrox-lgm` also need a gaussx override until the next kernellib release; the [README](https://github.com/jejjohnson/pyrox#installation) has the details.
 
 ## Three modeling patterns
 
@@ -33,7 +34,7 @@ import numpyro.distributions as dist
 
 
 def model(x, y=None):
-    net = MLP(key=key)                      # any eqx.Module
+    net = MLP(key=key)  # any eqx.Module
     W = numpyro.sample("W", prior)
     net = eqx.tree_at(lambda m: m.W, net, W)
     f = numpyro.deterministic("f", net(x))
@@ -57,9 +58,7 @@ class BayesianLinear(PyroxModule):
     def __call__(self, x):
         W = self.pyrox_sample(
             "weight",
-            dist.Normal(0, 1)
-                .expand([self.in_features, self.out_features])
-                .to_event(2),
+            dist.Normal(0, 1).expand([self.in_features, self.out_features]).to_event(2),
         )
         b = self.pyrox_param("bias", jnp.zeros(self.out_features))
         return x @ W + b
@@ -78,11 +77,13 @@ class RBFKernel(Parameterized):
 
     def setup(self):
         self.register_param(
-            "variance", jnp.array(1.0),
+            "variance",
+            jnp.array(1.0),
             constraint=dist.constraints.positive,
         )
         self.register_param(
-            "lengthscale", jnp.array(1.0),
+            "lengthscale",
+            jnp.array(1.0),
             constraint=dist.constraints.positive,
         )
         self.set_prior("variance", dist.LogNormal(0.0, 1.0))
@@ -92,7 +93,7 @@ class RBFKernel(Parameterized):
     def __call__(self, X1, X2):
         v = self.get_param("variance")
         ls = self.get_param("lengthscale")
-        sq = jnp.sum((X1[:, None] - X2[None, :]) ** 2 / ls ** 2, axis=-1)
+        sq = jnp.sum((X1[:, None] - X2[None, :]) ** 2 / ls**2, axis=-1)
         return v * jnp.exp(-0.5 * sq)
 ```
 

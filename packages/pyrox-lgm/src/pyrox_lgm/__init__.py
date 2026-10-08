@@ -1,8 +1,8 @@
 """Latent Gaussian models: GMRF components, PC priors and ``inla()``.
 
-Precision-form latent Gaussian models on top of gaussx and kernellib. This
-release is the package scaffold (P6); the components, priors and inference
-land in P7-P9. ``pyrox_lgm`` never imports ``pyrox_gp``.
+Precision-form latent Gaussian models on top of gaussx and kernellib:
+temporal, areal and SPDE components, penalised-complexity priors, ``inla()``
+and its diagnostics. ``pyrox_lgm`` never imports ``pyrox_gp``.
 """
 
 from pyrox_lgm._components import (

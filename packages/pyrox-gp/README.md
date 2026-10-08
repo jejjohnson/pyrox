@@ -1,4 +1,4 @@
-# pyrox-gp
+# <img src="../../docs/assets/icon-gp.svg" width="36" alt="" align="top"> pyrox-gp
 
 Gaussian process building blocks on top of
 [`pyrox`](../pyrox): kernels and kernel protocols, variational guides,
@@ -8,8 +8,10 @@ structures, pathwise sampling, and the shared spectral basis helpers
 
 ## Install
 
+Not on PyPI yet; install from GitHub with uv (see the [root README](../../README.md#installation)):
+
 ```bash
-uv add pyrox-gp
+uv add "pyrox-gp @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-gp"
 ```
 
 ## Layout

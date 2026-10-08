@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-pyrox is a uv workspace of three Python packages for probabilistic
+pyrox is a uv workspace of four Python packages for probabilistic
 modeling with Equinox and NumPyro. Built with Python 3.12+, uv,
 pytest, and MkDocs.
 
@@ -15,6 +15,7 @@ The packages, in dependency order:
 | `pyrox`    | `pyrox`     | Equinox-to-NumPyro bridge (`_core`: PyroxModule, PyroxParam, PyroxSample, Parameterized) + ensemble inference (`inference`). No internal deps. |
 | `pyrox-gp` | `pyrox_gp`  | Gaussian process building blocks: kernels, guides, likelihoods, Markov/sparse GPs, pathwise sampling, and the shared spectral basis helpers (`_basis`). Depends on `pyrox`. |
 | `pyrox-nn` | `pyrox_nn`  | Bayesian/uncertainty-aware NN layers, plus the BNF estimator API (`pyrox_nn.api`) and pandas preprocessing (`pyrox_nn.preprocessing`). Depends on `pyrox` and `pyrox-gp`. |
+| `pyrox-lgm` | `pyrox_lgm` | Latent Gaussian models in precision form: GMRF components, PC priors, `inla()`. Depends on `pyrox` (never on `pyrox-gp`). |
 
 ## Common Commands
 
@@ -87,6 +88,8 @@ top-level `pyproject.toml` only configures `[tool.uv.workspace]`.
   kernel operators come from kernellib; pyrox-gp adds priors and guides.
 - `pyrox-nn` depends on `pyrox` and `pyrox-gp` (+ geonnax); pandas and
   optax are gated behind the `[bnf]` optional extra.
+- `pyrox-lgm` depends on `pyrox` only (+ gaussx, kernellib, matfree, numpyro,
+  optax); it never imports `pyrox-gp`.
 
 ## Documentation Examples
 

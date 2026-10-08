@@ -1,217 +1,253 @@
-# pyrox
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+    <img alt="pyrox" src="docs/assets/logo-light.svg" width="300">
+  </picture>
+</p>
 
-[![Tests](https://github.com/jejjohnson/pyrox/actions/workflows/ci.yml/badge.svg)](https://github.com/jejjohnson/pyrox/actions/workflows/ci.yml)
-[![Lint](https://github.com/jejjohnson/pyrox/actions/workflows/lint.yml/badge.svg)](https://github.com/jejjohnson/pyrox/actions/workflows/lint.yml)
-[![Type Check](https://github.com/jejjohnson/pyrox/actions/workflows/typecheck.yml/badge.svg)](https://github.com/jejjohnson/pyrox/actions/workflows/typecheck.yml)
-[![Deploy Docs](https://github.com/jejjohnson/pyrox/actions/workflows/pages.yml/badge.svg)](https://github.com/jejjohnson/pyrox/actions/workflows/pages.yml)
-[![codecov](https://codecov.io/gh/jejjohnson/pyrox/branch/main/graph/badge.svg)](https://codecov.io/gh/jejjohnson/pyrox)
-[![PyPI version](https://img.shields.io/pypi/v/pyrox.svg)](https://pypi.org/project/pyrox/)
-[![Python versions](https://img.shields.io/pypi/pyversions/pyrox.svg)](https://pypi.org/project/pyrox/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
-[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://pre-commit.com/)
+<p align="center">
+  <a href="https://github.com/jejjohnson/pyrox/actions/workflows/ci.yml"><img alt="Tests" src="https://github.com/jejjohnson/pyrox/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/jejjohnson/pyrox/actions/workflows/typecheck.yml"><img alt="Type Check" src="https://github.com/jejjohnson/pyrox/actions/workflows/typecheck.yml/badge.svg"></a>
+  <a href="https://codecov.io/gh/jejjohnson/pyrox"><img alt="codecov" src="https://codecov.io/gh/jejjohnson/pyrox/branch/main/graph/badge.svg"></a>
+  <img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12%2B-blue">
+  <a href="https://opensource.org/licenses/MIT"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-yellow.svg"></a>
+</p>
 
-Author: J. Emmanuel Johnson
-Repo: [https://github.com/jejjohnson/pyrox](https://github.com/jejjohnson/pyrox)
-Website: [jejjohnson.netlify.com](https://jejjohnson.netlify.com)
+<p align="center">
+  <a href="https://jejjohnson.github.io/pyrox/"><b>Docs</b></a> ·
+  <a href="https://jejjohnson.github.io/pyrox/api/reference/"><b>API</b></a> ·
+  <a href="https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_treeat/"><b>Tutorials</b></a> ·
+  <a href="#gallery"><b>Gallery</b></a>
+</p>
 
-**Probabilistic modeling with Equinox and NumPyro: Bayesian neural networks, Gaussian processes, and composable GP building blocks.**
+**Probabilistic modeling with Equinox and NumPyro: Gaussian processes, Bayesian neural networks and latent Gaussian models.**
 
-pyrox bridges [Equinox](https://docs.kidger.site/equinox/) modules and [NumPyro](https://num.pyro.ai/) traces so a single module class can host deterministic parameters, random sample sites, priors, guides, and a model/guide mode switch — without duplicating inference logic. NumPyro owns inference; pyrox just makes modules visible to it. The goal is to write one `__call__` and have it run unchanged under `handlers.seed`, `handlers.trace`, MCMC/NUTS, SVI with `AutoGuide`s, `Predictive`, `jit`, `vmap`, and `grad`.
+pyrox lets an Equinox module declare NumPyro sample and param sites under stable, module-scoped names.
+NumPyro owns inference; pyrox makes modules visible to it.
+Write one `__call__` and it runs unchanged under `handlers.trace`, NUTS, SVI with any `AutoGuide`, `Predictive`, `jit`, `vmap` and `grad`.
 
-### Why pyrox?
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.svg">
+    <img alt="One PyroxModule with named sample and param sites runs unchanged under NumPyro handlers, NUTS, SVI, Predictive and JAX transforms" src="docs/assets/hero-light.svg" width="100%">
+  </picture>
+</p>
 
-Equinox gives JAX clean, immutable modules. NumPyro gives JAX a high-quality probabilistic programming surface. But the two don't compose out of the box: Equinox modules are frozen PyTrees, and NumPyro expects per-call access to `numpyro.param` / `numpyro.sample` calls that carry unique site names. `pyrox._core` provides the missing bridge — a light per-instance context that caches site lookups within a call, deterministic module-scoped site names (an explicit `pyrox_name`, or the class name by default) that stay stable across `jit`, `eqx.tree_at`, and checkpoint round-trips, and declarative registries for modules that want priors and guides attached to their parameters.
+## The packages
 
-### What's in the box
+pyrox is a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) of four packages under [`packages/`](packages).
+Each one installs on its own and pulls in what it needs.
 
-- **`PyroxModule`** — an `eqx.Module` subclass with `pyrox_param` / `pyrox_sample` methods that register sites under a stable, module-qualified name. Sites are cached per-call so a parameter referenced twice inside one `__call__` registers exactly once.
-- **`Parameterized`** — a `PyroxModule` for GP-style workflows. Declare parameters in `setup()`, attach priors and autoguides, and flip between `"model"` and `"guide"` mode with a single method call. Constrained autoguides respect positivity, simplex, and other supports via `TransformedDistribution`.
-- **`pyrox_method`** — a decorator that activates the per-call context; apply it to `__call__` (and any other method that registers sites).
-- **`PyroxParam` / `PyroxSample`** — lightweight declarative descriptors for parameter and sample metadata.
+| | Package | Import | What it holds |
+|---|---|---|---|
+| <img src="docs/assets/icon.svg" width="28" alt=""> | [`pyrox`](packages/pyrox) | `pyrox` | The Equinox ↔ NumPyro bridge (`PyroxModule`, `Parameterized`, `pyrox_method`) and ensemble MAP / VI inference |
+| <img src="docs/assets/icon-gp.svg" width="28" alt=""> | [`pyrox-gp`](packages/pyrox-gp) | `pyrox_gp` | Kernels, guides and likelihoods; exact, sparse, Markov and multi-output GPs; pathwise sampling |
+| <img src="docs/assets/icon-nn.svg" width="28" alt=""> | [`pyrox-nn`](packages/pyrox-nn) | `pyrox_nn` | Bayesian dense layers, SIREN and MFN, SNGP, deep VSSGP, and the Bayesian Neural Field estimator |
+| <img src="docs/assets/icon-lgm.svg" width="28" alt=""> | [`pyrox-lgm`](packages/pyrox-lgm) | `pyrox_lgm` | Latent Gaussian models in precision form: GMRF components, PC priors and `inla()` |
 
----
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/layers-dark.svg">
+    <img alt="pyrox-nn builds on pyrox-gp, which builds on pyrox; pyrox-lgm builds on pyrox directly. All sit on JAX, Equinox and NumPyro and on the GeoML packages gaussx, kernellib and geonnax" src="docs/assets/layers-light.svg" width="100%">
+  </picture>
+</p>
 
-## 📦 Package Layout
+Arrows point at what a package imports, and nothing points back up.
+`pyrox-lgm` works in precision form and never imports `pyrox-gp`.
 
-pyrox is a uv workspace of three packages under `packages/`:
+## Installation
 
-| Package    | Import name | Purpose |
-|------------|-------------|---------|
-| `pyrox`    | `pyrox`     | Equinox-to-NumPyro bridge (`_core`) + ensemble inference (`inference`) |
-| `pyrox-gp` | `pyrox_gp`  | GP building blocks: kernels, guides, likelihoods, Markov/sparse GPs, pathwise sampling, spectral bases |
-| `pyrox-nn` | `pyrox_nn`  | Bayesian/uncertainty-aware NN layers + BNF estimator API (`pyrox_nn.api`, `pyrox_nn.preprocessing`) |
-
-Dependency order: `pyrox-nn` → `pyrox-gp` → `pyrox`. The workspace
-root ships no code — only the per-package wheels under `packages/*`
-are published.
-
----
-
-## 🚀 Installation
-
-Each package installs independently and pulls in what it needs:
-
-```bash
-pip install pyrox        # bridge + ensemble inference only
-pip install pyrox-gp     # + GP building blocks
-pip install pyrox-nn     # + Bayesian NN layers and the BNF stack
-```
-
-Or with `uv`:
-
-```bash
-uv add pyrox-gp
-```
-
-### Runtime dependencies
-
-- `pyrox`: `jax`, `equinox`, `numpyro`, `einx`; optional `optax` (`pip install 'pyrox[optax]'`)
-- `pyrox-gp`: adds `gaussx`, `geonnax`, `lineax`
-- `pyrox-nn`: adds `geonnax`; optional `pandas`/`optax` via `pip install 'pyrox-nn[bnf]'`
-
-### From source
+pyrox is not on PyPI yet.
+The name `pyrox` on PyPI belongs to an unrelated project, so `pip install pyrox` installs the wrong package.
+Install from GitHub with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-git clone https://github.com/jejjohnson/pyrox.git
-cd pyrox
-make install
+# Core: the bridge and ensemble inference
+uv add "pyrox @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox"
+
+# GP, NN and LGM packages; each one pulls in pyrox from the same repository
+uv add "pyrox-gp @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-gp"
+uv add "pyrox-nn @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-nn"
+uv add "pyrox-lgm @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-lgm"
 ```
 
----
+`pyrox-gp`, `pyrox-nn` and `pyrox-lgm` depend on [gaussx](https://github.com/jejjohnson/gaussx) and [kernellib](https://github.com/jejjohnson/kernellib), which are also installed from GitHub.
+kernellib v0.0.15 pins gaussx v0.6.0 while pyrox needs v0.6.1, so until the next kernellib release add this override to your project's `pyproject.toml`:
 
-## 🧪 Three modeling patterns
-
-pyrox is opinionated about *how* to compose Equinox and NumPyro, but not *when* to reach for which primitive. Three patterns cover the common cases, ordered from lightest to heaviest machinery.
-
-### Pattern A — pure Equinox module injected into a NumPyro model
-
-When you already have an Equinox module and just want to treat one of its fields as a random variable, you don't need any pyrox machinery at all. Sample the value inside a plain NumPyro model function and splice it back in with `eqx.tree_at`. This is the right pattern for one-off Bayesian extensions of an otherwise deterministic network — no base class change, no shared registry.
-
-```python
-import equinox as eqx
-import numpyro
-import numpyro.distributions as dist
-
-
-def model(x, y=None):
-    net = MLP(key=key)                      # any eqx.Module
-    W = numpyro.sample("W", prior)
-    net = eqx.tree_at(lambda m: m.W, net, W)
-    f = numpyro.deterministic("f", net(x))
-    numpyro.sample("obs", dist.Normal(f, 0.1), obs=y)
+```toml
+[tool.uv]
+override-dependencies = ["gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.6.1"]
 ```
 
-### Pattern B — `PyroxModule` owns its probabilistic semantics
+Optional extras: `pyrox[optax]` for ensemble MAP, `pyrox-nn[bnf]` for the BNF estimator (pandas, optax), `pyrox-gp[flows]` for normalizing-flow warps, and `pyrox-lgm[xarray]` for xarray-backed `INLAResult` marginals.
 
-When the module itself is inherently probabilistic — a Bayesian layer, a hierarchical component, anything that "is" a set of sample and param sites — subclass `PyroxModule`. Register sites declaratively inside `__call__` and let the module's qualified name scope them. The scope is the module's `pyrox_name` (or the class name when unset) — deterministic, so site names survive `jit`, functional updates, and checkpoints. When stacking several instances of the same class in one model, give each a distinct `pyrox_name` (e.g. `BayesianLinear(..., pyrox_name="layer0")` with `pyrox_name` declared as a field); unnamed same-class siblings share a scope and a trace will reject the duplicate sites loudly.
+To work on pyrox itself, clone it and run `make install`; see [Development](#development).
+
+## Quick start
+
+A Bayesian linear layer that owns its sites, fitted by NUTS and SVI from the same model.
 
 ```python
 import jax.numpy as jnp
+import jax.random as jr
+import numpyro
 import numpyro.distributions as dist
+from jaxtyping import Array, Float
+from numpyro import handlers
+from numpyro.infer import MCMC, NUTS, SVI, Predictive, Trace_ELBO
+from numpyro.infer.autoguide import AutoNormal
+from numpyro.optim import Adam
+
 from pyrox._core import PyroxModule, pyrox_method
+
+# Shapes: N = 50 observations, D = 1 input, P = 1 output
 
 
 class BayesianLinear(PyroxModule):
-    pyrox_name = "BayesianLinear"
+    pyrox_name = "BayesianLinear"  # scopes the site names
     in_features: int
     out_features: int
 
     @pyrox_method
-    def __call__(self, x):
+    def __call__(self, x: Float[Array, "N D"]) -> Float[Array, "N P"]:
+        # W ~ 𝒩(0, I), a sample site;  b, a param site
         W = self.pyrox_sample(
             "weight",
-            dist.Normal(0, 1)
-                .expand([self.in_features, self.out_features])
-                .to_event(2),
-        )
-        b = self.pyrox_param("bias", jnp.zeros(self.out_features))
-        return x @ W + b
+            dist.Normal(0.0, 1.0)
+            .expand([self.in_features, self.out_features])
+            .to_event(2),
+        )  # (D, P)
+        b = self.pyrox_param("bias", jnp.zeros(self.out_features))  # (P,)
+        return x @ W + b  # (N, D) → (N, P)
+
+
+layer = BayesianLinear(in_features=1, out_features=1)
+
+
+def model(x: Float[Array, "N D"], y: Float[Array, " N"] | None = None) -> None:
+    # y = x W + b + ε,  ε ~ 𝒩(0, 0.1²)
+    f = layer(x)[:, 0]  # (N, D) → (N,)
+    numpyro.sample("obs", dist.Normal(f, 0.1), obs=y)
+
+
+x = jnp.linspace(-1.0, 1.0, 50)[:, None]  # (N, D)
+y = 2.0 * x[:, 0] + 0.1 * jr.normal(jr.key(0), (50,))  # (N,)
+
+# The sites NumPyro sees: ['BayesianLinear.weight', 'BayesianLinear.bias', 'obs']
+sites = list(handlers.trace(handlers.seed(model, 0)).get_trace(x, y))
+
+# Same model, two engines
+mcmc = MCMC(NUTS(model), num_warmup=300, num_samples=300)
+mcmc.run(jr.key(1), x, y)
+svi = SVI(model, AutoNormal(model), Adam(1e-2), Trace_ELBO())
+svi_result = svi.run(jr.key(2), 1000, x, y)
+
+draws = Predictive(model, mcmc.get_samples())(jr.key(3), x)["obs"]  # (S, N), S = 300
 ```
 
-### Pattern C — `Parameterized` for constrained params, priors, and guides
+## Three modeling patterns
 
-When a module has hyperparameters with positivity or simplex constraints, prior/posterior semantics, and a natural train/evaluate split — GP kernels are the canonical case — subclass `Parameterized`. Register parameters with constraints in `setup()`, attach priors, and pick an autoguide per-parameter. Flip `set_mode("model")` vs `set_mode("guide")` to switch between prior sampling (for MCMC) and variational draws (for SVI) without touching `__call__`.
+pyrox is opinionated about how Equinox and NumPyro compose, not about when to reach for which piece.
+Three patterns cover the common cases, from lightest to heaviest machinery.
+
+**A. Plain Equinox, `eqx.tree_at`.**
+When one field of an existing network becomes random, you need no pyrox machinery at all.
+Sample the value in a NumPyro model and splice it into the module.
 
 ```python
-import jax.numpy as jnp
-import numpyro.distributions as dist
-from pyrox._core import Parameterized, pyrox_method
+def model(x, y=None):
+    net = MLP(key=key)  # any eqx.Module
+    W = numpyro.sample("W", prior)
+    net = eqx.tree_at(lambda m: m.W, net, W)
+    numpyro.sample("obs", dist.Normal(net(x), 0.1), obs=y)
+```
 
+**B. `PyroxModule` owns its sites.**
+When the module is itself probabilistic (a Bayesian layer, a hierarchical component), subclass `PyroxModule`, as in the quick start.
+Sites are named `<pyrox_name>.<site>`, cached per call, and stable across `jit`, `eqx.tree_at` and checkpoints.
+Two instances of one class in the same model need distinct `pyrox_name`s; otherwise the trace rejects the duplicate sites.
 
+**C. `Parameterized` for constraints, priors and guides.**
+When a module has constrained hyperparameters with priors (GP kernels are the canonical case), declare them once in `setup()`.
+`set_mode("model")` samples the priors for MCMC; `set_mode("guide")` draws from the per-parameter autoguides for SVI, without touching `__call__`.
+
+```python
 class RBFKernel(Parameterized):
     pyrox_name = "RBFKernel"
 
     def setup(self):
         self.register_param(
-            "variance", jnp.array(1.0),
-            constraint=dist.constraints.positive,
+            "variance", jnp.array(1.0), constraint=dist.constraints.positive
         )
         self.register_param(
-            "lengthscale", jnp.array(1.0),
-            constraint=dist.constraints.positive,
+            "lengthscale", jnp.array(1.0), constraint=dist.constraints.positive
         )
         self.set_prior("variance", dist.LogNormal(0.0, 1.0))
-        self.autoguide("variance", "normal")
+        self.autoguide("variance", "normal")  # respects the positive constraint
 
     @pyrox_method
     def __call__(self, X1, X2):
-        v = self.get_param("variance")
-        ls = self.get_param("lengthscale")
-        sq = jnp.sum((X1[:, None] - X2[None, :]) ** 2 / ls ** 2, axis=-1)
+        v, ell = self.get_param("variance"), self.get_param("lengthscale")
+        # k(x, x′) = v exp(−‖x − x′‖² / 2ℓ²)
+        sq = jnp.sum((X1[:, None] - X2[None, :]) ** 2 / ell**2, axis=-1)  # (N, M)
         return v * jnp.exp(-0.5 * sq)
 ```
 
-Switch `kernel.set_mode("guide")` to draw variational params instead of sampling the prior. `"normal"` autoguides respect the registered constraint via `TransformedDistribution`, so a positive-support parameter never yields a negative sample at step zero or during optimization.
+All three patterns emit plain NumPyro sites, so they fit the same model to the same loss:
 
-### Composing pyrox modules with NumPyro handlers
+<p align="center"><img src="docs/images/readme/three_patterns_svi.png" alt="SVI loss over 400 steps for patterns A, B and C on the same latent GP classification model; the three curves overlap" width="70%"></p>
 
-Because `pyrox_param` and `pyrox_sample` are thin wrappers over `numpyro.param` / `numpyro.sample`, every NumPyro handler composes transparently: `handlers.trace` captures sites, `handlers.substitute` and `handlers.condition` replace or observe them, `handlers.scope` and `handlers.block` control visibility, and `handlers.reparam` rewrites sites in place. The same modules drop into `MCMC(NUTS(model))`, `SVI(model, AutoNormal(model), …)`, and `Predictive(model, ...)` with no extra glue. See `packages/pyrox/tests/test_core_numpyro_integration.py` for a worked inventory across the handler and inference surface.
+Every NumPyro handler composes with them: `trace`, `substitute`, `condition`, `scope`, `block` and `reparam`.
+[`test_core_numpyro_integration.py`](packages/pyrox/tests/test_core_numpyro_integration.py) checks each one, plus MCMC, SVI, `Predictive` and the JAX transforms.
 
----
+## Gallery
 
-## 🛠️ Development
+Every figure comes from an executed notebook in the [docs](https://jejjohnson.github.io/pyrox/).
+pyrox-gp priors can be built to look like the field being modelled: here the kernel's smoothness tracks the ocean variable.
+
+<p align="center"><img src="docs/images/readme/ocean_priors.png" alt="GP prior draws styled as sea-surface temperature (Matérn-5/2), sea-surface salinity (Matérn-3/2) and ocean colour (Matérn-1/2 with a log transform)" width="100%"></p>
+
+<table>
+  <tr>
+    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/notebooks/gp_pathwise/"><img src="docs/images/readme/pathwise_samples.png" alt="32 pathwise posterior samples of an exact GP against the analytic mean and two-sigma band"></a><br><b>Pathwise posterior samples</b><br><code>pyrox-gp</code></td>
+    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/notebooks/markov_gp_kalman/"><img src="docs/images/readme/markov_vs_dense.png" alt="Wall-clock of the log marginal likelihood: the Kalman path grows linearly in N, the dense Cholesky cubically"></a><br><b>Markov GP: linear in N, not cubic</b><br><code>pyrox-gp</code></td>
+    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/notebooks/multioutput_gp/"><img src="docs/images/readme/multioutput_gap.png" alt="A multi-output GP reconstructs a held-out gap in one output from a fully observed, correlated output"></a><br><b>Multi-output GP fills a gap</b><br><code>pyrox-gp</code></td>
+  </tr>
+  <tr>
+    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/notebooks/rff_as_neural_networks/"><img src="docs/images/readme/ensemble_gap.png" alt="An ensemble of 16 random-feature models: the predictive band widens across a held-out gap"></a><br><b>Ensemble band opens across a gap</b><br><code>pyrox.inference</code></td>
+    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/notebooks/lgm_mcmc_inla/"><img src="docs/images/readme/inla_vs_nuts.png" alt="Hyperparameter and coefficient marginals: the NUTS histogram against the INLA estimate, both near the truth"></a><br><b>INLA against NUTS</b><br><code>pyrox-lgm</code></td>
+    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/notebooks/spectral_kernel_models/"><img src="docs/images/readme/five_kernels.png" alt="2-D GP prior draws for RBF, Matérn-5/2, Matérn-3/2, Matérn-1/2 and ArcCosine kernels at one lengthscale"></a><br><b>Five kernels, one grid</b><br><code>pyrox-gp</code></td>
+  </tr>
+</table>
+
+## Where it fits
+
+pyrox is the probabilistic-modeling layer of the GeoML stack.
+It builds on [gaussx](https://github.com/jejjohnson/gaussx) (structured linear algebra and Gaussians), [kernellib](https://github.com/jejjohnson/kernellib) (kernels and kernel operators) and [geonnax](https://github.com/jejjohnson/geonnax) (neural nets and basis functions), alongside [filterax](https://github.com/jejjohnson/filterax), [vardax](https://github.com/jejjohnson/vardax) and [optax_bayes](https://github.com/jejjohnson/optax_bayes).
+
+## Documentation
+
+- [Docs site](https://jejjohnson.github.io/pyrox/): tutorials, examples and the API reference
+- [Vision](design_docs/pyrox/vision.md): motivation, user stories, design principles
+- [Architecture](design_docs/pyrox/architecture.md): package layout and layer stacks
+- [Boundaries](design_docs/pyrox/boundaries.md): scope and ecosystem
+- [Decisions](design_docs/pyrox/decisions.md): design decisions with rationale
+
+## Development
 
 ```bash
-make install              # Install all deps (uv sync --all-groups) + pre-commit hooks
-make test                 # Run tests
-make format               # Auto-fix formatting and lint
-make lint                 # Lint entire repo
-make typecheck            # Type check all workspace packages
-make precommit            # Run pre-commit on all files
-make docs-serve           # Local docs server
+git clone https://github.com/jejjohnson/pyrox.git
+cd pyrox
+make install      # uv sync --all-groups + pre-commit hooks
+make test         # all packages
+make lint         # ruff check .  (entire repo)
+make typecheck    # ty, per package
+make docs-serve   # preview the docs locally
 ```
 
-### Pre-commit checklist
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the contributor workflow and [`AGENTS.md`](AGENTS.md) for AI agent guidance.
+The icons and diagrams are generated by [`docs/assets/render.py`](docs/assets/render.py); edit it and run `uv run --no-project python docs/assets/render.py`.
 
-```bash
-uv run pytest -v                              # Tests
-uv run --group lint ruff check .              # Lint — ENTIRE repo
-uv run --group lint ruff format --check .     # Format — ENTIRE repo
-uv run --group typecheck ty check \
-    packages/pyrox/src/pyrox \
-    packages/pyrox-gp/src/pyrox_gp \
-    packages/pyrox-nn/src/pyrox_nn             # Typecheck — packages only
-```
+## License
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full contributor workflow and [`AGENTS.md`](AGENTS.md) for AI agent guidance.
-
----
-
-## 📚 Documentation
-
-- [Vision](design_docs/pyrox/vision.md) — motivation, user stories, design principles
-- [Architecture](design_docs/pyrox/architecture.md) — package layout and layer stacks
-- [Boundaries](design_docs/pyrox/boundaries.md) — scope and ecosystem
-- [Decisions](design_docs/pyrox/decisions.md) — design decisions with rationale
-- [API](design_docs/pyrox/api/) — surface inventory and conventions
-- [Examples](design_docs/pyrox/examples/) — worked examples across core/nn/gp
-
-Rendered docs deploy from `docs/` via MkDocs + Material.
-
----
-
-## 🪪 License
-
-MIT — see [`LICENSE`](LICENSE).
+MIT, see [`LICENSE`](LICENSE).

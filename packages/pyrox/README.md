@@ -1,4 +1,4 @@
-# pyrox
+# <img src="../../docs/assets/icon.svg" width="36" alt="" align="top"> pyrox
 
 Core primitives for probabilistic modeling with Equinox and NumPyro:
 the Equinox-to-NumPyro bridge (`PyroxModule`, `PyroxParam`,
@@ -11,10 +11,12 @@ The GP building blocks live in
 
 ## Install
 
+Not on PyPI yet; install from GitHub with uv (see the [root README](../../README.md#installation)):
+
 ```bash
-uv add pyrox
+uv add "pyrox @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox"
 # ensemble-of-MAP inference needs optax:
-uv add "pyrox[optax]"
+uv add "pyrox[optax] @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox"
 ```
 
 ## Layout

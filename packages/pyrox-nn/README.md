@@ -1,4 +1,4 @@
-# pyrox-nn
+# <img src="../../docs/assets/icon-nn.svg" width="36" alt="" align="top"> pyrox-nn
 
 Bayesian, spectral, and coordinate-encoding neural network layers on
 top of [`pyrox`](../pyrox) and [`pyrox-gp`](../pyrox-gp): SIREN, MFN,
@@ -9,10 +9,12 @@ the Bayesian Neural Field (BNF), and the sklearn-style estimator API
 
 ## Install
 
+Not on PyPI yet; install from GitHub with uv (see the [root README](../../README.md#installation)):
+
 ```bash
-uv add pyrox-nn
+uv add "pyrox-nn @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-nn"
 # the BNF stack (pandas preprocessing + SGD-MAP/SVI inference) needs:
-uv add "pyrox-nn[bnf]"
+uv add "pyrox-nn[bnf] @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-nn"
 ```
 
 ## Layout
