@@ -235,7 +235,7 @@ svi = SVI(evidence, AutoNormal(evidence), Adam(1e-2), Trace_ELBO())
 svi_result = svi.run(jr.key(2), 2000, s_obs, y)
 ```
 
-`pgp.Matern` is a Pattern C module: `set_prior` turns each hyperparameter into a NumPyro site named `Matern.<name>`, so one model function serves NUTS and SVI.
+`pgp.Matern` is a [Pattern C](#three-modeling-patterns) module: `set_prior` turns each hyperparameter into a NumPyro site named `Matern.<name>`, so one model function serves NUTS and SVI.
 On the simulated overpass (M = 227 of 400 cells), NUTS puts σ_obs at 8.0 ppb (90 % interval 7.3–8.7) against the true 8 ppb, and ℓ at about 18 km.
 `init_to_median` and a σ_obs prior bounded away from zero keep warm-up away from a near-singular K_θ + σ²_obs I_M.
 
@@ -324,11 +324,63 @@ def evidence_b(s_obs: Float[Array, "M 3"], y: Float[Array, " M"]) -> None:
 ```
 
 **C. `Parameterized` for constraints, priors and guides.**
-When a module has constrained hyperparameters with priors (GP kernels are the canonical case), declare them once.
-`pgp.Matern` in Stage 1 is one: `set_prior` attaches a prior, `autoguide` picks a per-parameter guide, and `set_mode("model")` or `set_mode("guide")` switches between them without touching `__call__`.
+When a module has constrained hyperparameters with priors (GP kernels are the canonical case), declare them once in `setup()`: `register_param` puts each value on its support, `set_prior` attaches p(θ), and `autoguide` attaches a per-parameter q(θ).
+`set_mode("model")` makes `get_param` sample the prior and `set_mode("guide")` makes it sample the guide, so the module is its own SVI guide and `__call__` never changes.
+`pgp.Matern` in Stage 1 is a ready-made one; here is the same kernel written out:
+
+```python
+import kernellib.functional as klf
+from pyrox._core import Parameterized, pyrox_method
+
+
+# C. A Parameterized kernel: constraints, priors and guides declared once, in setup()
+class MaternPriors(Parameterized, pgp.Kernel):
+    pyrox_name: str = "MaternPriors"
+
+    def setup(self) -> None:
+        # ℓ > 0 and σ² > 0: each value lives on the positive support
+        positive = dist.constraints.positive
+        self.register_param("lengthscale", jnp.array(20.0), constraint=positive)  # ()  km
+        self.register_param("variance", jnp.array(150.0), constraint=positive)    # ()  ppb²
+        # p(θ): ℓ ~ LogNormal(3, 0.5),  σ² ~ LogNormal(5, 1)
+        self.set_prior("lengthscale", dist.LogNormal(3.0, 0.5))
+        self.set_prior("variance", dist.LogNormal(5.0, 1.0))
+        # q(θ): a Normal on each unconstrained value, mapped back onto ℓ, σ² > 0
+        self.autoguide("lengthscale", "normal")
+        self.autoguide("variance", "normal")
+
+    @pyrox_method
+    def __call__(self, X1: Float[Array, "N1 3"], X2: Float[Array, "N2 3"]) -> Float[Array, "N1 N2"]:
+        # model mode: θ ~ p(θ);  guide mode: θ ~ q(θ)
+        ell = self.get_param("lengthscale")                # ()  site MaternPriors.lengthscale
+        var = self.get_param("variance")                   # ()  site MaternPriors.variance
+        # k_θ(r) = σ² (1 + √3 r / ℓ) exp(−√3 r / ℓ)
+        return klf.matern_kernel(X1, X2, var, ell, nu=1.5)  # (N1, 3), (N2, 3) → (N1, N2)
+
+
+kernel = MaternPriors()
+
+
+def evidence_c(s_obs: Float[Array, "M 3"], y: Float[Array, " M"]) -> None:
+    kernel.set_mode("model")                               # θ ~ p(θ)
+    sigma_obs = numpyro.sample("sigma_obs", dist.LogNormal(2.3, 0.5))  # ()  ppb
+    pgp.gp_factor("y", pgp.GPPrior(kernel=kernel, X=s_obs), y - x_b, sigma_obs**2)  # (M,) → ()
+
+
+def guide_c(s_obs: Float[Array, "M 3"], y: Float[Array, " M"]) -> None:
+    kernel.set_mode("guide")                               # θ ~ q(θ): the kernel's own guide
+    kernel(s_obs[:1], s_obs[:1])                           # registers q(ℓ), q(σ²)
+    # q(σ_obs) = LogNormal(μ, s): σ_obs sits outside the kernel, so the guide names it
+    mu = numpyro.param("sigma_obs_mu", 2.3)
+    sd = numpyro.param("sigma_obs_sd", 0.1, constraint=dist.constraints.positive)
+    numpyro.sample("sigma_obs", dist.LogNormal(mu, sd))    # ()
+
+
+svi_c = SVI(evidence_c, guide_c, Adam(1e-2), Trace_ELBO()).run(jr.key(2), 2000, s_obs, y)
+```
 
 All three emit plain NumPyro sites, so they fit the same model to the same loss.
-On the methane example, 2,000 SVI steps end at a loss of 826.6 (A), 827.2 (B) and 826.9 (C).
+On the methane example, 2,000 SVI steps end at a loss of 826.6 (A), 827.2 (B) and 826.6 (C, with its own guide), and NUTS on the C model puts σ_obs at 8.0 ppb and ℓ at 18 km, as in Stage 1.
 The latent GP classifier in the docs shows the same, step by step:
 
 <p align="center"><img src="docs/images/readme/three_patterns_svi.png" alt="SVI loss over 400 steps for patterns A, B and C on the same latent GP classification model; the three curves overlap" width="70%"></p>
