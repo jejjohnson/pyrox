@@ -6,6 +6,8 @@ repo_name: jejjohnson/pyrox
 
 theme:
   name: material
+  logo: assets/icon.svg
+  favicon: assets/icon.svg
   features:
     - navigation.tabs
     - navigation.sections

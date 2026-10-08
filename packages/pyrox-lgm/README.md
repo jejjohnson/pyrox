@@ -1,32 +1,33 @@
-# pyrox-lgm
+# <img src="../../docs/assets/icon-lgm.svg" width="36" alt="" align="top"> pyrox-lgm
 
-Latent Gaussian models (LGMs) for JAX: GMRF latent components, PC priors and
-an `inla()` driver, built on [`pyrox`](../pyrox),
-[gaussx](https://github.com/jejjohnson/gaussx) (sparse precision operators,
-GMRF distributions, Laplace modes) and
-[kernellib](https://github.com/jejjohnson/kernellib) (graphs and GMRF
-structure matrices).
+Latent Gaussian models (LGMs) for JAX: GMRF latent components, PC priors and an `inla()` driver.
+It builds on [`pyrox`](../pyrox), [gaussx](https://github.com/jejjohnson/gaussx) (sparse precision operators, GMRF distributions, Laplace modes) and [kernellib](https://github.com/jejjohnson/kernellib) (graphs and GMRF structure matrices).
 
-LGMs are written in **precision form** and live here rather than in
-[`pyrox-gp`](../pyrox-gp), whose GPs are covariance-form; this package imports
-nothing from pyrox-gp.
+LGMs are written in **precision form** and live here rather than in [`pyrox-gp`](../pyrox-gp), whose GPs are covariance-form.
+This package imports nothing from pyrox-gp.
 
-## Status
+## What's inside
 
-Scaffold only (P6 of the [`inla()` epic](https://github.com/jejjohnson/pyrox/issues/258)).
-The modules are filled in by later phases:
+| Area | Public names |
+|---|---|
+| Temporal components | `RW1`, `RW2`, `AR1`, `IID` |
+| Areal components | `Besag`, `BYM2`, `CAR`, `Leroux` |
+| Spatial and generic components | `SPDE`, `Generic`, and the combinators `Kronecker`, `Replicate` |
+| Penalised-complexity priors | `PCPrecision`, `PCMatern`, `PCAR1Rho`, `PCBYM2Phi`, `structure_spectrum` |
+| Observations | `Gaussian`, `Bernoulli`, `Binomial`, `Poisson`, `NegativeBinomial` |
+| Model and inference | `LGM`, `FixedEffects`, `inla()`, `INLAResult`, `Summary` |
+| Diagnostics and formulas | `diagnostics`, `Diagnostics`, the `f(...)` formula sugar |
 
-| Module | Phase | Contents |
-|---|---|---|
-| `_components/` | P7 | temporal (RW1, RW2, AR1), areal (ICAR, BYM2), SPDE, generic and combinators |
-| `_priors/_pc.py` | P7 | penalised-complexity priors |
-| `_model.py`, `_inla.py`, `_result.py`, `_numpyro.py` | P8 | `LGM`, `inla()`, `INLAResult`, NumPyro faces |
-| `_diagnostics.py`, `_formula.py` | P9 | diagnostics and the `f(...)` formula sugar |
+The [`lgm_mcmc_inla`](https://jejjohnson.github.io/pyrox/notebooks/lgm_mcmc_inla/) notebook compares `inla()` against NUTS on the same model.
 
 ## Install
 
+pyrox-lgm is not on PyPI yet; install it from GitHub with uv:
+
 ```bash
-uv add pyrox-lgm
+uv add "pyrox-lgm @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-lgm"
 # xarray-backed INLAResult marginals:
-uv add "pyrox-lgm[xarray]"
+uv add "pyrox-lgm[xarray] @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-lgm"
 ```
+
+Until the next kernellib release, the project also needs the gaussx override described in the [root README](../../README.md#installation).
