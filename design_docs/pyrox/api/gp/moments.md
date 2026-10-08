@@ -299,11 +299,17 @@ Gaussian Process Inference with GPU Acceleration".
 
 **In pyrox-gp today** this is `pyrox_gp.preconditioned_cg_solver`
 (roadmap P4): gaussx's CG with a randomized Nyström or randomly pivoted
-Cholesky preconditioner built from $K_y - \mu I$ with shift $\mu$ (so the
-noise is not counted twice, gaussx#345) and an SLQ log-determinant, with
-gradients through both. The pivoted-Cholesky-only description above is the
-original design; the model still assembles $K_y$ densely, so the
-matrix-free path for $n \approx 10^5$ is tracked separately.
+Cholesky preconditioner and an SLQ log-determinant, with gradients through
+both. The pivoted-Cholesky-only description above is the original design.
+
+With `GPPrior(..., matrix_free=True)` (pyrox#277) $K_y$ is never formed: the
+model passes $K_y = K_{\text{op}} + (\text{jitter} + \sigma^2) I$ as a
+`lineax.AddLinearOperator` of a matrix-free kernel operator (row blocks of
+$K$ evaluated per matvec and rematerialised on the backward pass, so
+$O(BN)$ memory with gradients) and a scaled identity. The preconditioner
+reads $\sigma^2$ from that sum and is built from $K$ with the exact noise as
+its shift (gaussx#345), so `shift` is optional. For a dense $K_y$ it is
+still built from $K_y - \mu I$ with a user lower bound $\mu$.
 
 #### 5.1.4 WoodburySolver
 
