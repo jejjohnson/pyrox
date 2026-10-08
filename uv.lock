@@ -21,7 +21,7 @@ members = [
     "pyrox-monorepo",
     "pyrox-nn",
 ]
-overrides = [{ name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=v0.6.1" }]
+overrides = [{ name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=v0.6.5" }]
 
 [[package]]
 name = "absl-py"
@@ -668,8 +668,8 @@ dependencies = [
 
 [[package]]
 name = "gaussx"
-version = "0.6.1"
-source = { git = "https://github.com/jejjohnson/gaussx.git?rev=v0.6.1#56fa3521bc8ca2b25564ccfb5f5e068ef5133c10" }
+version = "0.6.5"
+source = { git = "https://github.com/jejjohnson/gaussx.git?rev=v0.6.5#12ff91a68da2886478e9b3a1d0d4c0745d74ca41" }
 dependencies = [
     { name = "einx" },
     { name = "equinox" },
@@ -678,6 +678,7 @@ dependencies = [
     { name = "jaxtyping" },
     { name = "lineax" },
     { name = "matfree" },
+    { name = "optimistix" },
 ]
 
 [[package]]
@@ -984,8 +985,8 @@ wheels = [
 
 [[package]]
 name = "kernellib"
-version = "0.0.15"
-source = { git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.15#fc36b3d59cc862c153874cb88eed1c02807e4eba" }
+version = "0.0.17"
+source = { git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.17#470df2d5276274540f67d61e096ae0b4373588b5" }
 dependencies = [
     { name = "einx" },
     { name = "equinox" },
@@ -1184,11 +1185,11 @@ wheels = [
 
 [[package]]
 name = "matfree"
-version = "0.6.0"
+version = "0.6.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/38/e4/3bdc4b7f2bfd92e94c9bf10508fbf718fb33cea5e7ed6fc8cd08bf22f7dd/matfree-0.6.0.tar.gz", hash = "sha256:223551cd767e1ec9c272bc0cf624676b74f2ef5198ededa5d13152cd2e26876c", size = 68021, upload-time = "2026-06-09T11:08:00.773Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/97/ae/ac950986206dcd5d49b8fd7c415d5b8eff11586df99da4b4213aea341ad9/matfree-0.6.2.tar.gz", hash = "sha256:b73b4f04a0f2822c22621696c8ed3b784807c4bc55953961d1918fc3a04e49ac", size = 75589, upload-time = "2026-09-02T05:30:43.409Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7f/cd/001cebc8ff1862dfc5713ba6db9b7d3780a5f5d14cee605e45503f09979a/matfree-0.6.0-py3-none-any.whl", hash = "sha256:14743d6fb3118e6eff8d205f57ab16316d834b22d16226b914809007b80e9cf5", size = 41666, upload-time = "2026-06-09T11:07:59.531Z" },
+    { url = "https://files.pythonhosted.org/packages/39/03/48458c50ff59b21e212dac2e4d2c83abe3c6855718e283eb24064675287c/matfree-0.6.2-py3-none-any.whl", hash = "sha256:41592a0188ac3cacd2ae169d146284f9f7d2e5ed94709f790130a2a97da32e92", size = 44028, upload-time = "2026-09-02T05:30:41.901Z" },
 ]
 
 [[package]]
@@ -2075,9 +2076,9 @@ requires-dist = [
     { name = "einx", specifier = ">=0.4.3" },
     { name = "flowjax", specifier = ">=0.9" },
     { name = "gauss-flows", marker = "extra == 'flows'", git = "https://github.com/jejjohnson/gauss_flows.git?rev=bdb23f076ebaaf1ba042aa52ea593487cef3204e" },
-    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.1" },
+    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.5" },
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.5" },
-    { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.15" },
+    { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.17" },
     { name = "lineax", specifier = ">=0.1.1" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
     { name = "optax", marker = "extra == 'optax'", specifier = ">=0.2.8" },
@@ -2107,8 +2108,8 @@ xarray = [
 
 [package.metadata]
 requires-dist = [
-    { name = "gaussx", extras = ["numpyro"], git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.1" },
-    { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.15" },
+    { name = "gaussx", extras = ["numpyro"], git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.5" },
+    { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.17" },
     { name = "matfree", specifier = ">=0.6.0" },
     { name = "numpyro", specifier = ">=0.21" },
     { name = "optax", specifier = ">=0.2.8" },

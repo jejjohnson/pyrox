@@ -39,6 +39,12 @@ The package is organized into three submodules:
 | Structured GP guides | **pyrox.gp** | Variational families respecting GP geometry |
 | Inducing features (VISH, VFF) | **pyrox.gp** | Spectral inducing variables for SVGP |
 | Pathwise sampling (Matheron's rule) | **pyrox.gp** | Function-valued posterior draws |
+| Graph construction, graph Laplacians, graph spectra, GMRF structure | **kernellib** | `kl.graph_from_edges`, Laplacian eigenpairs; no numpyro |
+| Graph inducing features, latent and inducing-point initialisation, exact-GP recipes | **pyrox.gp** | Built on the kernellib graph primitives |
+| Geometry on the sphere and graph/EOF bases (`graph_laplacian_eigpairs`, `eof_basis`) | **geonnax** | `pyrox_gp._basis` re-exports both for compatibility |
+| Latent components (SPDE, BYM2, temporal, areal), PC priors, `inla()` | **pyrox-lgm** | Latent Gaussian models in precision form |
+| Sparse operators, GMRF distributions, precision builders, INLA kernels, FEM/SPDE assembly | **gaussx** | `GaussianMRF`, `SparseCholeskySolver`, `fem_matrices`, `spde_precision` |
+| Randomized linear algebra | **gaussx** | Hutchinson, sketching, randomized SVD |
 | Structured linear operators (Kronecker, BlockDiag, LowRank) | **gaussx** | pyrox uses, doesn't own |
 | Linear operations (solve, logdet, cholesky, diag, trace) | **gaussx** | Structure-exploiting dispatch |
 | Solver strategies (Dense, CG, BBMM, Auto) | **gaussx** | pyrox.gp Solver delegates to these |
@@ -50,6 +56,15 @@ The package is organized into three submodules:
 | Neural network primitives | **equinox** | `eqx.Module`, `eqx.tree_at` |
 | Bayesian hierarchical model structure | **user** | pyrox provides components |
 | Data loading, preprocessing, visualization | **external** | User's responsibility |
+
+---
+
+## Covariance Form vs Precision Form
+
+- **pyrox-gp** works with GPs in *covariance form*: kernels build dense or structured covariance operators, and inference solves against them.
+- **pyrox-lgm** works with latent Gaussian models in *precision form*: GMRF components carry sparse precision matrices, and `inla()` integrates the hyperparameters.
+
+Both build on the same kernellib graph primitives and gaussx operators; neither reimplements the other's inference. Routing GMRF priors through `gx.laplace_mode` in pyrox-gp's `LaplaceInference` is a possible later option.
 
 ---
 
@@ -69,6 +84,7 @@ The package is organized into three submodules:
 | Exact GP in hierarchical model | `pyrox.gp.gp_factor` / `gp_sample` inside NumPyro model |
 | Sparse GP (SVGP) | `pyrox.gp` inducing features + structured guide, SVI |
 | Temporal GP | `pyrox.gp` state-space Kalman solver |
+| Latent Gaussian model with a sparse precision (SPDE, BYM2, temporal, areal) and INLA | `pyrox-lgm` components and `inla()` |
 | GP with structured covariance | `pyrox.gp` solver protocol dispatching to gaussx operators |
 | GEV/GPD with GP-varying parameters | GP latents from `pyrox.gp` in xtremax extreme value models |
 
@@ -82,6 +98,8 @@ The package is organized into three submodules:
 | **numpyro** | `numpyro.sample`, `numpyro.param`, distributions, inference | pyrox registers sample/param sites; NumPyro traces and runs inference. All AutoGuide families work out of the box. `GPPrior` is a native `numpyro.distributions.Distribution`. |
 | **kernellib** | Kernel functions, `Kernel` base class, kernel operators, spectral densities | `pyrox_gp.Kernel = kernellib.AbstractKernel`; pyrox-gp kernels call `kernellib.functional`; `pyrox_gp._basis` delegates spectral densities and RFF draws. kernellib never imports numpyro. |
 | **gaussx** | Solver protocol backend, structured operators, `MultivariateNormal`, Matheron sampling | `pyrox.gp.Solver.solve/log_det` delegates to `gaussx.ops.solve/logdet`; `CovarianceRepresentation` maps to gaussx operators; `PathwiseSampler` uses `gaussx.matheron_update`. |
+| **geonnax** | Graph Laplacian eigenpairs, EOF bases | `pyrox_gp._basis` re-exports `graph_laplacian_eigpairs` and `eof_basis`; pinned as a git tag in pyrox-gp and pyrox-nn. |
+| **pyrox-lgm** | Latent components, PC priors, `inla()` | Downstream sibling package built on pyrox, gaussx and kernellib; precision-form counterpart of pyrox-gp. |
 | **lineax** | Base operator abstraction (`AbstractLinearOperator`) | Transitive via gaussx; pyrox doesn't import lineax directly. |
 | **matfree** | SLQ logdet, Hutchinson trace, partial eig/SVD | Transitive via gaussx solvers (CG, BBMM). |
 | **jax** | All computation, autodiff, vmap, scan | Foundation. |

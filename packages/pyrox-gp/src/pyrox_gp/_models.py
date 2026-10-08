@@ -279,9 +279,9 @@ class ConditionedGP(eqx.Module):
             K_cross = self.prior.kernel(X_star, self.prior.X)
             K_diag = self.prior.kernel.diag(X_star)
         return predict_variance(
+            self.cache,
             K_cross,
             K_diag,
-            self.operator,
             solver=self.prior._resolved_solver(),
         )
 

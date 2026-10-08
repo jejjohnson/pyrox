@@ -23,8 +23,8 @@ classifiers = [
 # from the covariance-form GP package (tests/test_import_guard.py).
 dependencies = [
     "pyrox",
-    "gaussx[numpyro]>=0.6.1",
-    "kernellib>=0.0.15",
+    "gaussx[numpyro]>=0.6.5",
+    "kernellib>=0.0.17",
     "matfree>=0.6.0",
     "numpyro>=0.21",
     "optax>=0.2.8",
@@ -42,8 +42,8 @@ Repository = "https://github.com/jejjohnson/pyrox"
 [tool.uv.sources]
 # Neither is on PyPI yet; resolve the release tags from GitHub, in step with
 # pyrox-gp's sources (one version per package across the workspace).
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.6.1" }
-kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.15" }
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.6.5" }
+kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.17" }
 
 [build-system]
 requires = ["hatchling"]
