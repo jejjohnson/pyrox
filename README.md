@@ -85,7 +85,7 @@ To work on pyrox itself, clone it and run `make install`; see [Development](#dev
 
 ## Quick start
 
-A Bayesian linear layer that owns its sites, fitted by NUTS and SVI from the same model.
+A Bayesian linear layer that owns its sites, fitted by NUTS and by SVI from the same model.
 
 ```python
 import jax.numpy as jnp
@@ -97,103 +97,239 @@ from numpyro import handlers
 from numpyro.infer import MCMC, NUTS, SVI, Predictive, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from numpyro.optim import Adam
-
 from pyrox._core import PyroxModule, pyrox_method
 
-# Shapes: N = 50 observations, D = 1 input, P = 1 output
+# Shapes: N = 50 observations, D = 1 input, P = 1 output, S = 300 posterior draws
 
 
 class BayesianLinear(PyroxModule):
-    pyrox_name = "BayesianLinear"  # scopes the site names
+    pyrox_name = "BayesianLinear"                          # scopes every site name below
     in_features: int
     out_features: int
 
     @pyrox_method
     def __call__(self, x: Float[Array, "N D"]) -> Float[Array, "N P"]:
-        # W ~ 𝒩(0, I), a sample site;  b, a param site
-        W = self.pyrox_sample(
-            "weight",
-            dist.Normal(0.0, 1.0)
-            .expand([self.in_features, self.out_features])
-            .to_event(2),
-        )  # (D, P)
-        b = self.pyrox_param("bias", jnp.zeros(self.out_features))  # (P,)
-        return x @ W + b  # (N, D) → (N, P)
+        # W ~ 𝒩(0, I)
+        prior = dist.Normal(0.0, 1.0).expand([self.in_features, self.out_features])
+        W = self.pyrox_sample("weight", prior.to_event(2))  # (D, P)   site BayesianLinear.weight
+        # b, a point estimate
+        b = self.pyrox_param("bias", jnp.zeros(self.out_features))  # (P,)   site BayesianLinear.bias
+        # f = x W + b
+        return x @ W + b                                   # (N, D) → (N, P)
 
 
 layer = BayesianLinear(in_features=1, out_features=1)
 
 
 def model(x: Float[Array, "N D"], y: Float[Array, " N"] | None = None) -> None:
-    # y = x W + b + ε,  ε ~ 𝒩(0, 0.1²)
-    f = layer(x)[:, 0]  # (N, D) → (N,)
-    numpyro.sample("obs", dist.Normal(f, 0.1), obs=y)
+    # y = x W + b + ε,  ε ~ 𝒩(0, 0.1² I)
+    f: Float[Array, " N"] = layer(x)[:, 0]                 # (N, D) → (N,)
+    numpyro.sample("obs", dist.Normal(f, 0.1), obs=y)      # event ()   site obs
 
 
-x = jnp.linspace(-1.0, 1.0, 50)[:, None]  # (N, D)
-y = 2.0 * x[:, 0] + 0.1 * jr.normal(jr.key(0), (50,))  # (N,)
+# Data: y = 2x + ε on x ∈ [−1, 1]
+x: Float[Array, "N D"] = jnp.linspace(-1.0, 1.0, 50)[:, None]          # (N, 1)
+y: Float[Array, " N"] = 2.0 * x[:, 0] + 0.1 * jr.normal(jr.key(0), (50,))  # (N,)
 
 # The sites NumPyro sees: ['BayesianLinear.weight', 'BayesianLinear.bias', 'obs']
-sites = list(handlers.trace(handlers.seed(model, 0)).get_trace(x, y))
+sites: list[str] = list(handlers.trace(handlers.seed(model, 0)).get_trace(x, y))
 
-# Same model, two engines
+# p(W | y) ∝ p(y | W) p(W), by NUTS
 mcmc = MCMC(NUTS(model), num_warmup=300, num_samples=300)
 mcmc.run(jr.key(1), x, y)
+# q(W) ≈ p(W | y), by SVI with a mean-field guide, from the same model
 svi = SVI(model, AutoNormal(model), Adam(1e-2), Trace_ELBO())
 svi_result = svi.run(jr.key(2), 1000, x, y)
 
-draws = Predictive(model, mcmc.get_samples())(jr.key(3), x)["obs"]  # (S, N), S = 300
+# y* ~ p(y* | x, y) = ∫ p(y* | x, W) p(W | y) dW
+draws: Float[Array, "S N"] = Predictive(model, mcmc.get_samples())(jr.key(3), x)["obs"]  # (S, N)
 ```
+
+`layer(x)` runs under `handlers.trace`, NUTS, SVI and `Predictive` unchanged: the posterior mean of `BayesianLinear.weight` comes out at 1.97 against the true slope of 2.
+
+## Example: map methane from one overpass
+
+The running example of the GeoML stack, cut down to what pyrox does: map XCH₄ over a basin from the cloud-free pixels of one TROPOMI overpass, with a per-pixel uncertainty.
+
+The state x ∈ ℝᴺ is XCH₄ in ppb on a 20 × 20 grid over the Permian Basin, so N = 400 cells.
+One overpass leaves M of them cloud-free; `mask` marks those cells and y ∈ ℝᴹ holds their values.
+x_b = 1,880 ppb is the background.
+Cell centres are 3-D positions sᵢ in km on a sphere of radius R_E = 6,371 km, so ‖sᵢ − sⱼ‖ is a chordal distance in km.
+The block below simulates the overpass (a 40 ppb plume, σ_obs = 8 ppb pixel noise, 60 % cloud-free); a real L2 product's pixels drop in for `lonlat`, `mask` and `y`.
+
+```python
+import geonnax as gnx
+import jax
+import jax.numpy as jnp
+import jax.random as jr
+import numpyro
+import numpyro.distributions as dist
+import pyrox_gp as pgp
+from jaxtyping import Array, Bool, Float
+from numpyro.infer import MCMC, NUTS, SVI, Trace_ELBO, init_to_median
+from numpyro.infer.autoguide import AutoNormal
+from numpyro.optim import Adam
+
+jax.config.update("jax_enable_x64", True)
+
+# Shapes: N = 400 grid cells (20 × 20); M = Σᵢ maskᵢ cloud-free cells; S = 500 draws
+lon, lat = jnp.meshgrid(jnp.linspace(-104.2, -103.4, 20), jnp.linspace(31.6, 32.4, 20))
+lonlat: Float[Array, "N 2"] = jnp.stack([lon.ravel(), lat.ravel()], axis=-1)  # (N, 2) degrees
+# s(λ, φ) = R_E (cos φ cos λ, cos φ sin λ, sin φ),  R_E = 6,371 km, so ‖sᵢ − sⱼ‖ is in km
+unit: Float[Array, "N 3"] = gnx.geo.lonlat_to_cartesian3d(lonlat, input_unit="degrees")
+s: Float[Array, "N 3"] = 6371.0 * unit                     # (N, 2) → (N, 3) km   geonnax
+
+# Stand-in overpass. x(λ, φ) = x_b + 40 exp(−‖(λ, φ) − (λ₀, φ₀)‖² / 2·0.08²) ppb
+x_b: float = 1880.0                                        # background XCH₄, ppb
+d2: Float[Array, " N"] = jnp.sum((lonlat - jnp.array([-103.8, 32.0])) ** 2, axis=-1)
+x_true: Float[Array, " N"] = x_b + 40.0 * jnp.exp(-d2 / (2 * 0.08**2))  # (N,) ppb
+# yᵢ = xᵢ + εᵢ,  εᵢ ~ 𝒩(0, 8²),  kept where the pixel is cloud-free (p = 0.6)
+k_mask, k_noise = jr.split(jr.key(0))
+mask: Bool[Array, " N"] = jr.bernoulli(k_mask, 0.6, (400,))                # (N,)
+y: Float[Array, " M"] = (x_true + 8.0 * jr.normal(k_noise, (400,)))[mask]  # (N,) → (M,)
+s_obs: Float[Array, "M 3"] = s[mask]                                       # (N, 3) → (M, 3)
+```
+
+### Stage 1: tune the covariance by its evidence (geonnax → pyrox-gp → NumPyro)
+
+**TL;DR.** Choose the field's correlation length and variance, and the pixel noise, by asking which values make the observed pixels most probable once the unknown field is integrated out.
+
+**Problem.** θ = (ℓ, σ², σ_obs) holds the Matérn-3/2 lengthscale ℓ (km), its variance σ² (ppb²) and the pixel noise σ_obs (ppb).
+k_θ is the Matérn-3/2 kernel and K_θ ∈ ℝ^{M×M} its Gram matrix on the observed centres.
+The anomaly x − x_b is a Gaussian process, and each observed pixel adds independent noise:
+
+$$x - x_b \sim \mathcal{GP}(0, k_\theta)$$
+
+$$y_i = x(s_i) + \varepsilon_i$$
+
+$$\varepsilon_i \sim \mathcal{N}(0, \sigma_{\mathrm{obs}}^2)$$
+
+Integrating out x gives the evidence, the only term that depends on θ:
+
+$$\log p(y \mid \theta) = \log \mathcal{N}(y - x_b; 0, K_\theta + \sigma_{\mathrm{obs}}^2 I_M)$$
+
+The goal is the hyperparameter posterior p(θ | y) ∝ p(y | θ) p(θ), sampled by NUTS, or its mean-field approximation q(θ) fitted by SVI.
+
+```python
+def evidence(s_obs: Float[Array, "M 3"], y: Float[Array, " M"]) -> None:
+    # k_θ(r) = σ² (1 + √3 r / ℓ) exp(−√3 r / ℓ),  Matérn-3/2, r = ‖sᵢ − sⱼ‖ in km
+    k = pgp.Matern(nu=1.5)                                 # pyrox-gp: a Parameterized kernel
+    # ℓ ~ LogNormal(3, 0.5): median 20 km
+    k.set_prior("lengthscale", dist.LogNormal(3.0, 0.5))
+    # σ² ~ LogNormal(5, 1): median 150 ppb²
+    k.set_prior("variance", dist.LogNormal(5.0, 1.0))
+    # σ_obs ~ LogNormal(2.3, 0.5): median 10 ppb, bounded away from zero
+    sigma_obs = numpyro.sample("sigma_obs", dist.LogNormal(2.3, 0.5))  # ()
+    # log p(y | θ) = log 𝒩(y − x_b; 0, K_θ + σ_obs² I_M),  K_θ = [k_θ(sᵢ, sⱼ)]ᵢⱼ
+    prior = pgp.GPPrior(kernel=k, X=s_obs)                 # (M, 3) → GP over M cells   pyrox-gp
+    pgp.gp_factor("y", prior, y - x_b, sigma_obs**2)       # (M,) → () log-evidence    pyrox-gp
+
+
+# (a) p(θ | y) ∝ p(y | θ) p(θ), sampled by NUTS
+mcmc = MCMC(NUTS(evidence, init_strategy=init_to_median), num_warmup=500, num_samples=500)
+mcmc.run(jr.key(1), s_obs, y)
+theta: dict[str, Float[Array, " S"]] = mcmc.get_samples()  # sites → (S,)
+
+# (b) q(θ) ≈ p(θ | y), fitted by SVI with a mean-field guide on the same model
+svi = SVI(evidence, AutoNormal(evidence), Adam(1e-2), Trace_ELBO())
+svi_result = svi.run(jr.key(2), 2000, s_obs, y)
+```
+
+`pgp.Matern` is a Pattern C module: `set_prior` turns each hyperparameter into a NumPyro site named `Matern.<name>`, so one model function serves NUTS and SVI.
+On the simulated overpass (M = 227 of 400 cells), NUTS puts σ_obs at 8.0 ppb (90 % interval 7.3–8.7) against the true 8 ppb, and ℓ at about 18 km.
+`init_to_median` and a σ_obs prior bounded away from zero keep warm-up away from a near-singular K_θ + σ²_obs I_M.
+
+### Stage 2: the map and its uncertainty (pyrox-gp → gaussx)
+
+**TL;DR.** With θ fixed at its posterior median θ̂, compute the best-estimate XCH₄ map on all N cells and its per-cell standard deviation.
+
+**Problem.** K_MM is the Gram matrix on the observed cells, K_NM the cross-covariance from all cells to the observed ones, and K_iM its i-th row.
+Conditioning the Gaussian process on y is closed-form:
+
+$$x_a = x_b + K_{NM} (K_{MM} + \hat\sigma_{\mathrm{obs}}^2 I_M)^{-1} (y - x_b)$$
+
+$$\Sigma_{ii} = k_{\hat\theta}(s_i, s_i) - K_{iM} (K_{MM} + \hat\sigma_{\mathrm{obs}}^2 I_M)^{-1} K_{Mi}$$
+
+x_a ∈ ℝᴺ is the analysis and sdᵢ = √Σᵢᵢ its per-cell standard deviation, including at the clouded cells.
+
+```python
+# θ̂ = the posterior median of each site
+ell = float(jnp.median(theta["Matern.lengthscale"]))       # ()  km
+var = float(jnp.median(theta["Matern.variance"]))          # ()  ppb²
+sig = float(jnp.median(theta["sigma_obs"]))                # ()  ppb
+k_hat = pgp.Matern(nu=1.5, init_lengthscale=ell, init_variance=var)
+
+# x_a = x_b + K_NM (K_MM + σ̂²_obs I_M)⁻¹ (y − x_b)
+# Σᵢᵢ = k(sᵢ, sᵢ) − K_iM (K_MM + σ̂²_obs I_M)⁻¹ K_Mi
+post = pgp.GPPrior(kernel=k_hat, X=s_obs).condition(y - x_b, jnp.array(sig**2))  # pyrox-gp
+mean, var_a = post.predict(s)                              # (N, 3) → (N,), (N,)
+x_a: Float[Array, " N"] = x_b + mean                       # (N,)  ppb
+sd: Float[Array, " N"] = jnp.sqrt(var_a)                   # (N,)  ppb
+```
+
+The map's RMSE against the true field is 3.4 ppb, against 8.2 ppb for the raw pixels, and 95.5 % of cells lie within ±2 sd of the truth.
+The plume peak comes out at 1,906 ppb against a true 1,917 ppb: a kernel this smooth flattens a narrow peak.
+Both stages run in float64 in about 50 s on a laptop CPU.
+To carry θ's uncertainty into the map, condition on each NUTS draw instead of the median and pool the results.
 
 ## Three modeling patterns
 
 pyrox is opinionated about how Equinox and NumPyro compose, not about when to reach for which piece.
 Three patterns cover the common cases, from lightest to heaviest machinery.
+Here each one writes the Stage 1 evidence model.
 
-**A. Plain Equinox, `eqx.tree_at`.**
-When one field of an existing network becomes random, you need no pyrox machinery at all.
-Sample the value in a NumPyro model and splice it into the module.
+**A. Plain sites and `eqx.tree_at`.**
+When a field of an existing Equinox module becomes random, you need no pyrox machinery at all.
+Sample the value in the model and splice it into the module.
 
 ```python
-def model(x, y=None):
-    net = MLP(key=key)  # any eqx.Module
-    W = numpyro.sample("W", prior)
-    net = eqx.tree_at(lambda m: m.W, net, W)
-    numpyro.sample("obs", dist.Normal(net(x), 0.1), obs=y)
+import equinox as eqx
+import kernellib as kl
+
+
+# A. Plain sites, spliced into a kernellib kernel with eqx.tree_at
+def evidence_a(s_obs: Float[Array, "M 3"], y: Float[Array, " M"]) -> None:
+    ell = numpyro.sample("lengthscale", dist.LogNormal(3.0, 0.5))      # ()  ℓ, km
+    var = numpyro.sample("variance", dist.LogNormal(5.0, 1.0))         # ()  σ², ppb²
+    k = eqx.tree_at(lambda k: (k.lengthscale, k.variance), kl.Matern(nu=1.5), (ell, var))
+    sigma_obs = numpyro.sample("sigma_obs", dist.LogNormal(2.3, 0.5))  # ()  ppb
+    pgp.gp_factor("y", pgp.GPPrior(kernel=k, X=s_obs), y - x_b, sigma_obs**2)  # (M,) → ()
 ```
 
-**B. `PyroxModule` owns its sites.**
+**B. A `PyroxModule` owns its sites.**
 When the module is itself probabilistic (a Bayesian layer, a hierarchical component), subclass `PyroxModule`, as in the quick start.
 Sites are named `<pyrox_name>.<site>`, cached per call, and stable across `jit`, `eqx.tree_at` and checkpoints.
 Two instances of one class in the same model need distinct `pyrox_name`s; otherwise the trace rejects the duplicate sites.
 
-**C. `Parameterized` for constraints, priors and guides.**
-When a module has constrained hyperparameters with priors (GP kernels are the canonical case), declare them once in `setup()`.
-`set_mode("model")` samples the priors for MCMC; `set_mode("guide")` draws from the per-parameter autoguides for SVI, without touching `__call__`.
-
 ```python
-class RBFKernel(Parameterized):
-    pyrox_name = "RBFKernel"
+import kernellib.functional as klf
+from pyrox._core import PyroxModule, pyrox_method
 
-    def setup(self):
-        self.register_param(
-            "variance", jnp.array(1.0), constraint=dist.constraints.positive
-        )
-        self.register_param(
-            "lengthscale", jnp.array(1.0), constraint=dist.constraints.positive
-        )
-        self.set_prior("variance", dist.LogNormal(0.0, 1.0))
-        self.autoguide("variance", "normal")  # respects the positive constraint
+
+# B. A PyroxModule kernel that samples its own θ inside __call__
+class MaternSites(pgp.Kernel, PyroxModule):
+    pyrox_name: str = "MaternSites"
 
     @pyrox_method
-    def __call__(self, X1, X2):
-        v, ell = self.get_param("variance"), self.get_param("lengthscale")
-        # k(x, x′) = v exp(−‖x − x′‖² / 2ℓ²)
-        sq = jnp.sum((X1[:, None] - X2[None, :]) ** 2 / ell**2, axis=-1)  # (N, M)
-        return v * jnp.exp(-0.5 * sq)
+    def __call__(self, X1: Float[Array, "N1 3"], X2: Float[Array, "N2 3"]) -> Float[Array, "N1 N2"]:
+        ell = self.pyrox_sample("lengthscale", dist.LogNormal(3.0, 0.5))  # ()  → MaternSites.lengthscale
+        var = self.pyrox_sample("variance", dist.LogNormal(5.0, 1.0))     # ()  → MaternSites.variance
+        # k_θ(r) = σ² (1 + √3 r / ℓ) exp(−√3 r / ℓ)
+        return klf.matern_kernel(X1, X2, var, ell, nu=1.5)                # (N1, 3), (N2, 3) → (N1, N2)
+
+
+def evidence_b(s_obs: Float[Array, "M 3"], y: Float[Array, " M"]) -> None:
+    sigma_obs = numpyro.sample("sigma_obs", dist.LogNormal(2.3, 0.5))  # ()  ppb
+    pgp.gp_factor("y", pgp.GPPrior(kernel=MaternSites(), X=s_obs), y - x_b, sigma_obs**2)
 ```
 
-All three patterns emit plain NumPyro sites, so they fit the same model to the same loss:
+**C. `Parameterized` for constraints, priors and guides.**
+When a module has constrained hyperparameters with priors (GP kernels are the canonical case), declare them once.
+`pgp.Matern` in Stage 1 is one: `set_prior` attaches a prior, `autoguide` picks a per-parameter guide, and `set_mode("model")` or `set_mode("guide")` switches between them without touching `__call__`.
+
+All three emit plain NumPyro sites, so they fit the same model to the same loss.
+On the methane example, 2,000 SVI steps end at a loss of 826.6 (A), 827.2 (B) and 826.9 (C).
+The latent GP classifier in the docs shows the same, step by step:
 
 <p align="center"><img src="docs/images/readme/three_patterns_svi.png" alt="SVI loss over 400 steps for patterns A, B and C on the same latent GP classification model; the three curves overlap" width="70%"></p>
 
