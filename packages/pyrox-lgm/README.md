@@ -30,4 +30,4 @@ uv add "pyrox-lgm @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=pac
 uv add "pyrox-lgm[xarray] @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-lgm"
 ```
 
-Until the next kernellib release, the project also needs the gaussx override described in the [root README](../../README.md#installation).
+Until kernellib pins gaussx v0.6.5, the project also needs the gaussx override described in the [root README](../../README.md#installation).
