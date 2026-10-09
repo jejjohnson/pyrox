@@ -42,7 +42,8 @@ git --no-pager diff --no-prefix --unified=100000 --minimal "$BASE_BRANCH"...HEAD
 ## Review Checklist
 
 Skip anything ruff, ty or the tests already enforce (formatting, import
-order, RST markup in docstrings); review what they cannot see.
+order, RST markup in pyrox / pyrox-gp / pyrox-nn docstrings — pyrox-lgm's
+source is not scanned); review what they cannot see.
 
 ### 1. Reuse and package boundaries
 
@@ -58,7 +59,8 @@ order, RST markup in docstrings); review what they cannot see.
   `pyrox-lgm` imports `pyrox` only, never `pyrox-gp`. A helper two packages
   need lives in the lowest one.
 - `import pyrox_nn` stays pandas-free (`api` / `preprocessing` are not
-  imported by the root); optax is imported lazily.
+  imported by the root); optax is lazy in `pyrox` (`_require_optax`) and
+  pyrox-gp (`QuasiNewtonInference`), and a required dependency of pyrox-lgm.
 
 ### 2. Sites (`PyroxModule`)
 
@@ -105,8 +107,9 @@ order, RST markup in docstrings); review what they cannot see.
   only where a `seed` handler is guaranteed.
 - **Stability:** jitter on Gram diagonals, `safe_cholesky` for
   ill-conditioned input, log-space densities, no explicit inverses.
-- **Pytrees:** layers, kernels, guides, likelihoods, states and results are
-  `eqx.Module`s; configuration is `eqx.field(static=True)`; no array in a
+- **Pytrees:** layers, kernels, guides and likelihoods are `eqx.Module`s;
+  states and results are `eqx.Module`s or NamedTuples; never a dataclass
+  for anything traced; configuration is `eqx.field(static=True)`; no array in a
   static field.
 
 ### 5. Public API and documentation
@@ -156,7 +159,7 @@ order, RST markup in docstrings); review what they cannot see.
 class Layer(eqx.Module):
     def __call__(self, x):
         W = numpyro.sample("W", dist.Normal(0, 1).expand([3, 2]).to_event(2))
-        return x @ W
+        return einx.dot("... i, i o -> ... o", x, W)
 
 
 # ✅ Scoped to the instance, cached per call, guarded against siblings
@@ -166,13 +169,14 @@ class Layer(PyroxModule):
     @pyrox_method
     def __call__(self, x):
         W = self.pyrox_sample("W", dist.Normal(0, 1).expand([3, 2]).to_event(2))
-        return x @ W
+        return einx.dot("... i, i o -> ... o", x, W)
 ```
 
 ### Distinct names for siblings
 
 ```python
-# ❌ Both register "RBF.variance": the second raises ValueError in one trace
+# ❌ Both register "RBF.variance": the second raises in one trace
+# (ValueError for a param, AssertionError once it has a prior)
 k1, k2 = pgp.RBF(), pgp.RBF()
 
 # ✅
