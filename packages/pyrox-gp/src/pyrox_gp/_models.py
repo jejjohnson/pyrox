@@ -39,6 +39,7 @@ from jaxtyping import Array, Float
 from numpyro import distributions as dist
 
 from pyrox_gp._context import _kernel_context
+from pyrox_gp._kernel_operator import freeze_kernel, matrix_free_operator
 from pyrox_gp._protocols import Kernel, Likelihood
 
 
@@ -83,6 +84,39 @@ class GPPrior(eqx.Module):
         jitter: Diagonal regularization added to the prior covariance
             for numerical stability. Not a noise model — use
             ``noise_var`` on `condition` for that.
+        matrix_free: If ``True``, never form ``K``. The covariance is the
+            `lineax.AddLinearOperator` of a matrix-free kernel operator
+            (row blocks of ``K`` evaluated per matvec, ``O(block_size N)``
+            memory, gradients included) and ``(jitter + noise_var) I``. Pair
+            it with an iterative solver, normally
+            `pyrox_gp.preconditioned_cg_solver`, which reads the noise from
+            the sum; a dense solver materialises ``K`` again. NumPyro-aware
+            kernels are resolved once per call through ``frozen()``.
+        block_size: Rows of ``K`` per matvec step when ``matrix_free``.
+
+    Examples:
+        Exact GP regression on $10^5$ stations, hyperparameters by SVI:
+
+        ```python
+        import jax.random as jr
+        import numpyro
+        import numpyro.distributions as dist
+        import pyrox_gp as px
+
+        # X: (100_000, 2) station coordinates, y: (100_000,) readings
+        solver = px.preconditioned_cg_solver(rank=500, key=jr.key(0))
+
+        def model(X, y):
+            kernel = px.Matern(nu=1.5, init_lengthscale=0.1)
+            prior = px.GPPrior(kernel, X, solver=solver, matrix_free=True)
+            noise_var = numpyro.param(
+                "noise_var", 0.1, constraint=dist.constraints.positive
+            )
+            px.gp_factor("y", prior, y, noise_var)
+
+        # numpyro.infer.SVI(model, lambda X, y: None, optax.adam(1e-2),
+        #                   numpyro.infer.Trace_ELBO()).run(key, 500, X, y)
+        ```
     """
 
     kernel: Kernel
@@ -90,6 +124,8 @@ class GPPrior(eqx.Module):
     mean_fn: Callable[[Float[Array, "N D"]], Float[Array, " N"]] | None = None
     solver: AbstractSolverStrategy | None = None
     jitter: float = 1e-6
+    matrix_free: bool = eqx.field(static=True, default=False)
+    block_size: int = eqx.field(static=True, default=256)
 
     def mean(self, X: Float[Array, "N D"]) -> Float[Array, " N"]:
         """Evaluate the mean function at ``X``; zero by default."""
@@ -97,12 +133,23 @@ class GPPrior(eqx.Module):
             return jnp.zeros(X.shape[0], dtype=X.dtype)
         return self.mean_fn(X)
 
+    def _matrix_free_operator(
+        self, diagonal: Float[Array, ""]
+    ) -> lx.AbstractLinearOperator:
+        return matrix_free_operator(
+            freeze_kernel(self.kernel), self.X, diagonal, block_size=self.block_size
+        )
+
     def _prior_operator(self) -> lx.AbstractLinearOperator:
+        if self.matrix_free:
+            return self._matrix_free_operator(jnp.asarray(self.jitter))
         K = self.kernel(self.X, self.X)
         K = K.at[jnp.diag_indices_from(K)].add(self.jitter)
         return _psd_operator(K)
 
     def _noisy_operator(self, noise_var: Float[Array, ""]) -> lx.AbstractLinearOperator:
+        if self.matrix_free:
+            return self._matrix_free_operator(self.jitter + noise_var)
         K = self.kernel(self.X, self.X)
         K = K.at[jnp.diag_indices_from(K)].add(self.jitter + noise_var)
         return _psd_operator(K)

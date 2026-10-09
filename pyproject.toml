@@ -116,6 +116,13 @@ ignore = ["E402", "E721", "E731", "E741"]
     "E501",
 ]
 
+[tool.ruff.format]
+# README code blocks keep a hand-aligned column of shape comments (one column
+# per block, after the equation comment above each line). The formatter would
+# collapse it to two spaces, so README files are left out of formatting only;
+# they are still linted.
+exclude = ["README.md", "packages/*/README.md"]
+
 [tool.ruff.lint.isort]
 combine-as-imports = true
 lines-after-imports = 2
