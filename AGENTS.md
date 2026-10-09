@@ -195,6 +195,14 @@ agent can read and follow them):
 | Write a squash commit message | `squash-commit` |
 | Open or link GitHub issues | `create-gh-issue`, `link-gh-issues` (templates in `.github/ISSUE_TEMPLATE/`; `make gh-labels`, `gh-sub`, `gh-block`, `gh-show`) |
 
+Downstream users get pyrox's guidance through the Claude Code plugin in
+`plugins/pyrox/` (published by `.claude-plugin/marketplace.json`) and
+`docs/llms.txt`; see `docs/agents.md`. When the public API or the modelling
+patterns change, update `plugins/pyrox/skills/bayesian-models-with-pyrox/`
+too: `packages/pyrox/tests/test_plugin_skill.py` runs its worked example
+(slow tier) and checks that every pyrox name it and the plugin reviewer
+mention still exists.
+
 ## Working in the repo
 
 Always run Python tools through `uv run` (never the system Python).

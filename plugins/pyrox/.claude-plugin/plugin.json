@@ -1,0 +1,11 @@
+{
+  "name": "pyrox",
+  "description": "Write probabilistic models in JAX with Equinox and NumPyro on pyrox — modules that own their sample / param sites, kernels with priors and guides, exact / sparse / Markov / multi-output GPs, Bayesian layers, ensemble MAP / VI, latent Gaussian models with INLA — instead of hand-wiring numpyro.sample into Equinox modules.",
+  "author": {
+    "name": "jejjohnson"
+  },
+  "homepage": "https://jejjohnson.github.io/pyrox/agents/",
+  "repository": "https://github.com/jejjohnson/pyrox",
+  "license": "MIT",
+  "keywords": ["jax", "numpyro", "equinox", "bayesian", "gaussian-processes", "probabilistic-programming", "inla"]
+}
