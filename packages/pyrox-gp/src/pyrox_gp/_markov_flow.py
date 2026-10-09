@@ -425,7 +425,7 @@ class NormalizingKalmanPrior(eqx.Module):
             self.base.P0,
             mask=mask_eff,
         )
-        m_smooth, P_smooth = gaussx.rts_smoother(state, self.base.A, self.base.Q)
+        m_smooth, P_smooth = gaussx.rts_smoother(state, self.base.A)
 
         if n_ahead > 0:
             A_dense = _dense(self.base.A)

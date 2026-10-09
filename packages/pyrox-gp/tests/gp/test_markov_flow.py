@@ -301,7 +301,7 @@ def test_ensemble_map_over_seeds_is_finite():
 def _rts_reference(base, z):
     """Warped-space observation moments straight from gaussx."""
     state = gaussx.kalman_filter(base.A, base.H, base.Q, base.R, z, base.m0, base.P0)
-    m_smooth, P_smooth = gaussx.rts_smoother(state, base.A, base.Q)
+    m_smooth, P_smooth = gaussx.rts_smoother(state, base.A)
     mz = m_smooth @ base.H.T
     vz = jax.vmap(lambda P: jnp.diag(base.H @ P @ base.H.T))(P_smooth) + jnp.diag(
         base.R
