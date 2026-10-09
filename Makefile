@@ -65,7 +65,8 @@ check-env-%:
 # Phony declarations
 # ---------------------------------------------------------------------------
 .PHONY: help install lint format typecheck test test-cov \
-        precommit build clean version docs docs-serve docs-deploy
+        precommit build clean version docs docs-serve docs-deploy \
+        capabilities
 
 .DEFAULT_GOAL := help
 
@@ -178,3 +179,6 @@ docs-serve: ## 🌐 Serve documentation locally
 
 docs-deploy: ## 🚀 Deploy documentation to GitHub Pages
 	uv run --group docs --group dev mkdocs gh-deploy --force
+
+capabilities: ## 🗂️  Regenerate docs/capabilities.md (every public name, for reuse)
+	uv run python scripts/capabilities.py

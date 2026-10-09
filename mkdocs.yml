@@ -68,6 +68,7 @@ nav:
       - "Regression Masterclass — Pattern 3 (Parameterized)": notebooks/regression_masterclass_parameterized.ipynb
   - API Reference:
       - Overview: api/reference.md
+      - Capability Index: capabilities.md
       - Core: api/core.md
       - GP: api/gp.md
       - NN:

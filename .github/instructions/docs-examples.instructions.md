@@ -103,7 +103,7 @@ Every notebook opens with a `#`-level title and a Colab badge pointing at its `m
 
 ## First Code Cell — Colab Detection + Install
 
-Detect Colab, install `pyrox[colab]` (which pulls in `matplotlib` and `watermark`) only when needed:
+Detect Colab and install, only when needed, the packages the notebook imports, each from its subdirectory (`packages/<pkg>`), with the `[colab]` extra (which pulls in `matplotlib` and `watermark`) on one of them (pyrox-lgm has no `[colab]` extra: add `matplotlib` and `watermark` explicitly):
 
 ```python
 import subprocess
@@ -124,7 +124,8 @@ if IN_COLAB:
             "pip",
             "install",
             "-q",
-            "pyrox[colab] @ git+https://github.com/jejjohnson/pyrox@main",
+            "pyrox @ git+https://github.com/jejjohnson/pyrox@main#subdirectory=packages/pyrox",
+            "pyrox-gp[colab] @ git+https://github.com/jejjohnson/pyrox@main#subdirectory=packages/pyrox-gp",
         ],
         check=True,
     )
@@ -245,7 +246,7 @@ MathJax is configured in `mkdocs.yml` — both inline and display math render in
 - [ ] Authored in jupytext `.py` percent format during development
 - [ ] First markdown cell: `#`-level title + Colab badge
 - [ ] Second markdown cell: background + math + "What you'll learn"
-- [ ] Setup cell: Colab detection + `pyrox[colab]` install via `subprocess`
+- [ ] Setup cell: Colab detection + per-package `git+…#subdirectory=packages/<pkg>` install via `subprocess`
 - [ ] `warnings.filterwarnings(..., IProgress, ...)`
 - [ ] `jax.config.update("jax_enable_x64", True)`
 - [ ] `%watermark` version readout
