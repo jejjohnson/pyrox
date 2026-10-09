@@ -45,7 +45,7 @@ conversions go through `gaussx.natural_to_mean_cov` /
 `gaussx.mean_cov_to_natural`, the damped natural update through
 `gaussx.damped_natural_update`, log-densities through
 `gaussx.gaussian_log_prob`, KL through
-`gaussx.dist_kl_divergence`, and Cholesky through
+`gaussx.gaussian_kl`, and Cholesky through
 `gaussx.cholesky` / `gaussx.safe_cholesky`. The
 `NaturalGuide` ``sample`` / ``log_prob`` paths route through
 `gaussx.MultivariateNormalPrecision` so the precision Cholesky
@@ -80,7 +80,7 @@ from gaussx import (
     MultivariateNormalPrecision,
     cholesky,
     damped_natural_update,
-    dist_kl_divergence,
+    gaussian_kl,
     gaussian_log_prob,
     natural_to_mean_cov,
     safe_cholesky,
@@ -237,14 +237,14 @@ class FullRankGuide(Guide):
     def kl_divergence(self, prior_cov: lx.AbstractLinearOperator) -> Float[Array, ""]:
         r"""``KL(q(u) || p(u))`` against an inducing prior with zero mean.
 
-        Falls back to `gaussx.dist_kl_divergence`, which dispatches
+        Falls back to `gaussx.gaussian_kl`, which dispatches
         on operator structure for the trace and logdet terms but does
         not yet take an explicit solver.
         """
         q_loc = self.mean
         q_cov = _full_cov_operator(self.scale_tril)
         p_loc = jnp.zeros_like(self.mean)
-        return dist_kl_divergence(q_loc, q_cov, p_loc, prior_cov)
+        return gaussian_kl(q_loc, q_cov, p_loc, prior_cov)
 
     def predict(
         self,
@@ -325,7 +325,7 @@ class MeanFieldGuide(Guide):
         q_loc = self.mean
         q_cov = _diag_cov_operator(self.scale)
         p_loc = jnp.zeros_like(self.mean)
-        return dist_kl_divergence(q_loc, q_cov, p_loc, prior_cov)
+        return gaussian_kl(q_loc, q_cov, p_loc, prior_cov)
 
     def predict(
         self,
@@ -565,14 +565,14 @@ class NaturalGuide(Guide):
     def kl_divergence(self, prior_cov: lx.AbstractLinearOperator) -> Float[Array, ""]:
         r"""``KL(q(u) || p(u))`` against an inducing prior with zero mean.
 
-        Falls back to `gaussx.dist_kl_divergence` in moment form —
-        ``dist_kl_divergence`` does not yet take an explicit solver, but
+        Falls back to `gaussx.gaussian_kl` in moment form —
+        ``gaussian_kl`` does not yet take an explicit solver, but
         it dispatches on operator structure for the trace and logdet
         terms.
         """
         m, cov = self._moments()
         p_loc = jnp.zeros_like(m)
-        return dist_kl_divergence(m, _possemi_cov_operator(cov), p_loc, prior_cov)
+        return gaussian_kl(m, _possemi_cov_operator(cov), p_loc, prior_cov)
 
     def predict(
         self,
@@ -614,7 +614,7 @@ class NaturalGuide(Guide):
             self.nat2,
             nat1_hat,
             nat2_hat,
-            lr=rho,  # ty: ignore[invalid-argument-type]
+            lr=rho,
         )
         # gaussx returns Array | AbstractLinearOperator; we always pass Arrays
         # in, so the runtime type is Array.

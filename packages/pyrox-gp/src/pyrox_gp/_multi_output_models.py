@@ -57,11 +57,11 @@ from gaussx import (
     Kronecker,
     MultivariateNormal,
     PredictionCache,
-    SumOperator,
     build_prediction_cache,
     log_marginal_likelihood,
     predict_mean,
     predict_variance,
+    sum_operator,
     variational_elbo_gaussian,
 )
 from jaxtyping import Array, Float
@@ -270,7 +270,7 @@ class MultiOutputGPPrior(eqx.Module):
                 self.num_outputs,
                 K_op.in_structure().dtype,
             )
-            return SumOperator(K_op, shift, tags=lx.positive_semidefinite_tag)
+            return sum_operator(K_op, shift, tags=lx.positive_semidefinite_tag)
         K = K_op.as_matrix()
         noise = _flat_noise(noise_var, num_points, self.num_outputs)
         K = K.at[jnp.diag_indices_from(K)].add(self.jitter + noise)
@@ -374,9 +374,9 @@ class MultiOutputConditionedGP(eqx.Module):
             K_cross = self.prior.kernel.cross_covariance(X_star, self.prior.X)
             K_diag = _flatten_outputs(self.prior.kernel.diag(X_star))
         flat = predict_variance(
+            self.cache,
             K_cross,
             K_diag,
-            self.operator,
             solver=self.prior._resolved_solver(),
         )
         return _unflatten_outputs(flat, self.prior.num_outputs)

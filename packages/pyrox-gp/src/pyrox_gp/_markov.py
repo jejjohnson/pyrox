@@ -131,10 +131,7 @@ def _rts_smoother(
         predicted_covs=P_pred_seq,
         log_likelihood=jnp.zeros((), dtype=m_filt_seq.dtype),
     )
-    # process_noise is unused by gaussx.rts_smoother (kept for API
-    # symmetry with the time-varying filter); pass a zero placeholder.
-    Q_dummy = jnp.zeros_like(P_filt_seq[0])
-    return gaussx.rts_smoother(filter_state, A_seq, Q_dummy)
+    return gaussx.rts_smoother(filter_state, A_seq)
 
 
 def _require_stationary(

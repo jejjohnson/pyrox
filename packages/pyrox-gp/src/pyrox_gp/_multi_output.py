@@ -7,7 +7,7 @@ Kronecker-style factors that later solvers can exploit.
 
 The ``*_operator`` methods return structure-preserving
 `lineax.AbstractLinearOperator` objects built from ``gaussx``
-primitives (`gaussx.Kronecker`, `gaussx.SumOperator`,
+primitives (`gaussx.Kronecker`, `gaussx.sum_operator`,
 `gaussx.BlockDiag`) so downstream solvers and log-determinant
 strategies can exploit the block / Kronecker structure. Each method also
 exposes a dense counterpart (``cross_covariance``, ``K_uu``, ...) for
@@ -24,7 +24,7 @@ import jax
 import jax.numpy as jnp
 import lineax as lx
 import numpy as np
-from gaussx import BlockDiag, Kronecker, SumOperator, oilmm_back_project, oilmm_project
+from gaussx import BlockDiag, Kronecker, oilmm_back_project, oilmm_project, sum_operator
 from jaxtyping import Array, Float
 
 from pyrox_gp._context import _kernel_context, _kernel_contexts
@@ -266,7 +266,7 @@ class LMCKernel(eqx.Module):
         ]
         if len(terms) == 1:
             return terms[0]
-        return SumOperator(*terms)
+        return sum_operator(*terms)
 
     def cross_covariance(
         self,
@@ -527,7 +527,7 @@ class OILMMKernel(eqx.Module):
         ]
         if len(terms) == 1:
             return terms[0]
-        return SumOperator(*terms)
+        return sum_operator(*terms)
 
     def signal_covariance(
         self,

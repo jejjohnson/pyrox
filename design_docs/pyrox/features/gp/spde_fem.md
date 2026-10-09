@@ -1,9 +1,22 @@
 ---
-status: draft
+status: superseded
 version: 0.1.0
 ---
 
 # pyrox.gp x SPDE / Finite Element GP Approximation
+
+> **Superseded.** None of the layers below were built in pyrox-gp; the work
+> landed elsewhere (see pyrox#256, P10). The maths in sections 1-8 still
+> describes the method and is kept as the reference.
+>
+> | This document | New home |
+> |---|---|
+> | Layer 0, `pyrox.gp._src.fem` (mesh, FEM matrices) | `gaussx.fem_matrices`, `gaussx.fem_projector`, `gaussx.spde_precision` |
+> | Layer 1, `SPDESolver` | `gaussx.GaussianMRF` with `gaussx.SparseCholeskySolver` |
+> | Layer 2, `spde_gp_factor` | the `pyrox_lgm.SPDE` component and its NumPyro face |
+>
+> Non-stationary and rational-$\alpha$ extensions (section 8) remain
+> follow-ups in gaussx.
 
 **Subject:** Matérn GPs via the SPDE approach (Lindgren, Rue & Lindström 2011).
 Discretize the Whittle-Matérn SPDE on a triangulated mesh using piecewise-linear

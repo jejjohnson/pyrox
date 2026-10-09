@@ -20,7 +20,27 @@ before collection begins.
 
 from __future__ import annotations
 
+import warnings
+
 import jax
+import pytest
 
 
 jax.config.update("jax_enable_x64", True)
+
+
+@pytest.fixture(autouse=True)
+def _gaussx_deprecations_are_errors():
+    """Fail on any call to a gaussx name or call form slated for removal.
+
+    A lazy filter (rather than a ``filterwarnings`` ini entry) so gaussx
+    is imported after the x64 flag above and only when it is installed.
+    """
+    try:
+        from gaussx._deprecation import GaussxDeprecationWarning
+    except ImportError:
+        yield
+        return
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", GaussxDeprecationWarning)
+        yield
