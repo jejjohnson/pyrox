@@ -19,8 +19,9 @@ component here wraps it with hyperparameters and constraints.
 
 - Subclass `AbstractComponent` (an `eqx.Module`, not a `PyroxModule`):
   `name` and `n` as `eqx.field(static=True)`, a custom `__init__` with
-  keyword-only `name=` and `*_prior=None` defaulting to `PCPrecision(1,
-  0.01)` (see `_tau_prior`).
+  keyword-only `name=` and `*_prior=None` defaulting to the matching PC
+  prior (`tau_prior` → `PCPrecision(1, 0.01)` via `_tau_prior`,
+  `rho_prior` → `PCAR1Rho`, `phi_prior` → `PCBYM2Phi`).
 - Provide `n_nodes`, `theta_spec() -> {key: (prior, transform)}` (transform
   from `default_transform`) and `prior(theta, *, constraint="hard" | "soft"
   | "none", soft_constraint_scale=1e-3)` returning `gx.GaussianMRF` /
@@ -68,7 +69,8 @@ Docstring with the precision / density in MathJax, the R-INLA equivalent
   tail probability equals α, atol 1e-6) and a support test
   (`test_pc_priors.py`).
 - R-INLA, when it has the model: add a case to `make_fixtures.R`, run
-  `Rscript tests/fixtures/rinla/make_fixtures.R` (R + INLA + fmesher +
+  `Rscript packages/pyrox-lgm/tests/fixtures/rinla/make_fixtures.R` from the
+  repo root (R + INLA + fmesher +
   jsonlite), commit the JSON, and add a `_case` branch plus `CASES` and
   `TOLERANCES` entries in `test_rinla_fixtures.py`, recording the measured
   discrepancy next to each tolerance. If R is unavailable, say so in the PR

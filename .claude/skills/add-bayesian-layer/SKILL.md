@@ -32,9 +32,12 @@ Read "The contracts" in the root `AGENTS.md` (sites) and
 - Subclass `PyroxModule` (`from pyrox._core import PyroxModule,
   pyrox_method`). Every configuration field is `eqx.field(static=True)`;
   add `pyrox_name: str | None = eqx.field(static=True, default=None)`.
-- Build with `@classmethod init(cls, ..., *, pyrox_name=None)`: keyword-only
-  options, `ValueError` on bad values (see `_require_positive` in
-  `_siren.py`). A pure-prior layer takes no PRNG key.
+- Construction: a layer of plain fields (like `DenseReparameterization`)
+  uses the generated constructor; one that needs a key or validation gets a
+  `@classmethod init(cls, ..., *, pyrox_name=None)` with keyword-only
+  options and `ValueError` on bad values (see `_require_positive` in
+  `_siren.py`). A pure-prior layer takes no PRNG key. (Some older layers
+  declare `pyrox_name` as a plain field; new code uses the static one.)
 - In `@pyrox_method def __call__(self, x)`:
   - pure prior: `W = self.pyrox_sample("weight",
     dist.Normal(0, s).expand([d_in, d_out]).to_event(2))`, then
@@ -53,7 +56,7 @@ Read "The contracts" in the root `AGENTS.md` (sites) and
   registers** (`<pyrox_name>.weight`, …), `Args:` / `Returns:` with shapes,
   and an `Examples:` block that runs. No Sphinx markup
   (`tests/nn/test_docstrings.py`).
-- End the module with `__all__`.
+- A new module ends with `__all__`.
 
 ## 4. Export and document
 

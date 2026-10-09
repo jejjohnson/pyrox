@@ -48,8 +48,9 @@ downstream package.
 - A handler-composition case in `test_core_numpyro_integration.py` for any
   change to naming, caching or the guard.
 - Run every package's suite, not just core's: `uv run pytest --no-cov -m "not slow"`
-  from the root, then `-m slow` for pyrox-gp's and pyrox-nn's inference
-  tests, which exercise the bridge under SVI / MCMC.
+  from the root (it includes the core's NUTS / SVI / handler checks), then
+  `-m slow` for pyrox-gp's inference tests and pyrox-nn's BNF estimator
+  tests, which exercise the bridge in longer fits.
 
 ## 4. Docs
 
