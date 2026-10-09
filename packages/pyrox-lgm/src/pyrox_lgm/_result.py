@@ -33,6 +33,8 @@ _MAX_SKEW = 0.99
 _GL_NODES, _GL_WEIGHTS = np.polynomial.legendre.leggauss(40)
 # Simpson points (odd) for the moments of a range-limited mixture.
 _N_LIMIT = 801
+# Columns per Simpson chunk, bounding the (801, chunk) grids.
+_CHUNK = 2048
 
 
 def skew_normal_params(mean, var, skew):
@@ -62,6 +64,65 @@ def skew_normal_cdf(x, xi, omega, alpha):
     return ndtr(z) - 2.0 * owen
 
 
+def _truncated_gaussian_moments(means, s, weights, a, b, center):
+    r"""Mean and variance of $\sum_k w_k\,\mathcal N(m_k, s_k^2)$ on ``[a, b]``.
+
+    Per component, with standardised bounds $\alpha, \beta$ and
+    $Z = \Phi(\beta) - \Phi(\alpha)$: $\int_a^b (x - m) f =
+    s(\varphi(\alpha) - \varphi(\beta))$ and $\int_a^b (x - m)^2 f =
+    s^2[Z + \alpha\varphi(\alpha) - \beta\varphi(\beta)]$, combined about
+    ``center`` (the mixture mean) to avoid cancellation.
+    """
+    s = jnp.maximum(s, 1e-150)
+    al, be = (a[None, :] - means) / s, (b[None, :] - means) / s
+    pa = jnp.exp(-0.5 * al**2) / math.sqrt(2.0 * math.pi)
+    pb = jnp.exp(-0.5 * be**2) / math.sqrt(2.0 * math.pi)
+    z = ndtr(be) - ndtr(al)
+    d = means - center[None, :]
+    first = s * (pa - pb)
+    second = s**2 * (z + al * pa - be * pb)
+    w = weights[:, None]
+    m0 = jnp.sum(w * z, axis=0)
+    m1 = jnp.sum(w * (d * z + first), axis=0) / m0
+    m2 = jnp.sum(w * (second + 2.0 * d * first + d**2 * z), axis=0) / m0
+    return center + m1, m2 - m1**2
+
+
+def _truncated_grid_moments(weights, xi, omega, alpha, a, b):
+    """Mean and variance of a skew-normal mixture on ``[a, b]``: Simpson's
+    rule on ``_N_LIMIT`` points, in column chunks of at most ``_CHUNK``."""
+    n = a.shape[0]
+    chunk = min(n, _CHUNK)
+    pad = -n % chunk
+    t = jnp.linspace(0.0, 1.0, _N_LIMIT)
+    simpson = np.ones(_N_LIMIT)
+    simpson[1:-1:2], simpson[2:-1:2] = 4.0, 2.0
+    simpson = jnp.asarray(simpson)[:, None]
+
+    def moments(cols):
+        xi_c, om_c, al_c, lo, hi = cols  # (K, chunk) x3, (chunk,) x2
+        x = lo[None, :] + (hi - lo)[None, :] * t[:, None]
+
+        def add(k, acc):
+            z = (x - xi_c[k]) / om_c[k]
+            pdf = 2.0 * jnp.exp(-0.5 * z**2) * ndtr(al_c[k] * z)
+            return acc + weights[k] * pdf / (math.sqrt(2.0 * math.pi) * om_c[k])
+
+        f = jax.lax.fori_loop(0, xi_c.shape[0], add, jnp.zeros_like(x)) * simpson
+        m0 = jnp.sum(f, axis=0)
+        mean_t = jnp.sum(f * x, axis=0) / m0
+        return mean_t, jnp.sum(f * (x - mean_t) ** 2, axis=0) / m0
+
+    def split(v):  # (..., n) -> (n_chunks, ..., chunk); pads repeat the last column
+        v = jnp.pad(v, [(0, 0)] * (v.ndim - 1) + [(0, pad)], mode="edge")
+        return jnp.moveaxis(v.reshape(*v.shape[:-1], -1, chunk), -2, 0)
+
+    mean_t, var_t = jax.lax.map(
+        moments, (split(xi), split(omega), split(alpha), split(a), split(b))
+    )
+    return mean_t.reshape(-1)[:n], var_t.reshape(-1)[:n]
+
+
 def mixture_summary(
     means: Float[Array, "K n"],
     variances: Float[Array, "K n"],
@@ -80,7 +141,9 @@ def mixture_summary(
     spline-corrected Gaussian on $\\pm 5$ sds, ``GMRFLib_density_combine``):
     a component far wider than the mixture, from a design point in a long
     tail of $\\theta$, then loses the mass outside that range. Moments by
-    Simpson's rule on ``_N_LIMIT`` points.
+    a closed form for Gaussian components (memory $O(Kn)$), and for
+    skew-normal ones Simpson's rule on ``_N_LIMIT`` points in column chunks
+    of bounded memory.
     """
     w = weights[:, None]
     mean = jnp.sum(w * means, axis=0)
@@ -100,31 +163,13 @@ def mixture_summary(
         def component_cdf(x):
             return skew_normal_cdf(x[None, :], xi, omega, alpha)
 
-    def mixture_pdf(x):  # x of shape (G, n)
-        def add(k, acc):
-            if skewness is None:
-                sk = jnp.maximum(s[k], 1e-300)
-                z = (x - means[k]) / sk
-                pdf = jnp.exp(-0.5 * z**2) / (math.sqrt(2.0 * math.pi) * sk)
-            else:
-                z = (x - xi[k]) / omega[k]
-                pdf = 2.0 * jnp.exp(-0.5 * z**2) * ndtr(alpha[k] * z)
-                pdf = pdf / (math.sqrt(2.0 * math.pi) * omega[k])
-            return acc + weights[k] * pdf
-
-        return jax.lax.fori_loop(0, means.shape[0], add, jnp.zeros_like(x))
-
     p_lo = p_mass = None
     if limit is not None:
         a, b = mean - limit * sd, mean + limit * sd
-        t = jnp.linspace(0.0, 1.0, _N_LIMIT)
-        simpson = np.ones(_N_LIMIT)
-        simpson[1:-1:2], simpson[2:-1:2] = 4.0, 2.0
-        x = a[None, :] + (b - a)[None, :] * t[:, None]
-        f = mixture_pdf(x) * jnp.asarray(simpson)[:, None]
-        m0 = jnp.sum(f, axis=0)
-        mean_t = jnp.sum(f * x, axis=0) / m0
-        var_t = jnp.sum(f * (x - mean_t) ** 2, axis=0) / m0
+        if skewness is None:
+            mean_t, var_t = _truncated_gaussian_moments(means, s, weights, a, b, mean)
+        else:
+            mean_t, var_t = _truncated_grid_moments(weights, xi, omega, alpha, a, b)
         p_lo = jnp.sum(w * component_cdf(a), axis=0)
         p_mass = jnp.sum(w * component_cdf(b), axis=0) - p_lo
         ok = sd > 0

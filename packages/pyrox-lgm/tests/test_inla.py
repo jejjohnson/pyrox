@@ -703,6 +703,80 @@ def test_vb_subspace_is_r_inlas_node_selection():
         assert _vb_subspace(model).tolist() == [*nodes, n]
 
 
+def test_vb_subspace_keeps_the_group_axis_of_a_replicated_kronecker():
+    # Replicate(Kronecker(main, group)) is (replicate, main, group) in the flat
+    # vector, and the node limit shares 1024 over n_group * n_rep.
+    from pyrox_lgm._inla import _vb_subspace
+
+    n, ng, nrep = 100, 4, 2
+    comp = lgm.Replicate(
+        lgm.Kronecker(lgm.RW2(n, name="t"), lgm.AR1(ng, name="g")), nrep, name="st"
+    )
+    model = lgm.LGM((comp,), lgm.FixedEffects(("intercept",)), lgm.Gaussian())
+    js = (np.arange(30) * (n // 30) + max(1, (n // 30) // 2)) % n
+    nodes = [
+        r * n * ng + j * ng + g for r in range(nrep) for j in js for g in range(ng)
+    ]
+    got = _vb_subspace(model).tolist()
+    assert got == [*sorted(nodes), n * ng * nrep]
+    assert len(got) == 30 * ng * nrep + 1
+
+
+def test_theta_marginals_with_only_the_mode_fall_back_to_the_hessian():
+    from pyrox_lgm._inla import _theta_marginals
+
+    mu, cov = np.array([0.3]), np.array([[0.4]])
+    evals, evecs = np.linalg.eigh(np.linalg.inv(cov))
+    ones = (np.ones(1), np.ones(1))
+    ref = _theta_marginals(mu, cov, evecs, evals, ones)
+    only_mode = (np.array([0.3]), np.array([0.0]))
+    got = _theta_marginals(mu, cov, evecs, evals, ones, only_mode)
+    assert np.allclose(got[0], ref[0]) and np.allclose(got[1], ref[1])
+
+
+def test_analytic_range_limited_moments_match_numerical_integration():
+    # Two-component mixture, per column: the closed-form moments on mean +- 5
+    # sds against a fine trapezoid rule, and the memory-bounded skew-normal path
+    # (zero skewness is the Gaussian) against the closed form.
+    means = jnp.array([[0.0, 1.0, -2.0], [3.0, 1.5, 0.5]])
+    variances = jnp.array([[1.0, 0.25, 4.0], [9.0, 0.5, 1.0]])
+    w = jnp.array([0.7, 0.3])
+    cut = mixture_summary(means, variances, w, limit=5.0)
+    mean = jnp.sum(w[:, None] * means, 0)
+    sd = jnp.sqrt(jnp.sum(w[:, None] * (variances + means**2), 0) - mean**2)
+    for j in range(3):
+        a, b = float(mean[j] - 5 * sd[j]), float(mean[j] + 5 * sd[j])
+        x = np.linspace(a, b, 400_001)
+        f = sum(
+            float(w[k])
+            * norm.pdf(x, float(means[k, j]), np.sqrt(float(variances[k, j])))
+            for k in range(2)
+        )
+        m0 = np.trapezoid(f, x)
+        m = np.trapezoid(f * x, x) / m0
+        v = np.trapezoid(f * (x - m) ** 2, x) / m0
+        assert np.isclose(float(cut.mean[j]), m, atol=1e-9)
+        assert np.isclose(float(cut.sd[j]), np.sqrt(v), atol=1e-9)
+    skew0 = mixture_summary(means, variances, w, jnp.zeros((2, 3)), limit=5.0)
+    assert np.allclose(skew0.mean, cut.mean, atol=1e-8)
+    assert np.allclose(skew0.sd, cut.sd, atol=1e-8)
+
+
+def test_the_skew_normal_summary_is_chunked_over_columns(monkeypatch):
+    import pyrox_lgm._result as result_mod
+
+    rng = np.random.default_rng(1)
+    means = jnp.asarray(rng.normal(size=(2, 7)))
+    variances = jnp.asarray(rng.uniform(0.5, 2.0, size=(2, 7)))
+    skew = jnp.asarray(rng.uniform(-0.5, 0.5, size=(2, 7)))
+    w = jnp.array([0.4, 0.6])
+    full = mixture_summary(means, variances, w, skew, limit=5.0)
+    monkeypatch.setattr(result_mod, "_CHUNK", 3)  # 7 columns -> 3 padded chunks
+    chunked = mixture_summary(means, variances, w, skew, limit=5.0)
+    for a, b in zip(full, chunked, strict=True):
+        assert np.allclose(a, b)
+
+
 def test_range_limited_mixture_summary():
     # One Gaussian: +-5 sds hold all but 6e-7 of it. A wide component that
     # reaches far beyond the mixture's +-5 sds loses that mass.
@@ -725,3 +799,34 @@ def test_range_limited_mixture_summary():
     sd_cut = np.sqrt((0.99 * second(1.0) + 0.01 * second(20.0)) / mass)
     assert np.isclose(float(cut.sd[0]), sd_cut, rtol=1e-6)
     assert float(cut.sd[0]) < 0.9 * sd_full
+
+
+@pytest.mark.slow
+def test_an_unconverged_skewness_probe_asks_for_the_larger_budget(monkeypatch):
+    import pyrox_lgm._inla as inla_mod
+
+    n = 12
+    t = np.arange(n)
+    y = np.sin(t / 3.0) + 0.1 * np.cos(5.0 * t)
+    model = lgm.LGM(
+        (lgm.RW1(n, name="t"),), lgm.FixedEffects(("intercept",)), lgm.Gaussian()
+    )
+    data = {"y": y, "t": t}
+    real = inla_mod._log_post_converged
+
+    def fails_below(budget):
+        def probe(model_, A, d, max_newton, u):
+            value, ok = real(model_, A, d, max_newton, u)
+            return value, ok & (max_newton >= budget)
+
+        return probe
+
+    clean = lgm.inla(model, data, strategy="gaussian")
+    monkeypatch.setattr(inla_mod, "_log_post_converged", fails_below(200))
+    with pytest.warns(UserWarning, match="skewness probe"):
+        res = lgm.inla(model, data, strategy="gaussian")
+    assert np.allclose(res.theta_weights, clean.theta_weights, atol=1e-6)
+
+    monkeypatch.setattr(inla_mod, "_log_post_converged", fails_below(10_000))
+    with pytest.raises(RuntimeError, match="skewness probe"):
+        lgm.inla(model, data, strategy="gaussian")

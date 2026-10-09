@@ -52,8 +52,16 @@ def _vb_layout(c):
         n, ng = c.main.n_nodes, c.group.n_nodes
         return n, ng, 1, lambda j, g, r: j * ng + g
     if isinstance(c, Replicate):
-        n = c.component.n_nodes
-        return n, 1, c.n_rep, lambda j, g, r: r * n + j
+        # Recurse: replicating a Kronecker keeps its group axis, with the
+        # outer replicate the slowest index.
+        n, ng, inner, index = _vb_layout(c.component)
+        total = c.component.n_nodes
+        return (
+            n,
+            ng,
+            inner * c.n_rep,
+            lambda j, g, r: (r // inner) * total + index(j, g, r % inner),
+        )
     return c.n_nodes, 1, 1, lambda j, g, r: j
 
 
@@ -140,6 +148,16 @@ def _neg_log_post(model, A, data, max_newton, u):
 @eqx.filter_jit
 def _log_post(model, A, data, max_newton, u):
     return model.log_posterior_theta(u, data, projector=A, max_newton=max_newton)
+
+
+@eqx.filter_jit
+def _log_post_converged(model, A, data, max_newton, u):
+    fit = model.laplace(u, data, projector=A, max_newton=max_newton)
+    return fit.log_marginal + model.log_prior(u), fit.converged
+
+
+class _UnconvergedProbe(Exception):
+    """An inner Laplace fit at a skewness probe did not converge."""
 
 
 @eqx.filter_jit
@@ -512,16 +530,18 @@ def inla(
         return result
     budget = 4 * max_newton
     warnings.warn(
-        f"the inner Newton fit at the theta-mode or along its search did not "
-        f"converge in {max_newton} iterations; re-running the whole fit with "
+        f"the inner Newton fit at a skewness probe, at the theta-mode or along "
+        f"its search did not converge in {max_newton} iterations; re-running "
+        f"the whole fit with "
         f"max_newton={budget}",
         stacklevel=2,
     )
     result, mode_ok = run(budget)
     if not mode_ok or result is None:
         raise RuntimeError(
-            f"the inner Newton fit at the theta-mode or along its search did not "
-            f"converge in {budget} iterations; raise max_newton or check the model"
+            f"the inner Newton fit at a skewness probe, at the theta-mode or along "
+            f"its search did not converge in {budget} iterations; raise "
+            f"max_newton or check the model"
         )
     return result
 
@@ -554,6 +574,12 @@ def _inla_once(
     def log_post(u):
         return _log_post(model, A, data, max_newton, u)
 
+    def probe(u):  # the skewness probes: an unconverged fit asks for a retry
+        value, ok = _log_post_converged(model, A, data, max_newton, u)
+        if not bool(ok):
+            raise _UnconvergedProbe
+        return value
+
     # 1. theta-mode and design.
     u0 = jnp.zeros(m) if theta_init is None else jnp.asarray(theta_init, dtype=float)
     if u0.shape != (m,):
@@ -585,7 +611,10 @@ def _inla_once(
         # out that stretch's Jacobian, as R-INLA's do; the marginal
         # likelihood below keeps it.
         evals, evecs, scale = _eigen_axes(neg_h)
-        skew_corr = _skewness_corrections(log_post, u_star, scale, float(lp_mode))
+        try:
+            skew_corr = _skewness_corrections(probe, u_star, scale, float(lp_mode))
+        except _UnconvergedProbe:
+            return None, False  # inla() escalates the budget or raises
         x, log_delta_np = _rinla_design(m)
         s_minus, s_plus = skew_corr
         stretch = np.where(x > 0, s_plus, np.where(x < 0, s_minus, 1.0))
@@ -604,7 +633,10 @@ def _inla_once(
         )
         if integration != "eb":  # for the hyperparameter marginals
             evals, evecs, scale = _eigen_axes(neg_h)
-            skew_corr = _skewness_corrections(log_post, u_star, scale, float(lp_mode))
+            try:
+                skew_corr = _skewness_corrections(probe, u_star, scale, float(lp_mode))
+            except _UnconvergedProbe:
+                return None, False  # inla() escalates the budget or raises
         # The design's log-weights are log(Delta_k) + lp_k up to a constant,
         # with lp_k from the max_newton fit; keep log(Delta_k) to reweight.
         log_delta = log_w - jnp.stack([log_post(u) for u in points])
@@ -791,6 +823,10 @@ def _theta_marginals(u_star, cov_u, evecs, evals, skew, axis_points=None):
     s_minus, s_plus = skew
     g = np.linspace(-1.0, 1.0, 4001) * 10.0 * max(1.0, s_minus.max(), s_plus.max())
     grid, prob = np.empty((m, g.size)), np.empty((m, g.size))
+    # A spline needs knots beyond the mode: with fewer than three surviving
+    # design points, use the Hessian's split-normal instead.
+    if axis_points is not None and axis_points[0].size < 3:
+        axis_points = None
     for j in range(m):
         if axis_points is not None:
             xk = (axis_points[0] - u_star[j]) / sd[j]
