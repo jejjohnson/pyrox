@@ -1,0 +1,14 @@
+{
+  "name": "pyrox",
+  "owner": {
+    "name": "jejjohnson"
+  },
+  "description": "Claude Code plugins for probabilistic modelling with Equinox and NumPyro on pyrox.",
+  "plugins": [
+    {
+      "name": "pyrox",
+      "source": "./plugins/pyrox",
+      "description": "Build Bayesian models on pyrox (the Equinox ↔ NumPyro bridge, pyrox-gp, pyrox-nn, pyrox-lgm) instead of re-implementing site plumbing, GP likelihoods, Bayesian layers or INLA: a model-building skill and a reuse reviewer."
+    }
+  ]
+}
