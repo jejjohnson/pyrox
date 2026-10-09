@@ -21,7 +21,7 @@ only the probabilistic wiring.
 |---|---|---|---|
 | Guide | `Guide` (`_protocols.py`) | `sample(key)`, `log_prob(f)`; for `svgp_elbo` also `predict(K_xz, K_zz_op, K_xx_diag) -> (mean, var)` and `kl_divergence(prior_cov_op)` | `WhitenedGuide`, `NaturalGuide` (`_guides.py`) |
 | Likelihood | `Likelihood` (`_protocols.py`) | `log_prob(f, y, X=None)` summed over points; `latent_dim` static field if > 1 | `PoissonLikelihood`, `StudentTLikelihood` (`_likelihoods.py`) |
-| Inducing features | `InducingFeatures` protocol (`_inducing.py`) | `num_features`, `K_uu(kernel, *, jitter)` → `lx.DiagonalLinearOperator` (jitter via `_diagonal_with_jitter`), `k_ux(x, kernel)` | `FourierInducingFeatures` |
+| Inducing features | `InducingFeatures` protocol (`_inducing.py`) | `num_features`, `K_uu(kernel, *, jitter)` → an `lx.DiagonalLinearOperator` for orthogonal features (jitter via `_diagonal_with_jitter`), else a PSD-tagged operator; `k_ux(x, kernel)` | `FourierInducingFeatures` |
 | Non-Gaussian inference | `_NonGaussStrategy` (`_models.py`) | `fit(prior, likelihood, y) -> NonGaussConditionedGP` | `LaplaceInference` (`_inference_nongauss.py`) |
 | Multi-output kernel | the `MultiOutputKernel` union (`_multi_output_models.py`) | `num_outputs`, `num_latents`, `full_covariance_operator`, `cross_covariance_operator`, `diag(X) -> (N, P)`; add it to the union and `_latent_kernels` | `ICMKernel` (`_multi_output.py`) |
 
@@ -57,8 +57,9 @@ Rules for all of them:
 - Guides / likelihoods: `log_prob` and shapes; an SVI smoke run.
 - Inference strategies: one unmarked tiny smoke test (`fit` converges on 5–10
   points), deeper convergence tests marked `slow`.
-- Inducing features: `K_uu` is diagonal (`test_inducing_features.py`
-  pattern) and matches the dense covariance of the features.
+- Inducing features: `K_uu` matches the dense covariance of the features,
+  and is diagonal when they are orthogonal (`test_inducing_features.py`
+  pattern).
 - A kernel with priors inside the component draws once per model call
   (duplicate-site check under `handlers.trace()`).
 

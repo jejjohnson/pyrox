@@ -19,8 +19,12 @@ import `api` or `preprocessing`, which import pandas at module scope.
 
 - **A layer is a `PyroxModule`** with every configuration field
   `eqx.field(static=True)` and `pyrox_name: str | None =
-  eqx.field(static=True, default=None)`. Build it with a `@classmethod
-  init(...)` taking keyword-only options and validating them (`ValueError`).
+  eqx.field(static=True, default=None)` (older layers declare a plain
+  `str | None = None`; new ones use the static field). A layer that needs a
+  key or validation is built with a `@classmethod init(...)` taking
+  keyword-only options and raising `ValueError` (`BayesianSIREN`,
+  `RandomFeatureGaussianProcess`); a plain-field layer such as
+  `DenseReparameterization` uses the generated constructor.
 - **Two shapes of layer:**
   - *pure prior* — sample the weights in a `@pyrox_method __call__` from a
     full-shape prior (`dist.Normal(0, s).expand([d_in, d_out]).to_event(2)`)

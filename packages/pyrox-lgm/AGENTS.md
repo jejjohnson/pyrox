@@ -25,8 +25,9 @@ One facade, `pyrox_lgm`:
   `theta_spec() -> {key: (prior, transform)}` and `prior(theta, *,
   constraint=...)` returning a `gx.GaussianMRF` / `gx.IntrinsicGMRF`;
   override `n_index`, `assembly_precision`, `constraint_basis` or
-  `projector` only when needed. Keyword-only `name=` and `*_prior=` with
-  a `PCPrecision` default; exemplars `IID` (proper) and `RW1` (intrinsic) in
+  `projector` only when needed. Keyword-only `name=` and `*_prior=`
+  defaulting to the matching PC prior (`tau_prior` → `PCPrecision`,
+  `rho_prior` → `PCAR1Rho`, `phi_prior` → `PCBYM2Phi`); exemplars `IID` (proper) and `RW1` (intrinsic) in
   `_temporal.py`.
 - **Wiring a new component:** export it from `_components/__init__.py` and
   the package `__init__`; register it in `_MODELS` in `_formula.py`; extend
@@ -48,7 +49,8 @@ One facade, `pyrox_lgm`:
 ## R-INLA fixtures
 
 `tests/fixtures/rinla/make_fixtures.R` (R + INLA + fmesher + jsonlite;
-`Rscript tests/fixtures/rinla/make_fixtures.R`) writes one JSON per case.
+`Rscript packages/pyrox-lgm/tests/fixtures/rinla/make_fixtures.R` from the
+repo root) writes one JSON per case.
 `tests/test_rinla_fixtures.py` rebuilds each case and compares (slow) with
 per-case `TOLERANCES` whose measured values are recorded in comments. A new
 case needs an R block, a `_case` branch and entries in `CASES` and

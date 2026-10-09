@@ -99,7 +99,7 @@ Fill in sections according to the template's intent. **Minimum required sections
 
 ### Step 4 — Pick labels
 
-Every issue carries exactly one `type:*`, one or more `area:*`, at most one `layer:*`, one `wave:*`, and one `priority:*`. Common combinations:
+Every issue carries exactly one `type:*`, one or more `area:*`, at most one `layer:*`, one `wave:*`, and one `priority:*`. Common combinations (add the `priority:*` and `wave:*` that fit):
 
 | Work type | Labels |
 |---|---|
@@ -182,7 +182,7 @@ When the user has a `.plans/<wave>-backlog.md` file drafted from `docs/templates
 
 ## Common pitfalls
 
-- **Missing label** — `gh issue create --label` fails silently if the label doesn't exist. Run `make gh-labels` first on a fresh repo.
+- **Missing label** — `gh issue create --label` fails ("could not add label") and creates nothing if the label doesn't exist. Run `make gh-labels` first on a fresh repo.
 - **Missing milestone** — same. `gh api repos/:owner/:repo/milestones --method POST -f title="vX.Y-<slug>"` to create.
 - **Template frontmatter in the body** — `gh issue create --body-file` renders the frontmatter block as literal text. Strip the `---` block before writing the temp file.
 - **Shell-escaped backticks** — do NOT escape backticks when passing a body via `--body`. Use `--body-file` with a temp file for any body containing code fences or backticks. Heredocs with single-quoted delimiters (`<<'EOF'`) also preserve backticks correctly.

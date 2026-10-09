@@ -54,8 +54,9 @@ Copy `RBF` (or `Matern` when there is a static structural field such as
   `kernellib.functional` function at the init values.
 - `diag(X)` equals the Gram's diagonal.
 - The sites appear in `handlers.trace()` (`param` without a prior,
-  `sample` after `set_prior`; `Delta` / `Normal` guide sites after
-  `autoguide` + `set_mode("guide")`).
+  `sample` after `set_prior`; after `autoguide` + `set_mode("guide")`, a
+  `Delta` site (`"delta"`) or a transformed-Normal site (`"normal"`, which
+  maps back onto the positive support)).
 - `frozen()` returns the kernellib kernel with the same Gram.
 - Inside `GPPrior` + `gp_factor`, a model with priors on the
   hyperparameters runs under SVI for a few steps.

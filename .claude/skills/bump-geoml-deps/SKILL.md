@@ -17,8 +17,10 @@ several files that must agree.
 | geonnax | `packages/pyrox-gp/pyproject.toml`, `packages/pyrox-nn/pyproject.toml` (direct `geonnax @ git+…@vX` reference) |
 | gauss-flows | `packages/pyrox-gp/pyproject.toml` `[flows]` extra (pinned by commit) |
 
-Also check the README's installation note (the `override-dependencies`
-snippet) and the notebooks' Colab install cells if they pin a tag.
+Also update the README's installation note (the `override-dependencies`
+snippet names the kernellib / gaussx versions and has lagged behind the
+workspace pins before) and the notebooks' Colab install cells if they pin a
+tag.
 
 ## 2. Bump
 
