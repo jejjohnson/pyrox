@@ -6,8 +6,10 @@ three steps:
 1. the hyperparameter mode of $\log\tilde\pi(u\mid y) = \log\tilde\pi(y\mid\theta)
    + \log\pi(u)$ (gaussx's Laplace marginal, with exact gradients), by L-BFGS
    in the unconstrained coordinates $u$;
-2. an integration design $\{u_k, w_k\}$ around it (`gaussx.theta_design`:
-   ``"grid"`` for $m \le 2$, ``"ccd"`` above, ``"eb"`` on request);
+2. an integration design $\{u_k, w_k\}$ around it: by default R-INLA's own
+   (`_rinla_design`: its fixed grid for $m \le 2$, a CCD above, both
+   stretched by the skewness corrections), or `gaussx.theta_design`'s
+   ``"grid"``, ``"ccd"`` or ``"eb"`` on request;
 3. per design point, the Gaussian approximation of $x\mid y, \theta_k$
    (mode, Takahashi marginal variances kriged onto the hard constraints,
    the low-rank VB mean correction under ``strategy="vb"``, the
@@ -20,7 +22,7 @@ from __future__ import annotations
 import math
 import warnings
 from collections.abc import Mapping
-from typing import Literal
+from typing import Literal, cast
 
 import equinox as eqx
 import gaussx as gx
@@ -34,22 +36,98 @@ from pyrox_lgm._model import LGM
 from pyrox_lgm._result import INLAResult, Summary, mixture_summary
 
 
-# Components with at most this many nodes get the VB mean correction (with
-# the fixed effects), as R-INLA's ``control.vb`` limits it to small effects.
-_VB_MAX_NODES = 30
+# R-INLA's ``control.vb`` node selection for the VB mean correction
+# (``f.enable.limit``): each component contributes at most
+# min(30, 1024 / (n_f * n_group * n_rep)) nodes per group and replicate.
+_VB_LIMIT = 30
+_VB_LIMIT_MAX = 1024
+
+
+def _vb_layout(c):
+    """``(n, n_group, n_rep, index)``: a component's nodes as R-INLA's f()
+    sees them, ``index(j, g, r)`` the flat node of main node ``j``."""
+    from pyrox_lgm._components._combinators import Kronecker, Replicate
+
+    if isinstance(c, Kronecker):
+        n, ng = c.main.n_nodes, c.group.n_nodes
+        return n, ng, 1, lambda j, g, r: j * ng + g
+    if isinstance(c, Replicate):
+        # Recurse: replicating a Kronecker keeps its group axis, with the
+        # outer replicate the slowest index.
+        n, ng, inner, index = _vb_layout(c.component)
+        total = c.component.n_nodes
+        return (
+            n,
+            ng,
+            inner * c.n_rep,
+            lambda j, g, r: (r // inner) * total + index(j, g, r % inner),
+        )
+    return c.n_nodes, 1, 1, lambda j, g, r: j
+
+
+def _vb_subspace(model: LGM) -> np.ndarray:
+    """The nodes R-INLA's VB mean correction moves: the fixed effects, every
+    node of a small component, and ``lim`` evenly spaced nodes of a larger
+    one (``j * (n // lim) + max(1, (n // lim) // 2)`` for ``j < lim``)."""
+    idx = []
+    n_f = len(model.components)
+    for c, (a, _) in zip(model.components, model.slices().values(), strict=False):
+        n, ng, nrep, index = _vb_layout(c)
+        lim = min(_VB_LIMIT, _VB_LIMIT_MAX // (n_f * ng * nrep))
+        if lim <= 0:
+            continue
+        if n <= lim:
+            js = np.arange(n)
+        else:
+            step = max(1, n // lim)
+            js = (np.arange(lim) * step + max(1, step // 2)) % n
+        for r in range(nrep):
+            for g in range(ng):
+                idx.extend(a + index(j, g, r) for j in js.tolist())
+    n = model.n_latent
+    idx.extend(range(n - model.n_fixed, n))
+    return np.asarray(sorted(set(idx)), dtype=int)
+
 
 # Gauss-Hermite nodes per dimension for the empirical-Bayes moments.
 _EB_ORDER = 20
 
-
-def _vb_subspace(model: LGM) -> np.ndarray:
-    idx = []
-    for c, (a, b) in zip(model.components, model.slices().values(), strict=False):
-        if c.n_nodes <= _VB_MAX_NODES:
-            idx.extend(range(a, b))
-    n = model.n_latent
-    idx.extend(range(n - model.n_fixed, n))
-    return np.asarray(idx, dtype=int)
+# R-INLA's integration over theta, as in its default ("experimental") mode
+# since 22.11 (GMRFLib ``design.c`` and ``approx-inference.c``). Designs are
+# in the standardised z of theta = theta* + V Lambda^{-1/2} z. For m <= 2 a
+# fixed grid with fixed weights, for m > 2 a CCD on the unit sphere; either
+# way scaled by f = f0 sqrt(m) and, axis by axis, by the skewness corrections.
+_RINLA_F0 = 1.1
+_RINLA_X1 = np.array([0.0, -3.5, -2.5, -1.75, -1.0, -0.5, 0.5, 1.0, 1.75, 2.5, 3.5])
+_RINLA_W1 = np.array(
+    [
+        *(1.0, 3.187537795, 1.811358205, 1.937929918, 1.431919577, 1.288639321),
+        *(1.288639321, 1.431919577, 1.937929918, 1.811358205, 3.187537795),
+    ]
+)
+# m = 2: the 7 x 7 product grid on these axis values minus its four corners,
+# weights by (|z_1|, |z_2|) (symmetric in sign and in the two axes).
+_RINLA_AXIS2 = (0.0, 0.5, 1.25, 2.25)
+_RINLA_W2 = {
+    (0.0, 0.0): 1.0,
+    (0.0, 0.5): 0.646540918,
+    (0.0, 1.25): 1.17894196,
+    (0.0, 2.25): 1.93160554,
+    (0.5, 0.5): 0.4180151587,
+    (0.5, 1.25): 0.762234217,
+    (0.5, 2.25): 1.248862019,
+    (1.25, 1.25): 1.389904145,
+    (1.25, 2.25): 2.277250821,
+}
+# Skewness corrections from log pi at z = +-sqrt(2) on each axis.
+_SKEW_STEP = math.sqrt(2.0)
+# R-INLA drops a design point from the latent mixtures when its density is
+# below 1/999 of the mode's ("early stop"), and keeps the largest weights
+# that make up 0.999 of the rest (``GMRFLib_weight_prob_one``).
+_EARLY_STOP_DROP = math.log(999.0)
+_WEIGHT_PROB = 0.999
+# Range, in mixture sds, of R-INLA's combined latent marginals.
+_RINLA_LIMIT = 5.0
 
 
 # Module-level compiled pieces. They take the model, the projector and the
@@ -70,6 +148,16 @@ def _neg_log_post(model, A, data, max_newton, u):
 @eqx.filter_jit
 def _log_post(model, A, data, max_newton, u):
     return model.log_posterior_theta(u, data, projector=A, max_newton=max_newton)
+
+
+@eqx.filter_jit
+def _log_post_converged(model, A, data, max_newton, u):
+    fit = model.laplace(u, data, projector=A, max_newton=max_newton)
+    return fit.log_marginal + model.log_prior(u), fit.converged
+
+
+class _UnconvergedProbe(Exception):
+    """An inner Laplace fit at a skewness probe did not converge."""
 
 
 @eqx.filter_jit
@@ -250,6 +338,81 @@ def _theta_mode(model, A, data, max_newton, u0, *, max_iter, tol, verbose):
     )
 
 
+def _ccd_unit(m: int) -> np.ndarray:
+    """CCD on the unit sphere, centre first: axial points and a resolution-V
+    fraction of the 2^m factorial (Sanchez & Sanchez, 2005), as R-INLA's."""
+    cols: list[int] = []
+    forbidden = {0}
+    c = 0
+    while len(cols) < m:  # no defining word shorter than five
+        c += 1
+        if c in forbidden:
+            continue
+        forbidden |= {c} | {c ^ a for a in cols}
+        forbidden |= {c ^ a ^ b for i, a in enumerate(cols) for b in cols[i + 1 :]}
+        cols.append(c)
+    runs = np.arange(1 << max(cols).bit_length())
+    parity = np.array([[bin(r & c).count("1") % 2 for c in cols] for r in runs])
+    factorial = (1.0 - 2.0 * parity) / math.sqrt(m)
+    axial = np.concatenate([np.eye(m), -np.eye(m)])
+    return np.concatenate([np.zeros((1, m)), axial, factorial])
+
+
+def _rinla_design(m: int) -> tuple[np.ndarray, np.ndarray]:
+    r"""R-INLA's design in $z$ before the skewness corrections, centre first.
+
+    Returns ``(x, log_delta)``. For $m \le 2$ its fixed grid (11 and 45
+    points) with fixed weights, scaled by $f = f_0\sqrt m$; above, the CCD
+    on the sphere of radius $f$ with Rue, Martino & Chopin's (2009, sec. 6.5)
+    weights $\Delta_0 = 1 - (K - 1)\Delta$,
+    $\Delta = [(K - 1)(1 + e^{-f^2/2}(f^2/m - 1))]^{-1}$.
+    """
+    f = _RINLA_F0 * math.sqrt(m)
+    if m == 1:
+        return f * _RINLA_X1[:, None], np.log(_RINLA_W1)
+    if m == 2:
+        axis = sorted({s * a for a in _RINLA_AXIS2 for s in (1.0, -1.0)})
+        pts = [(a, b) for a in axis for b in axis if min(abs(a), abs(b)) < 2.0]
+        pts.sort(key=lambda p: p != (0.0, 0.0))  # the mode first
+        w = [_RINLA_W2[min(abs(a), abs(b)), max(abs(a), abs(b))] for a, b in pts]
+        return f * np.asarray(pts), np.log(np.asarray(w))
+    x = _ccd_unit(m)
+    k = x.shape[0]
+    w = 1.0 / ((k - 1) * (1.0 + math.exp(-0.5 * f * f) * (f * f / m - 1.0)))
+    log_delta = np.full(k, math.log(w))
+    log_delta[0] = math.log(1.0 - (k - 1) * w)
+    return f * x, log_delta
+
+
+def _eigen_axes(neg_h):
+    """``(evals, evecs, scale)`` of ``-H``, with ``u = u* + scale @ z``."""
+    evals, evecs = np.linalg.eigh(np.asarray(neg_h))
+    return evals, evecs, evecs / np.sqrt(evals)
+
+
+def _skewness_corrections(log_post, u_star, scale, lp_star):
+    r"""R-INLA's per-axis stretch of $z$ on each side of the mode.
+
+    Along each eigen-axis of the Hessian, $\log\tilde\pi$ is evaluated at
+    $z = \pm\sqrt2$; a Gaussian drops by exactly 1 there, so
+    $\sigma_\pm = (\text{drop}_\pm)^{-1/2}$ is the half-scale that a
+    split-normal fitted through those points has (Martins et al., 2013,
+    sec. 3.2). As R-INLA's default (``hessian.correct.skewness.only``),
+    each pair is divided by its geometric mean, so the corrections change
+    only the asymmetry and the Hessian keeps the scale. Returns
+    ``(sigma_minus, sigma_plus)``, each of shape ``(m,)``.
+    """
+    m = u_star.shape[0]
+    out = np.ones((2, m))
+    for j in range(m):
+        for side, sign in enumerate((-1.0, 1.0)):
+            drop = lp_star - float(log_post(u_star + sign * _SKEW_STEP * scale[:, j]))
+            if drop > 0:
+                out[side, j] = 1.0 / math.sqrt(drop)
+    out /= np.sqrt(out[0] * out[1])
+    return out[0], out[1]
+
+
 def inla(
     model: LGM,
     data: Mapping[str, ArrayLike],
@@ -261,6 +424,8 @@ def inla(
     theta_init: ArrayLike | None = None,
     max_theta_iter: int = 200,
     theta_tol: float = 1e-5,
+    grid_step: float = 1.0,
+    grid_threshold: float = 2.5,
     verbose: bool = False,
 ) -> INLAResult:
     r"""Integrated nested Laplace approximation of a latent Gaussian model.
@@ -271,16 +436,38 @@ def inla(
             binomial model), the node index of each observation per
             component, and the fixed-effect covariates.
         strategy: ``"vb"`` (default, as R-INLA since 22.11) corrects the
-            Gaussian approximation's mean by `gaussx.vb_mean_correction` on
-            the fixed effects and the components with at most 30 nodes;
+            Gaussian approximation's mean by `gaussx.vb_mean_correction` in
+            the span of R-INLA's nodes (`_vb_subspace`: the fixed effects,
+            every node of a component with at most 30, 30 evenly spaced
+            nodes of a larger one);
             ``"gaussian"`` keeps the Laplace mode; ``"sla"`` (simplified
             Laplace) shifts every latent marginal's mean and gives it the
             skewness of the third-order Laplace expansion, as a skew-normal
             (`_simplified_laplace`; it costs one solve per observation and
             leaves a Gaussian likelihood's marginals unchanged).
-        integration: The design over $\theta$: ``"auto"`` (``"grid"`` for
-            $m \le 2$, ``"ccd"`` above), ``"eb"`` (the mode alone), ``"grid"``
-            or ``"ccd"``.
+        integration: The design over $\theta$. ``"auto"`` (default) is
+            R-INLA's (``int.strategy = "auto"``, `_rinla_design`): a fixed
+            11-point grid for one hyperparameter, a 45-point one for two, a
+            CCD above, each stretched along the Hessian's eigen-axes by the
+            skewness corrections, with R-INLA's weights, early stop and
+            pruning; the latent and predictor summaries are then of each
+            mixture on its mean $\pm 5$ sds, as R-INLA reports them. This
+            reproduces R-INLA 26.8.7 to about 1e-3 of the latent means
+            (``tests/test_rinla_fixtures.py``), including its departures
+            from the exact integral over $\theta$: the weights leave out the
+            stretch's Jacobian, its two-hyperparameter grid scaled by
+            $f_0\sqrt2$ integrates a Gaussian's variance as 0.87, and the
+            range limit drops the tails that wide design points add.
+            ``"grid"`` and ``"ccd"`` are `gaussx.theta_design`'s unstretched
+            designs, summarised as plain mixtures (``"grid"`` refined by
+            ``grid_step`` and ``grid_threshold`` converges to the exact
+            integral); ``"eb"`` is the mode alone. Under every design but
+            ``"eb"`` the hyperparameter marginals are R-INLA's
+            (`_theta_marginals`), and the log marginal likelihood is the
+            Gaussian approximation corrected by the design
+            (`_log_marginal_likelihood`), not R-INLA's integrated estimate,
+            whose unnormalised weights bias it by a constant per
+            dimension.
         key: Unused by the deterministic design; reserved for stochastic
             strategies. Accepted so call sites stay stable.
         max_newton: Newton iterations per inner Laplace fit; a design point
@@ -291,6 +478,9 @@ def inla(
         max_theta_iter: L-BFGS iterations for the mode; not reaching
             ``theta_tol`` within them raises.
         theta_tol: Stop when $\max|\nabla_u| <$ ``theta_tol``.
+        grid_step: Step in standardised $z$ of ``integration="grid"``.
+        grid_threshold: Log-density drop from the mode at which
+            ``integration="grid"`` stops.
         verbose: Print the mode search.
 
     Returns:
@@ -330,6 +520,8 @@ def inla(
             theta_init=theta_init,
             max_theta_iter=max_theta_iter,
             theta_tol=theta_tol,
+            grid_step=grid_step,
+            grid_threshold=grid_threshold,
             verbose=verbose,
         )
 
@@ -338,16 +530,18 @@ def inla(
         return result
     budget = 4 * max_newton
     warnings.warn(
-        f"the inner Newton fit at the theta-mode or along its search did not "
-        f"converge in {max_newton} iterations; re-running the whole fit with "
+        f"the inner Newton fit at a skewness probe, at the theta-mode or along "
+        f"its search did not converge in {max_newton} iterations; re-running "
+        f"the whole fit with "
         f"max_newton={budget}",
         stacklevel=2,
     )
     result, mode_ok = run(budget)
     if not mode_ok or result is None:
         raise RuntimeError(
-            f"the inner Newton fit at the theta-mode or along its search did not "
-            f"converge in {budget} iterations; raise max_newton or check the model"
+            f"the inner Newton fit at a skewness probe, at the theta-mode or along "
+            f"its search did not converge in {budget} iterations; raise "
+            f"max_newton or check the model"
         )
     return result
 
@@ -363,6 +557,8 @@ def _inla_once(
     theta_init: ArrayLike | None = None,
     max_theta_iter: int = 200,
     theta_tol: float = 1e-5,
+    grid_step: float = 1.0,
+    grid_threshold: float = 2.5,
     verbose: bool = False,
 ) -> tuple[INLAResult | None, bool]:
     """One fit at a fixed Newton budget; see `inla`."""
@@ -377,6 +573,12 @@ def _inla_once(
 
     def log_post(u):
         return _log_post(model, A, data, max_newton, u)
+
+    def probe(u):  # the skewness probes: an unconverged fit asks for a retry
+        value, ok = _log_post_converged(model, A, data, max_newton, u)
+        if not bool(ok):
+            raise _UnconvergedProbe
+        return value
 
     # 1. theta-mode and design.
     u0 = jnp.zeros(m) if theta_init is None else jnp.asarray(theta_init, dtype=float)
@@ -396,20 +598,50 @@ def _inla_once(
         if not search_ok:
             return None, False  # inla() escalates the budget or raises
         hessian = _hessian(model, A, data, max_newton, u_star)
-        method = None if integration == "auto" else integration
-        points, log_w = gx.theta_design(
-            log_post, u_star, method=method, hessian=hessian
-        )
         neg_h = -hessian
         cov_u = jnp.linalg.inv(neg_h)
     else:
         u_star = u0
-        points, log_w = u0[None, :], jnp.zeros(1)
         neg_h = cov_u = jnp.zeros((0, 0))
-    # The design's log-weights are log(Delta_k) + lp_k up to a constant, with
-    # lp_k from the max_newton fit; keep log(Delta_k) to reweight below.
-    lp_design = jnp.stack([log_post(u) for u in points])
-    log_delta = log_w - lp_design
+    lp_mode = log_post(u_star)
+    skew_corr = log_jac = evals = evecs = None
+    if m and integration == "auto":
+        # R-INLA's design: the z-points stretched axis by axis, each side by
+        # its skewness correction. Its weights (and so the mixtures) leave
+        # out that stretch's Jacobian, as R-INLA's do; the marginal
+        # likelihood below keeps it.
+        evals, evecs, scale = _eigen_axes(neg_h)
+        try:
+            skew_corr = _skewness_corrections(probe, u_star, scale, float(lp_mode))
+        except _UnconvergedProbe:
+            return None, False  # inla() escalates the budget or raises
+        x, log_delta_np = _rinla_design(m)
+        s_minus, s_plus = skew_corr
+        stretch = np.where(x > 0, s_plus, np.where(x < 0, s_minus, 1.0))
+        points = u_star + jnp.asarray((x * stretch) @ scale.T)
+        log_delta = jnp.asarray(log_delta_np)
+        log_jac = jnp.asarray(np.sum(np.log(stretch), axis=1))
+    elif m:
+        method = cast(Literal["eb", "grid", "ccd"], integration)
+        points, log_w = gx.theta_design(
+            log_post,
+            u_star,
+            method=method,
+            hessian=hessian,
+            grid_step=grid_step,
+            grid_threshold=grid_threshold,
+        )
+        if integration != "eb":  # for the hyperparameter marginals
+            evals, evecs, scale = _eigen_axes(neg_h)
+            try:
+                skew_corr = _skewness_corrections(probe, u_star, scale, float(lp_mode))
+            except _UnconvergedProbe:
+                return None, False  # inla() escalates the budget or raises
+        # The design's log-weights are log(Delta_k) + lp_k up to a constant,
+        # with lp_k from the max_newton fit; keep log(Delta_k) to reweight.
+        log_delta = log_w - jnp.stack([log_post(u) for u in points])
+    else:
+        points, log_delta = u0[None, :], jnp.zeros(1)
 
     # 2. per-point Gaussian approximations; a point that needs the retry is
     # reweighted with its converged log-posterior, one that never converges
@@ -447,10 +679,33 @@ def _inla_once(
             stacklevel=2,
         )
     kept = np.flatnonzero(keep_arr)
+    lp_all = jnp.stack(lps)
+    lp_star = lps[0] if keep[0] else lp_mode  # point 0 is the mode
+    if m:
+        idx = jnp.asarray(kept)
+        log_w_ml = log_delta[idx] + lp_all[idx]
+        if log_jac is not None:
+            log_w_ml = log_w_ml + log_jac[idx]
+        log_ml = _log_marginal_likelihood(
+            lp_star, u_star, neg_h, points[idx], lp_all[idx], log_w_ml
+        )
+    else:
+        log_ml = lp_star
+    axis_points = None
+    if m == 1 and integration == "auto":
+        axis_points = (np.asarray(points[kept, 0]), np.asarray(lp_all[kept] - lp_star))
+    if integration == "auto" and m:
+        # R-INLA's early stop and pruning of the mixtures.
+        log_w = np.asarray(log_delta[kept] + lp_all[kept])
+        alive = np.asarray(lp_all[kept]) >= float(lp_star) - _EARLY_STOP_DROP
+        w = np.where(alive, np.exp(log_w - log_w[alive].max()), 0.0)
+        w = w / w.sum()
+        order = np.argsort(-w, kind="stable")
+        n_keep = int(np.searchsorted(np.cumsum(w[order]), _WEIGHT_PROB)) + 1
+        kept = np.sort(kept[order[:n_keep]])
     idx = jnp.asarray(kept)
     points = points[idx]
-    lp_kept = jnp.stack(lps)[idx]
-    log_w = log_delta[idx] + lp_kept
+    log_w = log_delta[idx] + lp_all[idx]
     weights = jnp.exp(log_w - jax.scipy.special.logsumexp(log_w))
     means_arr = jnp.stack(means)[idx]
     vars_arr = jnp.maximum(jnp.stack(variances)[idx], 0.0)
@@ -458,16 +713,14 @@ def _inla_once(
     eta_means_arr = jnp.stack(eta_means)[idx]
     eta_vars_arr = jnp.maximum(jnp.stack(eta_vars)[idx], 0.0)
     newton_iters = tuple(iters[k] for k in kept)
-    lp_star = lps[0] if keep[0] else lp_design[0]  # point 0 is the mode
-    if m:
-        log_ml = _log_marginal_likelihood(
-            lp_star, u_star, neg_h, points, lp_kept, log_w
-        )
-    else:
-        log_ml = lp_star
 
     # 3. mixtures.
-    summary = mixture_summary(means_arr, vars_arr, weights, skew_arr if sla else None)
+    # R-INLA's summaries are of its combined marginals, which live on the
+    # mixture's mean +- 5 sds; under its design, report them the same way.
+    limit = _RINLA_LIMIT if integration == "auto" and m else None
+    summary = mixture_summary(
+        means_arr, vars_arr, weights, skew_arr if sla else None, limit=limit
+    )
     random, fixed = {}, {}
     slices = model.slices()
     for c in model.components:
@@ -477,7 +730,12 @@ def _inla_once(
         for name in model.fixed.names:
             a, _ = slices[name]
             fixed[name] = Summary(*(f[a] for f in summary))
-    hyperpar = _hyperpar_summaries(model, u_star, cov_u, points, weights)
+    marginals = None
+    if skew_corr is not None:
+        marginals = _theta_marginals(
+            u_star, cov_u, evecs, evals, skew_corr, axis_points
+        )
+    hyperpar = _hyperpar_summaries(model, u_star, cov_u, marginals)
 
     result = INLAResult(
         fixed=fixed,
@@ -491,7 +749,9 @@ def _inla_once(
         latent_skewness=skew_arr,
         predictor_means=eta_means_arr,
         predictor_variances=eta_vars_arr,
-        linear_predictor=mixture_summary(eta_means_arr, eta_vars_arr, weights),
+        linear_predictor=mixture_summary(
+            eta_means_arr, eta_vars_arr, weights, limit=limit
+        ),
         log_marginal_likelihood=log_ml,
         n_dropped=n_dropped,
         model=model,
@@ -512,7 +772,8 @@ def _log_marginal_likelihood(lp_star, u_star, neg_h, points, lp, log_w):
     $\tilde\pi(u\mid y)$; the design corrects it by the ratio
     $r_k = \tilde\pi(u_k\mid y)/\tilde\pi_G(u_k)$ to that Gaussian. With the
     design weights $w_k \propto \Delta_k\tilde\pi(u_k\mid y)$ (normalised
-    over the kept points, ``lp`` their converged log-posteriors),
+    over the kept points, ``lp`` their converged log-posteriors; for a
+    stretched design $\Delta_k$ includes the stretch's Jacobian),
     $\int\tilde\pi / \int\tilde\pi_G \approx 1 / \sum_k w_k / r_k$. For
     ``"eb"`` (one point) this is the Gaussian approximation itself.
     """
@@ -525,13 +786,69 @@ def _log_marginal_likelihood(lp_star, u_star, neg_h, points, lp, log_w):
     return log_gauss - jax.scipy.special.logsumexp(log_wn - (lp - lp_gauss))
 
 
-def _hyperpar_summaries(model, u_star, cov_u, points, weights) -> dict[str, Summary]:
+def _natural_cubic(x, y, t):
+    """Natural cubic spline through ``(x, y)`` at ``t``, constant outside."""
+    n = x.size
+    h = np.diff(x)
+    a = np.zeros((n, n))
+    r = np.zeros(n)
+    a[0, 0] = a[-1, -1] = 1.0
+    for i in range(1, n - 1):
+        a[i, i - 1 : i + 2] = h[i - 1], 2.0 * (h[i - 1] + h[i]), h[i]
+        r[i] = 3.0 * ((y[i + 1] - y[i]) / h[i] - (y[i] - y[i - 1]) / h[i - 1])
+    c = np.linalg.solve(a, r)
+    b = np.diff(y) / h - h * (2.0 * c[:-1] + c[1:]) / 3.0
+    d = np.diff(c) / (3.0 * h)
+    t = np.clip(t, x[0], x[-1])
+    k = np.clip(np.searchsorted(x, t) - 1, 0, n - 2)
+    dt = t - x[k]
+    return y[k] + dt * (b[k] + dt * (c[k] + dt * d[k]))
+
+
+def _theta_marginals(u_star, cov_u, evecs, evals, skew, axis_points=None):
+    r"""Each hyperparameter's marginal on a grid of its unconstrained $u_j$.
+
+    As R-INLA: for one hyperparameter, ``axis_points`` ``(u_k, lp_k - lp*)``
+    from the design, interpolated as a spline-corrected Gaussian (its
+    ``GRIDSUM``); otherwise the split-normal in the Hessian's eigenbasis,
+    $\log\tilde\pi(z) = -\tfrac12\sum_i (z_i/\sigma_{i,\pm})^2$ with the
+    skewness corrections, along the line $u = u^\ast + \Sigma_{\cdot j}
+    (u_j - u^\ast_j)/\Sigma_{jj}$ of the conditional means (its ``CCD``
+    interpolator; Martins et al., 2013, sec. 3.2). Returns
+    ``(grid, prob)``, both ``(m, G)``, ``prob`` normalised per row.
+    """
+    u_star, cov_u = np.asarray(u_star), np.asarray(cov_u)
+    m = u_star.shape[0]
+    sd = np.sqrt(np.diag(cov_u))
+    s_minus, s_plus = skew
+    g = np.linspace(-1.0, 1.0, 4001) * 10.0 * max(1.0, s_minus.max(), s_plus.max())
+    grid, prob = np.empty((m, g.size)), np.empty((m, g.size))
+    # A spline needs knots beyond the mode: with fewer than three surviving
+    # design points, use the Hessian's split-normal instead.
+    if axis_points is not None and axis_points[0].size < 3:
+        axis_points = None
+    for j in range(m):
+        if axis_points is not None:
+            xk = (axis_points[0] - u_star[j]) / sd[j]
+            order = np.argsort(xk)
+            corr = axis_points[1][order] + 0.5 * xk[order] ** 2
+            ld = -0.5 * g**2 + _natural_cubic(xk[order], corr, g)
+        else:
+            du = np.outer(g * sd[j], cov_u[:, j] / cov_u[j, j])
+            z = du @ (evecs * np.sqrt(evals))
+            ld = -0.5 * np.sum((z / np.where(z > 0, s_plus, s_minus)) ** 2, axis=1)
+        p = np.exp(ld - ld.max())
+        grid[j], prob[j] = u_star[j] + sd[j] * g, p / p.sum()
+    return grid, prob
+
+
+def _hyperpar_summaries(model, u_star, cov_u, marginals=None) -> dict[str, Summary]:
     """Hyperparameter summaries on the user scale.
 
-    Means and sds are design-weighted averages of $T(u_k)$; quantiles map the
-    Gaussian approximation $u \\sim \\mathcal N(u^\\ast, (-\\nabla^2)^{-1})$
-    through each (monotone) bijection, which keeps them exact for that
-    approximation.
+    With ``marginals`` (`_theta_marginals`), the mean, sd and quantiles of
+    each hyperparameter's marginal pushed through its (elementwise,
+    monotone) bijection. Without (empirical Bayes), those of the Gaussian
+    approximation $u \\sim \\mathcal N(u^\\ast, (-\\nabla^2)^{-1})$.
     """
     spec = model.theta_spec()
     out, i = {}, 0
@@ -542,21 +859,37 @@ def _hyperpar_summaries(model, u_star, cov_u, points, weights) -> dict[str, Summ
         def to_user(block, shape=shape, transform=transform):
             return transform(block.reshape(shape) if shape else block[0])
 
-        sd_u = jnp.sqrt(jnp.diagonal(cov_u)[i : i + size])
-        qs = [to_user(u_star[i : i + size] + zq * sd_u) for zq in z]
-        if points.shape[0] > 1:
-            values = jax.vmap(lambda u, i=i, size=size: to_user(u[i : i + size]))(
-                points
-            )
-            w = weights.reshape((-1,) + (1,) * (values.ndim - 1))
-            mean = jnp.sum(w * values, axis=0)
-            var = jnp.sum(w * values**2, axis=0) - mean**2
-            sd = jnp.sqrt(jnp.maximum(var, 0.0))
+        if marginals is not None:
+            grid, prob = marginals[0][i : i + size], marginals[1][i : i + size]
+            cdf = np.cumsum(prob, axis=1) - 0.5 * prob
+            qs = [
+                to_user(
+                    jnp.asarray(
+                        [np.interp(p, c, gr) for c, gr in zip(cdf, grid, strict=True)]
+                    )
+                )
+                for p in (0.025, 0.5, 0.975)
+            ]
+            means, sds = [], []
+            for j in range(size):
+                block = np.repeat(
+                    np.asarray(u_star[i : i + size])[None], grid.shape[1], 0
+                )
+                block[:, j] = grid[j]
+                v = np.asarray(jax.vmap(to_user)(jnp.asarray(block))).reshape(-1, size)[
+                    :, j
+                ]
+                mean = float(np.sum(prob[j] * v))
+                means.append(mean)
+                sds.append(math.sqrt(max(float(np.sum(prob[j] * v**2)) - mean**2, 0.0)))
+            mean = jnp.asarray(means).reshape(shape)
+            sd = jnp.asarray(sds).reshape(shape)
         else:
-            # Empirical Bayes: one point carries no spread, so take the mean
-            # and sd of the same Gaussian approximation the quantiles come
-            # from, pushed through the bijection (a tensor Gauss-Hermite rule
-            # on the block's marginal; for exp, E = exp(mu + sigma^2 / 2)).
+            # Empirical Bayes: the Gaussian approximation pushed through the
+            # bijection (a tensor Gauss-Hermite rule on the block's marginal;
+            # for exp, E = exp(mu + sigma^2 / 2)).
+            sd_u = jnp.sqrt(jnp.diagonal(cov_u)[i : i + size])
+            qs = [to_user(u_star[i : i + size] + zq * sd_u) for zq in z]
             nodes, gh = np.polynomial.hermite_e.hermegauss(_EB_ORDER)
             grid = np.stack(np.meshgrid(*[nodes] * size, indexing="ij"), -1)
             wts = np.prod(np.meshgrid(*[gh] * size, indexing="ij"), axis=0)
