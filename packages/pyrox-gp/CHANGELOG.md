@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.9](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.8...pyrox-gp-v0.1.9) (2026-10-09)
+
+
+### Features
+
+* **gp:** matrix-free GPPrior path for large exact GPs ([#286](https://github.com/jejjohnson/pyrox/issues/286)) ([471ddce](https://github.com/jejjohnson/pyrox/commit/471ddcebb4514b79afe2eff691ae27f2d752d6f1))
+
 ## [0.1.8](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.7...pyrox-gp-v0.1.8) (2026-10-05)
 
 

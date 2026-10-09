@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/jejjohnson/pyrox/compare/pyrox-lgm-v0.1.1...pyrox-lgm-v0.1.2) (2026-10-09)
+
+
+### Bug Fixes
+
+* **lgm:** reproduce r-inla's integration over theta in inla() ([#287](https://github.com/jejjohnson/pyrox/issues/287)) ([391087e](https://github.com/jejjohnson/pyrox/commit/391087e8e3a5ea91cd83441695238b0d8d299456))
+
 ## [0.1.1](https://github.com/jejjohnson/pyrox/compare/pyrox-lgm-v0.1.0...pyrox-lgm-v0.1.1) (2026-10-05)
 
 

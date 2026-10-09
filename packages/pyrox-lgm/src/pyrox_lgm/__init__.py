@@ -43,7 +43,7 @@ from pyrox_lgm._priors import (
 from pyrox_lgm._result import INLAResult, Summary
 
 
-__version__ = "0.1.1"  # x-release-please-version
+__version__ = "0.1.2"  # x-release-please-version
 
 __all__ = [
     "AR1",
