@@ -103,7 +103,7 @@ Every notebook opens with a `#`-level title and a Colab badge pointing at its `m
 
 ## First Code Cell — Colab Detection + Install
 
-Detect Colab and install, only when needed, the packages the notebook imports, each from its subdirectory (`packages/<pkg>`), with the `[colab]` extra (which pulls in `matplotlib` and `watermark`) on the one that has the most dependencies:
+Detect Colab and install, only when needed, the packages the notebook imports, each from its subdirectory (`packages/<pkg>`), with the `[colab]` extra (which pulls in `matplotlib` and `watermark`) on one of them (pyrox-lgm has no `[colab]` extra: add `matplotlib` and `watermark` explicitly):
 
 ```python
 import subprocess

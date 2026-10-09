@@ -35,7 +35,7 @@ fails under a handler, a transform or a second instance.
 | Library | pyrox uses it for | The rule it brings |
 |---|---|---|
 | **NumPyro** | Sample / param / factor sites, handlers, MCMC, SVI, autoguides, distributions | Sites inside a module go through `pyrox_sample` / `pyrox_param` so they are scoped, cached per call and guarded; models stay plain NumPyro functions that every handler composes with. |
-| **Equinox** | Immutable `eqx.Module` pytrees, `filter_*` transforms, `eqx.tree_at` | Modules, guides, likelihoods, results are `eqx.Module`s, never dataclasses. Configuration (shapes, names, flags) is `eqx.field(static=True)`. Rebuilding a pytree skips `__init__`. |
+| **Equinox** | Immutable `eqx.Module` pytrees, `filter_*` transforms, `eqx.tree_at` | Modules, guides and likelihoods are `eqx.Module`s; states and results are `eqx.Module`s or NamedTuples (both pytrees); never a dataclass for anything traced. Configuration (shapes, names, flags) is `eqx.field(static=True)`. Rebuilding a pytree skips `__init__`. |
 | **gaussx** | Every solve, logdet, Cholesky, Gaussian density, KL, GP conditioning, Kalman filter, quadrature, GMRF | Linear algebra on a covariance or precision goes through gaussx on a PSD-tagged operator, never `jnp.linalg` / `cho_solve`. Models carry `solver: AbstractSolverStrategy \| None` (default `DenseSolver()`). |
 | **kernellib** | Kernel math (`kernellib.functional`), `AbstractKernel` (= `pyrox_gp.Kernel`), kernel operators, landmark selection, graphs | pyrox-gp kernels wrap kernellib; new kernel math goes to kernellib, not here. |
 | **geonnax** | Deterministic network cores, encoders, basis functions | pyrox-nn wraps a geonnax core and swaps its parameters for sites; new deterministic architecture goes to geonnax. |
@@ -87,8 +87,8 @@ fails under a handler, a transform or a second instance.
   `self.pyrox_sample(name, prior)` and `self.pyrox_param(name, init, *,
   constraint=, event_dim=)`, inside a method decorated with
   **`@pyrox_method`**. The decorator opens a per-call cache: a site read twice
-  in one call is one site; without it NumPyro rejects the duplicate (sample)
-  or the trace aliases it (param).
+  in one call is one site; without it a sample site read twice is rejected
+  under `trace` and resampled under `seed`.
 - **Site names are `"<scope>.<name>"`**, where the scope is `pyrox_name` if
   set, else the class name. Two instances of one class in one model need
   distinct `pyrox_name`s, or the trace rejects the duplicate sample site and
@@ -108,9 +108,11 @@ fails under a handler, a transform or a second instance.
   (`packages/pyrox/tests/test_core_numpyro_integration.py`). Under `jit`,
   close over the module (`jax.jit(handlers.seed(model, 0))`) rather than
   passing it as an argument.
-- **The private helpers are API across packages.** `_get_context`
-  (`pyrox_gp._context`), `_pyrox_scope_name` (`pyrox_gp._multi_output`) and
-  `_pyrox_fullname` (`pyrox_nn`) are used downstream: don't rename them.
+- **The private helpers are API across packages.** The `PyroxModule`
+  methods `_get_context` (used by `pyrox_gp._context` and
+  `pyrox_gp._kernel_operator`), `_pyrox_scope_name` (by
+  `pyrox_gp._multi_output`) and `_pyrox_fullname` (by `pyrox_nn`) are called
+  downstream: don't rename them.
 
 ### 2. `Parameterized`: priors and guides declared once
 
@@ -125,7 +127,7 @@ fails under a handler, a transform or a second instance.
   checkpoint load) yields a copy with an empty registry and a `KeyError`.
   Keep the original instance, or close over it.
 - **Reserved names.** Guide sites use `<name>_loc` / `<name>_scale`; a user
-  param with that name raises.
+  param with that name raises once the guide for `<name>` runs.
 - Structural settings (`nu`, `degree`, `input_dim`) are fields, not
   registered params.
 
@@ -202,8 +204,9 @@ uv run pytest --no-cov packages/pyrox-gp/tests/gp/test_kernel_classes.py -v
 
 - CI ("Tests", `ci.yml`) runs `uv run pytest -v -m "not slow"` on Python 3.12
   and 3.13, with coverage gated at 80 % across all four packages.
-- `@pytest.mark.slow` marks convergence, NUTS / SVI and dense-equivalence
-  sweeps. **No workflow runs them**, so run the slow tests of what you touched
+- `@pytest.mark.slow` marks the expensive tests (convergence sweeps, long
+  SVI / NUTS fits, R-INLA comparisons; the core bridge's short NUTS / SVI
+  checks are unmarked and run in CI). **No workflow runs the slow ones**, so run the slow tests of what you touched
   locally (`uv run pytest --no-cov -m slow packages/<pkg>/tests/...`).
 - Keep one unmarked, tiny smoke test per feature so the fast tier still
   exercises it.

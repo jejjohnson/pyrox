@@ -30,7 +30,7 @@ private `_*.py` modules, grouped by concept in `docs/capabilities.md`):
 ## Contracts
 
 - **Kernels** subclass `_ParameterizedKernel`: a `pyrox_name` field with a
-  fixed default (instances with the same name share sites by design),
+  fixed default (two instances with the same name collide in one trace, so siblings need distinct names),
   `init_*` floats, `setup()` registering positive params, a `@pyrox_method
   __call__` that calls `kernellib.functional`, a `diag` override for
   non-stationary kernels, and `_frozen_cls` / `_frozen_params` /
@@ -53,8 +53,10 @@ private `_*.py` modules, grouped by concept in `docs/capabilities.md`):
   closed-form ELBO paths.
 - **Inducing features** satisfy the `InducingFeatures` protocol
   (`num_features`, `K_uu(kernel, *, jitter)`, `k_ux(x, kernel)`); `K_uu`
-  returns an `lx.DiagonalLinearOperator` with the jitter folded in
-  (`_diagonal_with_jitter`), never `+ jnp.eye`.
+  is an `lx.DiagonalLinearOperator` when the features are orthogonal
+  (Fourier, spherical-harmonic, Laplacian), with the jitter folded in by
+  `_diagonal_with_jitter`, and otherwise a PSD-tagged operator (Slepian);
+  never `+ jnp.eye` on a diagonal one.
 - **Inference strategies** are `eqx.Module`s with static configuration that
   satisfy `_NonGaussStrategy.fit(prior, likelihood, y)` and return
   `NonGaussConditionedGP`; reuse the helpers in `_inference_nongauss.py`

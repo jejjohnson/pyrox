@@ -13,7 +13,8 @@ Usage::
     uv run python scripts/capabilities.py --check       # fail if stale
 
 ``packages/pyrox/tests/test_capabilities.py`` runs the check. Run it in the
-full environment (``make install``: every package, group and extra); the
+full environment (``make install``: every package and group; pandas comes
+from the dev group); the
 ``pyrox_nn.api`` / ``pyrox_nn.preprocessing`` namespaces need pandas. The
 upstream sections depend on the installed versions, which the index records;
 when they differ from the installed ones, only the pyrox part is compared.

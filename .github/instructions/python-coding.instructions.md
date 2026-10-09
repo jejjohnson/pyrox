@@ -12,7 +12,7 @@ applyTo: "packages/**/*.py,scripts/**/*.py"
 - Built-in generics: `list[int]`, `dict[str, Any]` not `List[int]`, `Dict[str, Any]`
 - `pathlib.Path` over `os.path`
 - f-strings for string formatting
-- `equinox.Module` for anything that flows through JAX (layers, kernels, guides, states, results): a dataclass is not a pytree; plain `dataclasses` only for host-side records that are never traced (the `Parameterized` registry entries)
+- `equinox.Module` for anything that flows through JAX (layers, kernels, guides, states, results): a dataclass is not a pytree; NamedTuples are pytrees too (`EnsembleState`, `Summary`); plain `dataclasses` only for host-side records that are never traced (the `Parameterized` registry entries, `PyroxSample`)
 - `Enum` for fixed sets of constants
 - Context managers (`with` statements) for resource handling
 - Specific exception types (never bare `except:`)
@@ -32,7 +32,7 @@ already depend on (see "What pyrox is built on" in `AGENTS.md`).
 | Kernels | `kernellib` |
 | Network cores, bases | `geonnax` |
 | Axis-naming array ops | `einx` |
-| Optimisers | `optax` (optional; import lazily) |
+| Optimisers | `optax` (optional in `pyrox` and `pyrox-gp`: import lazily; required by `pyrox-lgm`) |
 | Path handling | `pathlib` (stdlib) |
 | Testing | `pytest` |
 

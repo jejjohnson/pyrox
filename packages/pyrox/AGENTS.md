@@ -41,7 +41,8 @@ consumes), `inference/_ensemble.py`, `inference/_param_groups.py`.
 - **`Parameterized`**: `setup()` runs from `__post_init__`; guides are
   `delta` (a `Delta` *sample* site on the prior's support and event dim, so
   `replay` sees it) or `normal` (sized in unconstrained space); `<name>_loc` /
-  `<name>_scale` are reserved.
+  `<name>_scale` are reserved (a clashing user param raises when the guide
+  runs).
 - **optax is optional.** `pyrox.inference` imports it through
   `_require_optax()`, which names the `pyrox[optax]` extra; never import optax
   at module scope.
