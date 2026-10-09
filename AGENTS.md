@@ -175,6 +175,26 @@ fails under a handler, a transform or a second instance.
 | `packages/pyrox-lgm/tests/test_rinla_fixtures.py` | `inla()` against R-INLA reference fixtures (slow) |
 | `packages/pyrox-gp/tests/gp/test_src_kernels_deprecation.py` | The deprecated `pyrox_gp._src.kernels` shim |
 
+## Recipes
+
+Step-by-step recipes for the common jobs live as plain Markdown in
+`.claude/skills/<name>/SKILL.md` (Claude Code loads them automatically; any
+agent can read and follow them):
+
+| Job | Recipe |
+|---|---|
+| Add a Bayesian / uncertainty-aware layer (pyrox-nn) | `add-bayesian-layer` |
+| Add a GP kernel (pyrox-gp) | `add-kernel` |
+| Add a guide, likelihood, inducing features, inference strategy or multi-output kernel (pyrox-gp) | `add-gp-component` |
+| Add an LGM component, PC prior or observation model (pyrox-lgm) | `add-lgm-component` |
+| Change `PyroxModule`, `Parameterized` or `pyrox.inference` | `change-core-bridge` |
+| Bump gaussx / kernellib / geonnax | `bump-geoml-deps` |
+| Add or update an example notebook | `add-notebook` |
+| Verify before a PR | `pre-pr-check` |
+| Review a change | `pyrox-review` (+ the read-only `.claude/agents/reuse-reviewer.md` and `model-reviewer.md`) |
+| Write a squash commit message | `squash-commit` |
+| Open or link GitHub issues | `create-gh-issue`, `link-gh-issues` (templates in `.github/ISSUE_TEMPLATE/`; `make gh-labels`, `gh-sub`, `gh-block`, `gh-show`) |
+
 ## Working in the repo
 
 Always run Python tools through `uv run` (never the system Python).

@@ -66,7 +66,7 @@ check-env-%:
 # ---------------------------------------------------------------------------
 .PHONY: help install lint format typecheck test test-cov \
         precommit build clean version docs docs-serve docs-deploy \
-        capabilities
+        capabilities gh-labels gh-sub gh-block gh-show
 
 .DEFAULT_GOAL := help
 
@@ -182,3 +182,19 @@ docs-deploy: ## 🚀 Deploy documentation to GitHub Pages
 
 capabilities: ## 🗂️  Regenerate docs/capabilities.md (every public name, for reuse)
 	uv run python scripts/capabilities.py
+
+# ===========================================================================
+##@ GitHub issues
+# ===========================================================================
+
+gh-labels: ## 🏷️  Create / update the label taxonomy (docs/contributing.md)
+	bash .github/scripts/create-labels.sh
+
+gh-sub: ## 🔗 Link sub-issues: make gh-sub PARENT=7 CHILDREN="42 43"
+	bash .github/scripts/link-issues.sh sub $(PARENT) $(CHILDREN)
+
+gh-block: ## ⛔ Mark blocked-by: make gh-block ISSUE=44 BLOCKED_BY=43
+	bash .github/scripts/link-issues.sh block $(ISSUE) $(BLOCKED_BY)
+
+gh-show: ## 🔍 Show an issue's relationships: make gh-show ISSUE=44
+	bash .github/scripts/link-issues.sh show $(ISSUE)
