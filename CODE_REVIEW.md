@@ -1,6 +1,15 @@
 # Code Review Agent Instructions
 
-Standing instructions for **all** agents performing code reviews on this repository.
+Standing instructions for **all** agents performing code reviews on this
+repository. pyrox is a probabilistic-modelling workspace on Equinox and
+NumPyro: most defects worth finding are about **sites** (a raw
+`numpyro.sample` in a module, a missing `@pyrox_method`, two instances
+colliding on one scope, a `Parameterized` module rebuilt and emptied) or
+about **numerics** (hand-rolled linear algebra, a kernel resampled within
+one model call, Python control flow on traced values), not style. Read
+"Reuse before you write" and "The contracts" in [`AGENTS.md`](AGENTS.md) and
+the `AGENTS.md` of each package the diff touches; this file is the checklist
+and the report format.
 
 ---
 
@@ -32,212 +41,180 @@ git --no-pager diff --no-prefix --unified=100000 --minimal "$BASE_BRANCH"...HEAD
 
 ## Review Checklist
 
-### 1. Code Style and Readability
+Skip anything ruff, ty or the tests already enforce (formatting, import
+order, RST markup in docstrings); review what they cannot see.
 
-- Clear, descriptive naming (variables, functions, classes, modules)
-- Appropriate function/method length (single responsibility)
-- Logical code organization and flow
-- Avoidance of deeply nested structures
-- Linting via **ruff** (`uv run --group lint ruff check .`) — lint the **entire repo**, not just the package
-- Type-hint checking via **ty** (`uv run --group typecheck ty check packages/pyrox/src/pyrox packages/pyrox-gp/src/pyrox_gp packages/pyrox-nn/src/pyrox_nn`)
+### 1. Reuse and package boundaries
 
-> **Rule of thumb**: Sacrifice *cleverness* for *clarity*. Sacrifice *brevity* for *explicitness*.
-> Don't worry about formatting — our CI pipeline (ruff format, pre-commit) handles that automatically.
+- Every function, class or module the diff **adds** has been checked
+  against [`docs/capabilities.md`](docs/capabilities.md) (the four packages
+  plus gaussx, kernellib, geonnax). A re-implemented solve, Cholesky,
+  Gaussian KL, Kalman step, kernel function, basis function or network core
+  is a **High** finding, with the existing name to use.
+- Kernel math belongs in kernellib, deterministic network cores and bases in
+  geonnax, structured linear algebra in gaussx; the probabilistic wrapper
+  belongs here.
+- Imports point down the stack: `pyrox` ← `pyrox-gp` ← `pyrox-nn`;
+  `pyrox-lgm` imports `pyrox` only, never `pyrox-gp`. A helper two packages
+  need lives in the lowest one.
+- `import pyrox_nn` stays pandas-free (`api` / `preprocessing` are not
+  imported by the root); optax is imported lazily.
 
-### 2. Modern Python Idioms (Python ≥ 3.12)
+### 2. Sites (`PyroxModule`)
 
-- `from __future__ import annotations` at the top of every module
-- Type hints on **all** public functions, methods, and module-level variables
-- `pathlib.Path` over `os.path`
-- f-strings for string formatting
-- Walrus operator (`:=`) only when it genuinely improves readability
-- `match` statements for pattern matching where appropriate
-- Structural pattern matching for complex conditionals
-- Context managers (`with` statements) for resource handling
-- `dataclasses` or `attrs` for data containers
-- `Enum` for fixed sets of constants
-- Modern union syntax (`X | Y` instead of `Union[X, Y]`)
-- Modern optional syntax (`X | None` instead of `Optional[X]`)
-- Built-in generics (`list[int]`, `dict[str, Any]` instead of `List[int]`, `Dict[str, Any]`)
+- Sites inside a module go through `self.pyrox_sample` /
+  `self.pyrox_param`, in a method decorated with `@pyrox_method`; a raw
+  `factor` / `deterministic` is named with `self._pyrox_fullname(...)`.
+- Every class that may be instantiated twice in one model has a
+  `pyrox_name` field (`eqx.field(static=True, default=None)`), and the code
+  that builds siblings gives each a distinct name.
+- Priors are built in the call at full shape (`.expand([...]).to_event(k)`);
+  no sampling or key at construction for pure-prior layers.
+- The module still works under `handlers.trace`, `seed`, `substitute`,
+  `condition`, `block`, `scope`, `plate`, SVI, MCMC and `Predictive`; under
+  `jit` it is closed over, not passed as an argument.
+- Private bridge names used across packages (`_get_context`,
+  `_pyrox_scope_name`, `_pyrox_fullname`) are not renamed.
 
-### 3. Packaging and Project Structure
+### 3. `Parameterized`
 
-- Proper `pyproject.toml` configuration (PEP 621)
-- Appropriate use of `__init__.py` exports
-- Clear module boundaries and dependencies
-- Correct use of relative vs absolute imports
-- Entry points defined properly for CLI tools
-- `src/` layout enforced
+- Params, priors and guides are declared in `setup()`; `__post_init__` is
+  not overridden (validation goes in `__check_init__`).
+- No code path rebuilds a `Parameterized` module (`eqx.tree_at`,
+  `apply_updates`, `filter_jit` argument, checkpoint load) and then calls
+  `get_param` on the copy.
+- `<name>_loc` / `<name>_scale` are not used as user param names; structural
+  settings (`nu`, `degree`) are fields, not params.
 
-### 4. Documentation
+### 4. Numerics
 
-- Module-level docstrings explaining purpose
-- Function/method docstrings for **all** public APIs (Google style — be consistent)
-- Inline comments explaining *why*, not *what* — except for complex logic or function calls where a brief *what* comment aids comprehension
-- Complex algorithms should have step-by-step explanations
-- All scientific algorithms should include Unicode equations in docstrings and inline where appropriate (e.g. `# σ² = Σ(xᵢ − μ)² / N`)
-- All docstrings for public classes and functions should include 2–3 example use cases
-- Type hints serve as documentation — ensure they are accurate and complete
+- **Linear algebra:** Grams and precisions are PSD-tagged lineax operators
+  passed to gaussx (`solve`, `cholesky`, `logdet`, `gaussian_kl`, …), honouring
+  the model's `solver=`; no new `jnp.linalg.solve` / `cho_solve` /
+  `solve_triangular` / `inv` on a covariance; no `.as_matrix()` that
+  densifies a structured operator outside a documented dense fallback.
+- **Kernel context:** a kernel with priors evaluated more than once per model
+  call (Gram + `diag`, several blocks or latents) sits inside
+  `_kernel_context` / `_kernel_contexts`.
+- **Traceability:** no Python `if` / `while` / `bool()` / `float()` /
+  `.item()` on traced values outside the documented eager `fit` loops.
+- **Dtypes:** arrays built with the input's dtype (`jnp.eye(n,
+  dtype=K.dtype)`); a bare Python scalar combined with an array is weakly
+  typed and fine.
+- **Randomness:** keys explicit and split before reuse; `numpyro.prng_key()`
+  only where a `seed` handler is guaranteed.
+- **Stability:** jitter on Gram diagonals, `safe_cholesky` for
+  ill-conditioned input, log-space densities, no explicit inverses.
+- **Pytrees:** layers, kernels, guides, likelihoods, states and results are
+  `eqx.Module`s; configuration is `eqx.field(static=True)`; no array in a
+  static field.
 
-### 5. Error Handling
+### 5. Public API and documentation
 
-- Specific exception types (never bare `except:`)
-- Custom exceptions for domain-specific errors
-- Helpful error messages with context
-- Proper exception chaining (`raise ... from ...`)
-- Early returns / guard clauses to reduce nesting
+- New public names: exported from the package `__init__.py` and `__all__`,
+  given a `::: package.Name` entry on their `docs/api` page, and
+  `docs/capabilities.md` regenerated.
+- Docstrings: Google style, jaxtyping shapes, the model in MathJax, **the
+  site names the module registers**, an `Examples:` block (executed in
+  pyrox-lgm), a reference for a published method.
+- Renames and removals keep a deprecated path with a `DeprecationWarning`
+  naming the replacement.
 
-### 6. Testing Considerations
+### 6. Tests
 
-- Functions should be easily testable (pure functions where possible)
-- Dependencies should be injectable
-- Side effects should be isolated and explicit
-- Consider edge cases and boundary conditions
+- New behaviour is checked against a dense, closed-form or reference value
+  (R-INLA fixtures for `inla()`), with the tolerance's provenance in a
+  comment.
+- A new module's site set is asserted under `handlers.trace()` +
+  `handlers.seed(rng_seed=0)`; it is exercised under SVI / `Predictive`
+  where that is its use.
+- Expensive tests are `@pytest.mark.slow` — and since CI never runs them,
+  the PR says they were run locally — with one unmarked smoke test kept fast.
 
-### 7. Performance (when relevant)
+### 7. Modern Python (≥ 3.12)
 
-- Appropriate data structures for the use case
-- Generator expressions for large sequences
-- Avoid premature optimization
-- Note O(n) implications for critical paths
+- Type hints on every public function; `X | None`, built-in generics;
+  f-strings; specific exceptions with `raise ... from ...`; guard clauses
+  over deep nesting.
 
-### 8. Security
+### 8. Dependencies and security
 
-- No hardcoded secrets or credentials
-- Input validation and sanitization
-- Safe handling of file paths (no path traversal vulnerabilities)
-- Appropriate use of `subprocess` (avoid `shell=True`)
+- No new runtime dependency without discussion; optional ones go behind an
+  extra and a lazy import. `uv.lock` is updated with any dependency change;
+  git-pinned upstreams (gaussx, kernellib, geonnax) move together with the
+  root `override-dependencies`.
+- No secrets, no network access in fast tests.
 
 ---
 
-## Package Preferences
+## pyrox-Specific Checks
 
-When reviewing dependency choices or suggesting alternatives, prefer these libraries:
-
-| Purpose | Preferred Package |
-|---------|-------------------|
-| Logging | `loguru` |
-| CLI | `cyclopts` |
-| Data containers | `dataclasses` (stdlib) or `attrs` |
-| Configuration | `hydra-core` / `omegaconf` |
-| Path handling | `pathlib` (stdlib) |
-| HTTP | `httpx` |
-| Testing | `pytest` |
-
----
-
-## Python-Specific Checks
-
-When reviewing, specifically verify the patterns below.
-
-### Type Hints
+### Sites through the bridge
 
 ```python
-# ❌ Missing type hints
-def process_data(items, threshold):
-    ...
+# ❌ Unscoped, uncached, unguarded: two layers collide; a second read resamples
+class Layer(eqx.Module):
+    def __call__(self, x):
+        W = numpyro.sample("W", dist.Normal(0, 1).expand([3, 2]).to_event(2))
+        return x @ W
 
-# ✅ Complete type hints
-def process_data(items: list[DataItem], threshold: float) -> ProcessedResult:
-    ...
+
+# ✅ Scoped to the instance, cached per call, guarded against siblings
+class Layer(PyroxModule):
+    pyrox_name: str | None = eqx.field(static=True, default=None)
+
+    @pyrox_method
+    def __call__(self, x):
+        W = self.pyrox_sample("W", dist.Normal(0, 1).expand([3, 2]).to_event(2))
+        return x @ W
 ```
 
-### Modern Syntax
+### Distinct names for siblings
 
 ```python
-# ❌ Old-style
-from typing import Optional, Union, List, Dict
+# ❌ Both register "RBF.variance": the second raises ValueError in one trace
+k1, k2 = pgp.RBF(), pgp.RBF()
 
-def fetch(id: Optional[int] = None) -> Union[Data, None]:
-    result: Dict[str, List[int]] = {}
-
-# ✅ Modern (Python 3.12+)
-from __future__ import annotations
-
-def fetch(id: int | None = None) -> Data | None:
-    result: dict[str, list[int]] = {}
+# ✅
+k1, k2 = pgp.RBF(pyrox_name="RBF_q0"), pgp.RBF(pyrox_name="RBF_q1")
 ```
 
-### Dataclasses for Data Containers
+### A rebuilt `Parameterized` module
 
 ```python
-# ❌ Plain class with boilerplate
-class Config:
-    def __init__(self, host: str, port: int, timeout: float = 30.0):
-        self.host = host
-        self.port = port
-        self.timeout = timeout
+# ❌ tree_at skips setup(): the copy's registry is empty → KeyError on call
+kernel = eqx.tree_at(lambda k: k.init_lengthscale, kernel, 0.5)
+K = kernel(X, X)
 
-# ✅ Dataclass
-from __future__ import annotations
-
-from dataclasses import dataclass
-
-@dataclass
-class Config:
-    host: str
-    port: int
-    timeout: float = 30.0
+# ✅ Construct a new instance (setup() runs)
+kernel = pgp.RBF(init_lengthscale=0.5)
 ```
 
-### Path Handling
+### One kernel draw per model call
 
 ```python
-# ❌ os.path
-import os
-path = os.path.join(base_dir, "data", filename)
-if os.path.exists(path):
-    with open(path) as f:
-        ...
+# ❌ Under seed the diagonal comes from a second hyperparameter draw
+K = kernel(X, X)
+d = kernel.diag(X)
 
-# ✅ pathlib
-from pathlib import Path
-path = base_dir / "data" / filename
-if path.exists():
-    content = path.read_text()
+# ✅
+with _kernel_context(kernel):
+    K = kernel(X, X)
+    d = kernel.diag(X)
 ```
 
-### Exception Handling
+### Linear algebra through gaussx
 
 ```python
-# ❌ Bare except, poor chaining
-try:
-    result = parse(data)
-except:
-    raise RuntimeError("Failed")
+# ❌ Dense, ignores the model's solver, no structure
+L = jnp.linalg.cholesky(K + noise * jnp.eye(n))
+alpha = jax.scipy.linalg.cho_solve((L, True), y)
 
-# ✅ Specific exceptions, proper chaining
-try:
-    result = parse(data)
-except json.JSONDecodeError as e:
-    raise ParseError(f"Invalid JSON in {source}") from e
-```
-
-### Explanatory Comments for Complex Logic
-
-```python
-# ❌ No explanation for non-obvious algorithm
-def calculate_score(items):
-    return sum(i.weight * (1 - i.age / 365) for i in items if i.active)
-
-# ✅ Clear explanation of the logic
-def calculate_score(items: list[Item]) -> float:
-    """Calculate weighted score with time decay.
-
-    Score computation:
-        1. Filter to only active items
-        2. Apply time decay: items lose relevance linearly over one year
-        3. Weight each item's contribution by its assigned weight
-        4. Sum all weighted, decayed values
-    """
-    total = 0.0
-    for item in items:
-        if not item.active:
-            continue
-        # Time decay factor: 1.0 for new items → 0.0 after 365 days
-        decay_factor = 1 - (item.age / 365)
-        total += item.weight * decay_factor
-    return total
+# ✅
+op = lx.MatrixLinearOperator(
+    K + noise * jnp.eye(n, dtype=K.dtype), lx.positive_semidefinite_tag
+)
+alpha = gaussx.solve(op, y)
 ```
 
 ---

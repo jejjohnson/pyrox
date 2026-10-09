@@ -6,8 +6,8 @@ applyTo: "**"
 
 When performing code review, use `/CODE_REVIEW.md` as the source of truth for:
 
-- Review checklist (style, idioms, packaging, docs, error handling, testing, performance, security)
-- Python-specific checks (type hints, modern syntax, dataclasses, path handling, exceptions)
+- Review checklist (reuse, the site / `Parameterized` / numerics contracts, package boundaries, public API and docs, tests, idioms, dependencies)
+- pyrox-specific checks (raw NumPyro sites in a module, missing `@pyrox_method`, sibling scope collisions, rebuilt `Parameterized` modules, hand-rolled linear algebra, the kernel context, `eqx.Module` pytrees)
 - Output format and priority levels
 - Suggestion type emojis and review tone
 

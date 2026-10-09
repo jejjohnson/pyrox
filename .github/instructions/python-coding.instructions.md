@@ -12,7 +12,7 @@ applyTo: "packages/**/*.py,scripts/**/*.py"
 - Built-in generics: `list[int]`, `dict[str, Any]` not `List[int]`, `Dict[str, Any]`
 - `pathlib.Path` over `os.path`
 - f-strings for string formatting
-- `dataclasses` or `attrs` for data containers
+- `equinox.Module` for anything that flows through JAX (layers, kernels, guides, states, results): a dataclass is not a pytree; plain `dataclasses` only for host-side records that are never traced (the `Parameterized` registry entries)
 - `Enum` for fixed sets of constants
 - Context managers (`with` statements) for resource handling
 - Specific exception types (never bare `except:`)
@@ -21,14 +21,19 @@ applyTo: "packages/**/*.py,scripts/**/*.py"
 
 ## Package Preferences
 
+No new runtime dependency without discussion; build on what the packages
+already depend on (see "What pyrox is built on" in `AGENTS.md`).
+
 | Purpose | Preferred Package |
 |---------|-------------------|
-| Logging | `loguru` |
-| CLI | `cyclopts` |
-| Data containers | `dataclasses` (stdlib) or `attrs` |
-| Configuration | `hydra-core` / `omegaconf` |
+| Probabilistic sites, inference | `numpyro`, through the pyrox bridge |
+| Modules / pytrees | `equinox` |
+| Linear algebra, Gaussians, GMRFs | `gaussx` |
+| Kernels | `kernellib` |
+| Network cores, bases | `geonnax` |
+| Axis-naming array ops | `einx` |
+| Optimisers | `optax` (optional; import lazily) |
 | Path handling | `pathlib` (stdlib) |
-| HTTP | `httpx` |
 | Testing | `pytest` |
 
 ## Documentation
@@ -36,5 +41,6 @@ applyTo: "packages/**/*.py,scripts/**/*.py"
 - Module-level docstrings explaining purpose
 - Function/method docstrings for all public APIs (Google style)
 - Inline comments explaining *why*, not *what*
-- Scientific algorithms should include Unicode equations in docstrings (e.g. `# σ² = Σ(xᵢ − μ)² / N`)
+- Equations in docstrings in MathJax (`$…$`, `$$…$$`; no Sphinx `:math:`), Unicode in comments (e.g. `# σ² = Σ(xᵢ − μ)² / N`)
+- Docstrings of modules with sites list the site names they register
 - Public classes and functions should include 2–3 example use cases in docstrings

@@ -1,98 +1,31 @@
 # Copilot Instructions
 
-## Project Overview
+Read [`AGENTS.md`](../AGENTS.md) at the repository root first: it is the
+single source of truth for every coding agent working here (the package map,
+what pyrox is built on, "reuse before you write", the contracts, the tests
+that enforce them, commands, the pre-commit checklist, git and PR rules).
+Each package adds its own rules in `packages/<package>/AGENTS.md`; read that
+file before changing the package.
 
-- **Python**: 3.12+
-- **Package Manager**: uv
-- **CLI Framework**: cyclopts
-- **Layout**: uv workspace (`packages/*`, each with `src/` layout)
-- **Testing**: pytest
-- **Docs**: MkDocs + Material + mkdocstrings + mkdocs-jupyter
+The essentials, in case you only read this file:
 
-## Build & Test Commands
-
-```bash
-make install     # Install all dependencies (uv sync --all-groups)
-make test        # Run tests (uv run pytest -v)
-make lint        # Lint code (ruff check)
-make format      # Format code (ruff format + ruff check --fix)
-make typecheck   # Type check (ty check)
-make precommit   # Run pre-commit on all files
-make docs-serve  # Serve docs locally
-```
-
-## Before Every Commit — Mandatory Checklist
-
-**All four checks must pass before any commit.** CI runs them on the entire repo (`ruff check .`), not just the package dirs, so always run the commands below from the repo root.
-
-```bash
-# 1. Tests — zero failures required
-uv run pytest -v
-
-# 2. Lint — run on the ENTIRE repo (includes tests/ and scripts/)
-uv run --group lint ruff check .
-
-# 3. Format check — run on the ENTIRE repo
-uv run --group lint ruff format --check .
-
-# 4. Type check — on the package only
-uv run --group typecheck ty check packages/pyrox/src/pyrox packages/pyrox-gp/src/pyrox_gp packages/pyrox-nn/src/pyrox_nn
-```
-
-> **Common pitfall**: Running `ruff check packages/` instead of `ruff check .` misses import-sorting errors in `tests/` and `scripts/`. The CI workflow runs `ruff check .`. Always use `.` (repo root), not a subdirectory.
-
-## Key Directories
-
-| Path | Purpose |
-|------|---------|
-| `packages/pyrox/src/pyrox/` | Core bridge + inference |
-| `packages/pyrox-gp/src/pyrox_gp/` | GP building blocks |
-| `packages/pyrox-nn/src/pyrox_nn/` | Bayesian NN layers + BNF API |
-| `tests/` | Test suite |
-| `docs/` | Documentation (MkDocs) |
-| `notebooks/` | Jupyter notebooks |
-| `scripts/` | Example scripts |
-
-## Behavioral Guidelines
-
-### Do Not Nitpick
-- Ignore style issues that linters/formatters catch (formatting, import order, quote style)
-- Don't suggest changes to code you weren't asked to modify
-- Match existing patterns even if you'd do it differently
-
-### Always Propose Tests
-When implementing features or fixing bugs:
-1. Write a test that verifies the expected behavior
-2. Implement the change
-3. Verify the test passes
-
-### Never Suggest Without a Proposal
-Bad: "You should add validation here"
-Good: "Add validation here. Proposed implementation:"
-```python
-if value < 0:
-    raise ValueError('Value must be non-negative')
-```
-
-### Simplicity First
-- No abstractions for single-use code
-- No speculative features beyond what was asked
-- If 200 lines could be 50, propose the simpler version
-
-### Surgical Changes
-- Only modify lines directly related to the request
-- Don't refactor adjacent code
-- Don't add docstrings/comments to code you didn't change
-- Remove only imports/functions that YOUR changes made unused
-
-## Plans
-
-Plans and design documents go in `.plans/` (gitignored, never committed). Track work via GitHub issues, not committed plan files.
-
-## PR Review Comments
-
-When addressing PR review comments, always resolve each review thread after fixing it via the GitHub GraphQL API (`resolveReviewThread` mutation). Do not leave addressed comments unresolved. See the "Pull Request Review Comments" section in `AGENTS.md` for the exact GraphQL queries and workflow.
-
-## Code Review
-
-For all code review tasks, follow the guidance in `/CODE_REVIEW.md`.
+- A uv workspace of four packages under `packages/` — `pyrox` (the
+  Equinox ↔ NumPyro bridge, `pyrox._core`, and `pyrox.inference`),
+  `pyrox-gp`, `pyrox-nn`, `pyrox-lgm` — each with `src/<import name>/` and
+  `tests/`. `pyrox-lgm` never imports `pyrox-gp`.
+- Search [`docs/capabilities.md`](../docs/capabilities.md) before writing a
+  helper; linear algebra goes through gaussx, kernel math through kernellib,
+  network cores through geonnax.
+- Keep the contracts in `AGENTS.md`:
+  - **sites**: inside a `PyroxModule`, register sites with `pyrox_sample` /
+    `pyrox_param` in a `@pyrox_method`; distinct `pyrox_name`s for sibling
+    instances; everything keeps working under every NumPyro handler;
+  - **`Parameterized`**: declare params, priors and guides in `setup()`; a
+    rebuilt pytree loses its registry;
+  - **numerics**: `eqx.Module` (never dataclasses), explicit keys, gaussx on
+    PSD-tagged operators, `_kernel_context` for repeated kernel calls.
+- Before committing, from the repo root: `uv run pytest -m "not slow"`,
+  `uv run --group lint ruff check .`, `uv run --group lint ruff format --check .`,
+  `make typecheck`; `make capabilities` after a public API change.
+- Path-scoped standards live in `.github/instructions/`; code review follows
+  [`CODE_REVIEW.md`](../CODE_REVIEW.md).
