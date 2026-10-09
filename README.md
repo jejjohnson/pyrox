@@ -72,12 +72,14 @@ uv add "pyrox-lgm @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=pac
 ```
 
 `pyrox-gp`, `pyrox-nn` and `pyrox-lgm` depend on [gaussx](https://github.com/jejjohnson/gaussx) and [kernellib](https://github.com/jejjohnson/kernellib), which are also installed from GitHub.
-kernellib v0.0.15 pins gaussx v0.6.0 while pyrox needs v0.6.1, so until the next kernellib release add this override to your project's `pyproject.toml`:
+kernellib v0.0.17 and v0.0.18 pin gaussx v0.6.1 while pyrox needs v0.6.5, so until a kernellib release pins v0.6.5, add this override to your project's `pyproject.toml`:
 
 ```toml
 [tool.uv]
-override-dependencies = ["gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.6.1"]
+override-dependencies = ["gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.6.5"]
 ```
+
+Without it the install fails to resolve; with an older gaussx it resolves but `import pyrox_gp` fails.
 
 Optional extras: `pyrox[optax]` for ensemble MAP, `pyrox-nn[bnf]` for the BNF estimator (pandas, optax), `pyrox-gp[flows]` for normalizing-flow warps, and `pyrox-lgm[xarray]` for xarray-backed `INLAResult` marginals.
 
