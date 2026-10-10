@@ -255,7 +255,8 @@ fails under `jit`, `grad`, NUTS, float32 or a batch.
 | `tests/test_extraction.py`, `tests/test_quantile_regression.py`, `tests/test_simulations.py` | Extraction (missing data, kept coordinates; the chunked-input cases skip unless dask is installed, and no dependency group installs it), the optional quantile-regression path (skips without scikit-learn), simulators |
 | `tests/test_docs_api_coverage.py` | Every public name on exactly one `docs/api/` page, no stale entries |
 | `tests/test_capabilities.py` | `docs/api/capabilities.md` is current; no name bound to two different objects outside the operator / wrapper pattern |
-| `tests/test_build_docs.py` | The two-tool docs pipeline: inventory parsing, URL rewriting, link checking, `API_PORT` matching `docs/myst.yml` |
+| `tests/test_build_docs.py` | The two-tool docs pipeline: inventory parsing, URL rewriting, link checking, `API_PORT` matching `docs/myst.yml`, the root files (`llms.txt`) it copies |
+| `tests/test_plugin_skill.py` | The downstream plugin's names exist; its worked example runs and its claims hold (slow) |
 
 ## Recipes
 
@@ -273,6 +274,15 @@ agent can read and follow them):
 | Review a change | `xtremax-review` (+ the read-only `.claude/agents/reuse-reviewer.md` and `distribution-reviewer.md`) |
 | Write a squash commit message | `squash-commit` |
 | Open or link GitHub issues | `create-gh-issue`, `link-gh-issues` (templates in `.github/ISSUE_TEMPLATE/`; `make gh-labels`, `gh-sub`, `gh-block`, `gh-show`) |
+
+Downstream users get xtremax's guidance through the Claude Code plugin in
+`plugins/xtremax/` (published by `.claude-plugin/marketplace.json`) and
+`docs/llms.txt` (copied to the site root by `scripts/build_docs.py`); see
+`docs/agents.md`. When the public API or the headline usage changes, update
+`plugins/xtremax/skills/extreme-value-analysis-with-xtremax/` too:
+`tests/test_plugin_skill.py` runs its worked example (slow) and checks that
+every `xtremax.X` / `xtx.X` path it and the plugin reviewer name still
+exists.
 
 ## Working in the repo
 

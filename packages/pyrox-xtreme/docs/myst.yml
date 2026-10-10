@@ -135,6 +135,7 @@ project:
     - title: Project
       children:
         - file: interop.md
+        - file: agents.md
         - file: contributing.md
         - file: changelog.md
 
