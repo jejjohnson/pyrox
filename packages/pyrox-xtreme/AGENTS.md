@@ -257,6 +257,23 @@ fails under `jit`, `grad`, NUTS, float32 or a batch.
 | `tests/test_capabilities.py` | `docs/api/capabilities.md` is current; no name bound to two different objects outside the operator / wrapper pattern |
 | `tests/test_build_docs.py` | The two-tool docs pipeline: inventory parsing, URL rewriting, link checking, `API_PORT` matching `docs/myst.yml` |
 
+## Recipes
+
+Step-by-step recipes for the common jobs live as plain Markdown in
+`.claude/skills/<name>/SKILL.md` (Claude Code loads them automatically; any
+agent can read and follow them):
+
+| Job | Recipe |
+|---|---|
+| Add an EVT distribution, or a quantity / primitive for one (incl. non-stationary and spatial helpers) | `add-evt-distribution` |
+| Add a point-process family or layer (primitives → operator → NumPyro wrapper) | `add-point-process` |
+| Add a block-maxima, threshold or declustering utility on xarray | `add-extraction-utility` |
+| Add or update an example notebook or tutorial | `add-notebook` |
+| Verify before a PR | `pre-pr-check` |
+| Review a change | `xtremax-review` (+ the read-only `.claude/agents/reuse-reviewer.md` and `distribution-reviewer.md`) |
+| Write a squash commit message | `squash-commit` |
+| Open or link GitHub issues | `create-gh-issue`, `link-gh-issues` (templates in `.github/ISSUE_TEMPLATE/`; `make gh-labels`, `gh-sub`, `gh-block`, `gh-show`) |
+
 ## Working in the repo
 
 Always run Python tools through `uv run` (never the system Python); `git`,

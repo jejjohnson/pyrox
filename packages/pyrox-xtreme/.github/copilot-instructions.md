@@ -37,5 +37,9 @@ The essentials, in case you only read this file:
   `uv run --group lint ruff check .`, `uv run --group lint ruff format --check .`,
   `make typecheck`; `make capabilities` and the `docs/api/` `members:`
   entry after a public API change.
+- Step-by-step recipes (add an EVT distribution, a point process, an
+  extraction utility, a notebook; pre-PR check; review) are plain Markdown
+  in `.claude/skills/<name>/SKILL.md`, and the two review checklists in
+  `.claude/agents/`; follow them as written.
 - Path-scoped standards live in `.github/instructions/`; code review follows
   [`CODE_REVIEW.md`](../CODE_REVIEW.md).
