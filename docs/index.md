@@ -21,7 +21,7 @@ uv add "pyrox @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=package
 uv add "pyrox-gp @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-gp"
 ```
 
-`pyrox-gp`, `pyrox-nn` and `pyrox-lgm` also need a gaussx override until the next kernellib release; the [README](https://github.com/jejjohnson/pyrox#installation) has the details.
+`pyrox-gp`, `pyrox-nn` and `pyrox-lgm` also need a gaussx v0.6.5 override until kernellib pins that version; the [README](https://github.com/jejjohnson/pyrox#installation) has the details.
 
 ## Three modeling patterns
 
