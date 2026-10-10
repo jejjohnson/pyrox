@@ -1,6 +1,16 @@
 # Code Review Agent Instructions
 
-Standing instructions for **all** agents performing code reviews on this repository.
+Standing instructions for **all** agents performing code reviews on this
+repository. xtremax is an extreme value library on JAX and NumPyro: most
+defects worth finding are **numerical** (a hard branch at ξ = 0 that
+returns NaN gradients, a tail computed as `1 - F`, a return level that
+rounds to infinity in float32, a support whose bijector breaks NUTS) or
+**contractual** (a distribution that skips the primitives, a point-process
+mask with holes, a sampler without an explicit key, a hand-written
+re-implementation of something in the capability index), not style. Read
+"Boundaries", "Reuse before you write" and "The contracts" in
+[`AGENTS.md`](AGENTS.md) first; this file is the checklist and the report
+format.
 
 ---
 
@@ -32,212 +42,202 @@ git --no-pager diff --no-prefix --unified=100000 --minimal "$BASE_BRANCH"...HEAD
 
 ## Review Checklist
 
-### 1. Code Style and Readability
+Skip anything ruff, ty or the tests already enforce (formatting, import
+order, a public name missing from `docs/api/`); review what they cannot
+see.
 
-- Clear, descriptive naming (variables, functions, classes, modules)
-- Appropriate function/method length (single responsibility)
-- Logical code organization and flow
-- Avoidance of deeply nested structures
-- Linting via **ruff** (`uv run --group lint ruff check .`) — lint the **entire repo**, not just the package
-- Type-hint checking via **ty** (`uv run --group typecheck ty check src/xtremax`)
+### 1. Reuse and boundaries
 
-> **Rule of thumb**: Sacrifice *cleverness* for *clarity*. Sacrifice *brevity* for *explicitness*.
-> Don't worry about formatting — our CI pipeline (ruff format, pre-commit) handles that automatically.
+- Every function, class or module the diff **adds** has been checked
+  against [`docs/api/capabilities.md`](docs/api/capabilities.md) and the
+  shared helpers (`primitives/_common.py`, `primitives/_moments.py`,
+  `distributions/_support.py`, `_rng.py`, `point_processes/operators/_base.py`,
+  the point-process `_domain` / `_history` / `_results` / `_integration*`
+  modules). A re-implemented density, quantile, return level, compensator,
+  sampler, thinning loop, quadrature or GOF statistic is a **High**
+  finding, with the existing name to use.
+- No `import pipekit` / `pipekit_cycle` anywhere in `src/xtremax/` (interop
+  is structural only); no hand-written MCMC / SVI (NumPyro owns inference);
+  scikit-learn imported only in `extraction/quantile_regression.py`; no
+  GP machinery beyond `primitives/spatial.py`.
+- Layers point one way: primitives → distributions; point-process
+  primitives → operators → distributions; point-process primitives never
+  import equinox.
 
-### 2. Modern Python Idioms (Python ≥ 3.12)
+### 2. Primitives and EVT numerics
 
-- `from __future__ import annotations` at the top of every module
-- Type hints on **all** public functions, methods, and module-level variables
-- `pathlib.Path` over `os.path`
-- f-strings for string formatting
-- Walrus operator (`:=`) only when it genuinely improves readability
-- `match` statements for pattern matching where appropriate
-- Structural pattern matching for complex conditionals
-- Context managers (`with` statements) for resource handling
-- `dataclasses` or `attrs` for data containers
-- `Enum` for fixed sets of constants
-- Modern union syntax (`X | Y` instead of `Union[X, Y]`)
-- Modern optional syntax (`X | None` instead of `Optional[X]`)
-- Built-in generics (`list[int]`, `dict[str, Any]` instead of `List[int]`, `Dict[str, Any]`)
+- Arrays in, arrays out; the value first, then the parameters
+  (`gev_*(x, loc, scale, shape)`, `gpd_*(x, scale, shape)`).
+- No `jnp.where(ξ == 0, …)` (or `abs(ξ) < eps`) branch inside a kernel:
+  `log1p_over_x` / `expm1_over_x` keep value and gradient smooth through
+  ξ = 0. A class-layer branch that must remain uses `GUMBEL_THRESHOLD`
+  from `_common`, not a local constant.
+- Stable forms: survival as `-expm1(log F)`, quantiles from `-log q`,
+  return levels from the exceedance probability (`-log1p(-1/T)`, `-log T`),
+  never `1 - 1/T`, moments via `_moments.py`, standardising
+  via `clamped_standardize`, tail exponentials via `safe_exp_neg` /
+  `safe_exp_neg_density`.
+- Out-of-support values give `-inf` log-density and the boundary CDF /
+  survival; `±inf` inputs give the limits; NaN propagates; a discarded
+  `jnp.where` branch is sanitised first so its gradient is not NaN.
+- Accurate in **float32** (the suite's default): no constants or
+  intermediates that only work in float64.
 
-### 3. Packaging and Project Structure
+### 3. EVT distributions
 
-- Proper `pyproject.toml` configuration (PEP 621)
-- Appropriate use of `__init__.py` exports
-- Clear module boundaries and dependencies
-- Correct use of relative vs absolute imports
-- Entry points defined properly for CLI tools
-- `src/` layout enforced
+- A `numpyro.distributions.Distribution` (or the NumPyro distribution it
+  extends) whose quantities route to the primitives — no second copy of a
+  formula in the class.
+- `loc` / `scale` / `concentration`; the deprecated `shape=` alias warns
+  and refuses both spellings; `arg_constraints`, `reparametrized_params`,
+  `promote_shapes`, `batch_shape` from the broadcast; `validate_args`
+  passed through.
+- `support` from the `concrete_sign` dispatch (never `interval` with an
+  infinite bound), so `biject_to(d.support)` works on a latent site.
+- `sample` validates the key (`check_prng_key`) and clips the uniform away
+  from 0 and 1; `log_prob` is `@validate_sample`; `expand` rebuilds through
+  `__init__`; GEV / GPD keep the `ObservationNoise` seam (`shape=` keyword
+  on `sample`, `covariance()`).
 
-### 4. Documentation
+### 4. Point processes
 
-- Module-level docstrings explaining purpose
-- Function/method docstrings for **all** public APIs (Google style — be consistent)
-- Inline comments explaining *why*, not *what* — except for complex logic or function calls where a brief *what* comment aids comprehension
-- Complex algorithms should have step-by-step explanations
-- All scientific algorithms should include Unicode equations in docstrings and inline where appropriate (e.g. `# σ² = Σ(xᵢ − μ)² / N`)
-- All docstrings for public classes and functions should include 2–3 example use cases
-- Type hints serve as documentation — ensure they are accurate and complete
+- Padded buffers: the mask is a contiguous prefix, temporal padding at the
+  window's right edge, spatial padding at `domain.lo`; a sampler that
+  rejects candidates compacts accepted events.
+- Samplers take an explicit key and a static `max_events` /
+  `max_candidates` and return the right `NamedTuple` from `_results.py`;
+  every random draw gets its own split key.
+- Compensators and log-likelihoods: the sign of `Λ` (`Σ log λ(tᵢ) − Λ`),
+  the integration window, history conditioning (no event excites itself
+  or earlier times), and padded slots contributing nothing — including to
+  the gradient.
+- Thinning bounds come from `effective_lambda_max` (pinned bound, else
+  `max_intensity()`, else an error), never a derived estimate that can
+  under-cover the intensity.
+- Operators are `eqx.Module`s with array-leaf parameters (gradient updates
+  must reach sampling and log-probs without a rebuild); the HPP, IPP,
+  renewal and Hawkes families get diagnostics from `GoodnessOfFitMixin`
+  through `_compensator_fn`, marked families their plumbing from
+  `SeparableMarkedPP`; signature dispatch through `call_sequence_log_prob`
+  / `call_sampler`.
+- NumPyro wrappers: `self._op`, `support = constraints.dependent`,
+  a non-empty `sample_shape` raises (the temporal HPP excepted),
+  `_validate_sample` a no-op; the name matches the
+  operator it wraps.
 
-### 5. Error Handling
+### 5. Extraction and simulations
 
-- Specific exception types (never bare `except:`)
-- Custom exceptions for domain-specific errors
-- Helpful error messages with context
-- Proper exception chaining (`raise ... from ...`)
-- Early returns / guard clauses to reduce nesting
+- xarray in, xarray out, with coordinates and attrs kept; the dimension is
+  a parameter (`dim=` / `time_dim=`); chunked (dask) inputs keep working;
+  all-missing slices and `min_periods` handled; NumPy-style docstrings.
+- Simulations take an integer `seed` (salted per variable), not a global
+  RNG.
 
-### 6. Testing Considerations
+### 6. Public API and documentation
 
-- Functions should be easily testable (pure functions where possible)
-- Dependencies should be injectable
-- Side effects should be isolated and explicit
-- Consider edge cases and boundary conditions
+- New names: in their subpackage `__all__` (and the top-level
+  `src/xtremax/__init__.py` for distributions and `xtremax.primitives`), in
+  the `members:` list of the right section of their `docs/api/*.md` page,
+  and `docs/api/capabilities.md` regenerated (`make capabilities`).
+- Docstrings: Google style (NumPy style in `extraction/`); the formula, the
+  parameterisation and its relation to scipy's sign convention, a
+  reference for a published method, and an `Examples:` block that is
+  correct (no test runs it).
+- Prose pages use MyST directives and `xref:api#xtremax.<module>.<name>`;
+  notebook basenames stay unique; new notebooks join the `docs/myst.yml`
+  toc and are committed executed.
 
-### 7. Performance (when relevant)
+### 7. Tests
 
-- Appropriate data structures for the use case
-- Generator expressions for large sequences
-- Avoid premature optimization
-- Note O(n) implications for critical paths
+- Values pinned to an independent oracle (`scipy.stats`, a closed form,
+  mpmath), not to xtremax's own formula; parameters away from 0 / 1 so a
+  parameterisation slip shows; the ξ grid straddles 0 including the small
+  band (1e-6, 1e-4).
+- Gradients checked against finite differences, including at ξ = 0.
+- Random draws from fixed keys; statistical checks bounded by the
+  statistic's own sampling distribution, with the bound's source in a
+  comment.
+- No `jax.config.update("jax_enable_x64", …)` in-process; float64 checks in
+  a subprocess.
+- Lane markers right: unmarked for fast unit tests; `slow` for samplers,
+  Monte Carlo and `jit` + `grad` sweeps; `integration` for MCMC fits and
+  subprocess runs.
 
-### 8. Security
+### 8. Modern Python and dependencies
 
-- No hardcoded secrets or credentials
-- Input validation and sanitization
-- Safe handling of file paths (no path traversal vulnerabilities)
-- Appropriate use of `subprocess` (avoid `shell=True`)
+- Type hints on every public function; `X | None`; specific exceptions
+  with `raise ... from ...`; guard clauses over deep nesting.
+- `eqx.Module` (not a dataclass) for anything that flows through JAX;
+  NamedTuples for small results.
+- No new runtime dependency without discussion; optional ones behind an
+  extra with a guarded import; `uv.lock` updated.
 
 ---
 
-## Package Preferences
+## xtremax-Specific Checks
 
-When reviewing dependency choices or suggesting alternatives, prefer these libraries:
-
-| Purpose | Preferred Package |
-|---------|-------------------|
-| Logging | `loguru` |
-| CLI | `cyclopts` |
-| Data containers | `dataclasses` (stdlib) or `attrs` |
-| Configuration | `hydra-core` / `omegaconf` |
-| Path handling | `pathlib` (stdlib) |
-| HTTP | `httpx` |
-| Testing | `pytest` |
-
----
-
-## Python-Specific Checks
-
-When reviewing, specifically verify the patterns below.
-
-### Type Hints
+### Smooth through the Gumbel limit
 
 ```python
-# ❌ Missing type hints
-def process_data(items, threshold):
-    ...
+# ❌ log(1 + ξz)/ξ is 0/0 at ξ = 0: the value is patched, the gradient is NaN
+w = jnp.where(xi == 0, z, jnp.log1p(xi * z) / xi)
 
-# ✅ Complete type hints
-def process_data(items: list[DataItem], threshold: float) -> ProcessedResult:
-    ...
+# ✅ Smooth through ξ = 0; at ξ = 0 the gradient is the exact -z²/2
+from xtremax.primitives._common import log1p_over_x
+
+w = z * log1p_over_x(xi * z)
 ```
 
-### Modern Syntax
+### A support NUTS can use
 
 ```python
-# ❌ Old-style
-from typing import Optional, Union, List, Dict
+# ❌ interval with an infinite bound: biject_to(support) maps every point to inf
+@property
+def support(self):
+    return constraints.interval(self.lower_bound(), jnp.inf)
 
-def fetch(id: Optional[int] = None) -> Union[Data, None]:
-    result: Dict[str, List[int]] = {}
 
-# ✅ Modern (Python 3.12+)
-from __future__ import annotations
-
-def fetch(id: int | None = None) -> Data | None:
-    result: dict[str, list[int]] = {}
+# ✅ Dispatch on the statically known sign of ξ
+@property
+def support(self):
+    sign = concrete_sign(self.concentration)
+    if sign == 1:
+        return constraints.greater_than_eq(self.lower_bound())
+    if sign == -1:
+        return constraints.less_than_eq(self.upper_bound())
+    return constraints.real
 ```
 
-### Dataclasses for Data Containers
+### Return levels and tails in float32
 
 ```python
-# ❌ Plain class with boilerplate
-class Config:
-    def __init__(self, host: str, port: int, timeout: float = 30.0):
-        self.host = host
-        self.port = port
-        self.timeout = timeout
+# ❌ 1 - 1/T rounds to 1.0 in float32 for T = 1e8: the "return level" is inf
+z_T = gev_icdf(1.0 - 1.0 / T, loc, scale, xi)
+s = 1.0 - gev_cdf(x, loc, scale, xi)  # 0.0 in the deep tail
 
-# ✅ Dataclass
-from __future__ import annotations
-
-from dataclasses import dataclass
-
-@dataclass
-class Config:
-    host: str
-    port: int
-    timeout: float = 30.0
+# ✅ log1p(-1/T) and -expm1(log F) keep the precision
+z_T = gev_return_level(T, loc, scale, xi)
+s = gev_survival(x, loc, scale, xi)
 ```
 
-### Path Handling
+### Float64 checks without flipping x64 in the test session
 
 ```python
-# ❌ os.path
-import os
-path = os.path.join(base_dir, "data", filename)
-if os.path.exists(path):
-    with open(path) as f:
-        ...
+# ❌ Mutates global JAX state mid-session (flaky under xdist, leaks JIT caches)
+jax.config.update("jax_enable_x64", True)
 
-# ✅ pathlib
-from pathlib import Path
-path = base_dir / "data" / filename
-if path.exists():
-    content = path.read_text()
-```
-
-### Exception Handling
-
-```python
-# ❌ Bare except, poor chaining
-try:
-    result = parse(data)
-except:
-    raise RuntimeError("Failed")
-
-# ✅ Specific exceptions, proper chaining
-try:
-    result = parse(data)
-except json.JSONDecodeError as e:
-    raise ParseError(f"Invalid JSON in {source}") from e
-```
-
-### Explanatory Comments for Complex Logic
-
-```python
-# ❌ No explanation for non-obvious algorithm
-def calculate_score(items):
-    return sum(i.weight * (1 - i.age / 365) for i in items if i.active)
-
-# ✅ Clear explanation of the logic
-def calculate_score(items: list[Item]) -> float:
-    """Calculate weighted score with time decay.
-
-    Score computation:
-        1. Filter to only active items
-        2. Apply time decay: items lose relevance linearly over one year
-        3. Weight each item's contribution by its assigned weight
-        4. Sum all weighted, decayed values
+# ✅ Run the float64 check in a subprocess, as TestFloat64Isolation does
+script = textwrap.dedent(
     """
-    total = 0.0
-    for item in items:
-        if not item.active:
-            continue
-        # Time decay factor: 1.0 for new items → 0.0 after 365 days
-        decay_factor = 1 - (item.age / 365)
-        total += item.weight * decay_factor
-    return total
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    import numpy as np
+    from xtremax.primitives import gev_survival
+    s = gev_survival(np.float64(40.0), 0.0, 1.0, 0.0)
+    assert s.dtype == np.float64 and abs(s / np.exp(-40.0) - 1) < 1e-12
+    """
+)
+subprocess.run([sys.executable, "-c", script], check=True)
 ```
 
 ---

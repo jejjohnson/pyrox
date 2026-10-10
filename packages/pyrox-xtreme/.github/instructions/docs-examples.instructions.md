@@ -92,12 +92,12 @@ import numpy as np
 
 ## First Markdown Cell — Title + Colab Badge
 
-Every notebook opens with a `#`-level title and a Colab badge pointing at its `main`-branch URL. Replace `OWNER/REPO` below with the actual GitHub owner and repository name (e.g. from `project.github` in `docs/myst.yml`):
+Every notebook opens with a `#`-level title and a Colab badge pointing at its `main`-branch URL. For xtremax that is `jejjohnson/xtremax`:
 
 ```markdown
 # Demo — Feature Overview
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/OWNER/REPO/blob/main/docs/notebooks/demo_foo.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/jejjohnson/xtremax/blob/main/docs/notebooks/demo_foo.ipynb)
 
 <one-paragraph summary>
 
@@ -110,7 +110,7 @@ Every notebook opens with a `#`-level title and a Colab badge pointing at its `m
 
 ## First Code Cell — Colab Detection + Install
 
-Detect Colab, install the package only when needed (substitute `OWNER/REPO` with the actual GitHub owner and repository name):
+Detect Colab, install the package only when needed:
 
 ```python
 import subprocess
@@ -131,7 +131,7 @@ if IN_COLAB:
             "pip",
             "install",
             "-q",
-            "xtremax @ git+https://github.com/OWNER/REPO@main",
+            "xtremax @ git+https://github.com/jejjohnson/xtremax@main",
         ],
         check=True,
     )

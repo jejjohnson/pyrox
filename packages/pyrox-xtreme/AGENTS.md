@@ -1,182 +1,462 @@
-# Agent Guidelines
+# AGENTS.md
 
-This file contains standing instructions for **all** coding agents working on this repository (Copilot, Claude, Gemini, etc.).
+Standing instructions for **every** coding agent working in this repository
+(Claude Code, Copilot, Codex, Gemini, …). This is the single source of truth:
+`CLAUDE.md` and `.github/copilot-instructions.md` point here.
 
----
+## What this repo is
 
-## Karpathy Coding Principles
+xtremax is extreme value modelling for JAX and NumPyro: NumPyro-native EVT
+distributions (GEV, GPD, Gumbel, Fréchet, Weibull) whose maths lives in pure
+JAX primitives, temporal / spatial / spatiotemporal point processes in three
+layers (pure functions → equinox operators → NumPyro wrappers), and
+xarray-native extremes extraction (block maxima, thresholds, declustering).
+Bayesian EVT models are written by users as plain NumPyro models on top of
+it, so **xtremax is a library of primitives**: new code composes what is
+here, and anything genuinely new lands where the next person will find it.
 
-Four behavioral principles to reduce the most common LLM coding mistakes. These bias toward caution over speed — for trivial tasks, use judgment.
+The design docs in `docs/design_docs/` are a draft roadmap: they describe
+parts that do not exist (a model zoo, max-stable processes, a GPJax wrapper,
+dataset loaders). Where they disagree with the code, the code wins.
 
-### 1. Think Before Coding
+It is one package, `src/xtremax/`. Each subpackage is public and has its own
+`__all__` and its own page in `docs/api/`; `import xtremax` re-exports the
+five distribution classes and every name in `xtremax.primitives`.
 
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
+| Layer | Path | Owns |
+|---|---|---|
+| 0 · Primitives | `primitives/` | Pure JAX per family: `gev_*`, `gpd_*`, `gumbel_*`, `frechet_*`, `weibull_*` (log-prob, CDF, quantile, mean, return level; survival and log-survival for GEV and GPD); non-stationary return levels (`nonstationary.py`); spatial building blocks (`spatial.py`); the shared stable kernels in `_common.py` and cancellation-free moments in `_moments.py` |
+| 1 · Distributions | `distributions/` | `numpyro.distributions.Distribution` subclasses that route every quantity to the primitives; the support dispatch in `_support.py` |
+| Point processes · 0 | `point_processes/primitives/` | Pure functions per family (HPP, IPP, renewal, Hawkes, marked, thinning; spatial and spatiotemporal variants): intensities, compensators, log-likelihoods, samplers, diagnostics |
+| Point processes · 1 | `point_processes/operators/` | `equinox.Module` process objects; shared surface in `operators/_base.py` (`GoodnessOfFitMixin`, `LiveIntensityMixin`, `SeparableMarkedPP`) |
+| Point processes · 2 | `point_processes/distributions/` | NumPyro `Distribution` wrappers around the operators, named like them |
+| Point processes · shared | `point_processes/_domain.py`, `_history.py`, `_results.py`, `_adapters.py`, `_integration*.py` | `RectangularDomain`, `TemporalDomain`, `EventHistory`, the `*SampleResult` NamedTuples, retention / mark adapters, log-intensity quadrature |
+| Data | `extraction/` | xarray in, xarray out: block maxima, thresholds, declustering, extremal index; quantile-regression thresholds behind the `[threshold]` extra |
+| Data | `simulations/` | NumPy synthetic extremes, GMST trajectories, spatial domains (integer `seed`, not PRNG keys) |
+| shared | `_rng.py` | `check_prng_key` |
 
-Before implementing:
+Dependencies point one way: primitives → distributions; point-process
+primitives → operators → distributions. Point-process primitives take a
+NumPyro distribution as an inter-event or mark law where they need one, but
+never import equinox; extraction and simulations import no JAX at all.
 
-- State assumptions explicitly. If uncertain, ask before writing code.
-- If multiple interpretations exist, present them — don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
+### Boundaries
 
-### 2. Simplicity First
+- **xtremax never imports pipekit.** Workflow code composes xtremax into
+  pipekit graphs, not the reverse; xtremax classes satisfy pipekit's
+  runtime-checkable Protocols structurally (`docs/interop.md`):
+  `GeneralizedExtremeValueDistribution` and `GeneralizedParetoDistribution`
+  are `pipekit_cycle.ObservationNoise` (`covariance()`,
+  `sample(key, shape=...)`), `XarrayQuantileRegressor` is a
+  `pipekit.Predictor`. `tests/test_interop.py` checks this against local
+  mirrors of the Protocols. No test checks the import ban itself: review it.
+- **NumPyro owns inference.** MCMC, SVI, `Predictive`, handlers and masking
+  (`d.mask(m)`) are NumPyro's; never re-implement them, and delegate to an
+  existing NumPyro distribution where one fits (`GumbelType1GEVD` subclasses
+  `numpyro.distributions.Gumbel`).
+- **No GeoML library is a runtime dependency.** GP latent fields (spatially
+  varying GEV parameters) come from a GP library — the spatial-extremes
+  tutorials use pyrox-gp from the `tutorials` group; `primitives/spatial.py`
+  stops at distances, design matrices and a two-range correlation on
+  purpose. pyrox's design docs list xtremax as a consumer of its GP
+  latents, and pipekit-evaluate's protocols as a library that satisfies
+  them without importing pipekit; neither is imported here.
+- **scikit-learn is optional.** Only `extraction/quantile_regression.py`
+  imports it; `xtremax.extraction` exports `XarrayQuantileRegressor` and
+  `quantile_regression_threshold` only when it is installed (the
+  `[threshold]` extra), so `import xtremax` works without it.
 
-**Minimum code that solves the problem. Nothing speculative.**
+## What xtremax is built on
 
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If 200 lines could be 50, rewrite it.
+Each foundation brings a rule. Breaking one runs fine on one example and
+fails under `jit`, `grad`, NUTS, float32 or a batch.
 
-Test: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+| Library | xtremax uses it for | The rule it brings |
+|---|---|---|
+| **NumPyro** | `Distribution` base, constraints, `biject_to`, `promote_shapes`, `validate_sample`, inference | Distributions declare `arg_constraints`, a `support` whose bijector works for half-unbounded supports, a `batch_shape`, and take `validate_args`; samples come from an explicit key. |
+| **jax** | All maths: `jit`, `grad`, `vmap`, PRNG keys | Pure functions, explicit keys, no Python control flow on traced values. The suite runs with x64 **off** (float32), so float32 accuracy is a requirement, not a bonus. |
+| **equinox** | Point-process operators, domains, `EventHistory` | Operators are immutable `eqx.Module` pytrees; parameters are array leaves (so a gradient update flows into sampling and log-probs without rebuilding); sizes and flags are static. |
+| **jaxtyping** | Shape annotations (`Float[Array, ...]`, `PRNGKeyArray`) | Annotate public array arguments and returns. |
+| **xarray** (+ NumPy, dask) | The extraction interface | Take and return `xr.DataArray`; keep coordinates, dims and attrs; stay dask-friendly (`xr.apply_ufunc(..., dask="parallelized")`). |
+| **scipy.stats** | The tests' independent oracle | Pin values to scipy, not to xtremax's own formulas; mind its sign conventions (`genextreme(c=-ξ)`, `genpareto(c=ξ)`). |
 
-### 3. Surgical Changes
+## Reuse before you write
 
-**Touch only what you must. Clean up only your own mess.**
+1. **Search the capability index.** [`docs/api/capabilities.md`](docs/api/capabilities.md)
+   lists every public name, each once at its subpackage home, grouped by the
+   module that defines it, with a one-line summary. It is generated
+   (`make capabilities`) and checked by `tests/test_capabilities.py`.
+2. **Search the shared private helpers** in the table below.
+3. **If it is missing, add it at its layer**, in the module that owns the
+   concept: the maths of a new quantity as a primitive first, then the class
+   method that calls it; a helper two modules need goes into the owning
+   shared module (`primitives/_common.py`, `point_processes/operators/_base.py`,
+   …), not inline in one caller.
+4. **One object, one name.** The one deliberate exception: each NumPyro
+   wrapper in `point_processes.distributions` shares its name with the
+   operator it wraps (the capability script allows exactly that pattern).
 
-When editing existing code:
+| You are about to write… | Use instead |
+|---|---|
+| A GEV / GPD / Gumbel log-density, CDF, survival, quantile, mean or return level | `xtremax.primitives` (`gev_log_prob`, `gpd_survival`, `gumbel_icdf`, `gev_return_level`, …) or the distribution's method |
+| `log1p(ξz) / ξ` with a `jnp.where(ξ == 0, …)` Gumbel branch | `primitives._common.log1p_over_x` / `expm1_over_x` (smooth, finite gradient through ξ = 0) |
+| `(x - loc) / scale`, `exp(-w)` in a tail | `_common.clamped_standardize`, `safe_exp_neg` (CDF / survival), `safe_exp_neg_density` (log-density) |
+| GEV variance / skewness / kurtosis from `Γ(1 - kξ)` differences | `primitives._moments` (`gev_variance`, `gev_skewness`, `gev_excess_kurtosis`) |
+| `icdf(1 - 1/T)` for a return level | `gev_return_level` / `gpd_return_level` (parameterised by the exceedance probability, accurate for large T), `d.return_level(T)` on a GEV or GPD; `gumbel_return_level` still forms `1 - 1/T`, so for a large T use `gev_return_level(T, loc, scale, 0.0)` |
+| A return level / period over a changing climate, expected exceedances | `nonstationary_return_level`, `nonstationary_return_period`, `expected_exceedances`, `assemble_nonstationary_gev_fields` |
+| Site-distance matrices, regression design matrices, a copula correlation | `pairwise_distances` (finite gradient on the diagonal), `design_matrix`, `two_range_correlation` |
+| `constraints.interval(lo, hi)` with an infinite bound as a support | the sign dispatch in `distributions._support.concrete_sign` → `greater_than_eq` / `less_than_eq` / `real` |
+| `assert key.shape == (2,)` | `xtremax._rng.check_prng_key` |
+| A GEV / GPD likelihood in `numpyro.factor` | the distribution classes; ragged records with `d.mask(m)` |
+| `da.resample(time="YE").max()`, a percentile threshold, runs declustering | `temporal_block_maxima` (with `keep_time`, `min_periods`), `quantile_threshold`, `seasonal_threshold`, `rolling_threshold`, `decluster_runs`, `decluster_separation`, `estimate_extremal_index` |
+| `n log λ − λT`, a compensator, a Poisson / Hawkes / renewal sampler | `xtremax.point_processes.primitives` (`hpp_*`, `ipp_*`, `exp_hawkes_*`, `general_hawkes_*`, `renewal_*`, `stpp_hawkes_*`, …) or the operators |
+| `∫ exp(log λ)` by hand | `integrate_log_intensity`, `cumulative_log_intensity`, `integrate_log_intensity_spatial`, `integrate_log_intensity_spatiotemporal` |
+| An Ogata thinning loop, retention probabilities | `thinning_sample`, `thinning_retention_log_prob`, `retention_compensator`; `ThinningProcess` |
+| Time-rescaling residuals, KS, QQ | `time_rescaling_residuals`, `ks_statistic_exp1`, `qq_exp1_quantiles`; on an operator, `goodness_of_fit` via `GoodnessOfFitMixin` |
+| Ripley's K, L, pair correlation under CSR | `csr_ripleys_k`, `csr_l_function`, `csr_pair_correlation` |
+| A padded event buffer, a domain, a sample tuple | `EventHistory`, `RectangularDomain`, `TemporalDomain`, `SampleResult` and its marked / spatial siblings |
+| A retention or mark callable from a constant or a function of time | `constant_retention`, `time_varying_retention`, `constant_mark_distribution`, `time_varying_marks` |
+| Synthetic extremes for a test or a demo | `xtremax.simulations` (`simulate_temp_extremes`, `generate_gmst_trajectory`, …) |
+| A GP prior on GEV parameters, MCMC / SVI loops | pyrox-gp (or another GP library) and NumPyro; not here |
 
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it — don't delete it.
+## The contracts
 
-When your changes create orphans:
+### 1. Primitives: pure, smooth through ξ = 0, float32-accurate
 
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
+- **Arrays in, arrays out** (`jax.jit` / `grad` / `vmap` safe), no NumPyro,
+  no class state. Argument order is the value first, then the parameters:
+  `gev_log_prob(x, loc, scale, shape)`, `gpd_cdf(x, scale, shape)` (the GPD
+  is for excesses, so it has no `loc`), `gumbel_icdf(q, loc, scale)`,
+  `gev_return_level(period, loc, scale, shape)`. The primitives call ξ
+  `shape`; the classes call it `concentration`.
+- **No hard branch on the Gumbel / exponential limit.** Write the kernel
+  through `log1p_over_x` / `expm1_over_x` so value and gradient are smooth
+  through ξ = 0 (`∂/∂ξ ≠ 0` there). The only remaining class-layer branches
+  (`mode`, the quantile grid of `conditional_excess_mean`) import
+  `GUMBEL_THRESHOLD` from `_common`; never cache a local copy.
+- **Stable forms.** Survival never as `1 - F` (the GEV uses
+  `-expm1(log F)`), GEV quantiles from `-log q`, return levels from the
+  exceedance probability (`-log1p(-1/T)` for the GEV, `-log T` for the
+  GPD), moments through the reduced forms in `_moments.py`;
+  standardise with `clamped_standardize`.
+- **Extended reals and support.** Out of support: log-density `-inf`, CDF /
+  survival the boundary value; `x = ±inf` gives the limit; NaN propagates.
+  Discarded `jnp.where` branches are sanitised first (double-`where`) so
+  they never feed `0/0` or `inf` to autodiff.
+- **Fréchet and Weibull** are GEV restricted to ξ > 0 / ξ < 0: their
+  primitives delegate to `gev_*`, and the sign is a caller obligation (the
+  class enforces it).
 
-Test: Every changed line should trace directly to the user's request.
+### 2. EVT distributions: the NumPyro contract
 
-### 4. Goal-Driven Execution
+- **Subclass `numpyro.distributions.Distribution`** (or the NumPyro
+  distribution it extends, as Gumbel does) and route `log_prob`, `cdf`,
+  `icdf`, `mean`, `return_level`, survival and moments to the primitives;
+  the class adds no maths of its own beyond EVT conveniences built from
+  them (hazard, mean residual life, …).
+- **Parameters** `loc`, `scale`, `concentration` (ξ) (GPD: `scale`,
+  `concentration`; Gumbel: `loc`, `scale`); `shape=` is a deprecated alias
+  that warns (`DeprecationWarning`) and raises if passed with
+  `concentration`. `arg_constraints` covers each (`positive` scale;
+  `positive` / `less_than(0.0)` concentration for Fréchet / Weibull);
+  `reparametrized_params` lists them. Parameters go through
+  `promote_shapes`, and `batch_shape` is their broadcast shape.
+- **Support** is a property dispatched on `concrete_sign(concentration)`:
+  `greater_than_eq(lower_bound())` for ξ > 0, `less_than_eq(upper_bound())`
+  for ξ < 0, `real` when the sign is zero, traced or mixed. Never
+  `interval(lo, ±inf)`: its bijector returns inf / NaN and breaks NUTS and
+  SVI on a latent site.
+- **`sample(key, sample_shape=())`** calls `check_prng_key(key)` first, then
+  inverts the CDF at a uniform clipped to `[eps, 1 - eps]`; `log_prob`
+  carries `@validate_sample` (Gumbel inherits both from NumPyro's `Gumbel`
+  and adds only the key check).
+- **`expand`** rebuilds through `__init__` so every EVT method survives.
+- **The `ObservationNoise` seam** (GEV and GPD only): `sample` also takes
+  the keyword `shape=` (passing it with a non-empty `sample_shape` raises),
+  and `covariance()` is the variance broadcast to `batch_shape` (`+inf`
+  where the moment does not exist).
 
-**Define success criteria. Loop until verified.**
+### 3. Point processes: three layers over padded buffers
 
-Transform imperative tasks into declarative goals with verification:
+- **Padded buffers.** Variable-length events are a fixed-size buffer plus a
+  boolean mask whose `True` entries form a **contiguous prefix**; temporal
+  padding sits at the window's right edge, spatial padding at `domain.lo`.
+  Every sampler emits this form and sequential consumers (time-rescaling
+  residuals, Hawkes, renewal) assume it.
+- **Samplers** take an explicit key and a static `max_events` /
+  `max_candidates`, return a `NamedTuple` from `_results.py`
+  (`SampleResult(times, mask, n_events)`, …) whose `n_events` semantics are
+  per family, and are batched with `jax.vmap` / `eqx.filter_vmap` over keys
+  (only the temporal HPP takes `sample_shape`).
+- **Primitives** (`primitives/`) are pure functions: no equinox, and no
+  NumPyro base-class machinery (a NumPyro distribution is accepted as a
+  law). They are the reference implementation the other layers delegate to.
+- **Operators** (`operators/`) are `eqx.Module`s with array-leaf parameters.
+  The HPP, IPP, renewal and Hawkes operators get the diagnostics trio
+  (`residuals`, `goodness_of_fit`, `compensator_curve`) from
+  `GoodnessOfFitMixin` by implementing `_compensator_fn`; thinning samplers
+  (the IPPs) read their bound through
+  `effective_lambda_max` (a pinned `lambda_max`, else the intensity module's
+  `max_intensity()`, else an error — never a derived guess); separable
+  marked families subclass `SeparableMarkedPP`. Dispatch over operator
+  signatures goes through `call_sequence_log_prob` / `call_sampler` in
+  `_base.py`, not `try / except TypeError`.
+- **Distributions** (`distributions/`) wrap an operator as `self._op`, set
+  `support = constraints.dependent` (a sample is a `(times, mask)`-style
+  pytree, not a vector), make `_validate_sample` a no-op, and raise on a
+  non-empty `sample_shape` (except the temporal HPP wrapper, whose sampler
+  batches). Temporal wrappers take `batch_shape` from their parameters'
+  broadcast shape; spatial and spatiotemporal ones have `batch_shape == ()`
+  (the homogeneous ones reject a non-scalar rate).
+- **User callables** (retention, marks) receive history as an
+  `EventHistory`, whatever the family.
 
-- "Add validation" → Write tests for invalid inputs, then make them pass
-- "Fix the bug" → Write a test that reproduces it, then make it pass
-- "Optimize X" → Write the naive correct version first, then optimize while preserving correctness
+### 4. Extraction and simulations
 
-For multi-step tasks, state a brief plan:
+- Extraction functions take an `xr.DataArray`, name the dimension they act
+  on (`dim=` / `time_dim=`, default `"time"`), return xarray with
+  coordinates and attrs intact (or a scalar, for a constant threshold),
+  and keep chunked (dask) inputs working.
+  Their docstrings are **NumPy style**, the rest of the package Google
+  style; `docstring_style: auto` in `mkdocs.yml` handles both, so never pin
+  it.
+- Simulations are NumPy generators seeded with an integer `seed` (salted
+  per variable); they are the one place that does not take PRNG keys.
 
-```
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-3. [Step] → verify: [check]
-```
+### The public API
 
-**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+- Export a public name from its subpackage `__init__.py` (import + `__all__`)
+  — and from `src/xtremax/__init__.py` if it is a distribution class or a
+  `xtremax.primitives` function — add it to the `members:` list of the right
+  section on its `docs/api/*.md` page, and run `make capabilities`.
+- `tests/test_docs_api_coverage.py` fails when a name in a documented
+  module's `__all__` is on no page, on two, or listed but no longer
+  exported.
+- Docstrings: Google style (NumPy style in `extraction/`), the formula in
+  Unicode or `$…$`, the parameterisation (scipy's sign convention where it
+  differs), and an `Examples:` block. Examples are **not executed** by any
+  test; keep them correct by hand.
+- Renames keep the old spelling as a warning alias first (as `shape=` →
+  `concentration=`).
 
----
+## What enforces them
 
-## Before Every Commit
+| Test | Enforces |
+|---|---|
+| `tests/test_oracles.py` | Every EVT quantity (primitives and classes) against `scipy.stats` across a ξ grid that straddles 0; sample moments and KS of draws; quantile round trips in float32; float64 deep tails in a subprocess (integration); small-ξ moments against mpmath values |
+| `tests/test_gradients.py` | Gradients against central finite differences of `scipy.stats` (float64), inside the small-ξ band and across the Gumbel switch; batched-parameter methods |
+| `tests/test_primitives.py`, `tests/test_primitives_nonstationary.py` | Round trips, the Gumbel / exponential limits, finite gradients, `jit` / `vmap`, class ↔ primitive parity; non-stationary return levels and the spatial helpers |
+| `tests/test_distributions.py` | The NumPyro contract: support bounds, `biject_to(support)` round trips and NUTS on a latent site (`TestBijectToSupport`), PRNG-key validation, the `shape=` alias, masked likelihoods, boundary semantics |
+| `tests/test_interop.py` | `ObservationNoise` / `Predictor` conformance and `covariance()` |
+| `tests/point_processes/test_cross_family_invariants.py` | Degeneracies agree across families (renewal-exponential = HPP, Hawkes with α = 0 = HPP, thinning with p = 1 = base, …) |
+| `tests/point_processes/test_property_suite.py` | Closed forms and statistical checks at non-degenerate parameters (slow) |
+| `tests/point_processes/test_epic38_regressions.py`, `test_epic39_consolidation.py`, `test_review_regressions.py` | Fixed bugs stay fixed: compensator signs, contiguous masks, typed sample results, mixin-hosted diagnostics |
+| `tests/point_processes/test_*.py` (per family and layer) | Primitives, operators and NumPyro wrappers for every family |
+| `tests/test_extraction.py`, `tests/test_quantile_regression.py`, `tests/test_simulations.py` | Extraction (missing data, kept coordinates; the chunked-input cases skip unless dask is installed, and no dependency group installs it), the optional quantile-regression path (skips without scikit-learn), simulators |
+| `tests/test_docs_api_coverage.py` | Every public name on exactly one `docs/api/` page, no stale entries |
+| `tests/test_capabilities.py` | `docs/api/capabilities.md` is current; no name bound to two different objects outside the operator / wrapper pattern |
+| `tests/test_build_docs.py` | The two-tool docs pipeline: inventory parsing, URL rewriting, link checking, `API_PORT` matching `docs/myst.yml` |
 
-**All agents must** verify that every one of the following passes before creating a commit or reporting progress. No exceptions.
+## Working in the repo
 
-1. **Tests** – `uv run pytest -q -n auto` (or `make test`) must have 0 failures. The suite is marker-split into a fast lane and a heavy (`slow` / `integration`) lane; `make test-fast` reproduces what CI runs on a PR, but a commit must pass the **whole** suite.
-2. **Lint** – `uv run --group lint ruff check .` (or `make lint`) must report no issues.
-3. **Format** – `uv run --group lint ruff format --check .` must report no files to reformat.
-4. **Type checks** – `uv run --group typecheck ty check src/xtremax` (or `make typecheck`) must report no errors in changed files.
-
-> **Common pitfall**: Running `ruff check src/xtremax/` instead of `ruff check .` misses lint errors in `tests/` and `scripts/`. CI runs `ruff check .` on the entire repo — always use `.` (repo root), not a subdirectory.
-
-## Development Environment
-
-**IMPORTANT**: Always use `uv run` when running Python tools or scripts (e.g., `pytest`, `python`, `ruff`, `ty`, `mkdocs`, `pre-commit`) so they run in the project environment. You do **not** need `uv run` for non-Python shell commands (e.g., `git`, `ls`, `cat`). Do NOT use the system Python directly.
-
-## Pull Request Descriptions
-
-**Never replace or remove an existing PR title or description.** When reporting progress on a PR that already has a title and description, only append new checklist items or update the status of existing ones. The original content must be preserved in full.
-
-This is a common failure mode: an agent called to make a small follow-up change will supply a fresh description scoped only to its own work, silently discarding all prior context. Always read the existing description first and treat it as the base.
-
-## PR Title & Description Rules
-
-**Do not change** the PR title or description between sessions except to:
-- Correct a conventional-commits format violation in the title.
-- Append new items to the description checklist.
-
-Never rewrite the existing description; only add to it.
-
-## Pull Request Review Comments
-
-When addressing PR review comments, **resolve each review thread** after fixing it. Use the GitHub GraphQL API to list threads and resolve them:
+Always run Python tools through `uv run` (never the system Python); `git`,
+`ls` and other non-Python commands need no `uv run`.
 
 ```bash
-# 1. List all review threads and their IDs for a PR
+make install              # uv sync --all-groups --no-group tutorials + pre-commit hooks
+make test                 # the whole suite, in parallel, no coverage
+make test-fast            # fast lane only: what CI runs on a PR
+make test-heavy           # slow + integration only
+make test-cov             # the whole suite with a coverage report
+make lint                 # ruff check .   (entire repo)
+make format               # ruff format . && ruff check --fix .
+make typecheck            # ty check src/xtremax
+make capabilities         # regenerate docs/api/capabilities.md
+make docs                 # build both docs halves into public/ and check every link
+make docs-check           # strict validation of both halves, no themed render
+make docs-api             # MkDocs API reference only (mkdocs build --strict)
+make docs-serve           # build, then serve public/ at :8000
+```
+
+`make install` does not install the `[threshold]` extra; CI does
+(`uv sync --group dev --extra threshold`), and so does `make capabilities`.
+Add it locally with `uv sync --all-groups --no-group tutorials --extra
+threshold` to run `tests/test_quantile_regression.py` and
+`tests/test_capabilities.py` instead of skipping them. The `tutorials`
+group (pyrox, xrreader, cartopy, …) is needed only to re-run
+`docs/tutorials/spatial_extremes/`.
+
+Run one test from the repo root:
+`uv run pytest tests/test_oracles.py::TestGEVPrimitiveOracles -v`.
+
+### Test lanes
+
+The suite is split by marker (registered in `pyproject.toml`) so PRs get a
+fast signal (#90):
+
+| Marker | Meaning | Runs on |
+|--------|---------|---------|
+| *(none)* | fast: primitives, oracles, gradients, extraction | every PR ("Tests", `ci.yml`: Python 3.12, `-m "not slow and not integration"`) |
+| `slow` | samplers, Monte Carlo, `jit` + `grad` sweeps | "Extended Tests" (`tests-extended.yml`): every push to `main`, `v*` tags, weekly (Monday 05:00 UTC), on demand |
+| `integration` | end-to-end MCMC fits, subprocess runs | same as `slow` |
+
+- Add `@pytest.mark.slow` to any new test that draws point-process
+  realisations or does a statistical check; sampler-heavy modules set
+  `pytestmark` at module level instead. A test that is slow *once* is
+  usually the first XLA compile of a parametrised group being amortised —
+  mark by behaviour, not by stopwatch.
+- Extended Tests runs the whole suite on Python 3.12 and 3.13 with
+  coverage (`fail_under = 40` in `pyproject.toml`), or only the heavy lane
+  with `gh workflow run tests-extended.yml -f suite=heavy`. Coverage is not
+  in `addopts`: use `make test-cov` rather than `pytest --cov` on one lane.
+- **x64 stays off.** Never call `jax.config.update("jax_enable_x64", …)`
+  in-process (flaky under xdist, leaks JIT caches); a float64 check runs in
+  a subprocess, as `TestFloat64Isolation` in `tests/test_oracles.py` does.
+
+### Tests that assert on random draws
+
+- **Incidental randomness** (any draw would do): a fixed key
+  (`jax.random.PRNGKey(0)`, the `key` fixture in `tests/test_distributions.py`).
+- **Sampling behaviour under test** (sample moments, KS against scipy,
+  point-process counts): bound the statistic by its own sampling
+  distribution — a number of standard errors (`4 * sqrt(var / n)` in
+  `TestSampleStatistics`), a KS p-value floor — and say in a comment where
+  the bound comes from. By the lane rule above, a new statistical check is
+  `slow`.
+
+### Before every commit
+
+All of these must pass, from the repo root:
+
+1. `make test` — the **whole** suite, zero failures (`make test-fast` is
+   what CI runs on a PR; a commit must pass both lanes).
+2. `uv run --group lint ruff check .` — the **entire** repo, which includes
+   `tests/`, `scripts/` and the notebook cells under `docs/notebooks/`.
+   Running it on `src/xtremax/` alone misses errors CI catches.
+3. `uv run --group lint ruff format --check .`
+4. `make typecheck` (`ty check src/xtremax`, as CI runs it).
+5. After changing a public API: `make capabilities`, and the `members:`
+   entry on its `docs/api/` page.
+6. After changing docs or docstrings: `make docs-api` at least; `make docs`
+   when prose, notebooks or cross-references changed.
+7. After changing a dependency: `uv lock`, and commit `uv.lock`.
+
+## Coding principles
+
+1. **Think before coding.** State assumptions; if a request has several
+   readings, name them instead of picking one silently; ask when unsure;
+   push back when a simpler approach exists.
+2. **Simplicity first.** The minimum code that solves the problem: no
+   speculative features, no single-use abstractions, no configurability
+   nobody asked for, no error handling for impossible cases.
+3. **Surgical changes.** Touch only what the task needs; match the existing
+   style; don't refactor or add docstrings to code you didn't change;
+   remove only what your change made unused, and mention (don't delete)
+   unrelated dead code.
+4. **Goal-driven.** Turn the task into a check (a failing test, a
+   reproduced bug, a scipy oracle to match) and loop until it passes; for
+   multi-step work state the plan with a check per step.
+
+Also: `from __future__ import annotations` in every module, type hints on
+every public function, `eqx.Module` (not dataclasses) for anything that
+flows through JAX, NamedTuples for small results, pure functions with side
+effects isolated and explicit.
+
+## Git, commits and pull requests
+
+- Never push to or merge into `main` unless explicitly told to ("push to
+  main", "merge to main"). Work on a feature branch, commit locally, and
+  push only when asked. "Merge the branch" means push the feature branch,
+  not merge into `main`. Confirm before anything that affects a shared
+  branch.
+- Commit messages and PR titles follow
+  [Conventional Commits](https://www.conventionalcommits.org/) with a
+  lowercase subject (`feat(distributions): add …`); CI validates PR titles.
+  Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`,
+  `build`, `ci`, `chore`, `revert`. Breaking changes use `!` and a
+  `BREAKING CHANGE:` footer.
+- Releases are cut by release-please; don't bump versions by hand.
+- **Never replace or remove an existing PR title or description.** An agent
+  called for a small follow-up tends to write a fresh description scoped to
+  its own work and drop the rest: read the existing one first and only
+  append checklist items or update their status. Change the title only to
+  fix a Conventional Commits violation.
+- Code review follows [`CODE_REVIEW.md`](CODE_REVIEW.md); issues follow the
+  label taxonomy and epic model in [`docs/contributing.md`](docs/contributing.md).
+
+### Pull Request Review Comments
+
+After fixing a review comment, resolve its thread. Don't resolve threads you
+didn't address.
+
+```bash
+# 1. List the review threads and their IDs
 gh api graphql -f query='
   query($owner: String!, $repo: String!, $pr: Int!) {
     repository(owner: $owner, name: $repo) {
       pullRequest(number: $pr) {
         reviewThreads(first: 100) {
-          nodes {
-            id
-            isResolved
-            comments(first: 1) {
-              nodes { body path line }
-            }
-          }
+          nodes { id isResolved comments(first: 1) { nodes { body path line } } }
         }
       }
     }
   }' -f owner=OWNER -f repo=REPO -F pr=PR_NUMBER
 
-# 2. Resolve a review thread by its node ID
-gh api graphql -f query='mutation($threadId: ID!) { resolveReviewThread(input: {threadId: $threadId}) { thread { isResolved } } }' -f threadId=THREAD_ID
+# 2. Resolve an addressed thread
+gh api graphql -f query='mutation($threadId: ID!) {
+  resolveReviewThread(input: {threadId: $threadId}) { thread { isResolved } } }' \
+  -f threadId=THREAD_ID
 ```
 
-Workflow:
-1. List review threads via the GraphQL query above to get thread node IDs
-2. Address each thread with code changes
-3. After pushing the fix, resolve each addressed review thread via the `resolveReviewThread` mutation
-4. Do **not** resolve threads you haven't addressed
-
-## Plans
-
-Plans and design documents go in `.plans/` (gitignored, never committed). If a plan needs to be tracked long-term, create a GitHub issue with the same detail instead. **Never commit plan files to the repository.**
-
-## GIT Safety Rules
-
-- **NEVER** push to `main` or merge into `main` unless the user explicitly says "push to main" or "merge to main".
-- **NEVER** push to any remote branch or run `git push` unless the user explicitly asks you to push. Only commit locally.
-- Always work on feature branches.
-- When the user says "merge the changes" or "merge the branch", they mean push the local branch to the remote — NOT merge into main.
-- Always confirm before any action that affects shared branches (main, production, etc.).
+When the `gh` CLI is unavailable, use the GitHub MCP tools for the same
+operations.
 
 ## Documentation
 
-The docs are built by **two tools** and deployed as one site — see `docs/README.md`:
+The docs are built by **two tools** and deployed as one site
+(`docs/README.md` has the rationale); `docs.yml` builds them on every PR and
+push to `main`, and `pages.yml` deploys `public/` to GitHub Pages from
+`main`.
 
-- **Prose** (home, example notebooks, tutorials, design docs) — [mystmd](https://mystmd.org), toc in `docs/myst.yml`, served at `/`. Install with `npm install -g mystmd`.
-- **API reference** — MkDocs + Material + mkdocstrings from `docs/api/`, served at `/reference/`.
+| Half | Tool | Source | Deployed at |
+|---|---|---|---|
+| Prose — home, example notebooks, tutorials, design docs | mystmd | `docs/*.md`, `docs/notebooks/`, `docs/tutorials/`, `docs/design_docs/` (toc in `docs/myst.yml`) | `/` |
+| API reference | MkDocs + mkdocstrings | `docs/api/` (`docs_dir` in `mkdocs.yml`) | `/reference/` |
 
-- **Build + verify**: `make docs` (runs `scripts/build_docs.py`: strict MkDocs, strict MyST, assembles `public/`, checks every internal link)
-- **Serve locally**: `make docs-serve`
-- **API only**: `make docs-api` (`mkdocs build --strict`)
-- **CI**: `docs.yml` builds the site on every PR; `pages.yml` deploys `public/` to GitHub Pages (Actions source) on every push to `main`
+`make docs` runs `scripts/build_docs.py`: it builds the API with
+`mkdocs build --strict`, serves `site/` on port 8910 so mystmd can read its
+`objects.inv`, runs `myst build --strict`, rewrites the localhost API URLs
+to `/reference/`, and fails if any internal link in the assembled `public/`
+site does not resolve. mystmd is a Node CLI (`npm install -g mystmd`); if
+its theme download is blocked, `docs/README.md` says how to build against a
+local clone of the theme.
 
-When writing docstrings, use **Google style** (the `extraction/` subpackage is NumPy style; `docstring_style: auto` handles both).
+- **Prose is MyST Markdown**, not MkDocs-Material syntax: `:::{note}`
+  directives, not `!!!` admonitions or `===` tabs.
+- **Link to the API** with the `xref:` protocol:
+  ``[`temporal_block_maxima`](xref:api#xtremax.extraction.temporal_block_maxima)``.
+  A missing target fails `myst build --strict`.
+- **URLs are flat**: a page's URL is its basename minus any leading `NN_`
+  prefix, with `_` turned into `-` (`docs/design_docs/vision.md` →
+  `/vision/`), so keep basenames (and MyST labels) unique across the prose
+  tree. API pages link back to prose with relative directory URLs such as
+  `../vision/`.
+- **API pages** (`docs/api/*.md`) are section-structured, not whole-module
+  dumps: each `## Section` gets a short prose paragraph, then a
+  `::: module` block with an explicit `members:` list, which
+  `tests/test_docs_api_coverage.py` checks.
+- **Notebooks** in `docs/notebooks/` are committed as executed `.ipynb`
+  files, authored as jupytext percent `.py` and deleted after conversion;
+  mystmd renders the stored outputs and never re-runs them, so each must be
+  listed in the `docs/myst.yml` toc. Figures render inline with
+  `plt.show()`: no `savefig`, no committed PNGs. Longer real-data curricula
+  live in `docs/tutorials/` (e.g. `spatial_extremes/`), also pre-executed,
+  with helper code in a `_helpers/` folder next to the notebooks, outside
+  the package; ruff skips their `.ipynb` on purpose (`extend-exclude`).
+  Full standards: `.github/instructions/docs-examples.instructions.md`.
 
-Notebooks in `docs/` are committed as executed `.ipynb` files and must be listed in the `docs/myst.yml` toc. Link from prose into the API with `[name](xref:api#xtremax.module.name)`.
+## Plans
 
-## Commit Messages
-
-All commit messages **must** follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
-
-```
-<type>[optional scope]: <description>
-
-[optional body]
-
-[optional footer(s)]
-```
-
-Valid types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
-
-Examples:
-- `feat: add new data loading utility`
-- `fix: correct off-by-one error in slice computation`
-- `docs: update installation instructions`
-- `chore: bump ruff to 0.9.7`
+Plans and scratch design notes go in `.plans/` (gitignored, never
+committed); track work in GitHub issues. The committed design references
+are `docs/design_docs/`.

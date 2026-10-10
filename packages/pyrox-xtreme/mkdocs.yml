@@ -74,6 +74,7 @@ plugins:
 
 nav:
   - Overview: index.md
+  - Capability index: capabilities.md
   - Distributions: distributions.md
   - Primitives: primitives.md
   - Extraction: extraction.md
