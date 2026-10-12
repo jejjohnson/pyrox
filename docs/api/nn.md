@@ -165,3 +165,16 @@ Monte-Carlo sigmoid / softmax output layers with factor-analysis noise
 ::: pyrox_nn.standardize
 
 ::: pyrox_nn.unstandardize
+
+## Neural operators and basis transforms (re-exported from `geonnax`)
+
+Deterministic operator cores from `geonnax`, importable from `pyrox_nn` so
+that one import surface covers the stack (`from pyrox_nn import GeoFNO`).
+
+::: pyrox_nn.GeoFNO
+
+::: pyrox_nn.LearnedDeformation
+
+::: pyrox_nn.ManifoldNO
+
+::: pyrox_nn.BasisTransform

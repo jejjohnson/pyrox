@@ -14,7 +14,7 @@ several files that must agree.
 |---|---|
 | gaussx | `packages/pyrox-gp/pyproject.toml` and `packages/pyrox-lgm/pyproject.toml` (`>=` floor in `dependencies`, `tag` in `[tool.uv.sources]`); root `pyproject.toml` `[tool.uv] override-dependencies` (kernellib pins its own gaussx tag, so the override keeps one gaussx) |
 | kernellib | `packages/pyrox-gp/pyproject.toml`, `packages/pyrox-lgm/pyproject.toml` (floor + `[tool.uv.sources]` tag) |
-| geonnax | `packages/pyrox-gp/pyproject.toml`, `packages/pyrox-nn/pyproject.toml` (direct `geonnax @ git+…@vX` reference) |
+| geonnax | `packages/pyrox-gp/pyproject.toml`, `packages/pyrox-nn/pyproject.toml` (direct `geonnax @ git+…@vX` reference); root `pyproject.toml` `[tool.uv] override-dependencies` (kernellib pins its own geonnax tag) |
 | gauss-flows | `packages/pyrox-gp/pyproject.toml` `[flows]` extra (pinned by commit) |
 
 Also update the README's installation note (the `override-dependencies`
