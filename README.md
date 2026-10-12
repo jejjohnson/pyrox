@@ -72,11 +72,14 @@ uv add "pyrox-lgm @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=pac
 ```
 
 `pyrox-gp`, `pyrox-nn` and `pyrox-lgm` depend on [gaussx](https://github.com/jejjohnson/gaussx) and [kernellib](https://github.com/jejjohnson/kernellib), which are also installed from GitHub.
-kernellib v0.0.17 and v0.0.18 pin gaussx v0.6.1 while pyrox needs v0.6.5, so until a kernellib release pins v0.6.5, add this override to your project's `pyproject.toml`:
+kernellib v0.0.17 and v0.0.18 pin gaussx v0.6.1 and geonnax v0.0.5 while pyrox needs gaussx v0.6.5 and geonnax v0.0.9, so until a kernellib release pins those, add this override to your project's `pyproject.toml`:
 
 ```toml
 [tool.uv]
-override-dependencies = ["gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.6.5"]
+override-dependencies = [
+    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.6.5",
+    "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.9",
+]
 ```
 
 Without it the install fails to resolve; with an older gaussx it resolves but `import pyrox_gp` fails.

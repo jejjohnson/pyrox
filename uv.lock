@@ -21,7 +21,10 @@ members = [
     "pyrox-monorepo",
     "pyrox-nn",
 ]
-overrides = [{ name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=v0.6.5" }]
+overrides = [
+    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=v0.6.5" },
+    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.9" },
+]
 
 [[package]]
 name = "absl-py"
@@ -683,8 +686,8 @@ dependencies = [
 
 [[package]]
 name = "geonnax"
-version = "0.0.5"
-source = { git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.5#4ba4e4b22a43106249636e103d00570eb4ceb7d2" }
+version = "0.0.9"
+source = { git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.9#fa126ca69ab17837c8cf83d2a88e91e9f24cb33c" }
 dependencies = [
     { name = "einops" },
     { name = "einx" },
@@ -2077,7 +2080,7 @@ requires-dist = [
     { name = "flowjax", specifier = ">=0.9" },
     { name = "gauss-flows", marker = "extra == 'flows'", git = "https://github.com/jejjohnson/gauss_flows.git?rev=bdb23f076ebaaf1ba042aa52ea593487cef3204e" },
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.5" },
-    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.5" },
+    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.9" },
     { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.17" },
     { name = "lineax", specifier = ">=0.1.1" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
@@ -2219,7 +2222,7 @@ optax = [
 [package.metadata]
 requires-dist = [
     { name = "einx", specifier = ">=0.4.3" },
-    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.5" },
+    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.9" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
     { name = "optax", marker = "extra == 'bnf'", specifier = ">=0.2.8" },
     { name = "optax", marker = "extra == 'optax'", specifier = ">=0.2.8" },
