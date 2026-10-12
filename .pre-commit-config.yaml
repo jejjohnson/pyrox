@@ -15,8 +15,10 @@ repos:
         entry: uv run --group lint ruff check --fix --force-exclude
         language: system
         types_or: [python, pyi, jupyter]
+        require_serial: true
       - id: ruff-format
         name: ruff format
         entry: uv run --group lint ruff format --force-exclude
         language: system
         types_or: [python, pyi, jupyter]
+        require_serial: true
