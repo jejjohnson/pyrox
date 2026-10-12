@@ -25,7 +25,6 @@ private `_*.py` modules, grouped by concept in `docs/capabilities.md`):
 | Latent factor | `_latent_factor.py`, `_latent_factor_models.py`, `_latent_init.py` | — |
 | Pathwise | `_pathwise.py` | `PathwiseSampler` |
 | Shared helpers (private) | `_context.py` (`_kernel_context`, `_kernel_contexts`), `_basis/` (spectral densities, RFF draws, geonnax bases; also used by pyrox-nn), `_kernel_operator.py` (`KernelOperator`, `freeze_kernel`) | — |
-| Deprecated | `_src/kernels.py` (re-exports `kernellib.functional` with a `DeprecationWarning`) | — |
 
 ## Contracts
 

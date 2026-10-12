@@ -493,9 +493,8 @@ subclasses; solver strategies live in
 
 ## Math primitives
 
-Pure JAX kernel functions. Stateless, differentiable, composable —
-``(Array, ..., hyperparams) -> Gram``. No NumPyro, no protocols.
-
-::: pyrox_gp._src.kernels
-    options:
-      show_root_heading: false
+The pure JAX kernel functions (`rbf_kernel`, `matern_kernel`, ...) live in
+kernellib's functional API: `from kernellib.functional import rbf_kernel`.
+Stateless, differentiable, composable — `(Array, ..., hyperparams) -> Gram`.
+See the [kernellib documentation](https://github.com/jejjohnson/kernellib)
+for the reference.
