@@ -161,7 +161,7 @@ fails under a handler, a transform or a second instance.
   pyrox-lgm (`test_doctests.py`); elsewhere examples are illustrative, but
   keep them correct.
 - Breaking changes go through a deprecation (a `DeprecationWarning` naming
-  the replacement; see `pyrox_gp._src.kernels`) before removal.
+  the replacement) before removal.
 
 ## What enforces them
 
@@ -175,7 +175,6 @@ fails under a handler, a transform or a second instance.
 | `packages/pyrox-lgm/tests/test_import_guard.py` | pyrox-lgm never imports pyrox-gp |
 | `packages/pyrox-lgm/tests/test_public_api.py`, `test_doctests.py` | lgm `__all__` names exist, no duplicates; lgm doctests run |
 | `packages/pyrox-lgm/tests/test_rinla_fixtures.py` | `inla()` against R-INLA reference fixtures (slow) |
-| `packages/pyrox-gp/tests/gp/test_src_kernels_deprecation.py` | The deprecated `pyrox_gp._src.kernels` shim |
 
 ## Recipes
 

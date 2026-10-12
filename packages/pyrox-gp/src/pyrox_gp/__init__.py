@@ -2,8 +2,7 @@
 
 * Pure kernel *functions* live in `kernellib.functional` — closed-form
   math primitives (RBF, Matern, Periodic, Linear, RationalQuadratic,
-  Polynomial, Cosine, White, Constant). ``pyrox_gp._src.kernels``
-  re-exports them with a deprecation warning.
+  Polynomial, Cosine, White, Constant).
 * `Parameterized` kernel classes that wrap those functions with
   constraints, priors, and guide metadata — re-exported from this
   module.

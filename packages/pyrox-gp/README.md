@@ -19,5 +19,5 @@ uv add "pyrox-gp @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=pack
 | Module | Purpose |
 |--------|---------|
 | `pyrox_gp` | Public API: `GPPrior`, `ConditionedGP`, `SparseGPPrior`, kernels, guides, likelihoods, … |
-| `pyrox_gp._src.kernels` | Pure kernel functions (closed-form math primitives) |
+| `kernellib.functional` | Pure kernel functions (closed-form math primitives), hosted upstream in kernellib |
 | `pyrox_gp._basis` | Kernel spectral densities + RFF prior draws shared with `pyrox-nn` |
