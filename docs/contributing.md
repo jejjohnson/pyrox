@@ -235,6 +235,6 @@ make test         # pytest
 
 Note that `make format` **mutates files** — it formats and applies autofixes. `make lint` is the CI-parity read-only check. Run `make format` first, commit the result, then run `make lint` / `make test` to verify.
 
-Pre-commit hooks run ruff on every commit. Run `make precommit` to apply them to all files manually.
+Pre-commit hooks run ruff on every commit, using the same locked version (`lint` dependency group in `uv.lock`) as CI. Run `make precommit` to apply them to all files manually.
 
 Commit messages follow the [Conventional Commits](https://www.conventionalcommits.org/) specification — enforced on PR titles by `.github/workflows/conventional-commits.yml`.
