@@ -6,9 +6,17 @@ repos:
       - id: trailing-whitespace
       - id: check-yaml
       - id: check-added-large-files
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.17.0
+  # ruff runs from the locked `lint` dependency group (uv.lock) so pre-commit and
+  # CI's lint workflow always use the same version; do not pin ruff-pre-commit.
+  - repo: local
     hooks:
       - id: ruff
-        args: [--fix]
+        name: ruff
+        entry: uv run --group lint ruff check --fix --force-exclude
+        language: system
+        types_or: [python, pyi, jupyter]
       - id: ruff-format
+        name: ruff format
+        entry: uv run --group lint ruff format --force-exclude
+        language: system
+        types_or: [python, pyi, jupyter]
