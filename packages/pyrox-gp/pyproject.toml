@@ -5,7 +5,8 @@ description = "Gaussian process building blocks on top of pyrox: kernels, guides
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
 ]
-license = { file = "../../LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 readme = "README.md"
 keywords = ["jax", "equinox", "numpyro", "gaussian-processes", "probabilistic"]
 requires-python = ">=3.12"
@@ -15,7 +16,6 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Natural Language :: English",
-    "License :: OSI Approved :: MIT License",
     "Intended Audience :: Science/Research",
     "Development Status :: 2 - Pre-Alpha",
 ]
@@ -66,7 +66,7 @@ gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.6.5" }
 kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.17" }
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.metadata]

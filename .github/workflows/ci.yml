@@ -36,3 +36,17 @@ jobs:
         with:
           files: ./coverage.xml
           fail_ci_if_error: false
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Per-package LICENSE copies match the root LICENSE
+        run: for f in packages/*/LICENSE; do cmp LICENSE "$f"; done
+      - name: Build every package (sdist, then wheel from the sdist)
+        run: uv build --all-packages -o dist
+      - name: Every sdist and wheel carries the license text
+        run: |
+          for f in dist/*.tar.gz; do tar tzf "$f" | grep -q '/LICENSE$' || { echo "no LICENSE in $f"; exit 1; }; done
+          for f in dist/*.whl; do unzip -l "$f" | grep -q 'dist-info/licenses/LICENSE' || { echo "no LICENSE in $f"; exit 1; }; done
