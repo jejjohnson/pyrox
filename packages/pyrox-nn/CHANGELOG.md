@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.1](https://github.com/jejjohnson/pyrox/compare/pyrox-nn-v0.1.0...pyrox-nn-v0.1.1) (2026-10-17)
+
+
+### Features
+
+* **nn:** re-export GeoFNO, LearnedDeformation, ManifoldNO and BasisTransform from geonnax ([#303](https://github.com/jejjohnson/pyrox/issues/303)) ([0bff178](https://github.com/jejjohnson/pyrox/commit/0bff17865652a7cd0980672aac937c68697849a0))
+
+
+### Bug Fixes
+
+* **build:** ship a license file inside each package ([#300](https://github.com/jejjohnson/pyrox/issues/300)) ([a5c0501](https://github.com/jejjohnson/pyrox/commit/a5c05015573ab80122da11c86d9b574d5176ec4e))
+
 ## 0.1.0 (2026-07-25)
 
 
