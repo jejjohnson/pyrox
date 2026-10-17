@@ -1,0 +1,37 @@
+# pyrox
+
+> Probabilistic modelling with Equinox and NumPyro. The core (`pyrox._core`) is a bridge: an Equinox module that owns NumPyro sample and param sites, named and cached per call, so the same module runs under handlers.trace, NUTS, SVI and Predictive. On top sit GP building blocks (pyrox-gp), Bayesian neural-network layers (pyrox-nn) and latent Gaussian models with INLA (pyrox-lgm), built on gaussx, kernellib and geonnax. Use these instead of hand-wiring numpyro.sample into Equinox modules or re-implementing GP likelihoods.
+
+Four packages, installed separately from GitHub subdirectories (the name `pyrox` on PyPI is an unrelated project): `pyrox`, `pyrox-gp`, `pyrox-nn`, `pyrox-lgm` (import names `pyrox`, `pyrox_gp`, `pyrox_nn`, `pyrox_lgm`). Before writing a helper, search the capability index — every public name with a one-line summary, plus gaussx, kernellib and geonnax. Code you add should keep three rules:
+
+- **Sites through the bridge:** inside a `PyroxModule`, use `self.pyrox_sample` / `self.pyrox_param` in a method decorated with `@pyrox_method`; give sibling instances distinct `pyrox_name`s.
+- **Don't rebuild a `Parameterized` module:** its params, priors and guides live outside the pytree; `eqx.tree_at` or a `jit` argument yields an empty copy.
+- **Linear algebra through gaussx:** `GPPrior` / `gp_factor` carry a pluggable `solver=`; don't `cho_solve` a Gram by hand.
+
+Claude Code users can install the `pyrox` plugin: `/plugin marketplace add jejjohnson/pyrox`, then `/plugin install pyrox@pyrox`.
+
+## Start here
+
+- [Home](https://jejjohnson.github.io/pyrox/): the packages, installation, the quick start and the three modelling patterns
+- [Capability index](https://jejjohnson.github.io/pyrox/capabilities/): every public name, grouped by module, with a summary; then gaussx, kernellib and geonnax
+- [Building with agents](https://jejjohnson.github.io/pyrox/agents/): the Claude Code plugin, this file, and rules to paste into your project's AGENTS.md
+- [Regression masterclass: eqx.tree_at](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_treeat/), [PyroxModule](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_pyrox_sample/), [Parameterized](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_parameterized/): one model, three patterns
+
+## API reference
+
+- [Overview](https://jejjohnson.github.io/pyrox/api/reference/)
+- [Core](https://jejjohnson.github.io/pyrox/api/core/): `PyroxModule`, `pyrox_method`, `Parameterized`
+- [Inference](https://jejjohnson.github.io/pyrox/api/inference/): ensemble MAP / VI, parameter-group optimisers
+- [GP](https://jejjohnson.github.io/pyrox/api/gp/): kernels, guides, likelihoods, exact / sparse / Markov / multi-output GPs, non-Gaussian inference, pathwise sampling
+- [NN](https://jejjohnson.github.io/pyrox/api/nn/): Bayesian dense layers, random features, SIREN / MFN, SNGP, deep VSSGP, conditioning
+- [LGM](https://jejjohnson.github.io/pyrox/api/lgm/): components, PC priors, `inla()`
+- [Estimator](https://jejjohnson.github.io/pyrox/api/api/) and [Preprocessing](https://jejjohnson.github.io/pyrox/api/preprocessing/): the BNF estimator (`pyrox-nn[bnf]`)
+
+## Optional
+
+- [Exact GP regression](https://jejjohnson.github.io/pyrox/notebooks/exact_gp_regression/)
+- [Markov GP with a Kalman filter](https://jejjohnson.github.io/pyrox/notebooks/markov_gp_kalman/)
+- [Latent GP classification](https://jejjohnson.github.io/pyrox/notebooks/latent_gp_classification/)
+- [INLA against NUTS](https://jejjohnson.github.io/pyrox/notebooks/lgm_mcmc_inla/)
+- [Ensembles](https://jejjohnson.github.io/pyrox/notebooks/ensemble_runner_tutorial/)
+- [Source code](https://github.com/jejjohnson/pyrox)
