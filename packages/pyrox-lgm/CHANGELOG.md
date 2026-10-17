@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/jejjohnson/pyrox/compare/pyrox-lgm-v0.1.2...pyrox-lgm-v0.1.3) (2026-10-17)
+
+
+### Bug Fixes
+
+* **build:** ship a license file inside each package ([#300](https://github.com/jejjohnson/pyrox/issues/300)) ([a5c0501](https://github.com/jejjohnson/pyrox/commit/a5c05015573ab80122da11c86d9b574d5176ec4e))
+
 ## [0.1.2](https://github.com/jejjohnson/pyrox/compare/pyrox-lgm-v0.1.1...pyrox-lgm-v0.1.2) (2026-10-09)
 
 

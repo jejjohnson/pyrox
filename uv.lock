@@ -2015,7 +2015,7 @@ wheels = [
 
 [[package]]
 name = "pyrox"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "packages/pyrox" }
 dependencies = [
     { name = "einx" },
@@ -2049,7 +2049,7 @@ provides-extras = ["optax", "colab"]
 
 [[package]]
 name = "pyrox-gp"
-version = "0.1.9"
+version = "0.2.0"
 source = { editable = "packages/pyrox-gp" }
 dependencies = [
     { name = "einx" },
@@ -2093,7 +2093,7 @@ provides-extras = ["optax", "colab", "flows"]
 
 [[package]]
 name = "pyrox-lgm"
-version = "0.1.2"
+version = "0.1.3"
 source = { editable = "packages/pyrox-lgm" }
 dependencies = [
     { name = "gaussx" },
@@ -2196,7 +2196,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.42" }]
 
 [[package]]
 name = "pyrox-nn"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/pyrox-nn" }
 dependencies = [
     { name = "einx" },

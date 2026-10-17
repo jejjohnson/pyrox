@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.0](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.9...pyrox-gp-v0.2.0) (2026-10-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **gp:** `pyrox_gp._src.kernels` is removed; replace `from pyrox_gp._src.kernels import rbf_kernel` with `from kernellib.functional import rbf_kernel` (same for the other kernel functions).
+
+### Features
+
+* **gp:** remove the pyrox_gp._src.kernels deprecation shim ([78115da](https://github.com/jejjohnson/pyrox/commit/78115da2d21d2da7519ea7668d3877fd26ae5d35))
+* **nn:** re-export GeoFNO, LearnedDeformation, ManifoldNO and BasisTransform from geonnax ([#303](https://github.com/jejjohnson/pyrox/issues/303)) ([0bff178](https://github.com/jejjohnson/pyrox/commit/0bff17865652a7cd0980672aac937c68697849a0))
+
+
+### Bug Fixes
+
+* **build:** ship a license file inside each package ([#300](https://github.com/jejjohnson/pyrox/issues/300)) ([a5c0501](https://github.com/jejjohnson/pyrox/commit/a5c05015573ab80122da11c86d9b574d5176ec4e))
+
 ## [0.1.9](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.1.8...pyrox-gp-v0.1.9) (2026-10-09)
 
 
