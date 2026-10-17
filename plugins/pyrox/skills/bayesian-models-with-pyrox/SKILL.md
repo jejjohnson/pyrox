@@ -42,6 +42,7 @@ a Bayesian layer, look it up:
 | Many MAP or VI fits in parallel (deep ensembles) | `pyrox` | `pyrox.inference.ensemble_map`, `ensemble_vi`, `EnsembleMAP`, `EnsembleVI` |
 | GP kernels with hyperpriors | `pyrox-gp` | `pyrox_gp.RBF`, `Matern`, `Periodic`, … + `set_prior` / `autoguide` / `set_mode` |
 | An exact GP marginal likelihood or posterior | `pyrox-gp` | `GPPrior` + `gp_factor` / `gp_sample`; `GPPrior.condition(y, noise).predict(X*)` |
+| Gradient / sensitivity of a fitted GP, with uncertainty | `pyrox-gp` | `ConditionedGP.predict_gradient` (`GradientPosterior`), `predict_var_gradient`, `predict_mean_hessian` |
 | Sparse / variational GPs | `pyrox-gp` | `SparseGPPrior`, the guides (`WhitenedGuide`, `NaturalGuide`, …), `svgp_factor`, `svgp_elbo` |
 | Long time series (linear in N) | `pyrox-gp` | `MarkovGPPrior` + `markov_gp_factor`, SDE kernels (`MaternSDE`, …) |
 | Non-Gaussian likelihoods | `pyrox-gp` | the likelihoods + `LaplaceInference`, `ExpectationPropagation`, `GaussNewtonInference` |
