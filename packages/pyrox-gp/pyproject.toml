@@ -23,7 +23,7 @@ dependencies = [
     "pyrox",
     "gaussx>=0.6.5",
     "kernellib>=0.0.17",
-    "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.9",
+    "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.10",
     "lineax>=0.1.1",
     "einx>=0.4.3",
     "flowjax>=0.9",     # AbstractBijection protocol (typed warp fields). Shares
