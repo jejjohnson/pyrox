@@ -129,7 +129,7 @@ def _bnf_model(
 
     with $\sigma_i = 0$ without a ``sigma_col`` and $\sigma_0$ either fixed
     at ``sigma_obs`` (``noise="fixed"``) or learned through the site
-    ``sigma_obs`` $= \log \sigma_0 \sim \mathcal N(\log \sigma_{\text{obs}}, 1)$
+    ``log_sigma_obs`` $= \log \sigma_0 \sim \mathcal N(\log \sigma_{\text{obs}}, 1)$
     (``noise="learned"``). With ``has_sigma_col`` the observations are packed
     as ``y = [y_i, σ_i]`` of shape ``(N, 2)``, so the per-row noise travels
     with its row through the ensemble runners' mini-batching. The latent
@@ -141,7 +141,7 @@ def _bnf_model(
         numpyro.deterministic("f", f)
         if noise == "learned":
             log_sigma0 = numpyro.sample(
-                "sigma_obs", dist.Normal(jnp.log(sigma_obs), 1.0)
+                "log_sigma_obs", dist.Normal(jnp.log(sigma_obs), 1.0)
             )
             sigma0 = jnp.exp(log_sigma0)
         else:
@@ -250,9 +250,11 @@ class BNFEstimator(EstimatorBase):
         freq: Optional unit string for ``datetime`` time columns.
         noise: ``"fixed"`` (default) keeps the noise scale $\sigma_0$ at
             ``sigma_obs``; ``"learned"`` infers it through the sample site
-            ``sigma_obs`` $= \log \sigma_0 \sim \mathcal N(\log
+            ``log_sigma_obs`` $= \log \sigma_0 \sim \mathcal N(\log
             \sigma_{\text{obs}}, 1)$, which the MAP and VI ensembles treat
-            like any other latent.
+            like any other latent. With ``prior_weight=0`` (MLE) and no
+            ``sigma_col`` nothing bounds $\sigma_0$ below, so that
+            combination raises ``ValueError``.
         sigma_obs: Observation noise std $\sigma_0$ when ``noise="fixed"``
             (with ``sigma_col``, a floor for representativeness error), or
             the prior median of $\sigma_0$ when ``noise="learned"``.
@@ -307,6 +309,20 @@ class BNFEstimator(EstimatorBase):
             raise ValueError(f"noise must be 'fixed' or 'learned'; got {self.noise!r}.")
         if not self.sigma_obs > 0:
             raise ValueError(f"sigma_obs must be > 0; got {self.sigma_obs}.")
+        if (
+            self.noise == "learned"
+            and self.sigma_col is None
+            and self.inference_kind == "map"
+            and self.prior_weight == 0
+        ):
+            # Without the prior on log sigma_0 and without per-row sigma_i,
+            # nothing bounds sigma_0 below: a network that interpolates the
+            # data drives it to 0 and the likelihood to +inf.
+            raise ValueError(
+                "noise='learned' needs the prior on log_sigma_obs (prior_weight "
+                "> 0) or a sigma_col to bound sigma_0 below; with "
+                "prior_weight=0 (MLE) use noise='fixed'."
+            )
         if isinstance(seed, int):
             seed = jr.PRNGKey(seed)
         # 1. Pandas-side preprocessing → SpatiotemporalFit bundle.
@@ -458,7 +474,7 @@ class FittedBNF(FittedEstimator):
                 self.params, self.bnf_template, x_pred
             )  # (E, N)
             if cfg.noise == "learned":
-                sigma0 = jnp.exp(self.params["sigma_obs"])  # (E,)
+                sigma0 = jnp.exp(self.params["log_sigma_obs"])  # (E,)
             else:
                 sigma0 = jnp.full((preds.shape[0],), float(cfg.sigma_obs))
             seed = predict_seed
@@ -542,7 +558,7 @@ def _predict_vi_ensemble(
     # which adds sigma_0 itself — would double-count observation noise.
     factory = guide_factory or AutoNormal
     guide = factory(model_fn)
-    sites = ("f", "sigma_obs") if learned_noise else ("f",)
+    sites = ("f", "log_sigma_obs") if learned_noise else ("f",)
 
     def _per_member(
         member_params: Any, key: PRNGKeyArray
@@ -556,7 +572,7 @@ def _predict_vi_ensemble(
         )
         out = pred(key, x, None)
         if learned_noise:
-            sigma0 = jnp.exp(out["sigma_obs"])
+            sigma0 = jnp.exp(out["log_sigma_obs"])
         else:
             sigma0 = jnp.full((num_posterior_samples,), sigma_obs)
         return out["f"], sigma0
