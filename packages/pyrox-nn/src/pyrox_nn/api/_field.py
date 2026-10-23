@@ -167,8 +167,9 @@ def _field_init_fn(
 
     Returns a flat dict ``{site_name: value}`` of the unobserved sample sites
     (the field's weights, plus ``log_sigma_obs`` when the noise is learned)
-    and, for each name in ``param_constraints``, that param site's initial
-    value mapped to unconstrained space. The dict becomes the
+    and the param sites; each name in ``param_constraints`` (param sites and
+    constrained latents) holds its initial value mapped to unconstrained
+    space. The dict becomes the
     per-ensemble-member parameter PyTree carried by the ensemble runner.
     """
     from numpyro.distributions.transforms import biject_to
@@ -197,10 +198,11 @@ def _field_log_joint(
 ]:
     """Build a ``(loglik, logprior)`` callable that takes a flat param dict.
 
-    Names in ``param_constraints`` are param sites held in unconstrained
-    space: they are mapped through their constraint's bijection and
-    substituted. A param site has no prior, so it adds nothing to
-    ``logprior``; without a prior the MAP point needs no Jacobian term.
+    Names in ``param_constraints`` (param sites and constrained latents) are
+    held in unconstrained space: they are mapped through their constraint's
+    bijection and substituted. The prior is evaluated on the constrained
+    value with no log-det-Jacobian, so the optimum is the constrained-space
+    MAP; a param site has no prior and adds nothing to ``logprior``.
     """
     from numpyro.distributions.transforms import biject_to
     from numpyro.handlers import substitute, trace
@@ -255,15 +257,33 @@ def _map_param_constraints(
     d_in: int,
     y_shape: tuple[int, ...],
 ) -> dict[str, Any]:
-    """Check a model for the MAP path; return its param sites' constraints.
+    r"""Check a model for the MAP path; return the sites to reparameterise.
 
-    MAP optimises the param sites (``pyrox_param``) with the latents, in
-    unconstrained space. A field that draws ``numpyro.prng_key()`` (Monte
-    Carlo layers such as `pyrox_nn.DenseVariationalDropout`) has a random
-    log joint, which is not a MAP objective, so it is rejected.
+    MAP optimises the param sites (``pyrox_param``) and the latent sample
+    sites together, each in unconstrained space through
+    $T = $ ``biject_to(constraint)`` (the param's constraint, the prior's
+    support), so Adam's additive steps never leave the support. The
+    objective stays the *constrained-space* density $\log p(T(u))$, with no
+    log-det-Jacobian: its maximiser maps to the usual MAP point, which a
+    Jacobian term would move. Sample sites with real support (an identity
+    $T$) are left out of the map, so their values pass through untouched.
+    A field that draws ``numpyro.prng_key()`` (Monte Carlo layers such as
+    `pyrox_nn.DenseVariationalDropout`) has a random log joint, which is not
+    a MAP objective, so it is rejected; so is a discrete latent.
     """
     from numpyro.distributions import constraints
+    from numpyro.distributions.transforms import (
+        IdentityTransform,
+        IndependentTransform,
+        biject_to,
+    )
     from numpyro.handlers import seed, trace
+
+    def is_identity(t: Any) -> bool:
+        # biject_to(real.to_event(k)) wraps the identity in IndependentTransform.
+        while isinstance(t, IndependentTransform):
+            t = t.base_transform
+        return isinstance(t, IdentityTransform)
 
     probe = _PrngKeyProbe(seed(model_fn, jr.PRNGKey(0)))
     tr = trace(probe).get_trace(jnp.zeros((1, d_in)), jnp.ones((1, *y_shape)))
@@ -273,11 +293,20 @@ def _map_param_constraints(
             "DenseVariationalDropout), so its log joint is random and has no MAP "
             "point; use inference='vi', or a field without internal sampling."
         )
-    return {
-        name: site["kwargs"].get("constraint", constraints.real)
-        for name, site in tr.items()
-        if site["type"] == "param"
-    }
+    out: dict[str, Any] = {}
+    for name, site in tr.items():
+        if site["type"] == "param":
+            out[name] = site["kwargs"].get("constraint", constraints.real)
+        elif site["type"] == "sample" and not site.get("is_observed", False):
+            support = site["fn"].support
+            if support.is_discrete:
+                raise ValueError(
+                    f"the latent site {name!r} is discrete; MAP needs continuous "
+                    "latents."
+                )
+            if not is_identity(biject_to(support)):
+                out[name] = support
+    return out
 
 
 # -- fitting --------------------------------------------------------------------
@@ -415,8 +444,8 @@ def _fit_ensemble(
             learning_rate=learning_rate,
             prior_weight=prior_weight,
         )
-        # Hand back the param sites in constrained space, per member, so the
-        # fitted dict substitutes directly into the field.
+        # Hand back the reparameterised sites in constrained space, per
+        # member, so the fitted dict substitutes directly into the field.
         for name, constraint in param_constraints.items():
             params[name] = jax.vmap(biject_to(constraint))(params[name])
         return params, losses

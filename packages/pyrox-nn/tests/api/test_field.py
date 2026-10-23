@@ -225,6 +225,68 @@ def test_map_optimises_param_sites_in_unconstrained_space():
     assert abs(float(jnp.mean(fitted.predict(x))) - float(np.mean(y + 5.0))) < 0.2
 
 
+class _PositiveField(PyroxModule):
+    """``-a`` with ``a ~ LogNormal(log 1e-4, 1)``: the data pull ``a`` to 0."""
+
+    pyrox_name: str | None = eqx.field(static=True, default="Pos")
+
+    @pyrox_method
+    def __call__(self, z):
+        a = self.pyrox_sample("a", dist.LogNormal(jnp.log(1e-4), 1.0))
+        return -a * jnp.ones(z.shape[0], dtype=z.dtype)
+
+
+def test_map_keeps_constrained_latents_in_their_support():
+    """Adam steps on a raw LogNormal draw near 1e-4 overshoot below 0 (NaN
+    losses); optimising log a keeps a > 0 and the fit finite."""
+    x, _, _ = _data(0, 20)
+    est = NeuralFieldEstimator(model_fn=_PositiveField, ensemble_size=2, num_epochs=50)
+    fitted = est.fit(x, -np.ones(20), seed=0)
+    assert jnp.all(jnp.isfinite(fitted.losses))
+    assert jnp.all(fitted.params["Pos.a"] > 0)
+
+
+def test_constrained_latent_log_joint_is_the_constrained_density():
+    """No Jacobian: logprior is the LogNormal density at a = exp(u)."""
+    from pyrox_nn.api._field import _map_param_constraints
+
+    model_fn = _field_model(_make_forward(_PositiveField(), None), 0.1)
+    constraints_ = _map_param_constraints(model_fn, 1, ())
+    assert set(constraints_) == {"Pos.a"}
+    u = jnp.asarray(-8.0)
+    _, lp = _field_log_joint(model_fn, constraints_)(
+        {"Pos.a": u}, jnp.zeros((2, 1)), jnp.zeros(2)
+    )
+    expected = dist.LogNormal(jnp.log(1e-4), 1.0).log_prob(jnp.exp(u))
+    np.testing.assert_allclose(lp, expected, rtol=1e-12)
+
+
+def test_map_fits_kernel_hyperparameter_param_sites():
+    """SphericalHarmonicFeatures with a plain RBF: the kernel's variance and
+    lengthscale are pyrox_param sites (no priors) and must move from 1."""
+    import pyrox_gp as pgp
+    from pyrox_nn import SphericalHarmonicFeatures
+
+    rng = np.random.default_rng(0)
+    lonlat = np.stack([rng.uniform(-3, 3, 40), rng.uniform(-1.4, 1.4, 40)], -1)
+    y = 3.0 * np.cos(lonlat[:, 1])
+    est = NeuralFieldEstimator(
+        model_fn=lambda: SphericalHarmonicFeatures.init(
+            l_max=3, kernel=pgp.RBF(), input_mode="lonlat", input_unit="radians"
+        ),
+        ensemble_size=2,
+        num_epochs=100,
+        learning_rate=5e-2,
+    )
+    fitted = est.fit(lonlat, y, seed=0)
+    for name in ("RBF.variance", "RBF.lengthscale"):
+        assert fitted.params[name].shape == (2,)
+        assert jnp.all(fitted.params[name] > 0)
+        # Initialised at 1.0; 100 steps at lr 0.05 move them by O(1)
+        # (measured 1.4-2.7), far from a frozen value.
+        assert jnp.all(jnp.abs(fitted.params[name] - 1.0) > 0.1)
+
+
 def test_map_rejects_fields_that_draw_prng_keys():
     x, y, _ = _data(0, 10)
     make = lambda: DenseVariationalDropout(in_features=1, out_features=1)

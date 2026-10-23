@@ -29,7 +29,9 @@ fit exactly like their valid rows, or an xarray Dataset (`fit_xarray`,
 `pip install pyrox-nn[xarray]`) whose missing cells are masked; datetimes
 become days since the first timestamp (or `time_origin=`), and
 `FittedNeuralField.predict_xarray` maps a Dataset's grid the same way.
-Under MAP, `pyrox_param` sites are optimised in unconstrained space, and
+Under MAP, `pyrox_param` sites and constrained latents (e.g. a LogNormal
+prior) are optimised in unconstrained space against the constrained-space
+density (no Jacobian), and
 fields that draw `numpyro.prng_key()` are rejected (use `inference="vi"`). The BNF
 estimators above are this estimator on a `BayesianNeuralField`.
 
