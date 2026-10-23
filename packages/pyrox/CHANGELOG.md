@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.2](https://github.com/jejjohnson/pyrox/compare/pyrox-v0.1.1...pyrox-v0.1.2) (2026-10-23)
+
+
+### Features
+
+* **pyrox:** add last-layer ggn laplace posterior ([#324](https://github.com/jejjohnson/pyrox/issues/324)) ([7d57fc5](https://github.com/jejjohnson/pyrox/commit/7d57fc5ab497d9e0dd49d3fed5cc5d2bda22a3ad))
+
+
+### Bug Fixes
+
+* **build:** ship a license file inside each package ([#300](https://github.com/jejjohnson/pyrox/issues/300)) ([a5c0501](https://github.com/jejjohnson/pyrox/commit/a5c05015573ab80122da11c86d9b574d5176ec4e))
+
 ## [0.1.1](https://github.com/jejjohnson/pyrox/compare/pyrox-v0.1.0...pyrox-v0.1.1) (2026-08-21)
 
 
