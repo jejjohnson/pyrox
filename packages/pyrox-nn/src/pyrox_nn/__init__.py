@@ -98,7 +98,11 @@ from pyrox_nn._geonnax import (
     SphericalHarmonicEncoder,
     mfn_forward,
 )
-from pyrox_nn._heteroscedastic import MCSigmoidDenseFA, MCSoftmaxDenseFA
+from pyrox_nn._heteroscedastic import (
+    GaussianRegressionHead,
+    MCSigmoidDenseFA,
+    MCSoftmaxDenseFA,
+)
 from pyrox_nn._mfn import BayesianFourierNet, BayesianGaborNet
 from pyrox_nn._siren import BayesianSIREN
 from pyrox_nn._slepian import BayesianSlepianEncoder
@@ -143,6 +147,7 @@ __all__ = [
     "FourierNet",
     "GaborFilter",
     "GaborNet",
+    "GaussianRegressionHead",
     "GeoFNO",
     "HSGPFeatures",
     "HybridSphericalSlepianEncoder",

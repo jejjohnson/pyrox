@@ -4,6 +4,8 @@
   low-rank-plus-diagonal logit noise, MC-averaged softmax probabilities.
 * `MCSigmoidDenseFA` — same noise model, sigmoid output for
   multi-label / binary classification.
+* `GaussianRegressionHead` — Bayesian regression head returning a mean
+  and an input-dependent log standard deviation.
 
 Both share the same heteroscedastic logit-noise model — given an
 input-dependent low-rank factor $V(x) \\in \\mathbb{R}^{C \\times r}$
@@ -27,10 +29,14 @@ import equinox as eqx
 import geonnax
 import jax
 import jax.numpy as jnp
+import jax.random as jr
 import numpyro
+import numpyro.distributions as dist
 from jax import Array as JaxArray
 from jaxtyping import Array, Float, PRNGKeyArray
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
+
+from pyrox_nn._batching import vmap_over_flat_batch
 
 
 class _HeteroscedasticBase(PyroxModule):
@@ -242,3 +248,144 @@ class MCSigmoidDenseFA(_HeteroscedasticBase):
         new_core = self._swap_core()
         logits = _batched_logits(new_core, x)
         return jnp.mean(jax.nn.sigmoid(logits), axis=0)
+
+
+class GaussianRegressionHead(PyroxModule):
+    r"""Bayesian heteroscedastic regression head (mean plus log-scale).
+
+    Wraps `geonnax.GaussianRegressionHead` and samples its four weight
+    arrays. For a feature vector $h \in \mathbb{R}^{D_\mathrm{in}}$,
+
+    $$
+    \mu = W_\mu^\top h + b_\mu, \qquad
+    \log\sigma = \operatorname{clip}\bigl(W_s^\top h + b_s,\ -7,\ 3\bigr),
+    \qquad y \sim \mathcal{N}\bigl(\mu, \sigma^2\bigr),
+    $$
+
+    with independent Gaussian priors centred on the homoscedastic head,
+
+    $$
+    W_\mu, W_s \sim \mathcal{N}(0, s^2), \qquad
+    b_\mu \sim \mathcal{N}(0, s^2), \qquad
+    b_s \sim \mathcal{N}(\log\sigma_\mathrm{init}, s^2),
+    $$
+
+    where $s$ is ``prior_std``. The wrapped core holds these prior
+    locations (zero weights, $b_s = \log\sigma_\mathrm{init}$), so
+    ``init_to_median`` (or substituting the core's arrays) starts inference
+    from a head that predicts $\mu = 0$ and $\sigma = \sigma_\mathrm{init}$
+    everywhere; the log-scale weights then move only as the data ask.
+
+    The layer returns $(\mu, \log\sigma)$; the caller writes the
+    likelihood. With a known per-observation error $\sigma_i$, use
+    $\sigma_i^2 + \sigma(h)^2$ as the variance.
+
+    Sites (scope ``pyrox_name``, default ``"GaussianRegressionHead"``):
+    ``<scope>.W_loc`` $(D_\mathrm{in}, K)$, ``<scope>.b_loc`` $(K,)$,
+    ``<scope>.W_log_scale`` $(D_\mathrm{in}, K)$ and
+    ``<scope>.b_log_scale`` $(K,)$, each sampled once per model call.
+
+    Plate semantics:
+        Call outside ``numpyro.plate("data", ..., subsample_size=...)`` so
+        the weight sites are not scaled by the subsample factor; put the
+        observation site inside the plate.
+
+    Attributes:
+        core: The deterministic geonnax head holding the prior locations.
+        prior_std: Prior standard deviation $s$ of every weight.
+        pyrox_name: Explicit scope name for NumPyro site registration.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> from numpyro import handlers
+        >>> head = GaussianRegressionHead.init(in_features=8, out_features=2)
+        >>> with handlers.seed(rng_seed=0):
+        ...     mu, log_sigma = head(jnp.ones((5, 8)))
+        >>> mu.shape, log_sigma.shape
+        ((5, 2), (5, 2))
+
+    References:
+        Nix, D. A., & Weigend, A. S. (1994). *Estimating the mean and
+        variance of the target probability distribution.* ICNN.
+    """
+
+    core: geonnax.GaussianRegressionHead
+    prior_std: float = eqx.field(static=True, default=1.0)
+    pyrox_name: str | None = eqx.field(static=True, default=None)
+
+    @classmethod
+    def init(
+        cls,
+        in_features: int,
+        out_features: int = 1,
+        *,
+        prior_std: float = 1.0,
+        sigma_init: float = 1.0,
+        pyrox_name: str | None = None,
+    ) -> Self:
+        r"""Build the head with priors centred on a homoscedastic core.
+
+        Args:
+            in_features: Feature dimension $D_\mathrm{in}$; must be > 0.
+            out_features: Number of targets $K$; must be > 0.
+            prior_std: Prior standard deviation of every weight; must be > 0.
+            sigma_init: Prior location of $\sigma$, i.e.
+                $b_s \sim \mathcal{N}(\log\sigma_\mathrm{init}, s^2)$;
+                $\log\sigma_\mathrm{init}$ must lie in $[-7, 3]$.
+            pyrox_name: Explicit scope name for the sites.
+
+        Returns:
+            The head.
+
+        Raises:
+            ValueError: If ``prior_std`` is not positive, or (from the
+                geonnax core) a dimension or ``sigma_init`` is invalid.
+        """
+        if not prior_std > 0:
+            raise ValueError(f"prior_std must be > 0; got {prior_std}.")
+        # The weights are sampled, so the core only carries the prior
+        # locations: scale_init_factor=0 zeroes W_log_scale, and W_loc is
+        # zeroed below, which makes the key irrelevant.
+        core = geonnax.GaussianRegressionHead.init(
+            in_features,
+            out_features,
+            key=jr.PRNGKey(0),
+            sigma_init=sigma_init,
+            scale_init_factor=0.0,
+        )
+        core = eqx.tree_at(lambda c: c.W_loc, core, jnp.zeros_like(core.W_loc))
+        return cls(core=core, prior_std=prior_std, pyrox_name=pyrox_name)
+
+    @property
+    def in_features(self) -> int:
+        return self.core.in_features
+
+    @property
+    def out_features(self) -> int:
+        return self.core.out_features
+
+    def _prior(self, loc: Array) -> dist.Distribution:
+        return dist.Normal(loc, self.prior_std).to_event(loc.ndim)
+
+    @pyrox_method
+    def __call__(
+        self, h: Float[Array, "*batch D_in"]
+    ) -> tuple[Float[Array, "*batch K"], Float[Array, "*batch K"]]:
+        r"""Sample the weights once and map features to $(\mu, \log\sigma)$.
+
+        Args:
+            h: Features of shape ``(*batch, D_in)``; ``(D_in,)`` for one.
+
+        Returns:
+            ``(mu, log_sigma)``, each of shape ``(*batch, K)``, with
+            ``log_sigma`` clamped to $[-7, 3]$.
+        """
+        c = self.core
+        names = ("W_loc", "b_loc", "W_log_scale", "b_log_scale")
+        sampled = tuple(
+            self.pyrox_sample(name, self._prior(getattr(c, name))) for name in names
+        )
+        core = eqx.tree_at(
+            lambda m: (m.W_loc, m.b_loc, m.W_log_scale, m.b_log_scale), c, sampled
+        )
+        return vmap_over_flat_batch(core, h)
