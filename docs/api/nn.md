@@ -5,7 +5,7 @@ The `pyrox_nn` subpackage ships uncertainty-aware neural network layers in four 
 1. **Geographic / spherical encoders** (re-exported from `geonnax`) — degree/radian, lon/lat, cyclic, spherical-harmonic, and Slepian preprocessing for geophysical inputs.
 2. **Dense / Bayesian-linear layers** (`pyrox_nn._dense`) — reparameterization, Flipout, hierarchical, NCP, DVI, rank-1 ensemble, and variational-dropout variants of `Wx + b`.
 3. **Spectral / GP-flavoured layers** — random-feature kernel maps, SNGP and VSSGP heads, deep random-feature expansions.
-4. **Ensembles & output heads** — BatchEnsemble layers, heteroscedastic Monte-Carlo output heads.
+4. **Ensembles & output heads** — BatchEnsemble layers, heteroscedastic Monte-Carlo output heads, the Gaussian regression head.
 5. **Bayesian Neural Field stack** (`pyrox_nn._bnf`) — five layers that together implement the BNF architecture (Saad et al., Nat. Comms. 2024); `BayesianNeuralField` wraps the deterministic `geonnax.NeuralFieldMLP` and takes an optional coordinate `encoder` (for example spherical harmonics on lon/lat).
 6. **Pure-JAX feature helpers** (re-exported from `geonnax.basis`) — pandas-free building blocks the BNF layers wrap.
 
@@ -216,7 +216,11 @@ per-member rank-1 perturbations (Wen et al., 2020; Dusenberry et al.,
 ## Heteroscedastic output heads
 
 Monte-Carlo sigmoid / softmax output layers with factor-analysis noise
-(Collier et al., 2021) for input-dependent label noise.
+(Collier et al., 2021) for input-dependent label noise, and a Bayesian
+regression head that returns a mean and an input-dependent log standard
+deviation.
+
+::: pyrox_nn.GaussianRegressionHead
 
 ::: pyrox_nn.MCSigmoidDenseFA
 

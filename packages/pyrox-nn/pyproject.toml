@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
     "pyrox",
     "pyrox-gp",
-    "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.10",
+    "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.11",
     "einx>=0.4.3",
 ]
 

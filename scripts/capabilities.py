@@ -117,6 +117,7 @@ ALLOWED_SHARED_NAMES: dict[str, str] = {
     **dict.fromkeys(
         [
             "DenseRank1",
+            "GaussianRegressionHead",
             "LayerNormEnsemble",
             "MCSigmoidDenseFA",
             "MCSoftmaxDenseFA",
