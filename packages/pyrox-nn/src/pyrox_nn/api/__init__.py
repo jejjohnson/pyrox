@@ -8,6 +8,9 @@
 * `BNFEstimator` family — concrete BNF estimators
   (``BNFEstimator``, ``BNFEstimatorMLE``, ``BNFEstimatorVI``) +
   `FittedBNF`.
+* `NeuralFieldEstimator` — fits any Bayesian neural field on arrays or an
+  xarray Dataset; returns a `FittedNeuralField`. The BNF family is this
+  estimator on a `BayesianNeuralField` with pandas preprocessing.
 """
 
 from pyrox_nn.api._bnf import (
@@ -17,6 +20,7 @@ from pyrox_nn.api._bnf import (
     FittedBNF,
 )
 from pyrox_nn.api._estimator import EstimatorBase, FittedEstimator
+from pyrox_nn.api._field import FittedNeuralField, NeuralFieldEstimator
 
 
 __all__ = [
@@ -26,4 +30,6 @@ __all__ = [
     "EstimatorBase",
     "FittedBNF",
     "FittedEstimator",
+    "FittedNeuralField",
+    "NeuralFieldEstimator",
 ]

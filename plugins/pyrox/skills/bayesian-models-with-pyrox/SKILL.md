@@ -50,6 +50,7 @@ a Bayesian layer, look it up:
 | Bayesian NN layers | `pyrox-nn` | `DenseReparameterization`, `DenseFlipout`, `BayesianSIREN`, random-feature layers, `RandomFeatureGaussianProcess` (SNGP), `DeepVSSGP` |
 | A GP on the sphere S² in weight space (an optimal-interpolation baseline for a neural field, linear in N) | `pyrox-nn` | `pyrox_nn.SphericalHarmonicFeatures`: `(l_max+1)²` harmonics with Funk-Hecke prior variances, so cost grows as `N·l_max²`; lon/lat input needs an explicit `input_unit="degrees" \| "radians"`; ARD (per-dimension lengthscale) kernels raise `NotImplementedError` |
 | A spatio-temporal regressor from a DataFrame | `pyrox-nn[bnf]` | `pyrox_nn.api.BNFEstimator` |
+| Fit any Bayesian neural field (a `BayesianSIREN` behind a `geonnax` encoder, `SphericalHarmonicFeatures`, …) to coordinates with ensemble MAP / VI | `pyrox-nn[bnf]` (+ `[xarray]` for `fit_xarray`) | `pyrox_nn.api.NeuralFieldEstimator(model_fn=..., encoder=..., noise="fixed" \| "learned" \| "heteroscedastic")`: `.fit(X, y, sigma=, valid=, seed=)` on arrays (rows with `valid=False` are padding and change nothing), `.fit_xarray(ds, coords=, target=, sigma=)` on a gridded Dataset (NaN cells masked); `"heteroscedastic"` needs a field returning `(mu, log_sigma)`, e.g. a trunk + `GaussianRegressionHead` |
 | Latent Gaussian models (GLMMs, disease mapping, SPDE) with INLA | `pyrox-lgm` | `pyrox_lgm.LGM`, components (`IID`, `RW1`, `AR1`, `BYM2`, `SPDE`, …), PC priors, `inla()`, `f()` |
 
 ## The three modelling patterns

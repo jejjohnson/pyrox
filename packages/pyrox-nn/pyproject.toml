@@ -36,6 +36,10 @@ bnf = [
     "pandas>=3.0.3",
     "optax>=0.2.8",
 ]
+# `pip install pyrox-nn[xarray]` enables `NeuralFieldEstimator.fit_xarray`.
+xarray = [
+    "xarray>=2025.1",
+]
 # `pip install pyrox-nn[colab]` bundles what the example notebooks need to run
 # top-to-bottom in Google Colab — matplotlib for plots, watermark for an
 # explicit version readout at the top of each notebook.

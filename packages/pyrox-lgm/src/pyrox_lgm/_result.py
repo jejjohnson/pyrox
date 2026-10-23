@@ -307,7 +307,7 @@ class INLAResult(eqx.Module):
     def to_xarray(self):
         """The summaries as an ``xarray.Dataset`` (needs the ``xarray`` extra)."""
         try:
-            import xarray as xr  # ty: ignore[unresolved-import]
+            import xarray as xr
         except ImportError as err:  # pragma: no cover - optional extra
             raise ImportError(
                 "to_xarray needs `pip install pyrox-lgm[xarray]`"

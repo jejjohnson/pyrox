@@ -13,6 +13,10 @@ posterior-predictive mean (Gaussian-mixture closed form for
 ``observation_model="NORMAL"``) and, optionally, per-row quantiles
 (MC-sampled from the mixture).
 
+Fitting and prediction are those of `pyrox_nn.api.NeuralFieldEstimator`:
+a BNF estimator is that estimator on a `BayesianNeuralField` built from
+pandas preprocessing, with the same log joint.
+
 Currently only ``observation_model="NORMAL"`` is implemented end-to-end.
 ``"NB"`` and ``"ZINB"`` are reserved for the upcoming gaussx mixture-
 quantile follow-up; instantiating them raises a clear
@@ -25,16 +29,22 @@ from collections.abc import Callable, Sequence
 from typing import Any, Literal
 
 import equinox as eqx
-import jax
 import jax.numpy as jnp
-import jax.random as jr
-import numpyro
-import numpyro.distributions as dist
 import pandas as pd
 from jaxtyping import Array, Float, PRNGKeyArray
 
 from pyrox_nn._bnf import BayesianNeuralField
 from pyrox_nn.api._estimator import EstimatorBase, FittedEstimator
+from pyrox_nn.api._field import (
+    NeuralFieldEstimator,
+    _field_init_fn,
+    _field_log_joint,
+    _field_model,
+    # Re-exported: the BNF tests (and earlier callers) import them from here.
+    _gaussian_mixture_quantiles as _gaussian_mixture_quantiles,
+    _predict,
+    _predict_map_ensemble as _predict_map_ensemble,
+)
 from pyrox_nn.preprocessing import (
     SpatiotemporalFit,
     encode_time_column,
@@ -114,6 +124,11 @@ def _build_bnf(
 NoiseModel = Literal["fixed", "learned"]
 
 
+# The BNF names of the shared init and log joint (unchanged signatures).
+_bnf_init_fn = _field_init_fn
+_bnf_log_joint = _field_log_joint
+
+
 def _bnf_model(
     bnf_template: BayesianNeuralField,
     sigma_obs: float,
@@ -121,97 +136,17 @@ def _bnf_model(
     noise: NoiseModel = "fixed",
     has_sigma_col: bool = False,
 ) -> Callable[[Array, Array | None], None]:
-    r"""The BNF regression model: field, observation noise, likelihood.
+    r"""The BNF regression model: `pyrox_nn.api._field._field_model` on the BNF.
 
     $$
     y_i \sim \mathcal N\bigl(f_\theta(x_i),\ \sigma_i^2 + \sigma_0^2\bigr),
     $$
 
-    with $\sigma_i = 0$ without a ``sigma_col`` and $\sigma_0$ either fixed
-    at ``sigma_obs`` (``noise="fixed"``) or learned through the site
-    ``log_sigma_obs`` $= \log \sigma_0 \sim \mathcal N(\log \sigma_{\text{obs}}, 1)$
-    (``noise="learned"``). With ``has_sigma_col`` the observations are packed
-    as ``y = [y_i, σ_i]`` of shape ``(N, 2)``, so the per-row noise travels
-    with its row through the ensemble runners' mini-batching. The latent
-    field is exposed as the deterministic site ``f``.
+    with $\sigma_i = 0$ without a ``sigma_col``; with it the observations are
+    packed as ``y = [y_i, σ_i]`` of shape ``(N, 2)``. The latent field is the
+    deterministic site ``f``.
     """
-
-    def model_fn(x: Array, y: Array | None = None) -> None:
-        f = bnf_template(x)
-        numpyro.deterministic("f", f)
-        if noise == "learned":
-            log_sigma0 = numpyro.sample(
-                "log_sigma_obs", dist.Normal(jnp.log(sigma_obs), 1.0)
-            )
-            sigma0 = jnp.exp(log_sigma0)
-        else:
-            sigma0 = sigma_obs
-        obs, sigma_i = y, None
-        if has_sigma_col and y is not None:
-            obs, sigma_i = y[..., 0], y[..., 1]
-        scale = sigma0 if sigma_i is None else jnp.sqrt(sigma_i**2 + sigma0**2)
-        numpyro.sample("y", dist.Normal(f, scale), obs=obs)
-
-    return model_fn
-
-
-def _bnf_init_fn(
-    model_fn: Callable[[Array, Array | None], None],
-    d_in: int,
-    y_shape: tuple[int, ...],
-    seed_key: PRNGKeyArray,
-) -> dict[str, Array]:
-    """Sample initial parameter values from the model's prior at one PRNG key.
-
-    Returns a flat dict ``{site_name: value}`` of the unobserved sample sites
-    (the BNF weights, plus ``sigma_obs`` when the noise is learned). The dict
-    shape becomes the per-ensemble-member parameter PyTree carried by the
-    ensemble runner.
-    """
-    from numpyro.handlers import seed, trace
-
-    # One dummy row reaches every sample site; the observation is given so
-    # that "y" is observed (and consumes no PRNG key).
-    dummy_x = jnp.zeros((1, d_in))
-    dummy_y = jnp.ones((1, *y_shape))
-    tr = trace(seed(model_fn, seed_key)).get_trace(dummy_x, dummy_y)
-    return {
-        name: site["value"]
-        for name, site in tr.items()
-        if site["type"] == "sample" and not site.get("is_observed", False)
-    }
-
-
-def _bnf_log_joint(
-    model_fn: Callable[[Array, Array | None], None],
-) -> Callable[
-    [dict[str, Array], Array, Array], tuple[Float[Array, ""], Float[Array, ""]]
-]:
-    """Build a (loglik, logprior) callable that takes a flat param dict."""
-    from numpyro.handlers import substitute, trace
-
-    def log_joint(
-        params: dict[str, Array], xb: Array, yb: Array
-    ) -> tuple[Float[Array, ""], Float[Array, ""]]:
-        seeded = substitute(model_fn, params)
-        tr = trace(seeded).get_trace(xb, yb)
-        ll = jnp.zeros(())
-        lp = jnp.zeros(())
-        for site in tr.values():
-            if site["type"] != "sample":
-                continue
-            contrib = site["fn"].log_prob(site["value"])
-            scale_meta = site.get("scale")
-            contrib = (
-                contrib.sum() if scale_meta is None else (contrib.sum() * scale_meta)
-            )
-            if site.get("is_observed", False):
-                ll = ll + contrib
-            else:
-                lp = lp + contrib
-        return ll, lp
-
-    return log_joint
+    return _field_model(bnf_template, sigma_obs, noise=noise, has_sigma=has_sigma_col)
 
 
 class BNFEstimator(EstimatorBase):
@@ -306,25 +241,11 @@ class BNFEstimator(EstimatorBase):
                 "observation_model='NORMAL' for now."
             )
         if self.noise not in ("fixed", "learned"):
+            # A BayesianNeuralField returns the field alone, so it cannot be
+            # heteroscedastic.
             raise ValueError(f"noise must be 'fixed' or 'learned'; got {self.noise!r}.")
-        if not self.sigma_obs > 0:
-            raise ValueError(f"sigma_obs must be > 0; got {self.sigma_obs}.")
-        if (
-            self.noise == "learned"
-            and self.sigma_col is None
-            and self.inference_kind == "map"
-            and self.prior_weight == 0
-        ):
-            # Without the prior on log sigma_0 and without per-row sigma_i,
-            # nothing bounds sigma_0 below: a network that interpolates the
-            # data drives it to 0 and the likelihood to +inf.
-            raise ValueError(
-                "noise='learned' needs the prior on log_sigma_obs (prior_weight "
-                "> 0) or a sigma_col to bound sigma_0 below; with "
-                "prior_weight=0 (MLE) use noise='fixed'."
-            )
-        if isinstance(seed, int):
-            seed = jr.PRNGKey(seed)
+        # sigma_obs, the inference kind and learned noise under MLE are
+        # validated by NeuralFieldEstimator.fit, after the preprocessing.
         # 1. Pandas-side preprocessing → SpatiotemporalFit bundle.
         fit_bundle = fit_spatiotemporal(
             df,
@@ -344,55 +265,26 @@ class BNFEstimator(EstimatorBase):
         )
         x_train = _df_to_design(df, fit_bundle, timetype=self.timetype, freq=self.freq)
         y_train = jnp.asarray(df[self.target_col].to_numpy(), dtype=jnp.float32)
+        sigma_i = None
         if self.sigma_col is not None:
             sigma_i = _sigma_column(df, self.sigma_col)
-            y_train = jnp.stack([y_train, sigma_i], axis=-1)  # (N, 2)
-        model_fn = _bnf_model(
-            bnf,
-            self.sigma_obs,
+        # 3. Run ensemble inference: a NeuralFieldEstimator on the BNF.
+        fitted = NeuralFieldEstimator(
+            model_fn=lambda: bnf,
             noise=self.noise,
-            has_sigma_col=self.sigma_col is not None,
-        )
-        # 3. Run ensemble inference.
-        if self.inference_kind == "map":
-            from pyrox.inference import ensemble_map
-
-            d_in = len(self.feature_cols)
-            y_shape = y_train.shape[1:]
-            init_fn = lambda k: _bnf_init_fn(model_fn, d_in, y_shape, k)
-            log_joint = _bnf_log_joint(model_fn)
-            params, losses = ensemble_map(
-                log_joint,
-                init_fn,
-                ensemble_size=self.ensemble_size,
-                num_epochs=self.num_epochs,
-                data=(x_train, y_train),
-                seed=seed,
-                learning_rate=self.learning_rate,
-                prior_weight=self.prior_weight,
-            )
-        elif self.inference_kind == "vi":
-            from numpyro.infer.autoguide import AutoNormal
-            from pyrox.inference import ensemble_vi
-
-            guide_factory = self.guide_factory or AutoNormal
-            guide = guide_factory(model_fn)
-            params, losses = ensemble_vi(
-                model_fn,
-                guide,
-                ensemble_size=self.ensemble_size,
-                num_epochs=self.num_epochs,
-                data=(x_train, y_train),
-                seed=seed,
-                learning_rate=self.learning_rate,
-            )
-        else:
-            raise ValueError(f"Unknown inference_kind {self.inference_kind!r}")
+            sigma_obs=self.sigma_obs,
+            ensemble_size=self.ensemble_size,
+            inference=self.inference_kind,
+            num_epochs=self.num_epochs,
+            learning_rate=self.learning_rate,
+            prior_weight=self.prior_weight,
+            guide_factory=self.guide_factory,
+        ).fit(x_train, y_train, sigma=sigma_i, seed=seed)
         return FittedBNF(
             config=self,
             fit_bundle=fit_bundle,
-            params=params,
-            losses=losses,
+            params=fitted.params,
+            losses=fitted.losses,
             bnf_template=bnf,
         )
 
@@ -462,45 +354,20 @@ class FittedBNF(FittedEstimator):
         x_pred = _df_to_design(
             df, self.fit_bundle, timetype=cfg.timetype, freq=cfg.freq
         )
-        model_fn = _bnf_model(
+        return _predict(
+            self.params,
             self.bnf_template,
-            cfg.sigma_obs,
+            x_pred,
+            encoder=None,
             noise=cfg.noise,
-            has_sigma_col=cfg.sigma_col is not None,
+            sigma_obs=cfg.sigma_obs,
+            has_sigma=cfg.sigma_col is not None,
+            inference=cfg.inference_kind,
+            guide_factory=cfg.guide_factory,
+            quantiles=quantiles,
+            predict_seed=predict_seed,
+            num_posterior_samples=num_posterior_samples,
         )
-
-        if cfg.inference_kind == "map":
-            preds = _predict_map_ensemble(
-                self.params, self.bnf_template, x_pred
-            )  # (E, N)
-            if cfg.noise == "learned":
-                sigma0 = jnp.exp(self.params["log_sigma_obs"])  # (E,)
-            else:
-                sigma0 = jnp.full((preds.shape[0],), float(cfg.sigma_obs))
-            seed = predict_seed
-        else:
-            preds, sigma0 = _predict_vi_ensemble(
-                self.params,
-                model_fn,
-                x_pred,
-                learned_noise=cfg.noise == "learned",
-                sigma_obs=float(cfg.sigma_obs),
-                num_posterior_samples=num_posterior_samples,
-                seed=predict_seed,
-                guide_factory=cfg.guide_factory,
-            )  # (E*S, N), (E*S,)
-            seed = predict_seed + 1
-        mean = preds.mean(axis=0)
-        if quantiles is None:
-            return mean
-        qs = _gaussian_mixture_quantiles(
-            preds,
-            sigma0,
-            quantiles=tuple(quantiles),
-            seed=seed,
-            num_samples=max(num_posterior_samples * preds.shape[0], 200),
-        )
-        return mean, qs
 
 
 def _sigma_column(df: pd.DataFrame, col: str) -> Float[Array, " N"]:
@@ -514,97 +381,3 @@ def _sigma_column(df: pd.DataFrame, col: str) -> Float[Array, " N"]:
             f"min {sigma.min()} and {int((~(sigma > 0)).sum())} non-positive or NaN."
         )
     return jnp.asarray(sigma, dtype=jnp.float32)
-
-
-def _predict_map_ensemble(
-    params: dict[str, Array],
-    bnf_template: BayesianNeuralField,
-    x: Float[Array, "N D"],
-) -> Float[Array, "E N"]:
-    """vmapped deterministic forward pass over MAP-stacked params."""
-    from numpyro.handlers import substitute
-
-    def _per_member(member_params: dict[str, Array]) -> Float[Array, " N"]:
-        seeded = substitute(bnf_template, member_params)
-        return seeded(x)
-
-    return jax.vmap(_per_member)(params)
-
-
-def _predict_vi_ensemble(
-    guide_params: Any,
-    model_fn: Callable[[Array, Array | None], None],
-    x: Float[Array, "N D"],
-    *,
-    learned_noise: bool,
-    sigma_obs: float,
-    num_posterior_samples: int,
-    seed: int,
-    guide_factory: Callable[[Callable], Any] | None = None,
-) -> tuple[Float[Array, "ES N"], Float[Array, " ES"]]:
-    r"""Per-member: draw ``S`` samples from the variational guide, push through.
-
-    Returns the latent predictions with leading axis ``E * S`` and each
-    draw's noise scale $\sigma_0$. The ``guide_factory`` must match what was
-    passed to ``BNFEstimator(VI)``; otherwise the guide's expected param
-    shapes won't line up.
-    """
-    from numpyro.infer import Predictive
-    from numpyro.infer.autoguide import AutoNormal
-
-    # `model_fn` exposes the latent as the deterministic site "f", so
-    # `Predictive` returns noise-free ensemble samples; `out["y"]` would
-    # already include one noise draw and `_gaussian_mixture_quantiles` —
-    # which adds sigma_0 itself — would double-count observation noise.
-    factory = guide_factory or AutoNormal
-    guide = factory(model_fn)
-    sites = ("f", "log_sigma_obs") if learned_noise else ("f",)
-
-    def _per_member(
-        member_params: Any, key: PRNGKeyArray
-    ) -> tuple[Float[Array, "S N"], Float[Array, " S"]]:
-        pred = Predictive(
-            model_fn,
-            guide=guide,
-            params=member_params,
-            num_samples=num_posterior_samples,
-            return_sites=sites,
-        )
-        out = pred(key, x, None)
-        if learned_noise:
-            sigma0 = jnp.exp(out["log_sigma_obs"])
-        else:
-            sigma0 = jnp.full((num_posterior_samples,), sigma_obs)
-        return out["f"], sigma0
-
-    e = jax.tree.leaves(guide_params)[0].shape[0]
-    keys = jr.split(jr.PRNGKey(seed), e)
-    preds, sigma0 = jax.vmap(_per_member)(guide_params, keys)  # (E, S, N), (E, S)
-    return preds.reshape(-1, x.shape[0]), sigma0.reshape(-1)
-
-
-def _gaussian_mixture_quantiles(
-    means: Float[Array, "M N"],
-    sigma: float | Float[Array, " M"],
-    *,
-    quantiles: tuple[float, ...],
-    seed: int,
-    num_samples: int,
-) -> tuple[Float[Array, " N"], ...]:
-    """MC-estimate per-row quantiles of an equal-weight Gaussian mixture.
-
-    Component ``m`` has mean ``means[m, n]`` and standard deviation
-    ``sigma`` (a scalar, or ``sigma[m]`` per component). Drawing
-    ``num_samples`` mixture samples per row is equivalent to first picking
-    a uniform component index and then sampling from that component's
-    Gaussian.
-    """
-    m, n = means.shape
-    sigma_m = jnp.broadcast_to(jnp.asarray(sigma), (m,))
-    rk = jr.PRNGKey(seed)
-    k_idx, k_eps = jr.split(rk)
-    component_idx = jr.randint(k_idx, (num_samples,), 0, m)
-    eps = jr.normal(k_eps, (num_samples, n))
-    samples = means[component_idx] + sigma_m[component_idx][:, None] * eps  # (S, N)
-    qs = tuple(jnp.quantile(samples, q, axis=0) for q in quantiles)
-    return qs

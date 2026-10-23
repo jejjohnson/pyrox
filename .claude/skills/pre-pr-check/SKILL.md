@@ -21,9 +21,9 @@ While iterating, run the touched package's tests with `--no-cov` (a subset
 never reaches the coverage gate):
 `uv run pytest --no-cov packages/<package>/tests -m "not slow"`.
 
-`make typecheck` in an environment with every extra installed reports three
-unused `ty: ignore` comments on optional imports (`gauss_flows`, `xarray`);
-those three are expected locally (CI's environment lacks the extras). Any
+`make typecheck` in an environment with every extra installed reports two
+unused `ty: ignore` comments on the optional `gauss_flows` imports; those two
+are expected locally (CI's environment lacks the extra). Any
 other diagnostic is yours.
 
 ## The slow tests of what you touched
