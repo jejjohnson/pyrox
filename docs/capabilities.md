@@ -552,7 +552,7 @@ it is almost here, extend it where it lives. Regenerate with
 
 <!-- upstream -->
 
-Listed at gaussx 0.6.5, kernellib 0.0.17, geonnax 0.0.9.
+Listed at gaussx 0.6.5, kernellib 0.0.17, geonnax 0.0.10.
 
 ## Upstream: `gaussx`
 
@@ -1131,6 +1131,7 @@ Deterministic Equinox network cores, encoders and basis functions. pyrox-nn wrap
 | `FourierNeuralOperator` | class | Fourier Neural Operator: lifting → Fourier blocks → projection. |
 | `GaborFilter` | class | Single Gabor filter: $g(x) = \sin(\Omega x + \varphi) \odot \exp(-\tfrac{\gamma}{2}\\|x - \mu\\|^2)$. |
 | `GaborNet` | class | Multiplicative Gabor Filter Network (Fathony et al., ICLR 2021). |
+| `GaussianFourierEncoder` | class | Gaussian random Fourier-feature positional encoding (Tancik et al., 2020). |
 | `GeneratedSiren` | class | Wrapper around a SIREN whose layers consume generated weights. |
 | `GeoContextEncoder` | class | Encode geoscience metadata into a single context vector. |
 | `GeoFNO` | class | Geo-FNO: a Fourier neural operator on per-sample point clouds. |
@@ -1159,6 +1160,7 @@ Deterministic Equinox network cores, encoders and basis functions. pyrox-nn wrap
 | `MultiScaleWaveletTransformer` | class | Multi-Scale Wavelet Transformer operator (Wang et al., 2026). |
 | `NCPContinuousPerturb` | class | Input perturbation for the Noise Contrastive Prior pattern. |
 | `NestedResidualUNet` | class | A small residual U-Net used as one stage block (Qin et al., 2020, "U²-Net"). |
+| `NeuralFieldMLP` | class | The BayesNF spatiotemporal network as a deterministic `equinox.Module`. |
 | `OrthogonalRandomFeatures` | class | Orthogonal Random Features (Yu et al., 2016) — variance-reduced RFF. |
 | `RandomFeatureGaussianProcess` | class | SNGP output layer (Liu et al., 2020) — deterministic core. |
 | `Rank1ProjInit` | class | Per-projection BatchEnsemble inits used by `MultiHeadAttentionBE`. |
