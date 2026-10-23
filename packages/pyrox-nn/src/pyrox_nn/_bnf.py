@@ -160,6 +160,48 @@ class InteractionFeatures(PyroxModule):
         return interaction_features(x, jnp.asarray(self.pairs, dtype=jnp.int32))
 
 
+def _core_columns(
+    d_in: int,
+    encoder_cols: tuple[int, ...],
+    fourier_degrees: tuple[int, ...],
+    interactions: tuple[tuple[int, int], ...],
+    seasonality_periods: tuple[float, ...],
+    num_seasonal_harmonics: tuple[int, ...],
+    time_col: int,
+) -> tuple[int, ...]:
+    """Input columns the core sees: all but the encoder's, which must be unused."""
+    # Index checks the core would make, needed before the columns are remapped.
+    if fourier_degrees and len(fourier_degrees) != d_in:
+        raise ValueError(
+            f"fourier_degrees needs one entry per input ({d_in}); "
+            f"got {len(fourier_degrees)}."
+        )
+    if any(not (0 <= c < d_in) for pair in interactions for c in pair):
+        raise ValueError(f"interactions index outside [0, {d_in}); got {interactions}.")
+    if not 0 <= time_col < d_in:
+        raise ValueError(f"time_col must be in [0, {d_in}); got {time_col}.")
+    enc = set(encoder_cols)
+    clashes = []
+    if fourier_degrees:
+        clashes += [c for c in enc if fourier_degrees[c] > 0]
+    clashes += [c for pair in interactions for c in pair if c in enc]
+    if seasonality_periods and any(num_seasonal_harmonics) and time_col in enc:
+        clashes.append(time_col)
+    if clashes:
+        raise ValueError(
+            "encoder_cols feed only the encoder, so they cannot also have Fourier "
+            "features, interactions or seasonal features; got clashes on columns "
+            f"{sorted(set(clashes))}."
+        )
+    core_cols = tuple(c for c in range(d_in) if c not in enc)
+    if not core_cols:
+        raise ValueError(
+            "at least one input column must stay outside encoder_cols; got "
+            f"encoder_cols={encoder_cols} for {d_in} inputs."
+        )
+    return core_cols
+
+
 class BayesianNeuralField(PyroxModule):
     r"""The full Bayesian Neural Field architecture, wrapping `geonnax.NeuralFieldMLP`.
 
@@ -175,7 +217,12 @@ class BayesianNeuralField(PyroxModule):
        each column with a positive degree, seasonal features of the raw time
        column, interaction products of $\tilde x$, and, when an ``encoder``
        is given, the encoder's features of ``x[encoder_cols]``. Each block is
-       gated by $\mathrm{softplus}(g_k)$; the concatenation is $h_0$.
+       gated by $\mathrm{softplus}(g_k)$; the concatenation is $h_0$. The
+       encoder's columns enter **only** through the encoder: they are left
+       out of $\tilde x$ (and so of the scales, Fourier and interaction
+       features). A spherical-harmonic encoder on lon/lat therefore gives a
+       field that is continuous across the dateline and regular at the
+       poles by construction.
     3. Hidden layers
        $h_{\ell+1} = \sigma_\alpha\bigl(\mathrm{softplus}(c_\ell)\,
        (W_\ell^\top h_\ell / \sqrt{\lvert h_\ell \rvert} + b_\ell)\bigr)$,
@@ -191,7 +238,8 @@ class BayesianNeuralField(PyroxModule):
 
     Sites (scope ``pyrox_name``, else ``BayesianNeuralField``), each with a
     $\mathrm{Logistic}(0, 1)$ prior at full shape, in registration order:
-    ``log_scale_adjustment`` $(D,)$; ``feature_gain_{b}`` (scalar, one per
+    ``log_scale_adjustment`` $(D,)$ ($D$ minus the encoder's columns with
+    an encoder); ``feature_gain_{b}`` (scalar, one per
     feature block, the encoder block last); ``logit_activation_weight``
     (scalar); ``layer_{l}_W`` $(I_\ell, \text{width})$, ``layer_{l}_b``
     $(\text{width},)$ and ``layer_{l}_gain`` (scalar) for each hidden layer;
@@ -227,15 +275,20 @@ class BayesianNeuralField(PyroxModule):
             on a lon/lat pair in radians). It is deterministic: its arrays,
             if any, are not sample sites.
         encoder_cols: Input columns fed to ``encoder``, in order; required
-            exactly when ``encoder`` is given.
+            exactly when ``encoder`` is given. They feed only the encoder,
+            so they may not have Fourier degrees, appear in
+            ``interactions`` or be the seasonal time column, and at least
+            one column must stay outside them.
         core: The wrapped `geonnax.NeuralFieldMLP`, built from the fields
             above. Its arrays are placeholders: every one is replaced by a
             sample site on each call.
 
     Raises:
         ValueError: If ``encoder`` and ``encoder_cols`` are not given
-            together, an encoder column is out of range, the encoder does
-            not return a vector, or the core rejects the configuration.
+            together, an encoder column is out of range or also used by
+            another feature block, no column is left outside them, the
+            encoder does not return a vector, or the core rejects the
+            configuration.
 
     Examples:
         >>> import jax.numpy as jnp
@@ -310,6 +363,16 @@ class BayesianNeuralField(PyroxModule):
                     f"shape {out.shape}."
                 )
             extra_features = out.shape[0]
+        core_cols = _core_columns(
+            d_in,
+            encoder_cols or (),
+            fourier_degrees,
+            interactions,
+            seasonality_periods,
+            num_seasonal_harmonics,
+            time_col,
+        )
+        remap = {c: i for i, c in enumerate(core_cols)}
         self.input_scales = input_scales
         self.fourier_degrees = fourier_degrees
         self.interactions = interactions
@@ -321,17 +384,20 @@ class BayesianNeuralField(PyroxModule):
         self.pyrox_name = pyrox_name
         self.encoder = encoder
         self.encoder_cols = encoder_cols
-        # The core's arrays are placeholders that every call overwrites with
-        # sample sites, so a fixed key is enough to build it.
+        # The core sees only the columns the encoder does not consume. Its
+        # arrays are placeholders that every call overwrites with sample
+        # sites, so a fixed key is enough to build it.
         self.core = NeuralFieldMLP.init(
-            input_scales,
+            tuple(input_scales[c] for c in core_cols),
             width=width,
             depth=depth,
-            fourier_degrees=fourier_degrees,
-            interactions=interactions,
+            fourier_degrees=tuple(fourier_degrees[c] for c in core_cols)
+            if fourier_degrees
+            else (),
+            interactions=tuple((remap[i], remap[j]) for i, j in interactions),
             seasonality_periods=seasonality_periods,
             num_seasonal_harmonics=num_seasonal_harmonics,
-            time_col=time_col,
+            time_col=remap.get(time_col, 0),
             extra_features=extra_features,
             key=jr.PRNGKey(0),
         )
@@ -415,9 +481,13 @@ class BayesianNeuralField(PyroxModule):
         if encoder is None or encoder_cols is None:
             fn = core
         else:
-            cols = jnp.asarray(encoder_cols, dtype=jnp.int32)
+            enc_idx = jnp.asarray(encoder_cols, dtype=jnp.int32)
+            core_idx = jnp.asarray(
+                [c for c in range(len(self.input_scales)) if c not in encoder_cols],
+                dtype=jnp.int32,
+            )
 
             def fn(xi: Float[Array, " D"]) -> Float[Array, " 1"]:
-                return core(xi, encoder(xi[cols]))
+                return core(xi[core_idx], encoder(xi[enc_idx]))
 
         return vmap_over_flat_batch(fn, x)[..., 0]

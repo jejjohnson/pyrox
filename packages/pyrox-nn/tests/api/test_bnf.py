@@ -238,13 +238,9 @@ def test_bnf_estimator_with_encoder_fits_and_predicts():
 def test_bnf_estimator_spherical_harmonic_encoder_has_no_dateline_seam():
     """A SH-encoded BNF fits a smooth global field with no seam at ±180°.
 
-    The raw (standardized) longitude still enters the network's first feature
-    block, so continuity across the dateline is not built in; it is learned
-    from data on both sides. The check: the jump
-    |f̂(180°, φ) − f̂(−180°, φ)| over a latitude grid is no larger than the
-    fit's own error against the truth on held-out points. A seam is visible
-    exactly when the jump stands out from the error elsewhere; a jump below
-    the RMSE is indistinguishable from it.
+    The estimator feeds lon/lat only to the encoder, so the field is periodic
+    in longitude by construction; this checks it end to end, through the
+    standardization round trip, on a fitted model.
     """
     from geonnax import SphericalHarmonicEncoder
 
@@ -275,5 +271,9 @@ def test_bnf_estimator_spherical_harmonic_encoder_has_no_dateline_seam():
     east = pd.DataFrame({"t": t, "lon": np.full_like(lat, np.pi), "lat": lat})
     west = pd.DataFrame({"t": t, "lon": np.full_like(lat, -np.pi), "lat": lat})
     jump = np.abs(np.asarray(fitted.predict(east)) - np.asarray(fitted.predict(west)))
-    seam_rms = float(np.sqrt(np.mean(jump**2)))
-    assert seam_rms <= rmse, f"seam RMS {seam_rms:.4f} > fit RMSE {rmse:.4f}"
+    # Float32 round-off only: the design matrix is float32 and lon = ±π
+    # passes through standardize / destandardize (eps 1.2e-7 at |lon| ~ 3)
+    # before sin/cos, and the trained network amplifies that by its
+    # Lipschitz constant (O(10) here); 1e-4 is three orders of magnitude
+    # below the fit error, where a seam would be invisible anyway.
+    assert jump.max() < 1e-4, f"max seam jump {jump.max():.2e}"

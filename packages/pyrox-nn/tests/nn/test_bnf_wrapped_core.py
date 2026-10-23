@@ -245,9 +245,11 @@ def test_core_is_a_neural_field_mlp():
 
 
 def _encoded_reference(params, x, cfg, encoder, cols):
-    """The inline forward with the encoder block appended last (batched)."""
-    scaled = x / (
-        jnp.asarray(cfg["input_scales"]) * jnp.exp(params["log_scale_adjustment"])
+    """The inline forward, encoder columns moved to a block appended last."""
+    keep = [c for c in range(x.shape[-1]) if c not in cols]
+    scales = jnp.asarray(cfg["input_scales"])[jnp.asarray(keep)]
+    scaled = x[:, jnp.asarray(keep)] / (
+        scales * jnp.exp(params["log_scale_adjustment"])
     )
     blocks = [scaled]
     if cfg["seasonality_periods"]:
@@ -314,8 +316,10 @@ def test_encoder_adds_one_gated_block_last():
     # Raw inputs + seasonal, then the encoder block.
     assert plain_gains == ["bnf.feature_gain_0", "bnf.feature_gain_1"]
     assert gains == [*plain_gains, "bnf.feature_gain_2"]
-    # Only the first layer's fan-in grows.
-    assert tr["bnf.layer_0_W"]["value"].shape == (3 + 4 + 16, 8)
+    # The encoded columns leave the raw block (3 -> 1 column) and enter
+    # through the encoder block only.
+    assert tr["bnf.log_scale_adjustment"]["value"].shape == (1,)
+    assert tr["bnf.layer_0_W"]["value"].shape == (1 + 4 + 16, 8)
     assert tr_plain["bnf.layer_0_W"]["value"].shape == (3 + 4, 8)
 
 
@@ -333,6 +337,21 @@ def test_encoder_forward_matches_batched_reference():
         ref = _encoded_reference(params, x, _ENC_CFG, enc, cols)
         # Float64 round-off, as above.
         assert jnp.allclose(f, ref, rtol=1e-12, atol=1e-12)
+
+
+def test_spherical_harmonic_encoder_field_has_no_dateline_seam():
+    """Lon/lat enter only through the SH encoder: f(t, π, φ) = f(t, −π, φ)."""
+    enc = SphericalHarmonicEncoder(l_max=6, input_mode="lonlat")
+    bnf = BayesianNeuralField(**_ENC_CFG, encoder=enc, encoder_cols=(1, 2))
+    lat = jnp.linspace(-1.5, 1.5, 25)
+    t = jnp.full_like(lat, 40.0)
+    east = jnp.stack([t, jnp.full_like(lat, jnp.pi), lat], axis=-1)
+    west = jnp.stack([t, jnp.full_like(lat, -jnp.pi), lat], axis=-1)
+    for seed in range(5):
+        with handlers.seed(rng_seed=seed):
+            f = bnf(jnp.concatenate([east, west]))
+        # Float64 round-off: sin(±π) = ±1.2e-16 differ only in sign.
+        assert jnp.allclose(f[:25], f[25:], rtol=0.0, atol=1e-10)
 
 
 def test_encoder_column_order_matters():
@@ -383,11 +402,43 @@ def test_encoder_jit_grad_and_predictive():
             dict(encoder=lambda z: jnp.outer(z, z), encoder_cols=(1, 2)),
             "vector",
         ),
+        (
+            dict(
+                encoder=SphericalHarmonicEncoder(l_max=1, input_mode="lonlat"),
+                encoder_cols=(0, 1),
+            ),
+            r"clashes on columns \[0\]",  # the seasonal time column
+        ),
+        (
+            dict(
+                encoder=SphericalHarmonicEncoder(l_max=1, input_mode="lonlat"),
+                encoder_cols=(1, 2),
+                fourier_degrees=(0, 2, 0),
+            ),
+            r"clashes on columns \[1\]",
+        ),
+        (
+            dict(
+                encoder=SphericalHarmonicEncoder(l_max=1, input_mode="lonlat"),
+                encoder_cols=(1, 2),
+                interactions=((0, 2),),
+            ),
+            r"clashes on columns \[2\]",
+        ),
+        (
+            dict(
+                encoder=lambda z: z,
+                encoder_cols=(0, 1, 2),
+                seasonality_periods=(),
+                num_seasonal_harmonics=(),
+            ),
+            "at least one input column",
+        ),
     ],
 )
 def test_encoder_validation(kwargs, match):
     with pytest.raises(ValueError, match=match):
-        BayesianNeuralField(**_ENC_CFG, **kwargs)
+        BayesianNeuralField(**{**_ENC_CFG, **kwargs})
 
 
 def test_invalid_config_raises():
