@@ -170,22 +170,106 @@ def test_diag_equals_full_for_orthogonal_features():
 # -- prior-precision tuning ----------------------------------------------------
 
 
-@pytest.mark.parametrize("structure", ["full", "diag"])
-def test_optimize_prior_precision_increases_evidence(blr, structure):
-    post = _fit(blr, structure=structure, prior_precision=50.0)
+def _blr_mean(phi, y, lam):
+    a = phi.T @ phi / SIGMA**2 + lam * jnp.eye(phi.shape[1])
+    return jnp.linalg.solve(a, phi.T @ y / SIGMA**2)
+
+
+def _blr_evidence(phi, y, lam):
+    n = y.shape[0]
+    cov = SIGMA**2 * jnp.eye(n) + phi @ phi.T / lam
+    return jax.scipy.stats.multivariate_normal.logpdf(y, jnp.zeros(n), cov)
+
+
+@pytest.fixture
+def stale(blr):
+    """The BLR problem with w* fitted at λ = 50, not at the λ under test."""
+    phi = _phi(blr["params"], blr["x"])
+    m = _blr_mean(phi, blr["y"], 50.0)
+    params = {"features": blr["params"]["features"], "output": {"W": m[:H], "b": m[H]}}
+    return {**blr, "params": params, "phi": phi}
+
+
+def test_evidence_and_mode_are_exact_blr_away_from_the_fitted_lambda(stale):
+    """The quadratic model re-solves the mode, so a stale w* does not matter."""
+    post = _fit(stale, prior_precision=50.0)
+    for lam in (0.1, 2.0, 50.0, 300.0):
+        assert jnp.allclose(
+            post.log_marginal_likelihood(lam),
+            _blr_evidence(stale["phi"], stale["y"], lam),
+            rtol=1e-9,
+        )
+        assert jnp.allclose(
+            post.mode(lam), _blr_mean(stale["phi"], stale["y"], lam), rtol=1e-9
+        )
+
+
+def test_optimize_prior_precision_maximizes_exact_blr_evidence(stale):
+    post = _fit(stale, prior_precision=50.0)
     tuned = post.optimize_prior_precision()
-    assert tuned.structure == structure
+    # Closed-form BLR evidence on a dense grid; spacing 12 / 4000 = 0.003.
+    grid = jnp.linspace(-6.0, 6.0, 4001)
+    evs = jax.vmap(lambda g: _blr_evidence(stale["phi"], stale["y"], jnp.exp(g)))(grid)
+    spacing = grid[1] - grid[0]
+    log_lam = jnp.log(tuned.prior_precision)
+    assert abs(log_lam - grid[jnp.argmax(evs)]) <= spacing
+    # The refined optimum is no worse than the best grid point. The slack is
+    # float64 round-off of a logpdf of size ~1e2 (≈1e-14 relative), with
+    # room to spare.
+    tuned_ev = _blr_evidence(stale["phi"], stale["y"], tuned.prior_precision)
+    assert tuned_ev >= jnp.max(evs) - 1e-10
+    assert tuned_ev > _blr_evidence(stale["phi"], stale["y"], 50.0)
+    # The method's evidence and the returned mean are the BLR ones at λ̂.
+    assert jnp.allclose(tuned.log_marginal_likelihood(), tuned_ev, rtol=1e-9)
+    lam_hat = tuned.prior_precision
+    w_hat = _blr_mean(stale["phi"], stale["y"], lam_hat)
+    assert jnp.allclose(tuned.w_mean, w_hat, rtol=1e-9)
+    mean, _ = tuned.predict(stale["x_new"])
+    phi_new = _phi(stale["params"], stale["x_new"])
+    assert jnp.allclose(mean, phi_new @ w_hat, rtol=1e-9)
+
+
+def test_optimize_prior_precision_diag_is_stationary(stale):
+    """No closed form for "diag": check the optimum against its own evidence."""
+    post = _fit(stale, structure="diag", prior_precision=50.0)
+    tuned = post.optimize_prior_precision()
     assert tuned.log_marginal_likelihood() > post.log_marginal_likelihood()
 
-    # The maximizer is a stationary point in log λ ...
     def ev(log_lam):
         return tuned.log_marginal_likelihood(jnp.exp(log_lam))
 
     log_lam = jnp.log(tuned.prior_precision)
-    assert abs(jax.grad(ev)(log_lam)) < 1e-8
-    # ... and beats a dense grid over eight decades.
+    # Golden-section leaves the bracket ~1e-21 wide in log λ, so the slope
+    # there is float64 round-off of an O(1e2) evidence (~1e-12); 1e-6 is far
+    # above that and far below the O(1) slope one decade away.
+    assert abs(jax.grad(ev)(log_lam)) < 1e-6
     grid = jnp.linspace(log_lam - 9.0, log_lam + 9.0, 401)
+    # Same round-off slack as in the full test above.
     assert tuned.log_marginal_likelihood() >= jnp.max(jax.vmap(ev)(grid)) - 1e-10
+
+
+@pytest.mark.parametrize("structure", ["full", "diag"])
+@pytest.mark.parametrize("zero_targets", [False, True])
+def test_zero_weights_give_finite_lambda(blr, structure, zero_targets):
+    """w* = 0 used to send λ to inf; with y = f = 0 too, b = 0 and the
+    evidence increases in λ, so λ stops at the finite end of the grid."""
+    params = {
+        "features": blr["params"]["features"],
+        "output": {"W": jnp.zeros(H), "b": jnp.zeros(())},
+    }
+    y = jnp.zeros_like(blr["y"]) if zero_targets else blr["y"]
+    post = last_layer_laplace(
+        _predict,
+        params,
+        blr["x"],
+        y,
+        sigma=SIGMA,
+        param_filter=_is_output,
+        structure=structure,
+    ).optimize_prior_precision()
+    assert jnp.isfinite(post.prior_precision)
+    assert jnp.isfinite(post.log_marginal_likelihood())
+    assert jnp.all(jnp.isfinite(post.predict(blr["x_new"])[1]))
 
 
 def test_evidence_argument_matches_rebuilt_posterior(blr):
@@ -286,20 +370,21 @@ def test_siren_gap_inflates_variance_and_stays_calibrated_on_data():
     """MAP fit with `ensemble_map` (one member), then last-layer Laplace.
 
     Training data cover [-1, -0.25] and [0.25, 1]; the gap (-0.25, 0.25) is
-    held out. Checks:
+    held out. Each band is mean ± 2 sd of the predictive (latent variance
+    plus σ²), scored on 200 fresh noisy targets, so its nominal coverage is
+    95.4 % with a binomial SE of √(0.954 · 0.046 / 200) ≈ 0.015. The bound
+    0.954 - 4 · 0.015 = 0.894 covers noise resampling only; the MAP bias it
+    must also absorb was measured on five training seeds (data seed s, init
+    seed fold_in(key(1), s), s = 0 the seed below) when this was written:
 
-    * in the data region, ±2-sd predictive intervals (latent variance plus
-      σ²) cover n = 200 fresh noisy targets at the nominal 95.4 %, to within
-      four binomial standard errors, √(0.954 · 0.046 / 200) ≈ 0.015, so
-      the bound is 0.954 - 0.06;
-    * the mean latent sd in the gap is at least 1.5x that in the data
-      region (2.4x-7.2x over five training seeds when this was written);
-    * in the gap, the Laplace band covers at least as many noisy targets as
-      the MAP band with noise alone. Last-layer Laplace is not calibrated
-      in gaps in general (Foong et al., 2019, "'In-between' uncertainty in
-      Bayesian neural networks"): on one of those five seeds the MAP missed
-      the gap and Laplace covered 36 % against the noise band's 20 %, so
-      nominal gap coverage is not asserted.
+    * in-data coverage 0.955-0.975 (smallest margin over 0.894: 0.06);
+    * gap coverage 0.925-0.99 (smallest margin: 0.03);
+    * gap / in-data mean latent sd 1.64-6.14, asserted at >= 1.25.
+
+    The gap check can fail: last-layer Laplace is not calibrated in gaps in
+    general (Foong et al., 2019, "'In-between' uncertainty in Bayesian
+    neural networks"); it holds here because this SIREN's error in the gap
+    stays within the inflated band on every seed tried.
     """
     import optax
     from pyrox.inference import ensemble_map
@@ -342,16 +427,15 @@ def test_siren_gap_inflates_variance_and_stays_calibrated_on_data():
     )
     x_gap = jr.uniform(k_gap, (200,), minval=-0.25, maxval=0.25)
 
-    def covered(xs, key, var_extra):
+    def covered(xs, key):
         mean, var = post.predict(xs)
         y_new = _truth(xs) + _NOISE * jr.normal(key, xs.shape)
-        sd = jnp.sqrt(var_extra(var) + _NOISE**2)
+        sd = jnp.sqrt(var + _NOISE**2)
         return jnp.mean(jnp.abs(y_new - mean) <= 2.0 * sd), jnp.mean(jnp.sqrt(var))
 
-    cov_in, sd_in = covered(x_in, jr.key(10), lambda v: v)
-    cov_gap, sd_gap = covered(x_gap, jr.key(11), lambda v: v)
-    cov_gap_map, _ = covered(x_gap, jr.key(11), jnp.zeros_like)
+    cov_in, sd_in = covered(x_in, jr.key(10))
+    cov_gap, sd_gap = covered(x_gap, jr.key(11))
 
     assert cov_in >= 0.954 - 4 * 0.015
-    assert sd_gap >= 1.5 * sd_in
-    assert cov_gap >= cov_gap_map
+    assert cov_gap >= 0.954 - 4 * 0.015
+    assert sd_gap >= 1.25 * sd_in

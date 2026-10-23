@@ -65,44 +65,73 @@ class LastLayerLaplace(eqx.Module):
 
     Built by [`last_layer_laplace`][pyrox.inference.last_layer_laplace].
     With $w$ the selected weights (the rest frozen at the MAP), $J$ the
-    Jacobian $\partial f / \partial w$ on the training inputs and Gaussian
-    noise $\sigma^2$, the posterior is $\mathcal{N}(w^*, H^{-1})$ with the
-    generalized Gauss-Newton (GGN) precision
+    Jacobian $\partial f / \partial w$ at the linearization point $w^*$ on
+    the training inputs and Gaussian noise $\sigma^2$, the log-likelihood is
+    replaced by its Gauss-Newton quadratic model around $w^*$,
 
     $$
-    H = G + \lambda I, \qquad G = \sigma^{-2} J^\top J,
+    \log p(y \mid w) \approx \ell^* + b^\top \Delta
+        - \tfrac{1}{2} \Delta^\top G \Delta, \qquad
+    \Delta = w - w^*,\;
+    G = \sigma^{-2} J^\top J + \epsilon I,\;
+    b = \sigma^{-2} J^\top (y - f^*),
     $$
 
-    where $G$ is kept whole (``structure="full"``) or as its diagonal
-    (``structure="diag"``). The posterior registers no NumPyro sites.
+    with $\epsilon$ the ``jitter``, which is exact for a model linear in
+    $w$. Under the prior $\mathcal{N}(0, \lambda^{-1} I)$ the posterior
+    precision is $H_\lambda = G + \lambda I$ and its mode is
+    $w_\lambda = H_\lambda^{-1} (G w^* + b)$. $G$ is kept whole
+    (``structure="full"``) or as its diagonal (``structure="diag"``). The
+    posterior registers no NumPyro sites.
 
     Attributes:
         predict_fn: ``(params, x) -> f``, the same predictive as
             `ensemble_predict` takes.
-        params: The MAP parameters the posterior is centred on.
+        params: The fitted parameters; their selected weights are $w^*$.
         param_filter: ``(path, leaf) -> bool`` selecting the weights $w$.
-        w_map: Flattened MAP weights $w^*$, shape ``(P,)``.
-        ggn: $G$, shape ``(P, P)`` (full) or ``(P,)`` (diag).
-        log_likelihood: $\log p(y \mid w^*)$ on the training data.
+        w_map: The linearization point $w^*$, flattened, shape ``(P,)``.
+        w_mean: The posterior mean, shape ``(P,)``: $w^*$ as fitted, or
+            $w_\lambda$ after `optimize_prior_precision`.
+        ggn: $\sigma^{-2} J^\top J$ (without jitter), shape ``(P, P)``
+            (full) or ``(P,)`` (diag).
+        loglik_grad: $b$, the log-likelihood gradient at $w^*$, ``(P,)``.
+        log_likelihood: $\ell^* = \log p(y \mid w^*)$ on the training data.
         sigma: Observation noise standard deviation $\sigma$.
         prior_precision: Isotropic prior precision $\lambda$.
         structure: ``"full"`` or ``"diag"``.
-        jitter: Added to the diagonal of $H$ before factorizing.
+        jitter: $\epsilon$, added to the diagonal of $G$, and so of $H$,
+            everywhere it is used.
     """
 
     predict_fn: Callable[[PyTree, Array], Array] = eqx.field(static=True)
     params: PyTree
     param_filter: Callable[[tuple, Any], bool] = eqx.field(static=True)
     w_map: Float[Array, " P"]
+    w_mean: Float[Array, " P"]
     ggn: Float[Array, "P P"] | Float[Array, " P"]
+    loglik_grad: Float[Array, " P"]
     log_likelihood: Float[Array, ""]
     sigma: Float[Array, ""]
     prior_precision: Float[Array, ""]
     structure: Literal["full", "diag"] = eqx.field(static=True)
     jitter: float = eqx.field(static=True)
 
-    def precision(self) -> Any:
-        r"""The posterior precision $H = G + (\lambda + \text{jitter}) I$.
+    def _lam(self, prior_precision: Array | float | None) -> Array:
+        if prior_precision is None:
+            return self.prior_precision
+        return jnp.asarray(prior_precision, dtype=self.w_map.dtype)
+
+    def _g_matvec(self, v: Array) -> Array:
+        """$G v$, jitter included."""
+        if self.structure == "diag":
+            return (self.ggn + self.jitter) * v
+        return einx.dot("p q, q -> p", self.ggn, v) + self.jitter * v
+
+    def precision(self, prior_precision: Array | float | None = None) -> Any:
+        r"""The posterior precision $H_\lambda = G + \lambda I$.
+
+        Args:
+            prior_precision: $\lambda$; defaults to the posterior's own.
 
         Returns:
             A PSD-tagged ``lineax`` operator of size ``(P, P)``: a
@@ -110,23 +139,40 @@ class LastLayerLaplace(eqx.Module):
             (diag).
         """
         gaussx, lx = _require_gaussx()
-        shift = self.prior_precision + self.jitter
+        shift = self._lam(prior_precision) + self.jitter
         if self.structure == "diag":
             return lx.DiagonalLinearOperator(self.ggn + shift)
         p = self.w_map.shape[0]
         h = gaussx.symmetrize(self.ggn) + shift * jnp.eye(p, dtype=self.ggn.dtype)
         return lx.MatrixLinearOperator(h, lx.positive_semidefinite_tag)
 
+    def mode(self, prior_precision: Array | float | None = None) -> Array:
+        r"""$w_\lambda = H_\lambda^{-1} (G w^* + b)$, shape ``(P,)``.
+
+        For a model linear in $w$ this is the exact posterior mean under
+        $\lambda$, wherever $w^*$ was fitted.
+
+        Args:
+            prior_precision: $\lambda$; defaults to the posterior's own.
+
+        Returns:
+            The mode of the quadratic-model posterior.
+        """
+        gaussx, _ = _require_gaussx()
+        rhs = self._g_matvec(self.w_map) + self.loglik_grad
+        return gaussx.solve(self.precision(prior_precision), rhs)
+
     def predict(self, x: Array) -> tuple[Array, Array]:
         r"""Linearized predictive mean and variance of $f$ at ``x``.
 
         $$
-        \mathbb{E}[f(x_*)] = f(x_*; w^*), \qquad
-        \mathrm{Var}[f(x_*)] = J_* H^{-1} J_*^\top,
+        \mathbb{E}[f(x_*)] = f(x_*; w^*) + J_* (\bar w - w^*), \qquad
+        \mathrm{Var}[f(x_*)] = J_* H_\lambda^{-1} J_*^\top,
         $$
 
-        with $J_* = \partial f(x_*) / \partial w$ at $w^*$. The variance is
-        of the latent $f$; add ``sigma**2`` for the predictive of $y$.
+        with $J_* = \partial f(x_*) / \partial w$ at $w^*$ and $\bar w$
+        the posterior mean ``w_mean``. The variance is of the latent $f$;
+        add ``sigma**2`` for the predictive of $y$.
 
         Args:
             x: Inputs, in whatever form ``predict_fn`` takes.
@@ -137,32 +183,39 @@ class LastLayerLaplace(eqx.Module):
         gaussx, _ = _require_gaussx()
         _, unravel, rest = _split(self.params, self.param_filter)
         f = _forward(self.predict_fn, unravel, rest, x)
-        mean = self.predict_fn(self.params, x)
+        f_map = self.predict_fn(self.params, x)
         jac = jax.jacfwd(f)(self.w_map)  # (M, P)
+        shift = einx.dot("m p, p -> m", jac, self.w_mean - self.w_map)
+        jac_t = einx.id("m p -> p m", jac)
         h = self.precision()
         if self.structure == "diag":
             # H⁻¹ is diagonal: Var = Σ_p J_*² / h_p.
-            hinv_jt = gaussx.solve_columns(h, einx.id("m p -> p m", jac))
-            var = einx.sum("[p] m", einx.id("m p -> p m", jac) * hinv_jt)
+            var = einx.sum("[p] m", jac_t * gaussx.solve_columns(h, jac_t))
         else:
             # H = L Lᵀ, so J_* H⁻¹ J_*ᵀ has diagonal Σ_p (L⁻¹ J_*ᵀ)².
-            v = gaussx.solve_columns(gaussx.cholesky(h), einx.id("m p -> p m", jac))
+            v = gaussx.solve_columns(gaussx.cholesky(h), jac_t)
             var = einx.sum("[p] m", v**2)
-        return mean, jnp.reshape(var, mean.shape)
+        mean = f_map + jnp.reshape(shift, f_map.shape)
+        return mean, jnp.reshape(var, f_map.shape)
 
     def log_marginal_likelihood(
-        self, prior_precision: Float[Array, ""] | float | None = None
+        self, prior_precision: Array | float | None = None
     ) -> Float[Array, ""]:
-        r"""Laplace evidence $\log p(y \mid \lambda)$ at fixed $w^*$.
+        r"""Laplace evidence $\log p(y \mid \lambda)$ of the quadratic model.
 
         $$
-        \log p(y \mid \lambda) \approx \log p(y \mid w^*)
-            - \tfrac{\lambda}{2} \lVert w^* \rVert^2
-            + \tfrac{P}{2} \log \lambda - \tfrac{1}{2} \log\det H.
+        \log p(y \mid \lambda) \approx \ell^* + b^\top \Delta
+            - \tfrac{1}{2} \Delta^\top G \Delta
+            - \tfrac{\lambda}{2} \lVert w_\lambda \rVert^2
+            + \tfrac{P}{2} \log \lambda
+            - \tfrac{1}{2} \log\det H_\lambda,
+        \qquad \Delta = w_\lambda - w^*.
         $$
 
-        For a model linear in $w$ with $w^*$ the posterior mean under
-        $\lambda$, this is the exact Bayesian linear-regression evidence.
+        The mode $w_\lambda$ is re-solved for each $\lambda$, so for a
+        model linear in $w$ this is the exact Bayesian linear-regression
+        evidence at every $\lambda$ (the jitter counts as part of $G$), not
+        only at the $\lambda$ that produced $w^*$.
 
         Args:
             prior_precision: $\lambda$ to evaluate at; defaults to the
@@ -172,74 +225,103 @@ class LastLayerLaplace(eqx.Module):
             Scalar log evidence.
         """
         gaussx, _ = _require_gaussx()
-        post = self
-        if prior_precision is not None:
-            post = eqx.tree_at(
-                lambda m: m.prior_precision,
-                self,
-                jnp.asarray(prior_precision, dtype=self.w_map.dtype),
-            )
-        lam = post.prior_precision
+        lam = self._lam(prior_precision)
+        w_lam = self.mode(lam)
+        delta = w_lam - self.w_map
         p = self.w_map.shape[0]
         return (
             self.log_likelihood
-            - 0.5 * lam * jnp.sum(self.w_map**2)
+            + jnp.dot(self.loglik_grad, delta)
+            - 0.5 * jnp.dot(delta, self._g_matvec(delta))
+            - 0.5 * lam * jnp.sum(w_lam**2)
             + 0.5 * p * jnp.log(lam)
-            - 0.5 * gaussx.logdet(post.precision())
+            - 0.5 * gaussx.logdet(self.precision(lam))
         )
 
-    def optimize_prior_precision(self, *, num_steps: int = 100) -> LastLayerLaplace:
+    def optimize_prior_precision(
+        self, *, num_grid: int = 4097, num_refine: int = 100
+    ) -> LastLayerLaplace:
         r"""Return a copy with $\lambda$ maximizing the Laplace evidence.
 
-        With $g_i$ the eigenvalues of $G$ (plus jitter) and $w^*$ fixed,
+        In the eigenbasis $G = Q \operatorname{diag}(g) Q^\top$ (the
+        identity for ``"diag"``), with $c = Q^\top (G w^* + b)$,
+        $d = Q^\top w^*$, $\beta = Q^\top b$ and
+        $\omega = c / (g + \lambda)$ the rotated mode, the evidence of
+        `log_marginal_likelihood` is the $O(P)$ scalar function
 
         $$
-        \frac{\partial \log p(y \mid \lambda)}{\partial \log \lambda}
-        = \tfrac{1}{2}\Bigl(\sum_i \frac{g_i}{g_i + \lambda}
-            - \lambda \lVert w^* \rVert^2\Bigr),
+        \ell^* + \beta^\top (\omega - d)
+            - \tfrac{1}{2} \sum_i g_i (\omega_i - d_i)^2
+            - \tfrac{\lambda}{2} \lVert \omega \rVert^2
+            + \tfrac{P}{2} \log \lambda
+            - \tfrac{1}{2} \sum_i \log (g_i + \lambda).
         $$
 
-        whose first term (MacKay's effective number of parameters
-        $\gamma$) decreases in $\lambda$ and whose second increases, so the
-        evidence is unimodal in $\log \lambda$ and its maximizer is the
-        unique root, found by bisection. Since $\gamma \le P$ the root lies
-        below $P / \lVert w^* \rVert^2$; the bracket spans $e^{60}$ below
-        that.
+        It is maximized over $\log \lambda$ on a grid spanning half the
+        dtype's exponent range each way (so $\lambda$ and every term stay
+        finite, even when $w^* = 0$), then refined by golden-section search
+        in the grid cell either side of the best point. For a model linear
+        in $w$ this maximizes the exact evidence.
 
         Args:
-            num_steps: Bisection steps on $\log \lambda$ (each halves the
-                bracket of width 60).
+            num_grid: Grid points on $\log \lambda$.
+            num_refine: Golden-section steps (each shrinks the bracket by
+                0.618).
 
         Returns:
-            A new `LastLayerLaplace` with the tuned ``prior_precision``.
+            A new `LastLayerLaplace` with the tuned ``prior_precision`` and
+            ``w_mean`` $= w_\lambda$ at it.
         """
         gaussx, lx = _require_gaussx()
+        dtype = self.w_map.dtype
         if self.structure == "diag":
             g = self.ggn
+            d, beta = self.w_map, self.loglik_grad
         else:
-            g = gaussx.eigvals(
+            g, q = gaussx.eig(
                 lx.MatrixLinearOperator(
                     gaussx.symmetrize(self.ggn), lx.positive_semidefinite_tag
                 )
-            ).real
-        g = jnp.clip(g, 0.0) + self.jitter
-        wsq = jnp.maximum(jnp.sum(self.w_map**2), jnp.finfo(self.w_map.dtype).tiny)
+            )
+            d = einx.dot("p k, p -> k", q, self.w_map)
+            beta = einx.dot("p k, p -> k", q, self.loglik_grad)
+        # Round-off can leave eigenvalues of the PSD G slightly negative.
+        g = jnp.clip(g.astype(dtype), 0.0) + self.jitter
+        c = g * d + beta
         p = self.w_map.shape[0]
 
-        def dlogev(log_lam: Array) -> Array:
+        def evidence(log_lam: Array) -> Array:
             lam = jnp.exp(log_lam)
-            return jnp.sum(g / (g + lam)) - lam * wsq
+            omega = c / (g + lam)
+            delta = omega - d
+            return (
+                jnp.dot(beta, delta)
+                - 0.5 * jnp.sum(g * delta**2)
+                - 0.5 * lam * jnp.sum(omega**2)
+                + 0.5 * p * log_lam
+                - 0.5 * jnp.sum(jnp.log(g + lam))
+            )
 
-        def step(_: int, bracket: tuple[Array, Array]) -> tuple[Array, Array]:
-            lo, hi = bracket
-            mid = 0.5 * (lo + hi)
-            up = dlogev(mid) > 0
-            return jnp.where(up, mid, lo), jnp.where(up, hi, mid)
+        bound = 0.5 * jnp.log(jnp.finfo(dtype).max)
+        grid = jnp.linspace(-bound, bound, num_grid, dtype=dtype)
+        best = jnp.argmax(jax.vmap(evidence)(grid))
+        step = grid[1] - grid[0]
+        lo = jnp.maximum(grid[best] - step, -bound)
+        hi = jnp.minimum(grid[best] + step, bound)
+        ratio = (jnp.sqrt(5.0) - 1.0) / 2.0
 
-        hi = jnp.log(p / wsq)
-        lo, hi = jax.lax.fori_loop(0, num_steps, step, (hi - 60.0, hi))
-        lam = jnp.exp(0.5 * (lo + hi)).astype(self.w_map.dtype)
-        return eqx.tree_at(lambda m: m.prior_precision, self, lam)
+        def golden(_: int, bracket: tuple[Array, Array]) -> tuple[Array, Array]:
+            a, b = bracket
+            x1 = b - ratio * (b - a)
+            x2 = a + ratio * (b - a)
+            left = evidence(x1) >= evidence(x2)
+            return jnp.where(left, a, x1), jnp.where(left, x2, b)
+
+        lo, hi = jax.lax.fori_loop(0, num_refine, golden, (lo, hi))
+        lam = jnp.exp(0.5 * (lo + hi)).astype(dtype)
+        return eqx.tree_at(
+            lambda m: (m.prior_precision, m.w_mean), self, (lam, self.mode(lam))
+        )
 
 
 def last_layer_laplace(
@@ -287,7 +369,8 @@ def last_layer_laplace(
         prior_precision: Isotropic prior precision $\lambda$.
         structure: ``"full"`` keeps $J^\top J$; ``"diag"`` keeps its
             diagonal (``gaussx.ggn_diagonal``).
-        jitter: Added to the diagonal of the precision before factorizing.
+        jitter: Added to the diagonal of the GGN (so of the precision)
+            before factorizing, consistently in every use.
 
     Returns:
         A `LastLayerLaplace` posterior.
@@ -314,17 +397,26 @@ def last_layer_laplace(
     f = _forward(predict_fn, unravel, rest, x)
     sigma = jnp.asarray(sigma, dtype=w.dtype)
     jac = jax.jacfwd(f)(w)  # (N, P)
+    f_map = f(w)
     if structure == "diag":
         ggn = gaussx.ggn_diagonal(jac) / sigma**2
     else:
+        # The dense P x P GGN, not gaussx.gauss_newton_precision's Woodbury
+        # form: optimize_prior_precision eigendecomposes G once to search
+        # lambda in O(P) per step, and storing G (P^2) instead of J (N P)
+        # is what lets N, the number of field samples, far exceed P.
         ggn = einx.dot("n p, n q -> p q", jac, jac) / sigma**2
-    log_lik = dist.Normal(f(w), sigma).log_prob(jnp.ravel(y)).sum()
+    resid = jnp.ravel(y) - f_map
+    loglik_grad = einx.dot("n p, n -> p", jac, resid) / sigma**2
+    log_lik = dist.Normal(f_map, sigma).log_prob(jnp.ravel(y)).sum()
     return LastLayerLaplace(
         predict_fn=predict_fn,
         params=params,
         param_filter=param_filter,
         w_map=w,
+        w_mean=w,
         ggn=ggn,
+        loglik_grad=loglik_grad,
         log_likelihood=log_lik,
         sigma=sigma,
         prior_precision=jnp.asarray(prior_precision, dtype=w.dtype),
