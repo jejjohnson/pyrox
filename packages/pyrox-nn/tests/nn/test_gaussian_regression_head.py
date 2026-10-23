@@ -50,7 +50,9 @@ def test_registers_exactly_the_four_weight_sites():
 
 
 def test_priors_are_centred_on_the_homoscedastic_head():
-    head = GaussianRegressionHead.init(4, 1, prior_std=0.3, sigma_init=0.2)
+    head = GaussianRegressionHead.init(
+        4, 1, prior_std=0.3, log_scale_prior_std=0.05, sigma_init=0.2
+    )
     with handlers.trace() as tr, handlers.seed(rng_seed=0):
         head(jnp.ones(4))
     for name in _SITES:
@@ -58,7 +60,8 @@ def test_priors_are_centred_on_the_homoscedastic_head():
         base = fn.base_dist
         expected = math.log(0.2) if name == "b_log_scale" else 0.0
         np.testing.assert_allclose(base.loc, expected, atol=1e-7)
-        np.testing.assert_allclose(base.scale, 0.3)
+        expected_scale = 0.05 if name == "W_log_scale" else 0.3
+        np.testing.assert_allclose(base.scale, expected_scale)
 
 
 @pytest.mark.parametrize(
@@ -155,6 +158,10 @@ def test_log_density_jit_and_grad():
     "kwargs",
     [
         {"prior_std": 0.0},
+        {"log_scale_prior_std": 0.0},
+        {"sigma_init": 0.0},
+        {"sigma_init": math.exp(-7.0)},  # on the lower clip
+        {"sigma_init": math.exp(3.0)},  # on the upper clip
         {"in_features": 0},
         {"out_features": 0},
         {"sigma_init": 1e-4},  # log σ_init < -7
@@ -165,6 +172,50 @@ def test_init_validation(kwargs):
     args = {"in_features": 3, "out_features": 1} | kwargs
     with pytest.raises(ValueError):
         GaussianRegressionHead.init(**args)
+
+
+def _rbf_features(x):
+    m = 15
+    centers = jnp.linspace(-1.0, 1.0, m)[:, None]
+    widths = jnp.full((m,), 2.0 / (m - 1))
+    return geonnax.basis.rbf_basis(x[:, None], centers, widths)
+
+
+def _prior_log_sigma(head, h, num_samples):
+    def one(key):
+        with handlers.seed(rng_seed=key):
+            return head(h)[1][:, 0]
+
+    return jax.vmap(one)(jr.split(jr.PRNGKey(0), num_samples))
+
+
+def test_default_log_scale_prior_is_mildly_heteroscedastic():
+    """Prior draws: log σ(x) − log σ(x') = W_sᵀ(h(x) − h(x')).
+
+    Its sd is s_σ ‖h(x) − h(x')‖ exactly, so the across-draw sd of the
+    within-draw contrast is checked against that closed form, then the
+    default's spread is compared with the old s_σ = prior_std = 1.
+    """
+    grid = jnp.linspace(-0.95, 0.95, 39)
+    h = _rbf_features(grid)
+    n = 4000
+    head = GaussianRegressionHead.init(15, 1, sigma_init=0.5)
+    log_sigma = _prior_log_sigma(head, h, n)
+    contrast = log_sigma[:, -1] - log_sigma[:, 19]  # x = 0.95 against x = 0
+    expected = 0.1 * float(jnp.linalg.norm(h[-1] - h[19]))
+    # The sample sd of n Gaussian draws has standard error sd / sqrt(2 (n - 1));
+    # 5 standard errors.
+    assert abs(float(contrast.std()) - expected) < 5 * expected / math.sqrt(2 * n)
+
+    spread = log_sigma.max(axis=1) - log_sigma.min(axis=1)
+    # Under the default no draw lets σ vary 2× over the grid: the spread is
+    # at most a few sd of s_σ ‖Δh‖ ≲ 0.14, far below log 2 ≈ 0.69.
+    assert float(jnp.mean(spread > math.log(2.0))) < 0.01
+    wide = GaussianRegressionHead.init(15, 1, sigma_init=0.5, log_scale_prior_std=1.0)
+    wide_spread = _prior_log_sigma(wide, h, 1000)
+    wide_spread = wide_spread.max(axis=1) - wide_spread.min(axis=1)
+    # With s_σ = 1 the same contrast has sd ≈ 1.4: most draws vary > 2×.
+    assert float(jnp.mean(wide_spread > math.log(2.0))) > 0.5
 
 
 def test_svi_and_predictive_smoke():
@@ -222,24 +273,30 @@ def test_recovers_known_noise_scale_on_synthetic_1d_data():
     svi = SVI(model, guide, optax.adam(1e-2), Trace_ELBO())
     res = svi.run(jr.PRNGKey(1), 3000, feats(x), y, progress_bar=False)
 
-    # Learned σ(x) at the posterior median against the truth. Each RBF sees
-    # about n_eff ≈ 2000 · (2/7) / 2 ≈ 290 points, and the MLE of log σ from
-    # n points has sd 1 / sqrt(2n) ≈ 0.04; 0.2 is about 5 sd. Within one RBF
+    # The bounds are calibrated on 6 seeds (x, ε, SVI, test and predictive
+    # keys all changed), not derived from sampling noise alone: with the
+    # default s_σ = 0.1 prior the error is dominated by basis and prior
+    # bias. Observed: max |Δ log σ| 0.083-0.188 (bound 0.3), σ̂(0.95)/σ̂(0)
+    # 3.46-3.85 (bound 2.5), coverage deviation from 0.9 at most 0.014
+    # overall and 0.034 per bin (bound 0.06, about 7 binomial sd of
+    # sqrt(0.09 / n) for a bin of n ≈ 1330 points).
+    #
+    # Learned σ(x) at the posterior median against the truth. Within one RBF
     # width of x = 0 the smooth basis cannot follow the kink of |x|, so that
-    # band is excluded (measured 0.25 there, 0.14 elsewhere).
+    # band is excluded.
     grid = jnp.linspace(-0.95, 0.95, 39)
     with handlers.substitute(data=guide.median(res.params)):
         _, log_sigma = head(feats(grid))
     err = jnp.abs(log_sigma[:, 0] - jnp.log(sigma(grid)))
-    assert float(jnp.max(err[jnp.abs(grid) > 1.0 / 7.0])) < 0.2
-    # The intervals widen away from the coast-like centre (truth: 5.5×).
-    assert float(jnp.exp(log_sigma[-1, 0] - log_sigma[19, 0])) > 3.0
+    assert float(jnp.max(err[jnp.abs(grid) > 1.0 / 7.0])) < 0.3
+    # The intervals widen away from x = 0 (truth: σ(0.95) / σ(0) = 5.75; the
+    # s_σ prior shrinks the fitted contrast towards homoscedastic).
+    assert float(jnp.exp(log_sigma[-1, 0] - log_sigma[19, 0])) > 2.5
 
-    # Coverage of the 90 % interval on fresh test points. For a calibrated
-    # interval the hit count is Binomial(n, 0.9), sd sqrt(0.09 / n); allow
-    # 4 sd: 0.019 for n = 4000, about 0.033 in each third-of-range bin
-    # (n ≈ 1330). A homoscedastic fit (σ ≈ 0.38 everywhere) would cover
-    # ≈ 1.0 in the inner bin and ≈ 0.75 in the outer one, far outside.
+    # Coverage of the 90 % interval on fresh test points, overall and in the
+    # inner and outer thirds. A homoscedastic fit (σ ≈ 0.38 everywhere)
+    # would cover ≈ 1.0 in the inner bin and ≈ 0.75 in the outer one, far
+    # outside the bound.
     xt, yt = draw(jr.PRNGKey(2), 4000)
     pred = Predictive(model, guide=guide, params=res.params, num_samples=400)
     ys = pred(jr.PRNGKey(3), feats(xt))["y"]
@@ -250,6 +307,4 @@ def test_recovers_known_noise_scale_on_synthetic_1d_data():
         jnp.abs(xt) < 1.0 / 3.0,
         jnp.abs(xt) > 2.0 / 3.0,
     ):
-        n = int(mask.sum())
-        bound = 4.0 * math.sqrt(0.9 * 0.1 / n)
-        assert abs(float(hit[mask].mean()) - 0.9) < bound, (n, hit[mask].mean())
+        assert abs(float(hit[mask].mean()) - 0.9) < 0.06, hit[mask].mean()
