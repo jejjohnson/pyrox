@@ -28,6 +28,14 @@ Roll your own training loop on top of the vmapped state primitives.
 
 ::: pyrox.inference.ensemble_predict
 
+## Post-hoc Laplace
+
+A Gaussian posterior over a chosen parameter group (typically the last layer) of one fitted model, from the generalized Gauss-Newton Hessian, with a linearized predictive and evidence-tuned prior precision. Needs `pip install pyrox[laplace]`.
+
+::: pyrox.inference.last_layer_laplace
+
+::: pyrox.inference.LastLayerLaplace
+
 ## Optimizer helpers
 
 ::: pyrox.inference.param_group_optimizer

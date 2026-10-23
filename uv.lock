@@ -23,7 +23,7 @@ members = [
 ]
 overrides = [
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=v0.6.5" },
-    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.9" },
+    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.10" },
 ]
 
 [[package]]
@@ -128,7 +128,7 @@ name = "cffi"
 version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pycparser", marker = "implementation_name != 'PyPy'" },
+    { name = "pycparser" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/eb/56/b1ba7935a17738ae8453301356628e8147c79dbb825bcbc73dc7401f9846/cffi-2.0.0.tar.gz", hash = "sha256:44d1b5909021139fe36001ae048dbdde8214afa20200eda0f64c068cac5d5529", size = 523588, upload-time = "2025-09-08T23:24:04.541Z" }
 wheels = [
@@ -686,8 +686,8 @@ dependencies = [
 
 [[package]]
 name = "geonnax"
-version = "0.0.9"
-source = { git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.9#fa126ca69ab17837c8cf83d2a88e91e9f24cb33c" }
+version = "0.0.10"
+source = { git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.10#7b058f0fa1ce1f800c0303158425bbff314b440a" }
 dependencies = [
     { name = "einops" },
     { name = "einx" },
@@ -1805,7 +1805,7 @@ name = "pexpect"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ptyprocess", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "ptyprocess" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/92/cc564bf6381ff43ce1f4d06852fc19a2f11d180f23dc32d9588bee2f149d/pexpect-4.9.0.tar.gz", hash = "sha256:ee7d41123f3c9911050ea2c2dac107568dc43b2d3b0c7557a33212c398ead30f", size = 166450, upload-time = "2023-11-25T09:07:26.339Z" }
 wheels = [
@@ -2030,6 +2030,10 @@ colab = [
     { name = "pandas" },
     { name = "watermark" },
 ]
+laplace = [
+    { name = "gaussx" },
+    { name = "lineax" },
+]
 optax = [
     { name = "optax" },
 ]
@@ -2038,14 +2042,16 @@ optax = [
 requires-dist = [
     { name = "einx", specifier = ">=0.4.3" },
     { name = "equinox", specifier = ">=0.13.8" },
+    { name = "gaussx", marker = "extra == 'laplace'", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.5" },
     { name = "jax", specifier = ">=0.10.1" },
+    { name = "lineax", marker = "extra == 'laplace'", specifier = ">=0.1.1" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
     { name = "numpyro", specifier = ">=0.21" },
     { name = "optax", marker = "extra == 'optax'", specifier = ">=0.2.8" },
     { name = "pandas", marker = "extra == 'colab'", specifier = ">=3.0.3" },
     { name = "watermark", marker = "extra == 'colab'", specifier = ">=2.6.0" },
 ]
-provides-extras = ["optax", "colab"]
+provides-extras = ["optax", "laplace", "colab"]
 
 [[package]]
 name = "pyrox-gp"
@@ -2080,7 +2086,7 @@ requires-dist = [
     { name = "flowjax", specifier = ">=0.9" },
     { name = "gauss-flows", marker = "extra == 'flows'", git = "https://github.com/jejjohnson/gauss_flows.git?rev=bdb23f076ebaaf1ba042aa52ea593487cef3204e" },
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.5" },
-    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.9" },
+    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.10" },
     { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.17" },
     { name = "lineax", specifier = ">=0.1.1" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
@@ -2222,7 +2228,7 @@ optax = [
 [package.metadata]
 requires-dist = [
     { name = "einx", specifier = ">=0.4.3" },
-    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.9" },
+    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.10" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
     { name = "optax", marker = "extra == 'bnf'", specifier = ">=0.2.8" },
     { name = "optax", marker = "extra == 'optax'", specifier = ">=0.2.8" },

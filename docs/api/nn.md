@@ -6,7 +6,7 @@ The `pyrox_nn` subpackage ships uncertainty-aware neural network layers in four 
 2. **Dense / Bayesian-linear layers** (`pyrox_nn._dense`) — reparameterization, Flipout, hierarchical, NCP, DVI, rank-1 ensemble, and variational-dropout variants of `Wx + b`.
 3. **Spectral / GP-flavoured layers** — random-feature kernel maps, SNGP and VSSGP heads, deep random-feature expansions.
 4. **Ensembles & output heads** — BatchEnsemble layers, heteroscedastic Monte-Carlo output heads.
-5. **Bayesian Neural Field stack** (`pyrox_nn._bnf`) — five layers that together implement the BNF architecture (Saad et al., Nat. Comms. 2024).
+5. **Bayesian Neural Field stack** (`pyrox_nn._bnf`) — five layers that together implement the BNF architecture (Saad et al., Nat. Comms. 2024); `BayesianNeuralField` wraps the deterministic `geonnax.NeuralFieldMLP` and takes an optional coordinate `encoder` (for example spherical harmonics on lon/lat).
 6. **Pure-JAX feature helpers** (re-exported from `geonnax.basis`) — pandas-free building blocks the BNF layers wrap.
 
 See also: [Geo encoders](nn/geo_encoders.md) for the longitude/latitude and spherical-harmonic API surface.

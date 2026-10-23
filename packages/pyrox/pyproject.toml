@@ -31,6 +31,12 @@ dependencies = [
 optax = [
     "optax>=0.2.8",
 ]
+# `pip install pyrox[laplace]` enables `pyrox.inference.last_layer_laplace`,
+# whose linear algebra goes through gaussx on lineax operators.
+laplace = [
+    "gaussx>=0.6.5",
+    "lineax>=0.1.1",
+]
 # `pip install pyrox[colab]` bundles what the example notebooks need to run
 # top-to-bottom in Google Colab — matplotlib for plots, watermark for an
 # explicit version readout at the top of each notebook.
@@ -42,6 +48,11 @@ colab = [
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/pyrox"
+
+[tool.uv.sources]
+# gaussx is not yet on PyPI; resolve the release tag from GitHub, in step with
+# pyrox-gp's source and the workspace override.
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.6.5" }
 
 [build-system]
 requires = ["hatchling>=1.27"]
