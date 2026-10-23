@@ -22,7 +22,7 @@ members = ["packages/*"]
 # override snippet users copy from README.md (Installation).
 override-dependencies = [
     "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.6.5",
-    "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.10",
+    "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.11",
 ]
 
 [tool.uv.sources]
