@@ -48,6 +48,7 @@ a Bayesian layer, look it up:
 | Non-Gaussian likelihoods | `pyrox-gp` | the likelihoods + `LaplaceInference`, `ExpectationPropagation`, `GaussNewtonInference` |
 | Multi-output GPs, pathwise samples | `pyrox-gp` | `MultiOutputGPPrior`, `LMCKernel`, `OILMMGPPrior`; `PathwiseSampler` |
 | Bayesian NN layers | `pyrox-nn` | `DenseReparameterization`, `DenseFlipout`, `BayesianSIREN`, random-feature layers, `RandomFeatureGaussianProcess` (SNGP), `DeepVSSGP` |
+| A GP on the sphere S² in weight space (an optimal-interpolation baseline for a neural field, linear in N) | `pyrox-nn` | `pyrox_nn.SphericalHarmonicFeatures`: `(l_max+1)²` harmonics with Funk-Hecke prior variances, so cost grows as `N·l_max²`; lon/lat input needs an explicit `input_unit="degrees" \| "radians"`; ARD (per-dimension lengthscale) kernels raise `NotImplementedError` |
 | A spatio-temporal regressor from a DataFrame | `pyrox-nn[bnf]` | `pyrox_nn.api.BNFEstimator` |
 | Latent Gaussian models (GLMMs, disease mapping, SPDE) with INLA | `pyrox-lgm` | `pyrox_lgm.LGM`, components (`IID`, `RW1`, `AR1`, `BYM2`, `SPDE`, …), PC priors, `inla()`, `f()` |
 
@@ -185,6 +186,7 @@ true slope of 2, and the GP's guide holds `RBF.lengthscale`,
 | A Kalman filter for a temporal GP | `MarkovGPPrior` + `markov_gp_factor` |
 | Laplace / EP for a classification GP | `LaplaceInference`, `ExpectationPropagation` with a `pyrox_gp` likelihood |
 | A Bayesian dense layer, Flipout, SIREN, random-feature GP | `pyrox_nn.DenseReparameterization`, `DenseFlipout`, `BayesianSIREN`, `RandomFeatureGaussianProcess` |
+| Spherical-harmonic features with kernel-derived weight variances on S² | `pyrox_nn.SphericalHarmonicFeatures` (isotropic `pyrox_gp` kernel; `input_unit` required for lon/lat) |
 | A deep-ensemble training loop | `pyrox.inference.ensemble_map` / `ensemble_vi` |
 | A GLMM / BYM2 / SPDE model and its INLA approximation | `pyrox_lgm.LGM` + components + `inla()` |
 | `cho_solve` / `slogdet` on a covariance | gaussx (`gaussx.solve`, `logdet` on a PSD-tagged operator) |

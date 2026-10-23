@@ -10,9 +10,10 @@ contract:
   scalar time axis.
 * `InteractionFeatures` — element-wise products on selected
   pairs of input columns.
-* `BayesianNeuralField` — the full BNF MLP: input rescaling +
-  feature concatenation + gain-modulated MLP with mixed
-  ``elu`` / ``tanh`` activation. Every learnable leaf carries a
+* `BayesianNeuralField` — the full BNF MLP, a wrapper around
+  `geonnax.NeuralFieldMLP` (input rescaling + gated feature blocks +
+  gain-modulated MLP with mixed ``elu`` / ``tanh`` activation, plus an
+  optional encoder block). Every parameter of the core carries a
   $\mathrm{Logistic}(0, 1)$ prior registered via
   `PyroxModule.pyrox_sample`.
 
@@ -25,11 +26,15 @@ Bayesian neural fields.* Nat. Commun. 15, 7942.
 
 from __future__ import annotations
 
-import einx
+from collections.abc import Callable
+from typing import Any
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import jax.random as jr
 import numpyro.distributions as dist
+from geonnax import NeuralFieldMLP
 from geonnax.basis import (
     fourier_features,
     interaction_features,
@@ -37,6 +42,8 @@ from geonnax.basis import (
 )
 from jaxtyping import Array, Float
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
+
+from pyrox_nn._batching import vmap_over_flat_batch
 
 
 class Standardization(PyroxModule):
@@ -153,30 +160,95 @@ class InteractionFeatures(PyroxModule):
         return interaction_features(x, jnp.asarray(self.pairs, dtype=jnp.int32))
 
 
+def _core_columns(
+    d_in: int,
+    encoder_cols: tuple[int, ...],
+    fourier_degrees: tuple[int, ...],
+    interactions: tuple[tuple[int, int], ...],
+    seasonality_periods: tuple[float, ...],
+    num_seasonal_harmonics: tuple[int, ...],
+    time_col: int,
+) -> tuple[int, ...]:
+    """Input columns the core sees: all but the encoder's, which must be unused."""
+    # Index checks the core would make, needed before the columns are remapped.
+    if fourier_degrees and len(fourier_degrees) != d_in:
+        raise ValueError(
+            f"fourier_degrees needs one entry per input ({d_in}); "
+            f"got {len(fourier_degrees)}."
+        )
+    if any(not (0 <= c < d_in) for pair in interactions for c in pair):
+        raise ValueError(f"interactions index outside [0, {d_in}); got {interactions}.")
+    if not 0 <= time_col < d_in:
+        raise ValueError(f"time_col must be in [0, {d_in}); got {time_col}.")
+    enc = set(encoder_cols)
+    clashes = []
+    if fourier_degrees:
+        clashes += [c for c in enc if fourier_degrees[c] > 0]
+    clashes += [c for pair in interactions for c in pair if c in enc]
+    if seasonality_periods and any(num_seasonal_harmonics) and time_col in enc:
+        clashes.append(time_col)
+    if clashes:
+        raise ValueError(
+            "encoder_cols feed only the encoder, so they cannot also have Fourier "
+            "features, interactions or seasonal features; got clashes on columns "
+            f"{sorted(set(clashes))}."
+        )
+    core_cols = tuple(c for c in range(d_in) if c not in enc)
+    if not core_cols:
+        raise ValueError(
+            "at least one input column must stay outside encoder_cols; got "
+            f"encoder_cols={encoder_cols} for {d_in} inputs."
+        )
+    return core_cols
+
+
 class BayesianNeuralField(PyroxModule):
-    r"""The full Bayesian Neural Field architecture.
+    r"""The full Bayesian Neural Field architecture, wrapping `geonnax.NeuralFieldMLP`.
 
-    A spatiotemporal MLP with:
+    The deterministic network is `geonnax.NeuralFieldMLP`; this layer puts
+    an independent $\mathrm{Logistic}(0, 1)$ prior on every one of its
+    parameters, registers them with `PyroxModule.pyrox_sample`, splices the
+    draws into the core with `eqx.tree_at` and runs it over the batch. For
+    one input $x \in \mathbb{R}^D$ with fixed scales $s$:
 
-    1. A learned per-input log-scale adjustment (Logistic(0, 1) prior).
-    2. Four feature blocks concatenated into ``h_0``: rescaled inputs,
-       Fourier features, seasonal features, interaction products.
-    3. Per-block ``softplus(feature_gain)`` modulation.
-    4. A depth-``L`` MLP whose layers are
-       $h_{\ell+1} = \sigma_\alpha\bigl(g_\ell \cdot W_\ell\, h_\ell
-       / \sqrt{\lvert h_\ell \rvert}\bigr)$, where $\sigma_\alpha
-       = \mathrm{sig}(\beta) \cdot \mathrm{elu} + (1 - \mathrm{sig}(\beta))
-       \cdot \mathrm{tanh}$ is a learned mixed activation.
-    5. A final linear layer scaled by ``softplus(output_gain)``.
+    1. The input is rescaled, $\tilde x = x \oslash (s \odot e^{a})$, with a
+       learned log-scale adjustment $a$.
+    2. Feature blocks $F_k$ are built: $\tilde x$, dyadic Fourier features of
+       each column with a positive degree, seasonal features of the raw time
+       column, interaction products of $\tilde x$, and, when an ``encoder``
+       is given, the encoder's features of ``x[encoder_cols]``. Each block is
+       gated by $\mathrm{softplus}(g_k)$; the concatenation is $h_0$. The
+       encoder's columns enter **only** through the encoder: they are left
+       out of $\tilde x$ (and so of the scales, Fourier and interaction
+       features). A spherical-harmonic encoder on lon/lat therefore gives a
+       field that is continuous across the dateline and regular at the
+       poles by construction.
+    3. Hidden layers
+       $h_{\ell+1} = \sigma_\alpha\bigl(\mathrm{softplus}(c_\ell)\,
+       (W_\ell^\top h_\ell / \sqrt{\lvert h_\ell \rvert} + b_\ell)\bigr)$,
+       with $\sigma_\alpha = \alpha\,\mathrm{elu} + (1 - \alpha)\tanh$ and
+       $\alpha = \mathrm{sigmoid}(\beta)$.
+    4. A readout
+       $f(x) = \mathrm{softplus}(c_{\text{out}})\,
+       (W_{\text{out}}^\top h_L / \sqrt{\lvert h_L \rvert} + b_{\text{out}})$.
 
-    All weights, biases, gains, scales, and the activation logit carry
-    independent $\mathrm{Logistic}(0, 1)$ priors registered via
-    `PyroxModule.pyrox_sample`.
+    The $1/\sqrt{\text{fan-in}}$ factor is the NTK scaling of BayesNF: it
+    makes the layer-wise prior predictive a fan-in-independent Gaussian
+    process in the infinite-width limit (Lee et al., 2018).
 
-    The $1/\sqrt{\text{fan-in}}$ pre-normalization is the
-    standard NTK-scaling trick — it makes the layer-wise prior
-    predictive a fan-in-independent Gaussian process in the
-    infinite-width limit (Lee et al., 2018).
+    Sites (scope ``pyrox_name``, else ``BayesianNeuralField``), each with a
+    $\mathrm{Logistic}(0, 1)$ prior at full shape, in registration order:
+    ``log_scale_adjustment`` $(D,)$ ($D$ minus the encoder's columns with
+    an encoder); ``feature_gain_{b}`` (scalar, one per
+    feature block, the encoder block last); ``logit_activation_weight``
+    (scalar); ``layer_{l}_W`` $(I_\ell, \text{width})$, ``layer_{l}_b``
+    $(\text{width},)$ and ``layer_{l}_gain`` (scalar) for each hidden layer;
+    ``output_W`` $(\text{width}, 1)$; ``output_b`` $(1,)$; ``output_gain``
+    (scalar). The names and shapes are those of the original inline
+    implementation, so saved posteriors still load.
+
+    The fixed scales follow the input's dtype (the inline implementation
+    cast them to float32), so float64 inputs get float64 scales.
 
     Attributes:
         input_scales: Per-input fixed scale (typically training-data
@@ -196,6 +268,49 @@ class BayesianNeuralField(PyroxModule):
         time_col: Index of the time column inside ``x`` used for
             seasonal features (default 0).
         pyrox_name: Optional scope-name override.
+        encoder: Optional single-example encoder ``(C,) -> (E,)`` applied
+            to ``x[encoder_cols]``, whose output enters as one extra gated
+            feature block (for example
+            ``geonnax.SphericalHarmonicEncoder(l_max=10, input_mode="lonlat")``
+            on a lon/lat pair in radians). It is deterministic: its arrays,
+            if any, are not sample sites.
+        encoder_cols: Input columns fed to ``encoder``, in order; required
+            exactly when ``encoder`` is given. They feed only the encoder,
+            so they may not have Fourier degrees, appear in
+            ``interactions`` or be the seasonal time column, and at least
+            one column must stay outside them.
+        core: The wrapped `geonnax.NeuralFieldMLP`, built from the fields
+            above. Its arrays are placeholders: every one is replaced by a
+            sample site on each call.
+
+    Raises:
+        ValueError: If ``encoder`` and ``encoder_cols`` are not given
+            together, an encoder column is out of range or also used by
+            another feature block, no column is left outside them, the
+            encoder does not return a vector, or the core rejects the
+            configuration.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> from numpyro import handlers
+        >>> from geonnax import SphericalHarmonicEncoder
+        >>> bnf = BayesianNeuralField(
+        ...     input_scales=(1.0, 1.0, 1.0), fourier_degrees=(0, 0, 0),
+        ...     interactions=(), seasonality_periods=(365.25,),
+        ...     num_seasonal_harmonics=(2,), width=16, depth=2,
+        ...     encoder=SphericalHarmonicEncoder(l_max=3, input_mode="lonlat"),
+        ...     encoder_cols=(1, 2), pyrox_name="bnf",
+        ... )
+        >>> with handlers.seed(rng_seed=0):
+        ...     f = bnf(jnp.zeros((5, 3)))
+        >>> f.shape
+        (5,)
+
+    References:
+        Saad, F. A. *et al.* (2024). Scalable spatiotemporal prediction with
+        Bayesian neural fields. *Nature Communications* 15, 7942.
+        Lee, J. *et al.* (2018). Deep neural networks as Gaussian processes.
+        *ICLR*.
     """
 
     input_scales: tuple[float, ...] = eqx.field(static=True)
@@ -205,8 +320,91 @@ class BayesianNeuralField(PyroxModule):
     num_seasonal_harmonics: tuple[int, ...] = eqx.field(static=True)
     width: int = eqx.field(static=True)
     depth: int = eqx.field(static=True)
-    time_col: int = eqx.field(static=True, default=0)
-    pyrox_name: str | None = None
+    time_col: int = eqx.field(static=True)
+    pyrox_name: str | None
+    encoder: Callable[[Float[Array, " C"]], Float[Array, " E"]] | None
+    encoder_cols: tuple[int, ...] | None = eqx.field(static=True)
+    core: NeuralFieldMLP
+
+    def __init__(
+        self,
+        input_scales: tuple[float, ...],
+        fourier_degrees: tuple[int, ...],
+        interactions: tuple[tuple[int, int], ...],
+        seasonality_periods: tuple[float, ...],
+        num_seasonal_harmonics: tuple[int, ...],
+        width: int,
+        depth: int,
+        time_col: int = 0,
+        pyrox_name: str | None = None,
+        encoder: Callable[[Float[Array, " C"]], Float[Array, " E"]] | None = None,
+        encoder_cols: tuple[int, ...] | None = None,
+    ) -> None:
+        d_in = len(input_scales)
+        extra_features = 0
+        if (encoder is None) != (encoder_cols is None):
+            raise ValueError(
+                "encoder and encoder_cols must be given together; got "
+                f"encoder={encoder!r}, encoder_cols={encoder_cols!r}."
+            )
+        if encoder is not None and encoder_cols is not None:
+            encoder_cols = tuple(int(c) for c in encoder_cols)
+            if not encoder_cols or any(not 0 <= c < d_in for c in encoder_cols):
+                raise ValueError(
+                    f"encoder_cols must be a non-empty tuple of indices in "
+                    f"[0, {d_in}); got {encoder_cols!r}."
+                )
+            out = jax.eval_shape(
+                encoder, jax.ShapeDtypeStruct((len(encoder_cols),), jnp.float32)
+            )
+            if len(out.shape) != 1:
+                raise ValueError(
+                    "encoder must map a (C,) vector to an (E,) vector; got output "
+                    f"shape {out.shape}."
+                )
+            extra_features = out.shape[0]
+        core_cols = _core_columns(
+            d_in,
+            encoder_cols or (),
+            fourier_degrees,
+            interactions,
+            seasonality_periods,
+            num_seasonal_harmonics,
+            time_col,
+        )
+        remap = {c: i for i, c in enumerate(core_cols)}
+        self.input_scales = input_scales
+        self.fourier_degrees = fourier_degrees
+        self.interactions = interactions
+        self.seasonality_periods = seasonality_periods
+        self.num_seasonal_harmonics = num_seasonal_harmonics
+        self.width = width
+        self.depth = depth
+        self.time_col = time_col
+        self.pyrox_name = pyrox_name
+        self.encoder = encoder
+        self.encoder_cols = encoder_cols
+        # The core sees only the columns the encoder does not consume. Its
+        # arrays are placeholders: `__call__` replaces every one of them
+        # (all nine parameter fields) with a sample site before running the
+        # core, so their values never reach an output and a fixed key is
+        # harmless. Real arrays (rather than `eqx.filter_eval_shape`
+        # structs) keep the module an ordinary pytree of arrays under
+        # `jit`, `vmap` and serialisation.
+        self.core = NeuralFieldMLP.init(
+            tuple(input_scales[c] for c in core_cols),
+            width=width,
+            depth=depth,
+            fourier_degrees=tuple(fourier_degrees[c] for c in core_cols)
+            if fourier_degrees
+            else (),
+            interactions=tuple((remap[i], remap[j]) for i, j in interactions),
+            seasonality_periods=seasonality_periods,
+            num_seasonal_harmonics=num_seasonal_harmonics,
+            time_col=remap.get(time_col, 0),
+            extra_features=extra_features,
+            key=jr.PRNGKey(0),
+        )
 
     @staticmethod
     def _logistic_prior(shape: tuple[int, ...]) -> dist.Distribution:
@@ -216,103 +414,84 @@ class BayesianNeuralField(PyroxModule):
         return dist.Logistic(jnp.zeros(shape), 1.0).to_event(len(shape))
 
     @pyrox_method
-    def __call__(self, x: Float[Array, "N D"]) -> Float[Array, " N"]:
-        d_in = len(self.input_scales)
-        input_scales = jnp.asarray(self.input_scales, dtype=jnp.float32)
-
-        # 1. Input rescaling: x / (input_scales * exp(log_scale_adjustment)).
+    def __call__(self, x: Float[Array, "*batch D"]) -> Float[Array, " *batch"]:
+        core = self.core
+        prior = self._logistic_prior
+        # Sites are registered in the order of the original inline
+        # implementation, so seeded draws are unchanged too.
         log_scale_adjustment = self.pyrox_sample(
-            "log_scale_adjustment",
-            self._logistic_prior((d_in,)),
+            "log_scale_adjustment", prior(core.log_scale_adjustment.shape)
         )
-        scaled_x = x / (input_scales * jnp.exp(log_scale_adjustment))
-
-        # 2. Build the four feature blocks.
-        feature_blocks: list[Float[Array, "N F_block"]] = [scaled_x]
-
-        # Fourier per input dim (only for degrees > 0).
-        for col_idx, d in enumerate(self.fourier_degrees):
-            if d > 0:
-                feature_blocks.append(
-                    fourier_features(scaled_x[:, col_idx], d, rescale=True)
-                )
-
-        # Seasonal on the time column.
-        if self.seasonality_periods and any(self.num_seasonal_harmonics):
-            feature_blocks.append(
-                seasonal_features(
-                    x[:, self.time_col],
-                    self.seasonality_periods,
-                    self.num_seasonal_harmonics,
-                    rescale=True,
-                )
-            )
-
-        # Interaction products.
-        if self.interactions:
-            feature_blocks.append(
-                interaction_features(
-                    scaled_x, jnp.asarray(self.interactions, dtype=jnp.int32)
-                )
-            )
-
-        # 3. Per-block softplus(feature_gain) modulation.
-        gated_blocks: list[Float[Array, "N F_block"]] = []
-        for b_idx, block in enumerate(feature_blocks):
-            if block.shape[-1] == 0:
-                continue
-            gain = self.pyrox_sample(
-                f"feature_gain_{b_idx}",
-                self._logistic_prior(()),
-            )
-            gated_blocks.append(block * jax.nn.softplus(gain))
-        h = jnp.concatenate(gated_blocks, axis=-1)
-
-        # 4. Mixed elu/tanh activation, learned mix weight.
+        feature_gain = jnp.stack(
+            [
+                self.pyrox_sample(f"feature_gain_{b}", prior(()))
+                for b in range(core.feature_gain.shape[0])
+            ]
+        )
         logit_activation_weight = self.pyrox_sample(
-            "logit_activation_weight",
-            self._logistic_prior(()),
+            "logit_activation_weight", prior(())
         )
-        alpha = jax.nn.sigmoid(logit_activation_weight)
-
-        def activation(z: Float[Array, ...]) -> Float[Array, ...]:
-            return alpha * jax.nn.elu(z) + (1.0 - alpha) * jnp.tanh(z)
-
-        # 5. Hidden MLP layers.
+        layers_W, layers_b, layers_gain = [], [], []
         for layer_idx in range(self.depth):
-            fan_in = h.shape[-1]
-            W = self.pyrox_sample(
-                f"layer_{layer_idx}_W",
-                self._logistic_prior((fan_in, self.width)),
+            layers_W.append(
+                self.pyrox_sample(
+                    f"layer_{layer_idx}_W", prior(core.layers_W[layer_idx].shape)
+                )
             )
-            b = self.pyrox_sample(
-                f"layer_{layer_idx}_b",
-                self._logistic_prior((self.width,)),
+            layers_b.append(
+                self.pyrox_sample(
+                    f"layer_{layer_idx}_b", prior(core.layers_b[layer_idx].shape)
+                )
             )
-            layer_gain = self.pyrox_sample(
-                f"layer_{layer_idx}_gain",
-                self._logistic_prior(()),
+            layers_gain.append(self.pyrox_sample(f"layer_{layer_idx}_gain", prior(())))
+        output_W = self.pyrox_sample("output_W", prior(core.output_W.shape))
+        output_b = self.pyrox_sample("output_b", prior(core.output_b.shape))
+        output_gain = self.pyrox_sample("output_gain", prior(()))
+
+        # With depth 0 the layer fields are empty (an empty tuple has no
+        # identity `eqx.tree_at` can find), so they are only swapped when
+        # there are hidden layers.
+        def where(c: NeuralFieldMLP) -> tuple[Any, ...]:
+            nodes = (
+                c.log_scale_adjustment,
+                c.feature_gain,
+                c.logit_activation_weight,
+                c.output_W,
+                c.output_b,
+                c.output_gain,
             )
-            h = h / jnp.sqrt(fan_in)
-            h = activation(
-                jax.nn.softplus(layer_gain)
-                * (einx.dot("... i, i o -> ... o", h, W) + b)
+            if self.depth > 0:
+                nodes = (*nodes, c.layers_W, c.layers_b, c.layers_gain)
+            return nodes
+
+        values: tuple[Any, ...] = (
+            log_scale_adjustment,
+            feature_gain,
+            logit_activation_weight,
+            output_W,
+            output_b,
+            output_gain,
+        )
+        if self.depth > 0:
+            values = (
+                *values,
+                tuple(layers_W),
+                tuple(layers_b),
+                jnp.stack(layers_gain),
+            )
+        core = eqx.tree_at(where, core, values)
+
+        encoder, encoder_cols = self.encoder, self.encoder_cols
+        if encoder is None or encoder_cols is None:
+            fn = core
+        else:
+            enc_idx = jnp.asarray(encoder_cols, dtype=jnp.int32)
+            core_idx = jnp.asarray(
+                [c for c in range(len(self.input_scales)) if c not in encoder_cols],
+                dtype=jnp.int32,
             )
 
-        # 6. Output linear, scaled by softplus(output_gain).
-        fan_in = h.shape[-1]
-        W_out = self.pyrox_sample(
-            "output_W",
-            self._logistic_prior((fan_in, 1)),
-        )
-        b_out = self.pyrox_sample(
-            "output_b",
-            self._logistic_prior((1,)),
-        )
-        output_gain = self.pyrox_sample(
-            "output_gain",
-            self._logistic_prior(()),
-        )
-        h = h / jnp.sqrt(fan_in)
-        out = einx.dot("... i, i o -> ... o", h, W_out) + b_out
-        return (jax.nn.softplus(output_gain) * out).squeeze(-1)
+            def fn(xi: Float[Array, " D"]) -> Float[Array, " 1"]:
+                return core(xi[core_idx], encoder(xi[enc_idx]))
+
+        return vmap_over_flat_batch(fn, x)[..., 0]

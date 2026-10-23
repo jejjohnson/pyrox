@@ -55,6 +55,8 @@ has the same list grouped by module, plus gaussx, kernellib and geonnax.
      `LaplaceInference` / `ExpectationPropagation`;
    - a Bayesian dense / Flipout / SIREN / random-feature / SNGP layer →
      `pyrox_nn`;
+   - real spherical harmonics with hand-computed kernel weight variances
+     (a weight-space GP on S²) → `pyrox_nn.SphericalHarmonicFeatures`;
    - a loop of independent MAP or SVI fits → `pyrox.inference.ensemble_map`
      / `ensemble_vi`;
    - a GLMM / areal / SPDE model with a hand-written Laplace approximation →

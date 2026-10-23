@@ -6,7 +6,7 @@ The `pyrox_nn` subpackage ships uncertainty-aware neural network layers in four 
 2. **Dense / Bayesian-linear layers** (`pyrox_nn._dense`) — reparameterization, Flipout, hierarchical, NCP, DVI, rank-1 ensemble, and variational-dropout variants of `Wx + b`.
 3. **Spectral / GP-flavoured layers** — random-feature kernel maps, SNGP and VSSGP heads, deep random-feature expansions.
 4. **Ensembles & output heads** — BatchEnsemble layers, heteroscedastic Monte-Carlo output heads, the Gaussian regression head.
-5. **Bayesian Neural Field stack** (`pyrox_nn._bnf`) — five layers that together implement the BNF architecture (Saad et al., Nat. Comms. 2024).
+5. **Bayesian Neural Field stack** (`pyrox_nn._bnf`) — five layers that together implement the BNF architecture (Saad et al., Nat. Comms. 2024); `BayesianNeuralField` wraps the deterministic `geonnax.NeuralFieldMLP` and takes an optional coordinate `encoder` (for example spherical harmonics on lon/lat).
 6. **Pure-JAX feature helpers** (re-exported from `geonnax.basis`) — pandas-free building blocks the BNF layers wrap.
 
 See also: [Geo encoders](nn/geo_encoders.md) for the longitude/latitude and spherical-harmonic API surface.
@@ -54,6 +54,88 @@ See also: [Geo encoders](nn/geo_encoders.md) for the longitude/latitude and sphe
 ::: pyrox_nn.OrthogonalRandomFeatures
 
 ::: pyrox_nn.HSGPFeatures
+
+## Spherical-harmonic GP features
+
+`SphericalHarmonicFeatures` is the $S^2$ analogue of `HSGPFeatures`: real
+spherical harmonics up to degree $L$ with $\mathcal{N}(0, a_l)$ weights, where
+$a_l$ are the kernel's Funk-Hecke coefficients. With fixed kernel
+hyperparameters it is a GP with the truncated kernel, linear in the number of
+observations, so it is an optimal-interpolation baseline that runs through the
+same inference code as a neural field. The sketch below fits it and a
+`BayesianNeuralField` on the same synthetic global field with the same
+`pyrox.inference.ensemble_map` loop, so the comparison isolates the network.
+
+```python
+import jax
+import jax.numpy as jnp
+import jax.random as jr
+import numpyro.distributions as dist
+from numpyro import handlers
+from pyrox.inference import ensemble_map
+from pyrox_gp import Matern
+from pyrox_nn import BayesianNeuralField, SphericalHarmonicFeatures
+
+# Synthetic global field: 2,000 noisy observations at random lon / lat (degrees).
+k_lon, k_lat, k_eps = jr.split(jr.key(0), 3)
+lon = jr.uniform(k_lon, (2000,), minval=-180.0, maxval=180.0)
+lat = jnp.rad2deg(jnp.arcsin(jr.uniform(k_lat, (2000,), minval=-1.0, maxval=1.0)))
+x = jnp.stack([lon, lat], axis=-1)  # (N, 2)
+lam, phi = jnp.deg2rad(lon), jnp.deg2rad(lat)
+y = jnp.sin(2 * lam) * jnp.cos(phi) + 0.5 * jnp.sin(phi) ** 2
+y = y + 0.1 * jr.normal(k_eps, y.shape)
+
+
+def fit(layer, sigma=0.1):
+    """MAP-fit every sample site of ``layer`` under a Normal likelihood."""
+
+    def log_joint(params, xb, yb):
+        with handlers.trace() as tr, handlers.substitute(data=params):
+            f = layer(xb)
+        logprior = sum(
+            s["fn"].log_prob(s["value"]).sum()
+            for s in tr.values()
+            if s["type"] == "sample"
+        )
+        return dist.Normal(f, sigma).log_prob(yb).sum(), logprior
+
+    def init_fn(key):
+        with handlers.trace() as tr, handlers.seed(rng_seed=key):
+            layer(x[:1])
+        return {n: s["value"] for n, s in tr.items() if s["type"] == "sample"}
+
+    params, _ = ensemble_map(
+        log_joint, init_fn, ensemble_size=4, num_epochs=2000,
+        data=(x, y), seed=jr.key(1),
+    )
+    # Ensemble-mean prediction at the training points.
+    return jax.vmap(lambda p: handlers.substitute(layer, data=p)(x))(params).mean(0)
+
+
+gp = SphericalHarmonicFeatures.init(
+    l_max=30,
+    kernel=Matern(nu=1.5, init_lengthscale=0.5),  # fixed hyperparameters
+    input_mode="lonlat",
+    input_unit="degrees",
+)
+bnf = BayesianNeuralField(
+    input_scales=(180.0, 90.0),
+    fourier_degrees=(4, 4),
+    interactions=((0, 1),),
+    seasonality_periods=(),
+    num_seasonal_harmonics=(),
+    width=64,
+    depth=2,
+)
+for name, layer in [("SH-GP", gp), ("BNF", bnf)]:
+    rmse = jnp.sqrt(jnp.mean((fit(layer) - y) ** 2))
+    print(f"{name}: train RMSE {rmse:.3f}")
+```
+
+The kernel's hyperparameters are `param` sites here, so they stay fixed; give
+the kernel priors (`kernel.set_prior(...)`) to fit them as sample sites too.
+
+::: pyrox_nn.SphericalHarmonicFeatures
 
 ## SIREN — Sinusoidal Representation Networks
 
