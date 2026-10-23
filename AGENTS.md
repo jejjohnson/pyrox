@@ -254,9 +254,9 @@ All of these must pass, from the repo root:
 3. `uv run --group lint ruff format --check .`
 4. `make typecheck` (all four packages; CI checks the same four). In an
    environment with every extra installed (`make install` plus extras), ty
-   reports three unused `ty: ignore` comments on optional imports
-   (`gauss_flows`, `xarray`); CI's environment does not have them, so those
-   three are expected locally.
+   reports two unused `ty: ignore` comments on the optional `gauss_flows`
+   imports; CI's environment does not have it, so those two are expected
+   locally.
 5. After changing a public API: `make capabilities`, and the `docs/api` page.
 6. After changing a dependency: `uv lock`, and commit `uv.lock`.
 7. After changing docs: `make docs` (it must build; CI deploys from `main`).

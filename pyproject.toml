@@ -52,6 +52,7 @@ dev = [
     # Optional-extra backends exercised by the test suites.
     "optax>=0.2.8",
     "pandas>=3.0.3",
+    "xarray>=2025.1",
 ]
 lint = [
     "ruff>=0.15.15",

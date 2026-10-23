@@ -2143,6 +2143,7 @@ dev = [
     { name = "pyrox-nn" },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "xarray" },
 ]
 docs = [
     { name = "ipykernel" },
@@ -2180,6 +2181,7 @@ dev = [
     { name = "pyrox-nn", editable = "packages/pyrox-nn" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
+    { name = "xarray", specifier = ">=2025.1" },
 ]
 docs = [
     { name = "ipykernel", specifier = ">=7.2.0" },
@@ -2224,6 +2226,11 @@ colab = [
 optax = [
     { name = "optax" },
 ]
+xarray = [
+    { name = "optax" },
+    { name = "pandas" },
+    { name = "xarray" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -2232,13 +2239,16 @@ requires-dist = [
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
     { name = "optax", marker = "extra == 'bnf'", specifier = ">=0.2.8" },
     { name = "optax", marker = "extra == 'optax'", specifier = ">=0.2.8" },
+    { name = "optax", marker = "extra == 'xarray'", specifier = ">=0.2.8" },
     { name = "pandas", marker = "extra == 'bnf'", specifier = ">=3.0.3" },
     { name = "pandas", marker = "extra == 'colab'", specifier = ">=3.0.3" },
+    { name = "pandas", marker = "extra == 'xarray'", specifier = ">=3.0.3" },
     { name = "pyrox", editable = "packages/pyrox" },
     { name = "pyrox-gp", editable = "packages/pyrox-gp" },
     { name = "watermark", marker = "extra == 'colab'", specifier = ">=2.6.0" },
+    { name = "xarray", marker = "extra == 'xarray'", specifier = ">=2025.1" },
 ]
-provides-extras = ["optax", "bnf", "colab"]
+provides-extras = ["optax", "bnf", "xarray", "colab"]
 
 [[package]]
 name = "pytest"

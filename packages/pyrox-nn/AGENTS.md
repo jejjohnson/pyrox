@@ -9,7 +9,7 @@ cores, plus the Bayesian Neural Field estimator. The root
 | Namespace | Holds |
 |---|---|
 | `pyrox_nn` | The layers: Bayesian dense (`_dense.py`), random features (`_features.py`), SIREN (`_siren.py`), MFN (`_mfn.py`), SNGP (`_sngp.py`), deep VSSGP (`_vssgp.py`), ensembles (`_ensemble.py`), heteroscedastic heads, classification and Gaussian regression (`_heteroscedastic.py`), conditioning (`_conditioning.py`), Slepian (`_slepian.py`), BNF layers (`_bnf.py`); deterministic geonnax names re-exported for compatibility (`_geonnax.py`) |
-| `pyrox_nn.api` | `BNFEstimator`, `BNFEstimatorMLE`, `BNFEstimatorVI`, `FittedBNF`, `EstimatorBase`, `FittedEstimator` (`[bnf]` extra) |
+| `pyrox_nn.api` | `NeuralFieldEstimator`, `FittedNeuralField` (`api/_field.py`: any field, arrays or xarray), `BNFEstimator`, `BNFEstimatorMLE`, `BNFEstimatorVI`, `FittedBNF` (`api/_bnf.py`: pandas + `BayesianNeuralField` on top of `_field`), `EstimatorBase`, `FittedEstimator` (`[bnf]` extra; `[xarray]` adds xarray to the same dependencies for `fit_xarray`) |
 | `pyrox_nn.preprocessing` | pandas → array preprocessing (`[bnf]` extra) |
 
 `import pyrox_nn` must never import pandas: the root `__init__` does not
@@ -44,7 +44,7 @@ import `api` or `preprocessing`, which import pandas at module scope.
   `self._pyrox_fullname("kl")`; `numpyro.prng_key()` needs a `seed` handler.
 - **Docstrings** list the sites the layer registers and the priors, in
   MathJax.
-- **The estimator** (`api/_bnf.py`) bridges a `PyroxModule` model to
+- **The estimator** (`api/_field.py`, reused by `api/_bnf.py`) bridges a `PyroxModule` model to
   `pyrox.inference`: `init_fn` traces the model on a dummy input for the
   unobserved sites, `log_joint` replays it under `substitute`.
 
