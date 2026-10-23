@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-label="pyrox-gp">
+<title>pyrox-gp</title>
+<defs><linearGradient id="icon-gp-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F97316"/><stop offset="1" stop-color="#E11D48"/></linearGradient></defs><g transform="translate(0 0) scale(1)"><rect x="4" y="4" width="120" height="120" rx="26" fill="url(#icon-gp-g)"/><path d="M18 70 C34 46 48 40 64 52 C80 64 92 46 110 36 L110 70 C92 82 80 96 64 86 C48 76 34 84 18 100 Z" fill="#FFFFFF" fill-opacity="0.28"/><path d="M18 85 C34 66 48 58 64 69 C80 80 92 64 110 53" fill="none" stroke="#FFFFFF" stroke-width="4.5" stroke-linecap="round"/><circle cx="30" cy="74" r="4.5" fill="#FFFFFF"/><circle cx="50" cy="63" r="4.5" fill="#FFFFFF"/><circle cx="78" cy="78" r="4.5" fill="#FFFFFF"/><circle cx="98" cy="59" r="4.5" fill="#FFFFFF"/></g>
+</svg>
