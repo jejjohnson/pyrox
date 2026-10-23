@@ -439,3 +439,18 @@ def test_siren_gap_inflates_variance_and_stays_calibrated_on_data():
     assert cov_in >= 0.954 - 4 * 0.015
     assert cov_gap >= 0.954 - 4 * 0.015
     assert sd_gap >= 1.25 * sd_in
+
+
+def test_docstring_example_runs():
+    """The `last_layer_laplace` example is a doctest (Codex review on #324:
+    the old ``"layers[-1]"`` selector matched no key path)."""
+    import doctest
+
+    from pyrox.inference import _laplace
+
+    finder = doctest.DocTestFinder()
+    runner = doctest.DocTestRunner()
+    for test in finder.find(_laplace.last_layer_laplace, "last_layer_laplace"):
+        runner.run(test)
+    assert runner.failures == 0
+    assert runner.tries > 0

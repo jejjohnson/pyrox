@@ -380,13 +380,30 @@ def last_layer_laplace(
             no weights.
 
     Examples:
+        >>> import equinox as eqx
+        >>> import jax
+        >>> import jax.numpy as jnp
+        >>> import jax.random as jr
+        >>> from pyrox.inference import last_layer_laplace
+        >>> model = eqx.nn.MLP(1, 1, 16, 2, activation=jnp.sin, key=jr.key(0))
+        >>> X = jnp.linspace(-1.0, 1.0, 50)[:, None]
+        >>> y = jnp.sin(3.0 * X[:, 0])
+        >>> def predict(m, x):
+        ...     return jax.vmap(m)(x)[:, 0]
+        >>> # Key paths spell list indices out (".layers[2]"), so build the
+        >>> # selector from the index rather than writing "layers[-1]".
+        >>> last = f".layers[{len(model.layers) - 1}]"
+        >>> def is_last(path, _leaf):
+        ...     return jax.tree_util.keystr(path).startswith(last)
         >>> post = last_layer_laplace(
-        ...     lambda m, x: jax.vmap(m)(x)[:, 0], model, X, y,
-        ...     sigma=0.1,
-        ...     param_filter=lambda path, _: "layers[-1]" in jax.tree_util.keystr(path),
+        ...     predict, model, X, y, sigma=0.1, param_filter=is_last
         ... )
+        >>> post.w_map.shape  # 16 weights + 1 bias
+        (17,)
         >>> post = post.optimize_prior_precision()
-        >>> mean, var = post.predict(X_new)
+        >>> mean, var = post.predict(jnp.linspace(-1.5, 1.5, 7)[:, None])
+        >>> mean.shape, var.shape
+        ((7,), (7,))
     """
     gaussx, _ = _require_gaussx()
     if structure not in ("full", "diag"):
