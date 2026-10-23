@@ -13,7 +13,8 @@ This module hosts two related groups:
    `RandomKitchenSinks`, `RBFCosineFeatures`,
    `MaternCosineFeatures`, `LaplaceCosineFeatures`,
    `ArcCosineFourierFeatures`,
-   `VariationalFourierFeatures`, and `HSGPFeatures`.
+   `VariationalFourierFeatures`, `HSGPFeatures` and
+   `SphericalHarmonicFeatures`.
    These previously lived in `pyrox_nn._layers`. The deterministic
    RFF kernel is now consumed from `geonnax`
    (`geonnax.rff_forward` and `geonnax.rff_cosine_forward`),
@@ -30,6 +31,8 @@ project convention.
 """
 
 from __future__ import annotations
+
+from typing import Literal
 
 import einx
 import equinox as eqx
@@ -48,9 +51,16 @@ from geonnax.basis import (
     standardize as standardize,
     unstandardize as unstandardize,
 )
+from geonnax.geo import lonlat_to_cartesian3d
 from jaxtyping import Array, Float
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
-from pyrox_gp._basis import fourier_basis, spectral_density
+from pyrox_gp import funk_hecke_coefficients
+from pyrox_gp._basis import (
+    fourier_basis,
+    harmonic_degrees,
+    real_spherical_harmonics,
+    spectral_density,
+)
 from pyrox_gp._context import _kernel_context
 from pyrox_gp._protocols import Kernel
 
@@ -733,3 +743,170 @@ class HSGPFeatures(PyroxModule):
             dist.Normal(0.0, 1.0).expand([self.num_basis]).to_event(1),
         )
         return einx.dot("n m, m -> n", Phi, sqrt_S * alpha)
+
+
+class SphericalHarmonicFeatures(PyroxModule):
+    r"""Weight-space GP on the sphere $S^2$ from real spherical harmonics.
+
+    The $S^2$ analogue of `HSGPFeatures`. For a zonal kernel
+    $k(n, n') = \kappa(n \cdot n')$ with Funk-Hecke coefficients
+    $a_l = 2\pi \int_{-1}^{1} \kappa(t) P_l(t)\,dt$, the addition theorem
+    gives the Mercer expansion
+
+    $$
+    k(n, n') = \sum_{l=0}^{\infty} a_l \sum_{m=-l}^{l} Y_{lm}(n)\,Y_{lm}(n'),
+    $$
+
+    with $Y_{lm}$ the orthonormal real spherical harmonics. Truncating at
+    degree $L$ = ``l_max`` gives the layer
+
+    $$
+    f(n) = \sum_{l=0}^{L} \sum_{m=-l}^{l} \sqrt{a_l}\,\alpha_{lm}\,Y_{lm}(n),
+    \qquad \alpha_{lm} \sim \mathcal{N}(0, 1),
+    $$
+
+    a GP whose covariance is the truncated kernel
+    $k_L(n, n') = \sum_{l \le L} a_l \sum_m Y_{lm}(n) Y_{lm}(n')$, linear in
+    the number of points. This is the NN-side dual of
+    `pyrox_gp.SphericalHarmonicInducingFeatures` (VISH, Dutordoir et al.,
+    2020): same harmonics, same `pyrox_gp.funk_hecke_coefficients`.
+
+    The kernel is any isotropic `pyrox_gp` kernel, evaluated on the
+    embedded unit vectors (chordal distance), as in VISH. A kernel with a
+    per-dimension (ARD) lengthscale is not zonal and raises
+    ``NotImplementedError``. Coefficients that quadrature round-off pushes
+    below zero are clipped to zero (a kernel restricted from
+    $\mathbb{R}^3$ to the sphere has $a_l \ge 0$).
+
+    **Sites.** ``<pyrox_name>.alpha`` with prior
+    $\mathcal{N}(0, I_{(L+1)^2})$; any priors on the kernel's
+    hyperparameters register once per call under the kernel's own scope
+    (evaluated inside `pyrox_gp._context._kernel_context`).
+
+    Attributes:
+        l_max: Maximum harmonic degree $L$ (inclusive); the layer has
+            ``(l_max + 1) ** 2`` features.
+        kernel: An isotropic `pyrox_gp` kernel (e.g. `pyrox_gp.Matern`,
+            `pyrox_gp.RBF`) built without ``input_dim``.
+        input_mode: ``"xyz"`` for unit vectors ``(N, 3)``, or ``"lonlat"``
+            for ``(N, 2)`` longitude / latitude columns.
+        input_unit: Unit of the ``"lonlat"`` columns, ``"degrees"`` or
+            ``"radians"``; ``None`` for ``"xyz"``.
+        num_quadrature: Gauss-Legendre nodes for the Funk-Hecke integral.
+        pyrox_name: Explicit scope name for NumPyro site registration.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> from numpyro import handlers
+        >>> from pyrox_gp import Matern
+        >>> layer = SphericalHarmonicFeatures.init(
+        ...     l_max=10,
+        ...     kernel=Matern(nu=1.5, init_lengthscale=0.5),
+        ...     input_mode="lonlat",
+        ...     input_unit="degrees",
+        ... )
+        >>> lonlat = jnp.array([[0.0, 0.0], [90.0, 45.0], [-120.0, -60.0]])
+        >>> with handlers.seed(rng_seed=0):
+        ...     f = layer(lonlat)
+        >>> f.shape, layer.num_basis
+        ((3,), 121)
+    """
+
+    kernel: Kernel
+    l_max: int = eqx.field(static=True)
+    input_mode: Literal["xyz", "lonlat"] = eqx.field(static=True, default="xyz")
+    input_unit: Literal["degrees", "radians"] | None = eqx.field(
+        static=True, default=None
+    )
+    num_quadrature: int = eqx.field(static=True, default=256)
+    pyrox_name: str | None = eqx.field(static=True, default=None)
+
+    @classmethod
+    def init(
+        cls,
+        *,
+        l_max: int,
+        kernel: Kernel,
+        input_mode: Literal["xyz", "lonlat"] = "xyz",
+        input_unit: Literal["degrees", "radians"] | None = None,
+        num_quadrature: int = 256,
+        pyrox_name: str | None = None,
+    ) -> SphericalHarmonicFeatures:
+        """Validate the configuration and build the layer.
+
+        Raises:
+            ValueError: ``l_max < 0``, ``num_quadrature < 1``, an unknown
+                ``input_mode``, or an ``input_unit`` that is missing for
+                ``"lonlat"``, unknown, or given for ``"xyz"``.
+        """
+        if l_max < 0:
+            raise ValueError(f"l_max must be >= 0; got {l_max}.")
+        if num_quadrature < 1:
+            raise ValueError(f"num_quadrature must be >= 1; got {num_quadrature}.")
+        if input_mode not in ("xyz", "lonlat"):
+            raise ValueError(
+                f"input_mode must be 'xyz' or 'lonlat'; got {input_mode!r}."
+            )
+        if input_mode == "lonlat" and input_unit not in ("degrees", "radians"):
+            raise ValueError(
+                "input_mode='lonlat' needs an explicit input_unit, 'degrees' or "
+                f"'radians'; got {input_unit!r}."
+            )
+        if input_mode == "xyz" and input_unit is not None:
+            raise ValueError(
+                f"input_unit applies to input_mode='lonlat' only; got {input_unit!r}."
+            )
+        return cls(
+            kernel=kernel,
+            l_max=l_max,
+            input_mode=input_mode,
+            input_unit=input_unit,
+            num_quadrature=num_quadrature,
+            pyrox_name=pyrox_name,
+        )
+
+    @property
+    def num_basis(self) -> int:
+        """Number of harmonics, ``(l_max + 1) ** 2``."""
+        return (self.l_max + 1) ** 2
+
+    @pyrox_method
+    def __call__(self, x: Float[Array, "N D_in"]) -> Float[Array, " N"]:
+        """Evaluate one GP draw at ``x``.
+
+        Args:
+            x: Unit vectors ``(N, 3)`` (``input_mode="xyz"``) or lon / lat
+                ``(N, 2)`` in ``input_unit`` (``input_mode="lonlat"``).
+
+        Returns:
+            The latent function values, shape ``(N,)``.
+        """
+        d_in = 3 if self.input_mode == "xyz" else 2
+        if x.ndim != 2 or x.shape[-1] != d_in:
+            raise ValueError(
+                f"input_mode={self.input_mode!r} expects x of shape (N, {d_in}); "
+                f"got {x.shape}."
+            )
+        if self.input_mode == "lonlat":
+            if self.input_unit is None:  # built without init(): no default unit
+                raise ValueError(
+                    "input_mode='lonlat' needs an explicit input_unit, "
+                    "'degrees' or 'radians'."
+                )
+            x = lonlat_to_cartesian3d(x, input_unit=self.input_unit)  # (N, 3)
+        Y = real_spherical_harmonics(x, self.l_max)  # (N, M)
+        # Funk-Hecke coefficients under the kernel's own context so any
+        # priors on (variance, lengthscale) register exactly once; the
+        # helper rejects ARD lengthscales.
+        with _kernel_context(self.kernel):
+            a = funk_hecke_coefficients(
+                self.kernel, self.l_max, num_quadrature=self.num_quadrature
+            )  # (l_max + 1,)
+        # a_l >= 0 for a kernel restricted from R^3; clip quadrature round-off.
+        degrees = jnp.asarray(harmonic_degrees(self.l_max))  # (M,) degree l per column
+        sqrt_a = jnp.sqrt(jnp.maximum(a, 0.0))[degrees]  # (M,)
+        alpha = self.pyrox_sample(
+            "alpha",
+            dist.Normal(0.0, 1.0).expand([self.num_basis]).to_event(1),
+        )
+        return einx.dot("n m, m -> n", Y, sqrt_a * alpha)
