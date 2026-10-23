@@ -367,17 +367,14 @@ class FittedBNF(FittedEstimator):
             quantiles=quantiles,
             predict_seed=predict_seed,
             num_posterior_samples=num_posterior_samples,
+            # The BNF estimator keeps its published 200-draw floor, so its
+            # quantiles are unchanged; NeuralFieldEstimator uses 2000.
+            min_quantile_samples=200,
         )
 
 
 def _sigma_column(df: pd.DataFrame, col: str) -> Float[Array, " N"]:
-    """Read and validate the per-row noise std column (finite, > 0)."""
+    """Read the per-row noise std column (validated by ``_pack_data``)."""
     if col not in df.columns:
         raise ValueError(f"sigma_col {col!r} is not a column of the DataFrame.")
-    sigma = df[col].to_numpy(dtype=float)
-    if not ((sigma > 0) & (sigma < float("inf"))).all():
-        raise ValueError(
-            f"sigma_col {col!r} must be finite and > 0 on every row; got "
-            f"min {sigma.min()} and {int((~(sigma > 0)).sum())} non-positive or NaN."
-        )
-    return jnp.asarray(sigma, dtype=jnp.float32)
+    return jnp.asarray(df[col].to_numpy(dtype=float), dtype=jnp.float32)

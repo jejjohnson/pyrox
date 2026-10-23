@@ -43,6 +43,7 @@ import numpy as np
 import numpyro
 import numpyro.distributions as dist
 from jaxtyping import Array, ArrayLike, Float, PRNGKeyArray
+from numpyro.primitives import Messenger
 
 
 NoiseModel = Literal["fixed", "learned", "heteroscedastic"]
@@ -160,14 +161,17 @@ def _field_init_fn(
     d_in: int,
     y_shape: tuple[int, ...],
     seed_key: PRNGKeyArray,
+    param_constraints: dict[str, Any] | None = None,
 ) -> dict[str, Array]:
     """Sample initial parameter values from the model's prior at one PRNG key.
 
     Returns a flat dict ``{site_name: value}`` of the unobserved sample sites
-    (the field's weights, plus ``log_sigma_obs`` when the noise is learned).
-    The dict becomes the per-ensemble-member parameter PyTree carried by the
-    ensemble runner.
+    (the field's weights, plus ``log_sigma_obs`` when the noise is learned)
+    and, for each name in ``param_constraints``, that param site's initial
+    value mapped to unconstrained space. The dict becomes the
+    per-ensemble-member parameter PyTree carried by the ensemble runner.
     """
+    from numpyro.distributions.transforms import biject_to
     from numpyro.handlers import seed, trace
 
     # One dummy row reaches every sample site; the observation is given so
@@ -175,24 +179,44 @@ def _field_init_fn(
     dummy_x = jnp.zeros((1, d_in))
     dummy_y = jnp.ones((1, *y_shape))
     tr = trace(seed(model_fn, seed_key)).get_trace(dummy_x, dummy_y)
-    return {
+    params = {
         name: site["value"]
         for name, site in tr.items()
         if site["type"] == "sample" and not site.get("is_observed", False)
     }
+    for name, constraint in (param_constraints or {}).items():
+        params[name] = biject_to(constraint).inv(tr[name]["value"])
+    return params
 
 
 def _field_log_joint(
     model_fn: Callable[[Array, Array | None], None],
+    param_constraints: dict[str, Any] | None = None,
 ) -> Callable[
     [dict[str, Array], Array, Array], tuple[Float[Array, ""], Float[Array, ""]]
 ]:
-    """Build a ``(loglik, logprior)`` callable that takes a flat param dict."""
+    """Build a ``(loglik, logprior)`` callable that takes a flat param dict.
+
+    Names in ``param_constraints`` are param sites held in unconstrained
+    space: they are mapped through their constraint's bijection and
+    substituted. A param site has no prior, so it adds nothing to
+    ``logprior``; without a prior the MAP point needs no Jacobian term.
+    """
+    from numpyro.distributions.transforms import biject_to
     from numpyro.handlers import substitute, trace
+
+    constraints = param_constraints or {}
 
     def log_joint(
         params: dict[str, Array], xb: Array, yb: Array
     ) -> tuple[Float[Array, ""], Float[Array, ""]]:
+        if constraints:
+            params = {
+                name: biject_to(constraints[name])(value)
+                if name in constraints
+                else value
+                for name, value in params.items()
+            }
         seeded = substitute(model_fn, params)
         tr = trace(seeded).get_trace(xb, yb)
         ll = jnp.zeros(())
@@ -212,6 +236,48 @@ def _field_log_joint(
         return ll, lp
 
     return log_joint
+
+
+class _PrngKeyProbe(Messenger):
+    """Records whether the wrapped model draws ``numpyro.prng_key()``."""
+
+    def __init__(self, fn: Callable[..., Any]) -> None:
+        self.used = False
+        super().__init__(fn)
+
+    def process_message(self, msg: dict[str, Any]) -> None:
+        if msg["type"] == "prng_key":
+            self.used = True
+
+
+def _map_param_constraints(
+    model_fn: Callable[[Array, Array | None], None],
+    d_in: int,
+    y_shape: tuple[int, ...],
+) -> dict[str, Any]:
+    """Check a model for the MAP path; return its param sites' constraints.
+
+    MAP optimises the param sites (``pyrox_param``) with the latents, in
+    unconstrained space. A field that draws ``numpyro.prng_key()`` (Monte
+    Carlo layers such as `pyrox_nn.DenseVariationalDropout`) has a random
+    log joint, which is not a MAP objective, so it is rejected.
+    """
+    from numpyro.distributions import constraints
+    from numpyro.handlers import seed, trace
+
+    probe = _PrngKeyProbe(seed(model_fn, jr.PRNGKey(0)))
+    tr = trace(probe).get_trace(jnp.zeros((1, d_in)), jnp.ones((1, *y_shape)))
+    if probe.used:
+        raise ValueError(
+            "this field draws numpyro.prng_key() (a Monte-Carlo layer such as "
+            "DenseVariationalDropout), so its log joint is random and has no MAP "
+            "point; use inference='vi', or a field without internal sampling."
+        )
+    return {
+        name: site["kwargs"].get("constraint", constraints.real)
+        for name, site in tr.items()
+        if site["type"] == "param"
+    }
 
 
 # -- fitting --------------------------------------------------------------------
@@ -334,12 +400,14 @@ def _fit_ensemble(
 ) -> tuple[Any, Float[Array, "E T"]]:
     """Run ``ensemble_map`` or ``ensemble_vi`` on the packed data."""
     if inference == "map":
+        from numpyro.distributions.transforms import biject_to
         from pyrox.inference import ensemble_map
 
         d_in, y_shape = x.shape[1], y.shape[1:]
-        return ensemble_map(
-            _field_log_joint(model_fn),
-            lambda k: _field_init_fn(model_fn, d_in, y_shape, k),
+        param_constraints = _map_param_constraints(model_fn, d_in, y_shape)
+        params, losses = ensemble_map(
+            _field_log_joint(model_fn, param_constraints),
+            lambda k: _field_init_fn(model_fn, d_in, y_shape, k, param_constraints),
             ensemble_size=ensemble_size,
             num_epochs=num_epochs,
             data=(x, y),
@@ -347,6 +415,11 @@ def _fit_ensemble(
             learning_rate=learning_rate,
             prior_weight=prior_weight,
         )
+        # Hand back the param sites in constrained space, per member, so the
+        # fitted dict substitutes directly into the field.
+        for name, constraint in param_constraints.items():
+            params[name] = jax.vmap(biject_to(constraint))(params[name])
+        return params, losses
     from numpyro.infer.autoguide import AutoNormal
     from pyrox.inference import ensemble_vi
 
@@ -477,8 +550,15 @@ def _predict(
     quantiles: Sequence[float] | None,
     predict_seed: int,
     num_posterior_samples: int,
+    min_quantile_samples: int = 2000,
 ) -> Prediction:
-    """Posterior-predictive mean and optional mixture quantiles (shared)."""
+    """Posterior-predictive mean and optional mixture quantiles (shared).
+
+    The quantiles use at least ``min_quantile_samples`` mixture draws per
+    row: the Monte-Carlo sd of a 5 % quantile from $S$ draws is
+    $\\sqrt{0.05 \\cdot 0.95 / S} / \\phi(1.645) \\approx 2.1/\\sqrt{S}$ in
+    units of $\\sigma$, 0.15σ at $S = 200$ and 0.05σ at the default 2000.
+    """
     forward = _make_forward(field, encoder)
     if inference == "map":
         out = _predict_map_ensemble(params, forward, x)
@@ -513,7 +593,7 @@ def _predict(
         sigma0,
         quantiles=tuple(quantiles),
         seed=seed,
-        num_samples=max(num_posterior_samples * preds.shape[0], 200),
+        num_samples=max(num_posterior_samples * preds.shape[0], min_quantile_samples),
     )
     return mean, qs
 
@@ -682,43 +762,46 @@ class NeuralFieldEstimator(eqx.Module):
         coords: Sequence[str],
         target: str,
         sigma: str | None = None,
+        time_origin: Any = None,
         seed: PRNGKeyArray | int,
     ) -> FittedNeuralField:
         r"""Fit on an xarray Dataset (``pip install pyrox-nn[xarray]``).
 
         Every variable named in ``coords``, ``target`` and ``sigma`` (a
         dimension, coordinate or data variable) is broadcast against the
-        others and flattened to one row per grid point; ``coords`` become the
-        columns of ``X`` in the order given. Rows where any of them is
-        missing (NaN, NaT) are masked out, so a gappy grid needs no
-        reshaping. Datetime coordinates become float days since
-        1970-01-01 and timedeltas float days; pass ``X`` to ``predict`` in
-        the same units.
+        others and flattened, in the target's dimension order, to one row
+        per grid point; ``coords`` become the columns of ``X`` in the order
+        given. Rows where any of them is missing (NaN, NaT) are masked out,
+        so a gappy grid needs no reshaping.
+
+        A datetime coordinate becomes float days since ``time_origin``
+        (default: its earliest timestamp), so the column starts near 0
+        instead of at ~2·10⁴ days since 1970, which float32 would resolve
+        only to minutes and a SIREN would see as a huge frequency. A
+        timedelta coordinate becomes float days. The origins are stored on
+        the fit; `FittedNeuralField.predict_xarray` applies the same
+        mapping, and ``predict`` on arrays expects the same units.
 
         Args:
             ds: An ``xarray.Dataset``.
             coords: Names of the input variables, e.g. ``("lon", "lat", "time")``.
             target: Name of the target variable.
             sigma: Optional name of the per-row noise std variable.
+            time_origin: Optional reference time for every datetime
+                coordinate (anything ``numpy.datetime64`` accepts).
             seed: PRNG key or integer seed.
 
         Returns:
-            The fitted ensemble.
+            The fitted ensemble, which remembers ``coords`` and the time
+            origins.
 
         Raises:
             ImportError: If xarray is not installed.
             ValueError: If a name is not a variable of ``ds``, or as `fit`.
         """
-        try:
-            import xarray as xr
-        except ImportError as err:  # pragma: no cover - exercised without xarray
-            raise ImportError(
-                "fit_xarray needs xarray: pip install 'pyrox-nn[xarray]'."
-            ) from err
+        xr = _require_xarray("fit_xarray")
         names = [*coords, target, *([sigma] if sigma is not None else [])]
-        missing = [name for name in names if name not in ds.variables]
-        if missing:
-            raise ValueError(f"{missing} are not variables of the Dataset.")
+        _check_names(ds, names)
         # Flatten in the target's dimension order (C order), whatever the
         # order of ``coords``.
         arrays = xr.broadcast(*(ds[name] for name in names))
@@ -727,25 +810,72 @@ class NeuralFieldEstimator(eqx.Module):
             *(d for d in arrays[0].dims if d not in ds[target].dims),
         )
         arrays = [a.transpose(*dims) for a in arrays]
-        cols = [_numeric_column(a.values.ravel()) for a in arrays]
+        origins = tuple(_time_origin(ds[name].values, time_origin) for name in coords)
+        cols = [
+            _numeric_column(a.values.ravel(), origin)
+            for a, origin in zip(
+                arrays, (*origins, *([None] * (len(names) - len(coords)))), strict=True
+            )
+        ]
         X = np.stack(cols[: len(coords)], axis=-1)
         valid = np.isfinite(np.stack(cols, axis=-1)).all(axis=-1)
-        return self.fit(
+        fitted = self.fit(
             X,
             cols[len(coords)],
             sigma=None if sigma is None else cols[-1],
             valid=valid,
             seed=seed,
         )
+        return FittedNeuralField(
+            config=fitted.config,
+            field=fitted.field,
+            params=fitted.params,
+            losses=fitted.losses,
+            has_sigma=fitted.has_sigma,
+            xarray_coords=tuple(coords),
+            time_origins=origins,
+        )
 
 
-def _numeric_column(values: np.ndarray) -> np.ndarray:
-    """Datetimes → float days since the epoch, timedeltas → float days.
+def _require_xarray(caller: str) -> Any:
+    try:
+        import xarray as xr
+    except ImportError as err:  # pragma: no cover - exercised without xarray
+        raise ImportError(
+            f"{caller} needs xarray: pip install 'pyrox-nn[xarray]'."
+        ) from err
+    return xr
+
+
+def _check_names(ds: Any, names: Sequence[str]) -> None:
+    missing = [name for name in names if name not in ds.variables]
+    if missing:
+        raise ValueError(f"{missing} are not variables of the Dataset.")
+
+
+def _time_origin(values: np.ndarray, time_origin: Any) -> str | None:
+    """The reference time of a datetime column as an ISO string (ns), or
+    ``None`` for other columns. A string, not a ``datetime64``, so it can be
+    a static field of `FittedNeuralField`."""
+    if not np.issubdtype(values.dtype, np.datetime64):
+        return None
+    if time_origin is not None:
+        return str(np.datetime64(time_origin, "ns"))
+    finite = values[~np.isnat(values)]
+    if finite.size == 0:
+        raise ValueError("a datetime coordinate has no valid timestamp.")
+    return str(finite.min().astype("datetime64[ns]"))
+
+
+def _numeric_column(values: np.ndarray, origin: str | None = None) -> np.ndarray:
+    """Datetimes → float days since ``origin``, timedeltas → float days.
 
     Missing values (NaT) become NaN so the validity mask catches them.
     """
     if np.issubdtype(values.dtype, np.datetime64):
-        values = values - np.datetime64(0, "s")
+        if origin is None:  # pragma: no cover - origins come from _time_origin
+            raise ValueError("a datetime column needs a time origin.")
+        values = values.astype("datetime64[ns]") - np.datetime64(origin, "ns")
     if np.issubdtype(values.dtype, np.timedelta64):
         days = values / np.timedelta64(1, "D")
         return np.where(np.isnat(values), np.nan, days)
@@ -764,6 +894,11 @@ class FittedNeuralField(eqx.Module):
             variational parameters for VI.
         losses: Per-member loss history, shape ``(E, num_epochs)``.
         has_sigma: Whether per-row $\\sigma_i$ were given at fit time.
+        xarray_coords: The ``coords`` of ``fit_xarray`` (``None`` after
+            ``fit``).
+        time_origins: Per coordinate, the reference time of a datetime
+            coordinate as an ISO string (``None`` for the others), from
+            ``fit_xarray``.
     """
 
     config: NeuralFieldEstimator
@@ -771,6 +906,8 @@ class FittedNeuralField(eqx.Module):
     params: Any
     losses: Float[Array, "E T"]
     has_sigma: bool = eqx.field(static=True, default=False)
+    xarray_coords: tuple[str, ...] | None = eqx.field(static=True, default=None)
+    time_origins: tuple[str | None, ...] | None = eqx.field(static=True, default=None)
 
     def predict(
         self,
@@ -816,3 +953,60 @@ class FittedNeuralField(eqx.Module):
             predict_seed=predict_seed,
             num_posterior_samples=num_posterior_samples,
         )
+
+    def predict_xarray(
+        self,
+        ds: Any,
+        *,
+        quantiles: Sequence[float] | None = None,
+        predict_seed: int = 0,
+        num_posterior_samples: int = 32,
+    ) -> Any:
+        """Predict on the grid of an xarray Dataset, as fitted by ``fit_xarray``.
+
+        The fitted ``coords`` are read from ``ds``, broadcast against each
+        other and mapped to the fit's units (datetimes as days since the
+        stored origins); the result has their broadcast shape and
+        coordinates. A grid point with a missing coordinate predicts NaN.
+
+        Args:
+            ds: An ``xarray.Dataset`` holding the fitted ``coords``.
+            quantiles: Optional levels, as in `predict`.
+            predict_seed: As in `predict`.
+            num_posterior_samples: As in `predict`.
+
+        Returns:
+            The mean as an ``xarray.DataArray``, or ``(mean, quantiles)``
+            with one ``DataArray`` per level.
+
+        Raises:
+            ValueError: If this fit did not come from ``fit_xarray``, or a
+                coordinate is not a variable of ``ds``.
+        """
+        if self.xarray_coords is None or self.time_origins is None:
+            raise ValueError("predict_xarray needs a fit from fit_xarray.")
+        xr = _require_xarray("predict_xarray")
+        _check_names(ds, self.xarray_coords)
+        arrays = xr.broadcast(*(ds[name] for name in self.xarray_coords))
+        template = arrays[0]
+        cols = [
+            _numeric_column(a.transpose(*template.dims).values.ravel(), origin)
+            for a, origin in zip(arrays, self.time_origins, strict=True)
+        ]
+        X = np.stack(cols, axis=-1)
+        rows = np.asarray(np.isfinite(X).all(axis=-1))
+        out = self.predict(
+            np.where(rows[:, None], X, 0.0),
+            quantiles=quantiles,
+            predict_seed=predict_seed,
+            num_posterior_samples=num_posterior_samples,
+        )
+
+        def as_grid(values: Any) -> Any:
+            grid = np.where(rows, np.asarray(values), np.nan).reshape(template.shape)
+            return xr.DataArray(grid, coords=template.coords, dims=template.dims)
+
+        if quantiles is None:
+            return as_grid(out)
+        mean, qs = out
+        return as_grid(mean), tuple(as_grid(q) for q in qs)

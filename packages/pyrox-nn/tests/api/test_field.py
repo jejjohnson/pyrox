@@ -13,7 +13,9 @@ import pytest
 from geonnax.basis import real_spherical_harmonics
 from geonnax.geo import lonlat_to_cartesian3d
 from numpyro import handlers
-from pyrox_nn import BayesianSIREN, GaussianRegressionHead
+from numpyro.distributions import constraints
+from pyrox._core import PyroxModule, pyrox_method
+from pyrox_nn import BayesianSIREN, DenseVariationalDropout, GaussianRegressionHead
 from pyrox_nn.api import FittedNeuralField, NeuralFieldEstimator
 from pyrox_nn.api._field import (
     _field_init_fn,
@@ -190,6 +192,70 @@ def test_padding_invariance_of_the_fit():
     np.testing.assert_allclose(padded.losses, plain.losses, rtol=1e-9)
 
 
+class _ParamField(PyroxModule):
+    """``w·x + b + s`` with a Normal weight, a real param ``b`` and a
+    positive param ``s``."""
+
+    pyrox_name: str | None = eqx.field(static=True, default="P")
+
+    @pyrox_method
+    def __call__(self, z):
+        w = self.pyrox_sample("w", dist.Normal(0.0, 1.0))
+        b = self.pyrox_param("b", jnp.asarray(0.0))
+        s = self.pyrox_param("s", jnp.asarray(0.5), constraint=constraints.positive)
+        return w * z[:, 0] + b + s
+
+
+def test_map_optimises_param_sites_in_unconstrained_space():
+    """pyrox_param sites are fitted, not left at their initial values."""
+    x, y, _ = _data(0, 30)
+    est = NeuralFieldEstimator(
+        model_fn=_ParamField, ensemble_size=2, num_epochs=300, learning_rate=5e-2
+    )
+    fitted = est.fit(x, y + 5.0, seed=0)
+    assert set(fitted.params) == {"P.w", "P.b", "P.s"}
+    # Stored in constrained space, per member.
+    assert fitted.params["P.s"].shape == (2,)
+    assert jnp.all(fitted.params["P.s"] > 0)
+    offset = fitted.params["P.b"] + fitted.params["P.s"]
+    # The least-squares offset of sin(3x) + 0.1·noise + 5 on 30 points is
+    # 5 ± ~0.3 (the slope absorbs part of the sine); with the params frozen
+    # at their init the offset stays 0.5 and the mean prediction near 0.5.
+    np.testing.assert_allclose(offset, 5.0, atol=0.5)
+    assert abs(float(jnp.mean(fitted.predict(x))) - float(np.mean(y + 5.0))) < 0.2
+
+
+def test_map_rejects_fields_that_draw_prng_keys():
+    x, y, _ = _data(0, 10)
+    make = lambda: DenseVariationalDropout(in_features=1, out_features=1)
+    with pytest.raises(ValueError, match="prng_key"):
+        NeuralFieldEstimator(model_fn=make, ensemble_size=1, num_epochs=2).fit(
+            x, y, seed=0
+        )
+    # VI runs under SVI's seed, so the same field fits there.
+    fitted = NeuralFieldEstimator(
+        model_fn=make, inference="vi", ensemble_size=1, num_epochs=2
+    ).fit(x, y, seed=0)
+    assert fitted.predict(x).shape == (10,)
+
+
+def test_vi_padding_invariance_of_the_fit():
+    x, y, _ = _data(5, 20)
+    est = NeuralFieldEstimator(
+        model_fn=_siren, inference="vi", ensemble_size=2, num_epochs=30
+    )
+    plain = est.fit(x, y, seed=0)
+    x_pad = np.concatenate([x, np.full((5, 1), np.nan)])
+    y_pad = np.concatenate([y, np.full(5, np.nan)])
+    padded = est.fit(x_pad, y_pad, valid=np.arange(25) < 20, seed=0)
+    # Same ELBO up to reduction-order round-off (measured 2e-12 on 30 steps).
+    np.testing.assert_allclose(padded.losses, plain.losses, rtol=1e-9)
+    for a, b in zip(
+        jax.tree.leaves(plain.params), jax.tree.leaves(padded.params), strict=True
+    ):
+        np.testing.assert_allclose(b, a, rtol=1e-9, atol=1e-12)
+
+
 def test_encoder_is_applied_per_row():
     enc = geonnax.SphericalHarmonicEncoder(l_max=1, input_mode="lonlat")
     forward = _make_forward(lambda z: z[:, :1], enc)
@@ -277,7 +343,7 @@ def test_fit_xarray_equals_fit_on_the_flattened_grid():
         ds, coords=("lon", "lat", "time"), target="sla", sigma="sla_err", seed=0
     )
     tt, la, lo = np.meshgrid(
-        np.array([18262.0, 18264.0, 18265.0]),  # days since 1970-01-01
+        np.array([0.0, 2.0, 3.0]),  # days since the first timestamp
         ds["lat"].values,
         ds["lon"].values,
         indexing="ij",
@@ -290,7 +356,46 @@ def test_fit_xarray_equals_fit_on_the_flattened_grid():
     # Identical inputs, identical computation: bitwise equal.
     for name in direct.params:
         assert jnp.array_equal(fitted.params[name], direct.params[name])
-    assert fitted.predict(X[:4]).shape == (4,)
+    assert fitted.time_origins == (None, None, "2020-01-01T00:00:00.000000000")
+
+    # predict_xarray applies the same mapping and returns the grid.
+    mean = fitted.predict_xarray(ds)
+    assert mean.dims == ("lon", "lat", "time")
+    # Same rows in another order: the batched matmuls may round differently.
+    np.testing.assert_allclose(
+        mean.transpose("time", "lat", "lon").values.ravel(),
+        fitted.predict(X),
+        rtol=1e-12,
+    )
+
+
+def test_fit_xarray_time_origin_and_sub_minute_resolution():
+    xr = pytest.importorskip("xarray")
+    time = np.datetime64("2024-03-01T00:00:00", "ns") + np.arange(6) * np.timedelta64(
+        10, "s"
+    )
+    ds = xr.Dataset({"z": (("time",), np.arange(6.0))}, coords={"time": time})
+    est = NeuralFieldEstimator(model_fn=_siren, ensemble_size=1, num_epochs=2)
+    fitted = est.fit_xarray(
+        ds, coords=("time",), target="z", time_origin="2024-02-29", seed=0
+    )
+    assert fitted.time_origins == ("2024-02-29T00:00:00.000000000",)
+    from pyrox_nn.api._field import _numeric_column
+
+    days = _numeric_column(time, fitted.time_origins[0])
+    # 10 s steps stay distinct in float32 near 1 day (spacing ~6e-8 day =
+    # 5 ms); since 1970 (~2e4 days, spacing ~2e-3 day = 3 min) they merge.
+    assert np.unique(days.astype(np.float32)).size == 6
+    # diff of values ~1 in float64: absolute error ~1e-16.
+    np.testing.assert_allclose(np.diff(days), 10 / 86400, rtol=0, atol=1e-14)
+    assert fitted.predict_xarray(ds).shape == (6,)
+
+
+def test_predict_xarray_needs_an_xarray_fit():
+    x, y, _ = _data(0, 10)
+    est = NeuralFieldEstimator(model_fn=_siren, ensemble_size=1, num_epochs=2)
+    with pytest.raises(ValueError, match="fit_xarray"):
+        est.fit(x, y, seed=0).predict_xarray(_grid_dataset())
 
 
 def test_fit_xarray_rejects_unknown_names():
