@@ -385,8 +385,12 @@ class BayesianNeuralField(PyroxModule):
         self.encoder = encoder
         self.encoder_cols = encoder_cols
         # The core sees only the columns the encoder does not consume. Its
-        # arrays are placeholders that every call overwrites with sample
-        # sites, so a fixed key is enough to build it.
+        # arrays are placeholders: `__call__` replaces every one of them
+        # (all nine parameter fields) with a sample site before running the
+        # core, so their values never reach an output and a fixed key is
+        # harmless. Real arrays (rather than `eqx.filter_eval_shape`
+        # structs) keep the module an ordinary pytree of arrays under
+        # `jit`, `vmap` and serialisation.
         self.core = NeuralFieldMLP.init(
             tuple(input_scales[c] for c in core_cols),
             width=width,
