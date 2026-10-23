@@ -35,18 +35,18 @@ def _feature_matrix(layer: SphericalHarmonicFeatures, x: jax.Array) -> jax.Array
     def f(alpha):
         return handlers.substitute(layer, data={name: alpha})(x)
 
-    return jax.jacfwd(f)(jnp.zeros(layer.num_basis))  # (N, M)
+    return jax.jit(jax.jacfwd(f))(jnp.zeros(layer.num_basis))  # (N, M)
 
 
 # --- construction and validation -------------------------------------------
 
 
 def test_output_shape_xyz():
-    layer = SphericalHarmonicFeatures.init(l_max=6, kernel=Matern(nu=1.5))
+    layer = SphericalHarmonicFeatures.init(l_max=3, kernel=Matern(nu=1.5))
     with handlers.seed(rng_seed=0):
         f = layer(_unit_points(jr.key(0), 11))
     assert f.shape == (11,)
-    assert layer.num_basis == 49
+    assert layer.num_basis == 16
 
 
 @pytest.mark.parametrize("unit", ["degrees", "radians"])
@@ -175,9 +175,46 @@ def test_jit_and_grad():
     assert jnp.all(jnp.isfinite(g))
 
 
+@pytest.mark.parametrize(
+    "lengthscale",
+    [
+        pytest.param(1.0, marks=pytest.mark.slow),
+        2.0,
+        pytest.param(5.0, marks=pytest.mark.slow),
+    ],
+)
+def test_float32_lengthscale_gradient_is_finite(lengthscale):
+    """Regression: negative tail coefficients must not give a NaN gradient.
+
+    In float32 the Funk-Hecke quadrature returns a few slightly negative
+    a_l at l_max=40 for these RBF lengthscales; clipping them with
+    ``sqrt(maximum(a, 0))`` has gradient 0 * inf = NaN there.
+    """
+    with jax.enable_x64(False):
+        kern = RBF(init_lengthscale=lengthscale)
+        layer = SphericalHarmonicFeatures.init(l_max=40, kernel=kern)
+        x = _unit_points(jr.key(0), 4).astype(jnp.float32)
+        alpha = jnp.ones(layer.num_basis, dtype=jnp.float32)
+
+        def f(ls):
+            data = {"SphericalHarmonicFeatures.alpha": alpha, "RBF.lengthscale": ls}
+            return handlers.substitute(layer, data=data)(x).sum()
+
+        g = jax.grad(f)(jnp.float32(lengthscale))
+        assert jnp.isfinite(g)
+
+
+def test_output_dtype_follows_input():
+    """A float32 input gives a float32 output even with x64 on."""
+    layer = SphericalHarmonicFeatures.init(l_max=2, kernel=Matern(nu=1.5))
+    with handlers.seed(rng_seed=0):
+        f = layer(_unit_points(jr.key(0), 3).astype(jnp.float32))
+    assert f.dtype == jnp.float32
+
+
 def test_svi_and_predictive_smoke():
     layer = SphericalHarmonicFeatures.init(
-        l_max=3, kernel=Matern(nu=1.5), pyrox_name="shf"
+        l_max=1, kernel=Matern(nu=1.5), pyrox_name="shf"
     )
     x = _unit_points(jr.key(0), 20)
     y = x[:, 2]
@@ -216,14 +253,20 @@ def test_monte_carlo_covariance_matches_truncated_kernel():
     over the 15 distinct entries of a 5x5 matrix the family-wise false-failure
     rate is below $10^{-5}$ (Bonferroni). The keys are fixed, so the test is
     deterministic.
+
+    $K_L$ here is built from the layer's own features, so this checks the
+    prior sampling ($\alpha \sim \mathcal{N}(0, I)$ scaled by
+    $\sqrt{a_l}$), not the kernel; the comparison against the kernel is
+    `test_truncation_error_decreases_with_l_max`.
     """
     layer = SphericalHarmonicFeatures.init(
-        l_max=8, kernel=Matern(nu=1.5, init_lengthscale=0.5)
+        l_max=4, kernel=Matern(nu=1.5, init_lengthscale=0.5)
     )
     x = _unit_points(jr.key(0), 5)
     n_draws = 4000
     keys = jr.split(jr.key(1), n_draws)
-    F = jax.vmap(lambda k: handlers.seed(layer, rng_seed=k)(x))(keys)  # (S, 5)
+    F = jax.jit(jax.vmap(lambda k: handlers.seed(layer, rng_seed=k)(x)))(keys)
+    # F: (S, 5)
     C_hat = F.T @ F / n_draws
     K_L = _feature_matrix(layer, x)
     K_L = K_L @ K_L.T
@@ -233,11 +276,24 @@ def test_monte_carlo_covariance_matches_truncated_kernel():
 
 
 @pytest.mark.parametrize(
-    "kern",
-    [Matern(nu=1.5, init_lengthscale=0.5), RBF(init_lengthscale=0.5)],
-    ids=["matern32", "rbf"],
+    ("kern", "l_maxes"),
+    [
+        pytest.param(Matern(nu=1.5, init_lengthscale=0.5), (2, 4, 8), id="matern32"),
+        pytest.param(
+            Matern(nu=1.5, init_lengthscale=0.5),
+            (2, 4, 8, 16),
+            id="matern32-L16",
+            marks=pytest.mark.slow,
+        ),
+        pytest.param(
+            RBF(init_lengthscale=0.5),
+            (2, 4, 8, 16),
+            id="rbf-L16",
+            marks=pytest.mark.slow,
+        ),
+    ],
 )
-def test_truncation_error_decreases_with_l_max(kern):
+def test_truncation_error_decreases_with_l_max(kern, l_maxes):
     r"""$k_L \to k$ as $L$ grows.
 
     With $c_l = a_l (2l+1)/(4\pi) \ge 0$, $k(n,n') = \sum_l c_l
@@ -248,7 +304,7 @@ def test_truncation_error_decreases_with_l_max(kern):
     $$
 
     attained on the diagonal. $e_L$ is non-increasing in $L$; the test checks
-    it strictly decreases over $L = 2, 4, 8, 16$ and that the off-diagonal
+    it strictly decreases over ``l_maxes`` and that the off-diagonal
     error stays below it. The slack ``1e-9`` covers the Gauss-Legendre error
     of the Funk-Hecke coefficients (about 1e-12 for these kernels with 256
     nodes) and float64 round-off.
@@ -256,7 +312,7 @@ def test_truncation_error_decreases_with_l_max(kern):
     x = _unit_points(jr.key(0), 30)
     K = kern(x, x)
     diag_err = []
-    for l_max in (2, 4, 8, 16):
+    for l_max in l_maxes:
         layer = SphericalHarmonicFeatures.init(l_max=l_max, kernel=kern)
         B = _feature_matrix(layer, x)
         K_L = B @ B.T
@@ -264,7 +320,7 @@ def test_truncation_error_decreases_with_l_max(kern):
         assert jnp.max(jnp.abs(K - K_L)) <= e_diag + 1e-9
         diag_err.append(float(e_diag))
     assert all(a > b for a, b in itertools.pairwise(diag_err)), diag_err
-    if isinstance(kern, RBF):
+    if isinstance(kern, RBF) and l_maxes[-1] >= 16:
         # The RBF coefficients decay super-exponentially: L = 16 is exact
         # to quadrature accuracy.
         assert diag_err[-1] < 1e-9

@@ -895,18 +895,24 @@ class SphericalHarmonicFeatures(PyroxModule):
                 )
             x = lonlat_to_cartesian3d(x, input_unit=self.input_unit)  # (N, 3)
         Y = real_spherical_harmonics(x, self.l_max)  # (N, M)
-        # Funk-Hecke coefficients under the kernel's own context so any
-        # priors on (variance, lengthscale) register exactly once; the
-        # helper rejects ARD lengthscales.
+        # Funk-Hecke coefficients; the helper rejects ARD lengthscales. It
+        # opens its own kernel context, so this outer one is a no-op today
+        # (contexts are reentrant); it is kept, as in HSGPFeatures, so that
+        # any kernel call added here shares the same hyperprior draw.
         with _kernel_context(self.kernel):
             a = funk_hecke_coefficients(
                 self.kernel, self.l_max, num_quadrature=self.num_quadrature
             )  # (l_max + 1,)
-        # a_l >= 0 for a kernel restricted from R^3; clip quadrature round-off.
+        # a_l >= 0 for a kernel restricted from R^3; quadrature round-off can
+        # push tail coefficients below 0 (often in float32). Clip them with a
+        # double where: sqrt(maximum(a, 0)) has a 0 * inf = NaN gradient there.
+        pos = a > 0
+        sqrt_a_l = jnp.where(pos, jnp.sqrt(jnp.where(pos, a, 1.0)), 0.0)
         degrees = jnp.asarray(harmonic_degrees(self.l_max))  # (M,) degree l per column
-        sqrt_a = jnp.sqrt(jnp.maximum(a, 0.0))[degrees]  # (M,)
+        sqrt_a = sqrt_a_l[degrees]  # (M,)
         alpha = self.pyrox_sample(
             "alpha",
             dist.Normal(0.0, 1.0).expand([self.num_basis]).to_event(1),
         )
-        return einx.dot("n m, m -> n", Y, sqrt_a * alpha)
+        # The quadrature runs in the default float dtype; keep the input's.
+        return einx.dot("n m, m -> n", Y, (sqrt_a * alpha).astype(Y.dtype))
