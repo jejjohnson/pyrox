@@ -288,7 +288,7 @@ it is almost here, extend it where it lives. Regenerate with
 
 | Name | Kind | What it does |
 |---|---|---|
-| `BayesianNeuralField` | class | The full Bayesian Neural Field architecture. |
+| `BayesianNeuralField` | class | The full Bayesian Neural Field architecture, wrapping `geonnax.NeuralFieldMLP`. |
 | `FourierFeatures` | class | Per-input dyadic-frequency Fourier basis. |
 | `InteractionFeatures` | class | Element-wise products on selected pairs of input columns. |
 | `SeasonalFeatures` | class | Period-and-harmonic cos/sin basis on a scalar time axis. |

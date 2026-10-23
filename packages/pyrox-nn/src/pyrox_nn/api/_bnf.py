@@ -73,9 +73,29 @@ def _df_to_design(
     return fit.standardize_layer(x)
 
 
-def _build_bnf(fit: SpatiotemporalFit, width: int, depth: int) -> BayesianNeuralField:
-    """Construct the `BayesianNeuralField` layer from a fit bundle."""
+def _build_bnf(
+    fit: SpatiotemporalFit,
+    width: int,
+    depth: int,
+    encoder: Callable[[Array], Array] | None = None,
+    encoder_cols: tuple[int, ...] | None = None,
+) -> BayesianNeuralField:
+    """Construct the `BayesianNeuralField` layer from a fit bundle.
+
+    The design matrix is standardized, but an encoder expects coordinates in
+    their own units (a lon/lat pair in radians, say), so the encoder is
+    composed with the inverse standardization of its columns.
+    """
     d_in = len(fit.feature_cols)
+    if encoder is not None and encoder_cols is not None:
+        cols = jnp.asarray(encoder_cols, dtype=jnp.int32)
+        mu = fit.standardize_layer.mu[cols]
+        std = fit.standardize_layer.std[cols]
+        user_encoder = encoder
+
+        def encoder(z: Array) -> Array:
+            return user_encoder(z * std + mu)
+
     return BayesianNeuralField(
         input_scales=tuple([1.0] * d_in),  # already standardized
         fourier_degrees=fit.fourier_layer.degrees,
@@ -86,6 +106,8 @@ def _build_bnf(fit: SpatiotemporalFit, width: int, depth: int) -> BayesianNeural
         depth=depth,
         time_col=0,
         pyrox_name="bnf",
+        encoder=encoder,
+        encoder_cols=encoder_cols,
     )
 
 
@@ -177,6 +199,15 @@ class BNFEstimator(EstimatorBase):
         fourier_degrees: Per-input dyadic Fourier degrees. Length must
             match ``feature_cols`` (or empty ⇒ no Fourier features).
         interactions: Pair-index list for interaction features.
+        encoder: Optional single-example encoder ``(C,) -> (E,)`` whose
+            output enters the network as one extra gated feature block (see
+            `pyrox_nn.BayesianNeuralField`), for example
+            ``geonnax.SphericalHarmonicEncoder(l_max=10, input_mode="lonlat")``.
+            It receives ``encoder_cols`` in the DataFrame's own units: the
+            estimator undoes its standardization of those columns first (the
+            time column arrives encoded, as in the design matrix).
+        encoder_cols: Indices into ``feature_cols`` fed to ``encoder``, in
+            order; required exactly when ``encoder`` is given.
         timetype: ``"int"`` or ``"datetime"``.
         freq: Optional unit string for ``datetime`` time columns.
         sigma_obs: Observation noise std (fixed in this MVP).
@@ -193,6 +224,8 @@ class BNFEstimator(EstimatorBase):
     num_seasonal_harmonics: tuple[int, ...] = eqx.field(static=True, default=())
     fourier_degrees: tuple[int, ...] = eqx.field(static=True, default=())
     interactions: tuple[tuple[int, int], ...] = eqx.field(static=True, default=())
+    encoder: Callable[[Array], Array] | None = None
+    encoder_cols: tuple[int, ...] | None = eqx.field(static=True, default=None)
     timetype: Literal["int", "datetime"] = eqx.field(static=True, default="int")
     freq: str | None = eqx.field(static=True, default=None)
     sigma_obs: float = eqx.field(static=True, default=0.1)
@@ -235,7 +268,9 @@ class BNFEstimator(EstimatorBase):
             standardize=self.standardize_columns,
         )
         # 2. Build the BNF layer template + design matrix.
-        bnf = _build_bnf(fit_bundle, self.width, self.depth)
+        bnf = _build_bnf(
+            fit_bundle, self.width, self.depth, self.encoder, self.encoder_cols
+        )
         x_train = _df_to_design(df, fit_bundle, timetype=self.timetype, freq=self.freq)
         y_train = jnp.asarray(df[self.target_col].to_numpy(), dtype=jnp.float32)
         # 3. Run ensemble inference.
