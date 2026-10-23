@@ -145,6 +145,7 @@ from pyrox_gp._markov_flow import (
 from pyrox_gp._models import (
     ConditionedGP,
     GPPrior,
+    GradientPosterior,
     gp_factor,
     gp_sample,
 )
@@ -216,6 +217,7 @@ __all__ = [
     "GaussNewtonInference",
     "GaussNewtonMarkovInference",
     "GaussianLikelihood",
+    "GradientPosterior",
     "Guide",
     "HeteroscedasticGaussianLikelihood",
     "ICMKernel",

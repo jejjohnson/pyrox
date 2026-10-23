@@ -61,6 +61,78 @@ prior = GPPrior(
 ::: pyrox_gp.gp_sample
 ::: pyrox_gp.preconditioned_cg_solver
 
+## Derivatives
+
+The gradient of a GP is a GP, so a `ConditionedGP` also gives the exact
+Gaussian posterior over $\nabla f(x_*)$, reusing the cached training solve
+(no re-solve). With $\hat K = K(X, X) + (\text{jitter} + \sigma^2) I$,
+$\alpha = \hat K^{-1}(y - m(X))$ and
+$G(x_*) = \partial_1 K(x_*, X) \in \mathbb{R}^{D \times N}$:
+
+$$
+\mathbb{E}[\nabla f(x_*) \mid y] = \nabla m(x_*) + G(x_*)\,\alpha ,
+\qquad
+\operatorname{Cov}[\nabla f \mid y]
+= \nabla_x \nabla_{x'}^\top k(X_*, X_*) - G\,\hat K^{-1} G^\top .
+$$
+
+The mean is the derivative of the predictive mean used for sensitivity maps
+by Johnson et al. (2020, §3); the covariance follows from the joint Gaussian
+of values and derivatives (Solak et al. 2003; Rasmussen & Williams 2006,
+§9.4). The derivative cross-covariances are kernellib's `Derivative` /
+`DerivativeIndexed` kernels; the solves go through gaussx (triangular solves
+with the cached Cholesky factor, or the prior's `solver` on the matrix-free
+operator).
+
+```text
+k    = freeze(kernel)                          # one draw per call
+G    = [Derivative(k, dx=d)(X*, X) for d]      # (D*M, N), kind-major rows
+mean = (G @ alpha) as (M, D) + grad m(X*)
+G K^-1 G^T = P^T Q                             # P = Q = L^-1 G^T with a factor
+cov  = H - P^T Q                               # marginal: (M, D, D) blocks only
+```
+
+- `predict_gradient(X_star, cov=...)` returns a `GradientPosterior`
+  (`mean`, `cov`); `cov="marginal"` (default) gives the per-point
+  `(M, D, D)` blocks, `"full"` the joint `(M, D, M, D)`, `"none"` skips the
+  covariance.
+- `predict_var_gradient(X_star)` gives $\nabla_x \sigma^2_*(x)$, the
+  acquisition gradient for uncertainty sampling.
+- `predict_mean_hessian(X_star)` gives $\nabla \nabla^\top \mu_*(x)$,
+  `(M, D, D)`.
+
+**Layout.** Internally the derivative rows are *kind-major*, as
+`kernellib.derivative_inputs(X_star, values=False)` builds them: row
+`d * M + m` is $\partial_d f(x_{*,m})$. The outputs are *point-major*:
+`mean[m, d]`, `cov[m, i, j]` (marginal) and `cov[a, i, b, j]` (full).
+Flatten the joint with `einx.id("a i b j -> (a i) (b j)", cov)`.
+
+```python
+import jax.numpy as jnp
+import pyrox_gp as px
+
+cond = px.GPPrior(px.RBF(init_lengthscale=0.5), X).condition(y, jnp.array(0.01))
+post = cond.predict_gradient(X_star)            # X_star: (M, D)
+sensitivity = jnp.sqrt(jnp.sum(post.mean**2, axis=-1))       # (M,) |E grad f|
+std = jnp.sqrt(jnp.diagonal(post.cov, axis1=-2, axis2=-1))   # (M, D)
+step = cond.predict_var_gradient(X_star)        # (M, D) uncertainty ascent
+```
+
+The kernel must be mean-square differentiable (`RBF`, `RationalQuadratic`,
+`Matern(nu >= 1.5)`, `Periodic`); `Matern(nu=0.5)` raises kernellib's
+`ValueError`. `predict_mean_hessian` with `Matern(nu=1.5)` is defined only
+away from the training inputs.
+
+References: Johnson, Laparra, Pérez-Suay, Mahecha & Camps-Valls (2020),
+*Kernel methods and their derivatives: Concept and perspectives for the
+earth system sciences*, PLOS ONE 15(10): e0235885,
+[doi:10.1371/journal.pone.0235885](https://doi.org/10.1371/journal.pone.0235885);
+Solak, Murray-Smith, Leithead, Leith & Rasmussen (2003), *Derivative
+observations in Gaussian process models of dynamic systems*, NeurIPS 15;
+Rasmussen & Williams (2006), *Gaussian Processes for Machine Learning*, §9.4.
+
+::: pyrox_gp.GradientPosterior
+
 ## Concrete kernels
 
 Each `Parameterized` kernel registers its hyperparameters with positivity

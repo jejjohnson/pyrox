@@ -15,12 +15,13 @@ in later waves.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol
 
 import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import kernellib as kl
 import lineax as lx
 import numpyro
 from gaussx import (
@@ -33,6 +34,7 @@ from gaussx import (
     log_marginal_likelihood,
     predict_mean,
     predict_variance,
+    solve_columns,
     unwhiten,
 )
 from jaxtyping import Array, Float
@@ -288,6 +290,114 @@ def _resolve_kernel_hyperparams(
     return variance, lengthscale
 
 
+class GradientPosterior(NamedTuple):
+    r"""Gaussian posterior over $\nabla f$ at $M$ test points (point-major).
+
+    Returned by `ConditionedGP.predict_gradient`. A ``NamedTuple``, so it is
+    a pytree and passes through ``jit`` / ``vmap``.
+
+    Attributes:
+        mean: $\mathbb{E}[\nabla f(x_{*,m}) \mid y]$, shape ``(M, D)``.
+        cov: The posterior covariance of the gradient, or ``None``.
+            With ``cov="marginal"`` the per-point blocks, shape
+            ``(M, D, D)``: ``cov[m]`` is
+            $\operatorname{Cov}[\nabla f(x_{*,m}) \mid y]$. With
+            ``cov="full"`` the joint, shape ``(M, D, M, D)``:
+            ``cov[a, i, b, j]`` is
+            $\operatorname{Cov}[\partial_i f(x_{*,a}), \partial_j f(x_{*,b}) \mid y]$;
+            flatten it with
+            ``einx.id("a i b j -> (a i) (b j)", cov)``. ``None``
+            with ``cov="none"``.
+
+    Examples:
+        ```python
+        post = cond.predict_gradient(X_star)  # X_star: (M, D)
+        post.mean.shape  # (M, D)
+        post.cov.shape  # (M, D, D)
+        ```
+    """
+
+    mean: Float[Array, "M D"]
+    cov: Float[Array, "M D D"] | Float[Array, "M D M D"] | None
+
+
+def _derivative_kernel(kernel: Kernel) -> kl.AbstractKernel:
+    """Freeze ``kernel`` to a plain kernellib kernel for differentiation.
+
+    Must run inside the caller's `_kernel_context`, so the frozen
+    hyperparameters are the draw every other kernel read in the call sees.
+    A `pyrox_gp` kernel without a kernellib counterpart cannot be frozen;
+    its ``NotImplementedError`` is re-raised with what to do about it.
+    """
+    try:
+        frozen = freeze_kernel(kernel)
+    except NotImplementedError as err:
+        raise NotImplementedError(
+            f"{err} The gradient posterior differentiates the kernel with "
+            "kernellib's Derivative kernels, which need a plain kernellib "
+            "kernel: give the class `_frozen_cls` / `_frozen_params` so "
+            "`frozen()` works, or build the GPPrior on a kernellib kernel."
+        ) from err
+    return frozen
+
+
+def _cross_gradient(
+    kernel: kl.AbstractKernel,
+    X_star: Float[Array, "M D"],
+    X: Float[Array, "N D"],
+) -> Float[Array, "DM N"]:
+    r"""$G = \partial_1 K(X_*, X)$ in kind-major rows ``(d m)``.
+
+    Row ``d * M + m`` holds $\partial k(x_{*,m}, x_n) / \partial x_{*,d}$,
+    the ordering of ``kernellib.derivative_inputs(X_star, values=False)``.
+    Each block is one ``kernellib.Derivative(kernel, dx=d)`` Gram, which
+    also rejects kernels whose GP is not mean-square differentiable.
+    """
+    blocks = [kl.Derivative(kernel, dx=d)(X_star, X) for d in range(X_star.shape[-1])]
+    return einx.id("d m n -> (d m) n", jnp.stack(blocks))
+
+
+def _whitened_cross(
+    cache: PredictionCache,
+    A: Float[Array, "K N"],
+    B: Float[Array, "L N"],
+    *,
+    solver: AbstractSolverStrategy,
+) -> tuple[Float[Array, "N K"], Float[Array, "N L"]]:
+    r"""Split $A\,\hat K^{-1} B^\top = P^\top Q$ using the cached solve.
+
+    The two branches of `gaussx.predict_variance`, with no refactorisation
+    of $\hat K$. With the cached Cholesky factor $\hat K = L L^\top$,
+    $P = L^{-1} A^\top$ and $Q = L^{-1} B^\top$ (triangular solves only;
+    $Q = P$ when ``B is A``, so the downdate $P^\top P$ is PSD). Without
+    a factor (matrix-free / iterative solvers), $P = A^\top$ and
+    $Q = \hat K^{-1} B^\top$, solved column by column with ``solver`` on
+    the cached operator. Callers contract ``P`` and ``Q`` over ``n``.
+    """
+    if cache.factor is not None:
+        P = solve_columns(cache.factor, einx.id("k n -> n k", A))
+        if B is A:
+            return P, P
+        return P, solve_columns(cache.factor, einx.id("l n -> n l", B))
+    if cache.operator is None:
+        raise ValueError(
+            "This PredictionCache holds only alpha; the gradient posterior "
+            "needs the training operator (build it with GPPrior.condition)."
+        )
+    Q = solve_columns(cache.operator, einx.id("l n -> n l", B), solver=solver)
+    return einx.id("k n -> n k", A), Q
+
+
+def _mean_fn_gradient(
+    mean_fn: Callable[[Float[Array, "N D"]], Float[Array, " N"]] | None,
+    X_star: Float[Array, "M D"],
+) -> Float[Array, "M D"]:
+    r"""$\nabla m(x_{*,m})$ per test point by autodiff; zero without a mean."""
+    if mean_fn is None:
+        return jnp.zeros_like(X_star)
+    return jax.vmap(jax.grad(lambda x: mean_fn(x[None])[0]))(X_star)
+
+
 class ConditionedGP(eqx.Module):
     """GP conditioned on Gaussian-likelihood training observations.
 
@@ -364,6 +474,226 @@ class ConditionedGP(eqx.Module):
         eps = jax.random.normal(key, (n_samples, X_star.shape[0]), dtype=mean.dtype)
         # Scale per-point std across the S sample rows: (M,) ⊙ (S, M) → (S, M).
         return einx.multiply("m, s m -> s m", std, eps) + mean
+
+    def predict_gradient(
+        self,
+        X_star: Float[Array, "M D"],
+        *,
+        cov: Literal["marginal", "full", "none"] = "marginal",
+    ) -> GradientPosterior:
+        r"""Gaussian posterior over the gradient $\nabla f(x_*)$ at ``X_*``.
+
+        Differentiation is linear, so $\nabla f$ is jointly Gaussian with
+        $y$ and conditioning commutes with it (Solak et al. 2003; Rasmussen
+        & Williams 2006, §9.4). With $\hat K = K(X, X) + (\text{jitter} +
+        \sigma^2) I$, $\alpha = \hat K^{-1}(y - m(X))$ (the cached
+        training solve) and the cross-covariance
+        $G(x_*) = \partial_1 K(x_*, X) \in \mathbb{R}^{D \times N}$,
+        $G_{dn} = \partial k(x_*, x_n) / \partial x_{*,d}$:
+
+        $$
+        \mathbb{E}[\nabla f(x_*) \mid y] = \nabla m(x_*) + G(x_*)\,\alpha ,
+        $$
+
+        which equals $\nabla_{x_*} \mu_*(x_*)$ exactly (Johnson et al.
+        2020, §3, with a mean function), and
+
+        $$
+        \operatorname{Cov}[\partial_i f(x_a), \partial_j f(x_b) \mid y]
+        = \partial_{1,i} \partial_{2,j} k(x_a, x_b)
+          - \partial_{1,i} K(x_a, X)\,\hat K^{-1}\,
+            \partial_{1,j} K(x_b, X)^\top .
+        $$
+
+        With the cached factor $\hat K = L L^\top$ the downdate is
+        $V^\top V$, $V = L^{-1} G^\top$ (triangular solves only); without
+        one (``matrix_free=True`` / iterative solvers) it is
+        $G\,\hat K^{-1} G^\top$ through the prior's ``solver``. The
+        covariance is symmetrised but not clipped, like `predict_var`.
+
+        ```text
+        k  = freeze(kernel)                          # same draw as the call
+        G  = [Derivative(k, dx=d)(X*, X) for d]      # (D*M, N), rows (d m)
+        mean = rearrange(G @ alpha, "(d m) -> m d") + grad m(X*)
+        P, Q = whitened_cross(cache, G, G)           # G K^-1 G^T = P^T Q
+        marginal: H_m = d1 d2 k(x_m, x_m)            # (M, D, D)
+                  cov = H_m - P_m^T Q_m
+        full:     H = DerivativeIndexed(k)(Xt, Xt)   # (D*M, D*M)
+                  cov = rearrange(H - P^T Q, "(i a) (j b) -> a i b j")
+        ```
+
+        The hyperparameters are read once, under one kernel context, so a
+        kernel with priors registers each site once per call (here
+        ``RBF.variance`` / ``RBF.lengthscale`` for `pyrox_gp.RBF`); the
+        cached $\alpha$ comes from the draw taken in `GPPrior.condition`.
+
+        References: Johnson, Laparra, Pérez-Suay, Mahecha & Camps-Valls
+        (2020), PLOS ONE 15(10): e0235885, doi:10.1371/journal.pone.0235885;
+        Solak et al. (2003), NeurIPS 15; Rasmussen & Williams (2006), §9.4.
+
+        Args:
+            X_star: Test inputs, shape ``(M, D)``.
+            cov: ``"marginal"`` (default) for the per-point ``(M, D, D)``
+                blocks, ``"full"`` for the joint ``(M, D, M, D)`` and
+                ``"none"`` for the mean only (skips the ``N x DM`` solve).
+
+        Returns:
+            A `GradientPosterior` ``(mean, cov)`` in point-major layout.
+
+        Raises:
+            ValueError: For an unknown ``cov``, or a kernel whose GP is not
+                mean-square differentiable (``Matern(nu=0.5)``, ``White``;
+                kernellib's check).
+            TypeError: For a Gram-only kernellib kernel.
+            NotImplementedError: For a `pyrox_gp` kernel without a
+                kernellib counterpart (no ``frozen()``).
+
+        Examples:
+            Sensitivity map with error bars (Johnson et al. 2020):
+
+            ```python
+            import jax.numpy as jnp
+            import pyrox_gp as px
+
+            # X: (N, 2), y: (N,)
+            cond = px.GPPrior(px.RBF(init_lengthscale=0.5), X).condition(
+                y, jnp.array(0.01)
+            )
+            post = cond.predict_gradient(X_star)  # X_star: (M, 2)
+            post.mean  # (M, 2)   E[grad f]
+            post.cov  # (M, 2, 2) Cov[grad f] per point
+            sensitivity = jnp.sqrt(jnp.sum(post.mean**2, axis=-1))  # (M,)
+            joint = cond.predict_gradient(X_star, cov="full").cov  # (M, 2, M, 2)
+            ```
+        """
+        if cov not in ("marginal", "full", "none"):
+            raise ValueError(f"cov must be 'marginal', 'full' or 'none', got {cov!r}.")
+        D = X_star.shape[-1]
+        with _kernel_context(self.prior.kernel):
+            k = _derivative_kernel(self.prior.kernel)
+            G = _cross_gradient(k, X_star, self.prior.X)
+        mean = einx.id(
+            "(d m) -> m d", einx.dot("k n, n -> k", G, self.cache.alpha), d=D
+        ) + _mean_fn_gradient(self.prior.mean_fn, X_star)
+        if cov == "none":
+            return GradientPosterior(mean, None)
+        P, Q = _whitened_cross(self.cache, G, G, solver=self.prior._resolved_solver())
+        if cov == "marginal":
+            H = jax.vmap(lambda x: jax.jacfwd(jax.grad(k.pairwise, 0), 1)(x, x))(X_star)
+            Pm = einx.id("n (d m) -> m n d", P, d=D)
+            Qm = einx.id("n (d m) -> m n d", Q, d=D)
+            S = H - einx.dot("m n i, m n j -> m i j", Pm, Qm)
+            return GradientPosterior(mean, 0.5 * (S + einx.id("m i j -> m j i", S)))
+        Xt = kl.derivative_inputs(X_star, values=False)
+        S = kl.DerivativeIndexed(k)(Xt, Xt) - einx.dot("n k, n l -> k l", P, Q)
+        S = 0.5 * (S + einx.id("k l -> l k", S))
+        return GradientPosterior(mean, einx.id("(i a) (j b) -> a i b j", S, i=D, j=D))
+
+    def predict_var_gradient(self, X_star: Float[Array, "M D"]) -> Float[Array, "M D"]:
+        r"""Gradient of the predictive variance, $\nabla_x \sigma^2_*(x)$.
+
+        The acquisition gradient for variance-reduction / uncertainty-sampling
+        active learning. From
+        $\sigma^2_*(x) = k(x, x) - k(x, X)\,\hat K^{-1} k(X, x)$,
+
+        $$
+        \nabla_x \sigma^2_*(x) = \big[\partial_1 k + \partial_2 k\big](x, x)
+            - 2\,G(x)\,\hat K^{-1} k(X, x),
+        $$
+
+        with $G(x) = \partial_1 K(x, X)$ as in `predict_gradient`. The first
+        term vanishes for a stationary kernel. With the cached factor the
+        second term is $-2\,(L^{-1} G^\top)^\top (L^{-1} k(X, x))$; it
+        equals ``jax.grad`` of `predict_var` but reuses the training solve.
+        The latent variance is differentiated (no observation noise), as in
+        `predict_var`.
+
+        ```text
+        k = freeze(kernel)
+        G = d1 K(X*, X)                     # (D*M, N)
+        P, Q = whitened_cross(cache, G, K(X*, X))
+        grad var[m] = grad_x k(x, x)|x_m - 2 P_m^T Q[:, m]
+        ```
+
+        Args:
+            X_star: Test inputs, shape ``(M, D)``.
+
+        Returns:
+            $\nabla_x \sigma^2_*$ at each test point, shape ``(M, D)``.
+
+        Raises:
+            ValueError: For a kernel whose GP is not mean-square
+                differentiable (see `predict_gradient`).
+            NotImplementedError: For a `pyrox_gp` kernel without
+                ``frozen()``.
+
+        Examples:
+            ```python
+            # One gradient-ascent step on the predictive variance
+            # (uncertainty sampling), X_cand: (M, D)
+            X_next = X_cand + 0.1 * cond.predict_var_gradient(X_cand)
+            ```
+        """
+        D = X_star.shape[-1]
+        with _kernel_context(self.prior.kernel):
+            k = _derivative_kernel(self.prior.kernel)
+            G = _cross_gradient(k, X_star, self.prior.X)
+            K_cross = k(X_star, self.prior.X)
+        prior_term = jax.vmap(jax.grad(lambda x: k.pairwise(x, x)))(X_star)
+        P, Q = _whitened_cross(
+            self.cache, G, K_cross, solver=self.prior._resolved_solver()
+        )
+        Pm = einx.id("n (d m) -> m n d", P, d=D)
+        return prior_term - 2.0 * einx.dot("m n d, n m -> m d", Pm, Q)
+
+    def predict_mean_hessian(
+        self, X_star: Float[Array, "M D"]
+    ) -> Float[Array, "M D D"]:
+        r"""Hessian of the predictive mean, $\nabla \nabla^\top \mu_*(x)$.
+
+        $$
+        \nabla \nabla^\top \mu_*(x) = \nabla^2 m(x)
+            + \sum_n \alpha_n\, \nabla_x^2 k(x, x_n),
+        $$
+
+        by forward-over-reverse autodiff (``jax.hessian``) of
+        $x \mapsto m(x) + k(x, X)\,\alpha$ with the frozen kernel and the
+        cached $\alpha$, $O(N D^2)$ per point. It needs $k \in C^2$ in its
+        first argument: fine for `pyrox_gp.RBF`,
+        `pyrox_gp.RationalQuadratic` and ``Matern(nu=2.5)``; with
+        ``Matern(nu=1.5)`` it is only defined away from the training
+        inputs (the Hessian jumps at $x = x_n$).
+
+        Args:
+            X_star: Test inputs, shape ``(M, D)``.
+
+        Returns:
+            The symmetric ``(M, D, D)`` Hessians.
+
+        Raises:
+            ValueError: For a kernel whose GP is not mean-square
+                differentiable (see `predict_gradient`).
+            NotImplementedError: For a `pyrox_gp` kernel without
+                ``frozen()``.
+
+        Examples:
+            ```python
+            hess = cond.predict_mean_hessian(X_star)  # (M, D, D)
+            curvature = jnp.trace(hess, axis1=-2, axis2=-1)  # Laplacian of mu
+            ```
+        """
+        with _kernel_context(self.prior.kernel):
+            k = _derivative_kernel(self.prior.kernel)
+        kl.DerivativeIndexed(k)  # kernellib's mean-square differentiability check
+        X, alpha, mean_fn = self.prior.X, self.cache.alpha, self.prior.mean_fn
+
+        def mu(x: Float[Array, " D"]) -> Float[Array, ""]:
+            value = einx.dot("n, n ->", k(x[None], X)[0], alpha)
+            if mean_fn is not None:
+                value = value + mean_fn(x[None])[0]
+            return value
+
+        return jax.vmap(jax.hessian(mu))(X_star)
 
 
 def gp_factor(
