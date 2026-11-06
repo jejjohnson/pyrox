@@ -509,8 +509,28 @@ def test_empirical_bayes_moments_are_those_of_the_gaussian_approximation():
         m, v = float(mu[k]), float(cov[k, k])
         assert np.isclose(float(out[key].mean), np.exp(m + v / 2), rtol=1e-8)
         sd = np.sqrt((np.exp(v) - 1) * np.exp(2 * m + v))
-        assert np.isclose(float(out[key].sd), sd, rtol=1e-6)
+        assert np.isclose(float(out[key].sd), sd, rtol=1e-8)
         assert np.isclose(float(out[key].q50), np.exp(m), rtol=1e-12)
+
+
+def test_empirical_bayes_moments_match_a_hand_built_tensor_rule():
+    # The per-block rule moment_transform replaced, built by hand: nodes from
+    # hermegauss, u = u* + L ξ, and the raw variance. The two agree to well below
+    # the 1e-10 here on a two-hyperparameter model, whose blocks are scalars.
+    from pyrox_lgm._inla import _EB_ORDER, _hyperpar_summaries
+
+    model, _ = _gaussian_rw2()
+    mu = np.array([0.3, -0.2])
+    cov = np.array([[0.5, 0.1], [0.1, 0.2]])
+    out = _hyperpar_summaries(model, jnp.asarray(mu), jnp.asarray(cov))
+    nodes, weights = np.polynomial.hermite_e.hermegauss(_EB_ORDER)
+    weights = weights / weights.sum()
+    for k, key in enumerate(model.theta_spec()):
+        values = np.exp(mu[k] + nodes * np.sqrt(cov[k, k]))
+        mean = np.sum(weights * values)
+        sd = np.sqrt(np.sum(weights * values**2) - mean**2)
+        assert np.isclose(float(out[key].mean), mean, rtol=1e-10)
+        assert np.isclose(float(out[key].sd), sd, rtol=1e-10)
 
 
 @pytest.mark.slow
