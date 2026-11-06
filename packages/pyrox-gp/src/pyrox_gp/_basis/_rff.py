@@ -37,8 +37,8 @@ import equinox as eqx
 import jax.numpy as jnp
 import kernellib as kl
 from jaxtyping import Array, Float
+from pyrox._core import call_context
 
-from pyrox_gp._context import _kernel_context
 from pyrox_gp._protocols import Kernel
 
 
@@ -78,7 +78,7 @@ def draw_rff_cosine_basis(
             read — essential when the same hyperparameter draw needs to be
             reused across a chain of operations (e.g. matching the cached
             operator on a `ConditionedGP`). When ``None``, they are read
-            from the kernel under a fresh `_kernel_context`, which resamples
+            from the kernel under a fresh `call_context`, which resamples
             hyperparameter priors for Pattern B/C kernels.
 
     Returns:
@@ -133,7 +133,7 @@ def _freeze(kernel: Kernel, overrides: dict[str, Array]) -> kl.AbstractKernel:
             # Overridden params are not read, so no context is needed for
             # them; frozen() scopes any others in its own context.
             return frozen_fn(**overrides)
-        with _kernel_context(kernel):
+        with call_context(kernel):
             return frozen_fn()
     except (NotImplementedError, ValueError):
         # No kernellib counterpart, or no lengthscale to override: let

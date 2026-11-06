@@ -14,8 +14,8 @@ from typing import Literal
 
 import kernellib as kl
 from jaxtyping import Array, Float, PRNGKeyArray
+from pyrox._core import call_context
 
-from pyrox_gp._context import _kernel_context
 from pyrox_gp._kernels import Kernel, _ParameterizedKernel
 
 
@@ -71,7 +71,7 @@ def init_inducing(
         frozen: kl.AbstractKernel = kl.RBF()  # never evaluated by "uniform"
     else:
         if isinstance(kernel, _ParameterizedKernel):
-            with _kernel_context(kernel):
+            with call_context(kernel):
                 frozen = kernel.frozen()
         else:  # already a plain kernellib kernel
             frozen = kernel

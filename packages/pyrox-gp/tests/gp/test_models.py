@@ -476,7 +476,7 @@ def test_predict_var_does_not_double_register_pattern_b_kernel_sites():
     # Build the conditioned GP under its own seed scope so the training
     # operator gets concrete kernel hyperparameters, then enter a fresh
     # trace for the predict_var call. Without the per-method
-    # ``_kernel_context`` scoping, the second kernel call inside
+    # ``call_context`` scoping, the second kernel call inside
     # ``predict_var`` would raise a duplicate-site error here.
     with handlers.seed(rng_seed=1):
         cond = prior.condition(y, jnp.array(0.05))

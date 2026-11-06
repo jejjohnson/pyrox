@@ -96,8 +96,8 @@ import numpyro
 from flowjax.bijections import AbstractBijection
 from jaxtyping import Array, Float
 from numpyro import distributions as dist
+from pyrox._core import call_contexts
 
-from pyrox_gp._context import _kernel_contexts
 from pyrox_gp._latent_factor import (
     collapsed_lfr_log_prob,
     decoder_posterior,
@@ -226,7 +226,7 @@ class LatentFactorGPPrior(eqx.Module):
         """Batched Cholesky factors of the ``Q`` latent GP covariances."""
         n = self.X.shape[0]
         eye = jnp.eye(n, dtype=self.X.dtype)
-        with _kernel_contexts(self.kernels):
+        with call_contexts(self.kernels):
             covs = jnp.stack(
                 [
                     k(self.X, self.X) + (self.latent_noise + self.jitter) * eye
@@ -273,7 +273,7 @@ class LatentFactorGPPrior(eqx.Module):
         # call: the training solve is O(N^3) per factor and does not depend
         # on the test inputs. Doing it here also captures the kernel
         # hyperparameters under whatever context the caller conditions in.
-        with _kernel_contexts(self.kernels):
+        with call_contexts(self.kernels):
             latents = tuple(
                 prior.condition(Z[:, q], noise_var=jnp.asarray(self.latent_noise))
                 for q, prior in enumerate(self.latent_priors())
@@ -320,7 +320,7 @@ class ConditionedLatentFactorGP(eqx.Module):
         point estimate ``Z`` itself.
         """
         means, variances = [], []
-        with _kernel_contexts(self.prior.kernels):
+        with call_contexts(self.prior.kernels):
             for cond in self.latents:
                 m, v = cond.predict(X_new)
                 means.append(m)

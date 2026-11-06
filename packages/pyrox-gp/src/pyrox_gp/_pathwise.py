@@ -29,12 +29,12 @@ import jax.numpy as jnp
 from gaussx import cholesky, solve_rows, unwhiten
 from jaxtyping import Array, Float
 from kernellib import functional as _kernel_fns
+from pyrox._core import call_context
 
 from pyrox_gp._basis._rff import (
     draw_rff_cosine_basis,
     evaluate_rff_cosine_paths,
 )
-from pyrox_gp._context import _kernel_context
 from pyrox_gp._guides import WhitenedGuide
 from pyrox_gp._kernels import RBF, Matern
 from pyrox_gp._models import ConditionedGP
@@ -50,7 +50,7 @@ def _frozen_kernel_fn(
     """Return ``(X1, X2) -> K(X1, X2)`` with frozen hyperparameters.
 
     Pattern B/C kernels read ``variance`` / ``lengthscale`` via
-    ``get_param`` under a ``_kernel_context``, which resamples on every
+    ``get_param`` under a ``call_context``, which resamples on every
     call for kernels that registered priors. The pathwise sampler must
     instead reuse the *same* hyperparameter draw that produced the RFF
     prior basis, so the posterior correction term ``K(x_*, X_corr)``
@@ -309,7 +309,7 @@ class DecoupledPathwiseSampler(eqx.Module):
         for ``n_paths`` independent guide draws, and one for the
         jitter-augmentation of the prior inducing draw. The RFF basis
         draw and the $K_{zz}$ assembly share a single
-        ``_kernel_context`` so kernels with hyperparameter priors
+        ``call_context`` so kernels with hyperparameter priors
         (Pattern B / C) sample ``(variance, lengthscale)`` once.
 
         The Matheron correction needs ``Cov(u_tilde) = K_{zz} + \
@@ -324,7 +324,7 @@ class DecoupledPathwiseSampler(eqx.Module):
 
         Z = self.prior.Z
         assert Z is not None  # __check_init__ guarantees
-        with _kernel_context(self.prior.kernel):
+        with call_context(self.prior.kernel):
             basis = draw_rff_cosine_basis(
                 self.prior.kernel,
                 rff_key,

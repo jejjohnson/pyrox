@@ -55,7 +55,7 @@ class _ParameterizedKernel(Parameterized, Kernel):
         Each registered parameter is resolved once, inside this kernel's
         per-call context, so a prior contributes one sample site (under
         ``numpyro.handlers.trace``) and one draw (under ``seed``); call it
-        inside an enclosing `_kernel_context` to share that draw with other
+        inside an enclosing `call_context` to share that draw with other
         evaluations. The result has no priors and no NumPyro state: it is the
         object kernellib's spectral methods, feature maps and operators take.
 

@@ -24,8 +24,8 @@ diff touches.
    - `docs/capabilities.md` — every public name in `pyrox._core`,
      `pyrox.inference`, `pyrox_gp`, `pyrox_nn`, `pyrox_lgm`, then the
      gaussx, kernellib and geonnax sections;
-   - the shared private helpers: `pyrox_gp._context` (`_kernel_context`,
-     `_kernel_contexts`), `pyrox_gp._basis`, `pyrox_gp._kernel_operator`,
+   - the shared helpers: `pyrox._core` (`call_context`, `call_contexts`,
+     `freeze`), `pyrox_gp._basis`, `pyrox_gp._kernel_operator`,
      `pyrox_gp._guides._resolve_solver`, the `_inference_nongauss` helpers,
      `pyrox_nn._batching.vmap_over_flat_batch`, `pyrox_lgm._components._base`
      (`default_transform`, `scale_operator`);
@@ -42,7 +42,7 @@ diff touches.
    - kernel formulas written inline → `kernellib.functional`; a new kernel
      class not built on `_ParameterizedKernel`;
    - a deterministic network core, encoder or basis function written here →
-     geonnax (or `pyrox_gp._basis`);
+     geonnax;
    - `numpyro.sample` / `numpyro.param` inside a module where
      `pyrox_sample` / `pyrox_param` apply; a hand-rolled per-call cache or
      scope prefix → the bridge;

@@ -66,7 +66,7 @@ has the same list grouped by module, plus gaussx, kernellib and geonnax.
    method without `@pyrox_method`; a `Parameterized` module rebuilt with
    `eqx.tree_at` / passed as a `jit` argument and then used; a kernel with
    priors evaluated twice in one model call outside
-   `pyrox_gp._context._kernel_context`.
+   `pyrox._core.call_context`.
 4. Check each replacement exists in the installed version (the listing
    above) and, where you can, run the model under
    `numpyro.handlers.trace(numpyro.handlers.seed(model, 0))` to confirm the

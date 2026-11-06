@@ -13,8 +13,8 @@ import math
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from geonnax.basis import harmonic_degrees, real_spherical_harmonics
 from numpy.polynomial.legendre import legval
-from pyrox_gp._basis import harmonic_degrees, real_spherical_harmonics
 from scipy.special import sph_harm_y
 
 

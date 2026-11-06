@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
     "pyrox",
     "gaussx>=0.6.5",
-    "kernellib>=0.0.17",
+    "kernellib>=0.0.22",
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.11",
     "lineax>=0.1.1",
     "einx>=0.4.3",
@@ -63,7 +63,7 @@ Repository = "https://github.com/jejjohnson/pyrox"
 gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.6.5" }
 # kernellib is not yet on PyPI either; same pattern. 0.0.5 carries the
 # spectral methods and RFF draws `_basis` delegates to, and needs gaussx >= 0.2.0.
-kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.17" }
+kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.22" }
 
 [build-system]
 requires = ["hatchling>=1.27"]

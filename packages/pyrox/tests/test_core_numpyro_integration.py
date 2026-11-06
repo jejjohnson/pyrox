@@ -13,6 +13,7 @@ with the upstream primitives must compose with the pyrox wrappers.
 
 from __future__ import annotations
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import jax.random as jr
@@ -28,7 +29,14 @@ from numpyro.infer.autoguide import (
     AutoNormal,
 )
 from numpyro.optim import Adam
-from pyrox._core import Parameterized, PyroxModule, pyrox_method
+from pyrox._core import (
+    Parameterized,
+    PyroxModule,
+    call_context,
+    call_contexts,
+    freeze,
+    pyrox_method,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -486,3 +494,295 @@ def test_grad_of_log_prob_wrt_param_is_finite():
 
     g = jax.grad(loss)(jnp.zeros(1))
     assert jnp.all(jnp.isfinite(g))
+
+
+# ---------------------------------------------------------------------------
+# call_context, call_contexts and freeze
+# ---------------------------------------------------------------------------
+
+
+class FrozenScale(eqx.Module):
+    """What ``Scaled.frozen`` builds: the resolved value, with no sites."""
+
+    scale: jax.Array
+
+
+class Scaled(Parameterized):
+    """A registered parameter with a prior, and a plain counterpart to freeze to."""
+
+    pyrox_name = "Scaled"
+
+    def setup(self) -> None:
+        self.register_param(
+            "scale", jnp.asarray(1.0), constraint=dist.constraints.positive
+        )
+        self.set_prior("scale", dist.LogNormal(0.0, 1.0))
+
+    @pyrox_method
+    def __call__(self):
+        return self.get_param("scale")
+
+    @pyrox_method
+    def frozen(self) -> FrozenScale:
+        return FrozenScale(scale=self.get_param("scale"))
+
+
+class NoCounterpart(PyroxModule):
+    """A module whose ``frozen`` says it has no plain counterpart."""
+
+    pyrox_name = "NoCounterpart"
+
+    def frozen(self):
+        raise NotImplementedError
+
+
+def _two_calls(module):
+    with call_context(module):
+        return module(), module()
+
+
+def test_call_context_shares_one_draw_under_seed():
+    module = Scalar()
+    with handlers.seed(rng_seed=0):
+        first, second = _two_calls(module)
+    assert first == second
+
+
+def test_call_context_registers_one_site_under_trace():
+    module = Scalar()
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        _two_calls(module)
+    assert [name for name, s in tr.items() if s["type"] == "sample"] == ["Scalar.x"]
+
+
+def test_call_context_is_a_noop_without_a_per_call_cache():
+    with call_context(object()):
+        pass
+
+
+def test_call_context_nests():
+    module = Scalar()
+    with (
+        handlers.seed(rng_seed=0),
+        call_context(module),
+        call_context(module),
+    ):
+        inner = module()
+        assert module() == inner
+
+
+def test_call_context_under_substitute():
+    module = Scalar()
+    with handlers.seed(rng_seed=0), handlers.substitute(data={"Scalar.x": 3.0}):
+        first, second = _two_calls(module)
+    assert first == second == 3.0
+
+
+def test_call_context_under_condition():
+    module = Scalar()
+    with (
+        handlers.trace() as tr,
+        handlers.seed(rng_seed=0),
+        handlers.condition(data={"Scalar.x": 2.0}),
+    ):
+        first, second = _two_calls(module)
+    assert first == second == 2.0
+    assert tr["Scalar.x"]["is_observed"]
+
+
+def test_call_context_under_block():
+    module = Scalar()
+    with handlers.trace() as tr, handlers.seed(rng_seed=0), handlers.block():
+        _two_calls(module)
+    assert "Scalar.x" not in tr
+
+
+def test_call_context_under_scope():
+    module = Scalar()
+    with (
+        handlers.trace() as tr,
+        handlers.seed(rng_seed=0),
+        handlers.scope(prefix="outer"),
+    ):
+        first, second = _two_calls(module)
+    assert first == second
+    assert [name for name, s in tr.items() if s["type"] == "sample"] == [
+        "outer/Scalar.x"
+    ]
+
+
+def test_call_context_under_mask():
+    module = Scalar()
+    with (
+        handlers.trace() as tr,
+        handlers.seed(rng_seed=0),
+        handlers.mask(mask=False),
+    ):
+        first, second = _two_calls(module)
+    assert first == second
+    assert tr["Scalar.x"]["type"] == "sample"
+
+
+def test_call_context_under_scale():
+    module = Scalar()
+    with (
+        handlers.trace() as tr,
+        handlers.seed(rng_seed=0),
+        handlers.scale(scale=2.0),
+    ):
+        _two_calls(module)
+    assert tr["Scalar.x"]["scale"] == 2.0
+
+
+def test_call_context_under_reparam():
+    module = Scalar()
+    config = {"Scalar.x": reparam.LocScaleReparam(centered=0.0)}
+    with (
+        handlers.trace() as tr,
+        handlers.seed(rng_seed=0),
+        handlers.reparam(config=config),
+    ):
+        first, second = _two_calls(module)
+    assert first == second
+    assert "Scalar.x_decentered" in tr
+
+
+def test_call_context_under_do():
+    module = Scalar()
+    with handlers.seed(rng_seed=0), handlers.do(data={"Scalar.x": 5.0}):
+        first, second = _two_calls(module)
+    assert first == second == 5.0
+
+
+def test_call_context_under_lift():
+    class WithParam(PyroxModule):
+        pyrox_name = "WithParam"
+
+        @pyrox_method
+        def __call__(self):
+            return self.pyrox_param("p", jnp.asarray(1.0))
+
+    module = WithParam()
+    with (
+        handlers.trace() as tr,
+        handlers.seed(rng_seed=0),
+        handlers.lift(prior=dist.Normal(0.0, 1.0)),
+    ):
+        first, second = _two_calls(module)
+    assert first == second
+    assert tr["WithParam.p"]["type"] == "sample"
+
+
+def test_call_context_under_plate():
+    module = Scalar()
+
+    def model():
+        with numpyro.plate("n", 3):
+            return _two_calls(module)
+
+    with handlers.seed(rng_seed=0):
+        first, second = model()
+    assert first.shape == (3,)
+    assert jnp.array_equal(first, second)
+
+
+def test_call_context_in_svi():
+    module = Scalar()
+
+    def model():
+        first, second = _two_calls(module)
+        numpyro.sample("y", dist.Normal(first + second, 1.0), obs=1.0)
+
+    svi = SVI(model, AutoNormal(model), Adam(1e-2), Trace_ELBO())
+    state = svi.init(jr.key(0))
+    state, loss = svi.update(state)
+    assert jnp.isfinite(loss)
+
+
+def test_call_context_in_mcmc():
+    module = Scalar()
+
+    def model():
+        first, second = _two_calls(module)
+        numpyro.sample("y", dist.Normal(first + second, 1.0), obs=1.0)
+
+    mcmc = MCMC(NUTS(model), num_warmup=5, num_samples=5, progress_bar=False)
+    mcmc.run(jr.key(0))
+    assert mcmc.get_samples()["Scalar.x"].shape == (5,)
+
+
+def test_call_context_in_predictive():
+    module = Scalar()
+
+    def model():
+        first, second = _two_calls(module)
+        numpyro.deterministic("gap", second - first)
+
+    draws = Predictive(model, num_samples=4)(jr.key(0))
+    assert jnp.all(draws["gap"] == 0.0)
+
+
+def test_call_context_under_jit_and_vmap():
+    module = Scalar()
+
+    def draw(key):
+        with handlers.seed(rng_seed=key):
+            first, second = _two_calls(module)
+        return second - first
+
+    assert jax.jit(draw)(jr.key(0)) == 0.0
+    assert jnp.all(jax.vmap(draw)(jr.split(jr.key(0), 3)) == 0.0)
+
+
+def test_call_context_under_grad():
+    module = Scalar()
+
+    def loss(value):
+        with handlers.seed(rng_seed=0), handlers.substitute(data={"Scalar.x": value}):
+            first, second = _two_calls(module)
+        return first * second
+
+    assert jnp.isfinite(jax.grad(loss)(1.0))
+
+
+class OtherScalar(Scalar):
+    """A second module with its own scope."""
+
+    pyrox_name = "OtherScalar"
+
+
+def test_call_contexts_deduplicates_by_identity():
+    module = Scalar()
+    other = OtherScalar()
+    with (
+        handlers.trace() as tr,
+        handlers.seed(rng_seed=0),
+        call_contexts([module, module, other]),
+    ):
+        for current in (module, module, other):
+            current()
+    assert {name for name, s in tr.items() if s["type"] == "sample"} == {
+        "Scalar.x",
+        "OtherScalar.x",
+    }
+
+
+def test_freeze_registers_one_site_per_parameter():
+    module = Scaled()
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        frozen = freeze(module)
+    assert isinstance(frozen, FrozenScale)
+    assert [name for name, s in tr.items() if s["type"] == "sample"] == ["Scaled.scale"]
+    assert frozen.scale == tr["Scaled.scale"]["value"]
+
+
+def test_freeze_shares_the_draw_of_an_enclosing_call_context():
+    module = Scaled()
+    with handlers.seed(rng_seed=0), call_context(module):
+        value = module()
+        assert freeze(module).scale == value
+
+
+@pytest.mark.parametrize("module", [object(), NoCounterpart()])
+def test_freeze_returns_a_module_it_cannot_freeze(module):
+    assert freeze(module) is module

@@ -20,7 +20,7 @@ import numpyro.distributions as dist
 import pyrox_gp as px
 import pytest
 from numpyro import handlers
-from pyrox_gp._context import _kernel_context
+from pyrox._core import call_context
 from pyrox_gp._kernel_operator import freeze_kernel
 
 
@@ -355,7 +355,7 @@ def test_prior_hyperparameters_registered_once_and_shared():
     samples = [name for name, site in tr.items() if site["type"] == "sample"]
     assert samples == ["RBF.lengthscale"]
 
-    with handlers.seed(rng_seed=0), _kernel_context(kernel):
+    with handlers.seed(rng_seed=0), call_context(kernel):
         got = cond.predict_gradient(X_star).mean
         ref = _grad_of(cond.predict_mean, X_star)
     np.testing.assert_allclose(got, ref, atol=1e-10)

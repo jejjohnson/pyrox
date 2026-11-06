@@ -5,7 +5,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from pyrox_gp._basis import graph_laplacian_eigpairs
+from geonnax.basis import graph_laplacian_eigpairs
 
 
 def _path_graph_adjacency(n: int) -> np.ndarray:

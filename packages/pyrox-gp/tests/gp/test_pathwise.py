@@ -286,7 +286,7 @@ def test_pathwise_function_repeated_eval_is_deterministic_for_pattern_b_kernel()
     when evaluated multiple times. With a Pattern B/C kernel carrying a
     LogNormal prior on its lengthscale, repeated calls to ``paths(X_star)``
     used to differ because ``get_param("lengthscale")`` resampled under each
-    new ``_kernel_context``. Now the kernel evaluation is closed over the
+    new ``call_context``. Now the kernel evaluation is closed over the
     sample-time hyperparams in :class:`PathwiseFunction``.
     """
     import numpyro.distributions as dist

@@ -39,8 +39,8 @@ from gaussx import (
     gaussian_log_prob,
 )
 from jaxtyping import Array, Float
+from pyrox._core import call_context
 
-from pyrox_gp._context import _kernel_context
 from pyrox_gp._inducing import InducingFeatures
 from pyrox_gp._protocols import Kernel
 
@@ -138,10 +138,10 @@ class SparseGPPrior(eqx.Module):
         sites once instead of resampling per call.
         """
         if self.inducing is not None:
-            with _kernel_context(self.kernel):
+            with call_context(self.kernel):
                 return self.inducing.K_uu(self.kernel, jitter=self.jitter)
         assert self.Z is not None
-        with _kernel_context(self.kernel):
+        with call_context(self.kernel):
             K = self.kernel(self.Z, self.Z)
         K = K.at[jnp.diag_indices_from(K)].add(self.jitter)
         return _psd_operator(K)
@@ -160,10 +160,10 @@ class SparseGPPrior(eqx.Module):
         helper to use when assembling several SVGP blocks together.
         """
         if self.inducing is not None:
-            with _kernel_context(self.kernel):
+            with call_context(self.kernel):
                 return self.inducing.k_ux(X, self.kernel)
         assert self.Z is not None
-        with _kernel_context(self.kernel):
+        with call_context(self.kernel):
             return self.kernel(X, self.Z)
 
     def kernel_diag(self, X: Float[Array, "N D"]) -> Float[Array, " N"]:
@@ -172,7 +172,7 @@ class SparseGPPrior(eqx.Module):
         See `predictive_blocks` for the shared-context batch
         helper to use when assembling several SVGP blocks together.
         """
-        with _kernel_context(self.kernel):
+        with call_context(self.kernel):
             return self.kernel.diag(X)
 
     def predictive_blocks(
@@ -203,7 +203,7 @@ class SparseGPPrior(eqx.Module):
         diagonal vector — never ``+ jnp.eye``) so the downstream solve
         stays O(M).
         """
-        with _kernel_context(self.kernel):
+        with call_context(self.kernel):
             if self.inducing is not None:
                 K_zz_op = self.inducing.K_uu(self.kernel, jitter=self.jitter)
                 K_xz = self.inducing.k_ux(X, self.kernel)

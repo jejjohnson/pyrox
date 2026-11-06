@@ -16,7 +16,7 @@ downstream package.
   `test_core_parameterized.py` or `test_core_numpyro_integration.py`.
 - Find downstream users of what you touch:
   `grep -rn "_get_context\|_pyrox_scope_name\|_pyrox_fullname\|<name>" packages/*/src`.
-  `pyrox_gp._context`, `pyrox_gp._multi_output` and `pyrox_nn` call private
+  `pyrox._core.call_context`, `pyrox_gp._multi_output` and `pyrox_nn` call private
   core names; renaming one breaks them.
 
 ## 2. Invariants to keep

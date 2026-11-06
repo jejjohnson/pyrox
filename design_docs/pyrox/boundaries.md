@@ -24,7 +24,7 @@ The package is organized into three submodules:
 | Equinox-NumPyro bridge (`PyroxModule`, `PyroxParam`, `PyroxSample`) | **pyrox._core** | Core competency |
 | `Parameterized` (prior/guide management) | **pyrox._core** | Shared by nn and gp |
 | Per-call context cache | **pyrox._core** | Prevents duplicate sample sites |
-| Spectral densities and RFF frequency draws | **kernellib** | `pyrox_gp._basis` wraps them for pyrox kernels; shared by nn (RFF layers, HSGP features) and gp (pathwise sampling, inducing features) |
+| Spectral densities and RFF frequency draws | **kernellib** | `pyrox._core.freeze` turns a pyrox kernel into the kernellib kernel they take; used by nn (RFF layers, HSGP features) and gp (pathwise sampling, inducing features) |
 | Edward2-style probabilistic layers | **pyrox.nn** | Dense, dropout, RFF, NCP, flipout |
 | MC-Dropout layers | **pyrox.nn** | Dropout-based uncertainty |
 | Spectral normalization | **pyrox.nn** | SNGP-style distance awareness |
@@ -41,7 +41,7 @@ The package is organized into three submodules:
 | Pathwise sampling (Matheron's rule) | **pyrox.gp** | Function-valued posterior draws |
 | Graph construction, graph Laplacians, graph spectra, GMRF structure | **kernellib** | `kl.graph_from_edges`, Laplacian eigenpairs; no numpyro |
 | Graph inducing features, latent and inducing-point initialisation, exact-GP recipes | **pyrox.gp** | Built on the kernellib graph primitives |
-| Geometry on the sphere and graph/EOF bases (`graph_laplacian_eigpairs`, `eof_basis`) | **geonnax** | `pyrox_gp._basis` re-exports both for compatibility |
+| Geometry on the sphere and graph/EOF bases (`graph_laplacian_eigpairs`, `eof_basis`) | **geonnax** | `pyrox_gp._basis` re-exports both, deprecated |
 | Latent components (SPDE, BYM2, temporal, areal), PC priors, `inla()` | **pyrox-lgm** | Latent Gaussian models in precision form |
 | Sparse operators, GMRF distributions, precision builders, INLA kernels, FEM/SPDE assembly | **gaussx** | `GaussianMRF`, `SparseCholeskySolver`, `fem_matrices`, `spde_precision` |
 | Randomized linear algebra | **gaussx** | Hutchinson, sketching, randomized SVD |
@@ -98,7 +98,7 @@ Both build on the same kernellib graph primitives and gaussx operators; neither 
 | **numpyro** | `numpyro.sample`, `numpyro.param`, distributions, inference | pyrox registers sample/param sites; NumPyro traces and runs inference. All AutoGuide families work out of the box. `GPPrior` is a native `numpyro.distributions.Distribution`. |
 | **kernellib** | Kernel functions, `Kernel` base class, kernel operators, spectral densities | `pyrox_gp.Kernel = kernellib.AbstractKernel`; pyrox-gp kernels call `kernellib.functional`; `pyrox_gp._basis` delegates spectral densities and RFF draws. kernellib never imports numpyro. |
 | **gaussx** | Solver protocol backend, structured operators, `MultivariateNormal`, Matheron sampling | `pyrox.gp.Solver.solve/log_det` delegates to `gaussx.ops.solve/logdet`; `CovarianceRepresentation` maps to gaussx operators; `PathwiseSampler` uses `gaussx.matheron_update`. |
-| **geonnax** | Graph Laplacian eigenpairs, EOF bases | `pyrox_gp._basis` re-exports `graph_laplacian_eigpairs` and `eof_basis`; pinned as a git tag in pyrox-gp and pyrox-nn. |
+| **geonnax** | Graph Laplacian eigenpairs, EOF bases | `pyrox_gp._basis` re-exports `graph_laplacian_eigpairs` and `eof_basis`, deprecated; pinned as a git tag in pyrox-gp and pyrox-nn. |
 | **pyrox-lgm** | Latent components, PC priors, `inla()` | Downstream sibling package built on pyrox, gaussx and kernellib; precision-form counterpart of pyrox-gp. |
 | **lineax** | Base operator abstraction (`AbstractLinearOperator`) | Transitive via gaussx; pyrox doesn't import lineax directly. |
 | **matfree** | SLQ logdet, Hutchinson trace, partial eig/SVD | Transitive via gaussx solvers (CG, BBMM). |

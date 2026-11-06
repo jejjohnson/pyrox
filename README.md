@@ -48,12 +48,13 @@ Each one installs on its own and pulls in what it needs.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/layers-dark.svg">
-    <img alt="pyrox-nn builds on pyrox-gp, which builds on pyrox; pyrox-lgm builds on pyrox directly. All sit on JAX, Equinox and NumPyro and on the GeoML packages gaussx, kernellib and geonnax" src="docs/assets/layers-light.svg" width="100%">
+    <img alt="pyrox-gp, pyrox-nn and pyrox-lgm are siblings that each build on pyrox directly. All sit on JAX, Equinox and NumPyro and on the GeoML packages gaussx, kernellib and geonnax" src="docs/assets/layers-light.svg" width="100%">
   </picture>
 </p>
 
 Arrows point at what a package imports, and nothing points back up.
-`pyrox-lgm` works in precision form and never imports `pyrox-gp`.
+`pyrox-gp`, `pyrox-nn` and `pyrox-lgm` are siblings over `pyrox`: `pyrox-nn` and `pyrox-lgm` never import `pyrox-gp`, so a network or a latent Gaussian model does not pull in the GP stack.
+A model can still combine them by passing a `pyrox_gp` kernel to a `pyrox_nn` layer such as `HSGPFeatures`, which then needs both installed.
 
 ## Installation
 
@@ -72,7 +73,7 @@ uv add "pyrox-lgm @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=pac
 ```
 
 `pyrox-gp`, `pyrox-nn` and `pyrox-lgm` depend on [gaussx](https://github.com/jejjohnson/gaussx) and [kernellib](https://github.com/jejjohnson/kernellib), which are also installed from GitHub.
-kernellib v0.0.17 and v0.0.18 pin gaussx v0.6.1 and geonnax v0.0.5 while pyrox needs gaussx v0.6.5 and geonnax v0.0.11, so until a kernellib release pins those, add this override to your project's `pyproject.toml`:
+kernellib v0.0.22 pins geonnax v0.0.8 while pyrox needs geonnax v0.0.11, so until a kernellib release pins that, add this override to your project's `pyproject.toml`, which also keeps one gaussx across the packages:
 
 ```toml
 [tool.uv]
@@ -82,7 +83,7 @@ override-dependencies = [
 ]
 ```
 
-Without it the install fails to resolve; with an older gaussx it resolves but `import pyrox_gp` fails.
+Without it the install fails to resolve.
 
 Optional extras: `pyrox[optax]` for ensemble MAP, `pyrox-nn[bnf]` for the BNF estimator (pandas, optax), `pyrox-gp[flows]` for normalizing-flow warps, and `pyrox-lgm[xarray]` for xarray-backed `INLAResult` marginals.
 

@@ -1,7 +1,7 @@
 [project]
 name = "pyrox-nn"
 version = "0.1.1"
-description = "Bayesian and uncertainty-aware neural network layers on top of pyrox and pyrox-gp, plus the BNF estimator API."
+description = "Bayesian and uncertainty-aware neural network layers on top of pyrox, kernellib and geonnax, plus the BNF estimator API."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
 ]
@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "pyrox",
-    "pyrox-gp",
+    "kernellib>=0.0.22",
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.11",
     "einx>=0.4.3",
 ]
@@ -55,6 +55,11 @@ colab = [
 
 [project.urls]
 Repository = "https://github.com/jejjohnson/pyrox"
+
+[tool.uv.sources]
+# kernellib is not yet on PyPI; resolve the release tag from GitHub, in step with
+# pyrox-gp's and pyrox-lgm's sources (one version per package across the workspace).
+kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.22" }
 
 [build-system]
 requires = ["hatchling>=1.27"]

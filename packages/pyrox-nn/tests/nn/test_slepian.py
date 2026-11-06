@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import numpyro.handlers as handlers
-from pyrox_gp._basis import slepian_cap_basis
+from geonnax.basis import slepian_cap_basis
 from pyrox_nn import (
     BayesianSlepianEncoder,
     HybridSphericalSlepianEncoder,

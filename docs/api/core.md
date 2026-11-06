@@ -28,3 +28,11 @@ The `pyrox._core` subpackage owns the Equinox-to-NumPyro bridge that every other
 ## `Parameterized`
 
 ::: pyrox._core.Parameterized
+
+## Per-call context
+
+::: pyrox._core.call_context
+
+::: pyrox._core.call_contexts
+
+::: pyrox._core.freeze

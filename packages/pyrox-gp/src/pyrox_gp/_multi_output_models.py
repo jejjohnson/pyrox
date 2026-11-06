@@ -65,8 +65,8 @@ from gaussx import (
     variational_elbo_gaussian,
 )
 from jaxtyping import Array, Float
+from pyrox._core import call_contexts
 
-from pyrox_gp._context import _kernel_contexts
 from pyrox_gp._inference import _ell_numerical
 from pyrox_gp._likelihoods import GaussianLikelihood
 from pyrox_gp._models import ConditionedGP, GPPrior
@@ -89,7 +89,7 @@ def _latent_kernels(kernel: MultiOutputKernel) -> tuple[Kernel, ...]:
 
     `ICMKernel` shares a single kernel instance across its ``Q``
     latents, so the same instance is repeated — downstream
-    `_kernel_contexts` deduplicates by identity, and the inducing
+    `call_contexts` deduplicates by identity, and the inducing
     builders accept repeated instances as intentional tying.
     """
     if isinstance(kernel, ICMKernel):
@@ -109,7 +109,7 @@ def _mo_kernel_context(kernel: MultiOutputKernel) -> Iterator[None]:
     NumPyro sites once and share a single hyperparameter draw. The inner
     per-call contexts are reentrant and become no-ops.
     """
-    with _kernel_contexts(_latent_kernels(kernel)):
+    with call_contexts(_latent_kernels(kernel)):
         yield
 
 
@@ -532,7 +532,7 @@ class MultiOutputSparseGPPrior(eqx.Module):
         """
         iv = MultiOutputInducingVariables.from_kernel(self.kernel, self.inducing)
         kernels = _latent_kernels(self.kernel)
-        with _kernel_contexts(kernels):
+        with call_contexts(kernels):
             K_uu_blocks, K_uf_blocks = self.inducing.inducing_blocks(X, kernels)
             K_ff_diag = _flatten_outputs(self.kernel.diag(X))
         jittered = tuple(
@@ -746,7 +746,7 @@ class OILMMGPPrior(eqx.Module):
         full ``(P*N, P*N)`` OILMM covariance.
         """
         keys = jax.random.split(key, self.num_latents)
-        with _kernel_contexts(self.kernel.kernels):
+        with call_contexts(self.kernel.kernels):
             latents = jnp.stack(
                 [
                     prior.sample(k)
@@ -777,7 +777,7 @@ class OILMMGPPrior(eqx.Module):
         noise = _per_output_noise(noise_var, self.num_outputs)
         residual = Y - self.mean(self.X)
         Y_latent, noise_latent = self.kernel.project(residual, noise)
-        with _kernel_contexts(self.kernel.kernels):
+        with call_contexts(self.kernel.kernels):
             latents = tuple(
                 prior.condition(Y_latent[:, q], noise_latent[q])
                 for q, prior in enumerate(self.latent_priors())
@@ -812,7 +812,7 @@ class ConditionedOILMMGP(eqx.Module):
 
     def predict_mean(self, X_star: Float[Array, "M D"]) -> Float[Array, "M P"]:
         """Per-output predictive mean, shape ``(M, P)``."""
-        with _kernel_contexts(self.prior.kernel.kernels):
+        with call_contexts(self.prior.kernel.kernels):
             latent_means = self._latent_means(X_star)
         # Mix latent means into output space: f = g W^T.
         f_mean = einx.dot("m q, p q -> m p", latent_means, self.prior.kernel.mixing)
@@ -820,7 +820,7 @@ class ConditionedOILMMGP(eqx.Module):
 
     def predict_var(self, X_star: Float[Array, "M D"]) -> Float[Array, "M P"]:
         """Per-output marginal predictive variance, shape ``(M, P)``."""
-        with _kernel_contexts(self.prior.kernel.kernels):
+        with call_contexts(self.prior.kernel.kernels):
             latent_vars = self._latent_vars(X_star)
         # Independent latents: output variance mixes through W ** 2.
         return einx.dot(
@@ -835,7 +835,7 @@ class ConditionedOILMMGP(eqx.Module):
         Both latent sweeps share one kernel context; the back-projection
         delegates to `pyrox_gp.OILMMKernel.back_project`.
         """
-        with _kernel_contexts(self.prior.kernel.kernels):
+        with call_contexts(self.prior.kernel.kernels):
             latent_means = self._latent_means(X_star)
             latent_vars = self._latent_vars(X_star)
         f_mean, f_var = self.prior.kernel.back_project(latent_means, latent_vars)
@@ -852,7 +852,7 @@ class ConditionedOILMMGP(eqx.Module):
         Matches the `MultiOutputConditionedGP.sample` convention —
         independent per input and output channel.
         """
-        with _kernel_contexts(self.prior.kernel.kernels):
+        with call_contexts(self.prior.kernel.kernels):
             mean, var = self.predict(X_star)
         std = jnp.sqrt(jnp.clip(var, min=0.0))
         eps = jax.random.normal(key, (n_samples, *mean.shape), dtype=mean.dtype)

@@ -27,15 +27,40 @@ kernels (``Linear``, ``Polynomial``) and bounded-spectrum kernels
 
 from __future__ import annotations
 
+import warnings
+
 import jax.numpy as jnp
 import kernellib as kl
 from jaxtyping import Array, Float
+from pyrox._core import freeze
 
-from pyrox_gp._context import _kernel_context
 from pyrox_gp._protocols import Kernel
 
 
 def spectral_density(
+    kernel: Kernel,
+    eigvals: Float[Array, " M"],
+    *,
+    D: int = 1,
+) -> Float[Array, " M"]:
+    """Deprecated: use kernellib's ``unit_spectral_density`` on a frozen kernel.
+
+    Replace it with ``freeze(kernel)`` from `pyrox._core`, then
+    ``variance * lengthscale**D * unit_spectral_density(lengthscale**2 * eigvals, D)``
+    on the result.
+    """
+    warnings.warn(
+        "pyrox_gp._basis.spectral_density is deprecated; use "
+        "pyrox._core.freeze(kernel), then kernellib's "
+        "`variance * lengthscale**D * "
+        "unit_spectral_density(lengthscale**2 * eigvals, D)`.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return _isotropic_spectral_density(kernel, eigvals, D=D)
+
+
+def _isotropic_spectral_density(
     kernel: Kernel,
     eigvals: Float[Array, " M"],
     *,
@@ -60,7 +85,7 @@ def spectral_density(
             density, or for ARD (per-dimension) lengthscales, which a radial
             density cannot represent.
     """
-    frozen = _freeze(kernel)
+    frozen = freeze(kernel)
     if not isinstance(frozen, kl.AbstractStationaryKernel):
         raise NotImplementedError(
             f"Spectral density for {type(kernel).__name__} is not registered. "
@@ -88,16 +113,3 @@ def spectral_density(
     # whose gradient is infinite at a zero eigenvalue.
     unit = frozen.unit_spectral_density(lengthscale**2 * eigvals, D)
     return frozen.variance * lengthscale**D * unit
-
-
-def _freeze(kernel: Kernel) -> kl.AbstractKernel:
-    """kernellib kernel for ``kernel``, resolving pyrox params once."""
-    frozen_fn = getattr(kernel, "frozen", None)
-    if frozen_fn is None:
-        return kernel
-    try:
-        # One context for every parameter, so a prior registers one site.
-        with _kernel_context(kernel):
-            return frozen_fn()
-    except NotImplementedError:
-        return kernel

@@ -439,7 +439,7 @@ def test_multi_output_inducing_blocks_matches_separate_K_uu_K_uf():
 
 def test_multi_output_inducing_blocks_shares_context_when_kernel_tied():
     """Regression for the codex P1 review: K_uu and K_uf called
-    sequentially via separate ``_kernel_contexts`` would re-register
+    sequentially via separate ``call_contexts`` would re-register
     sample sites for a tied kernel, tripping a NumPyro trace duplicate-
     site error. ``inducing_blocks`` shares one context across the pair.
     """
@@ -629,7 +629,7 @@ def test_lmc_full_covariance_shares_context_when_kernel_tied_across_latents():
     duplicate sample-site registration.
 
     Regression for the codex P1 review comment: opening a fresh
-    ``_kernel_context`` per kernel call clears the per-call cache between
+    ``call_context`` per kernel call clears the per-call cache between
     calls, so a NumPyro trace sees a second registration of the same
     site name. Sharing one context across the multi-kernel builder loop
     collapses the two calls into a single cached registration.

@@ -37,9 +37,14 @@ import `api` or `preprocessing`, which import pandas at module scope.
 - **Per-example cores** run over `(*batch, D)` inputs through
   `_batching.vmap_over_flat_batch`, with the weights sampled once per model
   call.
-- **Deterministic architecture belongs in geonnax**; basis functions and
-  spectral densities come from `pyrox_gp._basis`; a GP kernel's hyperprior
-  sites register once inside `_kernel_context(kernel)` (see `HSGPFeatures`).
+- **Never import `pyrox_gp`** (`tests/test_nn_import_guard.py`): pyrox-nn and
+  pyrox-gp are siblings over `pyrox`. A caller may pass a `pyrox_gp` kernel to a
+  layer, and tests may import it. Type a kernel field `kl.AbstractKernel`.
+- **Deterministic architecture belongs in geonnax**; basis functions come from
+  `geonnax.basis`; spectral densities and Funk–Hecke coefficients from kernellib.
+  `pyrox._core.freeze(kernel)` resolves a kernel's hyperpriors to one site each
+  and returns the plain kernellib kernel kernellib's functions take (see
+  `HSGPFeatures`).
 - **Raw primitives** (a KL `factor`) are named
   `self._pyrox_fullname("kl")`; `numpyro.prng_key()` needs a `seed` handler.
 - **Docstrings** list the sites the layer registers and the priors, in

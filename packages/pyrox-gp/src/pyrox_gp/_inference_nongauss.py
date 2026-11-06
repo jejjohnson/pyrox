@@ -58,8 +58,8 @@ from gaussx import (
     symmetrize,
 )
 from jaxtyping import Array, Float
+from pyrox._core import call_context
 
-from pyrox_gp._context import _kernel_context
 from pyrox_gp._protocols import Likelihood
 
 
@@ -126,7 +126,7 @@ class NonGaussConditionedGP(eqx.Module):
     def predict_mean(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
         r"""$\mu_* = \mu(X_*) + K_{*f}\,\alpha$ with
         ``alpha`` derived from the site naturals."""
-        with _kernel_context(self.prior.kernel):
+        with call_context(self.prior.kernel):
             L = self._pseudo_factor()
             K_cross = self.prior.kernel(X_star, self.prior.X)
             prior_mean_train = self.prior.mean(self.prior.X)
@@ -139,7 +139,7 @@ class NonGaussConditionedGP(eqx.Module):
 
     def predict_var(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
         r"""$\Sigma_{**} - K_{*f} (K + \mathrm{diag}(1/\Lambda))^{-1} K_{f*}$."""
-        with _kernel_context(self.prior.kernel):
+        with call_context(self.prior.kernel):
             L = self._pseudo_factor()
             K_cross = self.prior.kernel(X_star, self.prior.X)
             K_diag = self.prior.kernel.diag(X_star)
@@ -159,7 +159,7 @@ class NonGaussConditionedGP(eqx.Module):
         Pattern B / C kernels with prior'd hyperparameters resample
         once and produce a self-consistent ``(mean, var)`` pair.
         """
-        with _kernel_context(self.prior.kernel):
+        with call_context(self.prior.kernel):
             L = self._pseudo_factor()
             K_cross = self.prior.kernel(X_star, self.prior.X)
             K_diag = self.prior.kernel.diag(X_star)
@@ -192,7 +192,7 @@ def _check_scalar_latent(lik: Likelihood) -> None:
 
 
 def _prior_K(prior: GPPrior) -> Float[Array, "N N"]:
-    with _kernel_context(prior.kernel):
+    with call_context(prior.kernel):
         K = prior.kernel(prior.X, prior.X)
     return K.at[jnp.diag_indices_from(K)].add(prior.jitter)
 

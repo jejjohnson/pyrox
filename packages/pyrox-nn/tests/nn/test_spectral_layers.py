@@ -10,9 +10,16 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import kernellib as kl
 import numpy as np
+import numpyro
+import numpyro.distributions as dist
 import pytest
 from numpyro import handlers
+from numpyro.infer import SVI, Predictive, Trace_ELBO
+from numpyro.infer.autoguide import AutoNormal
+from numpyro.optim import Adam
+from pyrox._core import freeze
 from pyrox_gp import RBF, Matern
 from pyrox_nn import (
     HSGPFeatures,
@@ -20,6 +27,7 @@ from pyrox_nn import (
     RBFFourierFeatures,
     VariationalFourierFeatures,
 )
+from pyrox_nn._features import _spectral_weights
 
 
 # --- VariationalFourierFeatures -------------------------------------------
@@ -244,3 +252,120 @@ def test_hsgp_kernel_approximation_converges():
     var = np.var(samples)
     # k(0, 0) = sigma^2 = 1.0; allow ~25% Monte-Carlo slack on 200 samples.
     assert 0.5 < var < 1.5, var
+
+
+# --- pyrox-nn takes its spectral maths from kernellib, not pyrox-gp -----------
+
+
+_HSGP_KERNELS = [
+    (
+        RBF(init_lengthscale=0.6, init_variance=1.3),
+        kl.RBF(lengthscale=0.6, variance=1.3),
+    ),
+    (
+        Matern(nu=0.5, init_lengthscale=0.6, init_variance=1.3),
+        kl.Matern(nu=0.5, lengthscale=0.6, variance=1.3),
+    ),
+    (
+        Matern(nu=1.5, init_lengthscale=0.6, init_variance=1.3),
+        kl.Matern(nu=1.5, lengthscale=0.6, variance=1.3),
+    ),
+    (
+        Matern(nu=2.5, init_lengthscale=0.6, init_variance=1.3),
+        kl.Matern(nu=2.5, lengthscale=0.6, variance=1.3),
+    ),
+]
+
+
+def _hsgp_draw(kernel, in_features):
+    layer = HSGPFeatures.init(
+        in_features=in_features,
+        num_basis_per_dim=4,
+        L=3.0,
+        kernel=kernel,
+    )
+    x = jr.normal(jr.key(1), (9, in_features))
+    with handlers.seed(rng_seed=0):
+        return layer(x)
+
+
+@pytest.mark.parametrize("pyrox_kernel, plain_kernel", _HSGP_KERNELS)
+@pytest.mark.parametrize("in_features", [1, 2, 3])
+def test_hsgp_draw_is_the_same_for_pyrox_and_kernellib_kernels(
+    pyrox_kernel, plain_kernel, in_features
+):
+    np.testing.assert_allclose(
+        _hsgp_draw(pyrox_kernel, in_features),
+        _hsgp_draw(plain_kernel, in_features),
+        rtol=1e-12,
+    )
+
+
+@pytest.mark.parametrize("pyrox_kernel, plain_kernel", _HSGP_KERNELS)
+@pytest.mark.parametrize("in_features", [1, 2, 3])
+def test_hsgp_weights_match_kernellib_density_at_frequency_vectors(
+    pyrox_kernel, plain_kernel, in_features
+):
+    eigenvalues = jnp.array([0.1, 0.7, 4.0])
+    got = _spectral_weights(freeze(pyrox_kernel), eigenvalues, in_features)
+    # One frequency vector of magnitude √λ per eigenvalue, along the first axis.
+    omega = jnp.zeros((3, in_features)).at[:, 0].set(jnp.sqrt(eigenvalues))
+    np.testing.assert_allclose(got, plain_kernel.spectral_density(omega), rtol=1e-12)
+
+
+def test_hsgp_kernel_prior_registers_one_site_per_hyperparameter():
+    kernel = RBF(init_lengthscale=0.6, init_variance=1.3)
+    kernel.set_prior("lengthscale", dist.LogNormal(0.0, 1.0))
+    kernel.set_prior("variance", dist.LogNormal(0.0, 1.0))
+    layer = HSGPFeatures.init(in_features=1, num_basis_per_dim=4, L=3.0, kernel=kernel)
+    with handlers.trace() as tr, handlers.seed(rng_seed=0):
+        layer(jnp.zeros((3, 1)))
+    samples = sorted(n for n, s in tr.items() if s["type"] == "sample")
+    assert samples == ["HSGPFeatures.alpha", "RBF.lengthscale", "RBF.variance"]
+
+
+def test_hsgp_kernel_prior_runs_under_svi_and_predictive():
+    kernel = RBF(init_lengthscale=0.6, init_variance=1.3)
+    kernel.set_prior("lengthscale", dist.LogNormal(0.0, 1.0))
+    layer = HSGPFeatures.init(in_features=1, num_basis_per_dim=4, L=3.0, kernel=kernel)
+    x = jnp.linspace(-1.0, 1.0, 6)[:, None]
+
+    def model(y=None):
+        numpyro.sample("y", dist.Normal(layer(x), 0.1).to_event(1), obs=y)
+
+    guide = AutoNormal(model)
+    svi = SVI(model, guide, Adam(1e-2), Trace_ELBO())
+    state = svi.init(jr.key(0), y=jnp.zeros(6))
+    state, loss = svi.update(state, y=jnp.zeros(6))
+    assert jnp.isfinite(loss)
+    draws = Predictive(model, guide=guide, params=svi.get_params(state), num_samples=2)
+    assert draws(jr.key(1))["y"].shape == (2, 6)
+
+
+def test_hsgp_weights_have_finite_gradient_at_zero_eigenvalue():
+    eigenvalues = jnp.array([0.0, 1.0])
+
+    def total(lengthscale):
+        kernel = kl.Matern(nu=1.5, lengthscale=lengthscale, variance=1.0)
+        return jnp.sum(_spectral_weights(kernel, eigenvalues, 2))
+
+    assert jnp.isfinite(jax.grad(total)(0.7))
+
+
+def test_hsgp_rejects_ard_kernel():
+    layer = HSGPFeatures.init(
+        in_features=2,
+        num_basis_per_dim=3,
+        L=2.0,
+        kernel=kl.RBF(lengthscale=jnp.array([0.5, 1.0]), variance=1.0),
+    )
+    with handlers.seed(rng_seed=0), pytest.raises(NotImplementedError, match="ARD"):
+        layer(jnp.zeros((2, 2)))
+
+
+def test_hsgp_rejects_a_kernel_without_a_stationary_density():
+    layer = HSGPFeatures.init(
+        in_features=1, num_basis_per_dim=3, L=2.0, kernel=kl.Linear(variance=1.0)
+    )
+    with handlers.seed(rng_seed=0), pytest.raises(NotImplementedError, match="Linear"):
+        layer(jnp.zeros((2, 1)))
