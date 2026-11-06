@@ -48,7 +48,6 @@ import lineax as lx
 from gaussx import (
     AbstractIntegrator,
     GaussHermiteIntegrator,
-    GaussianState,
     cavity_distribution,
     cholesky_logdet,
     damped_natural_update,
@@ -60,6 +59,7 @@ from gaussx import (
 from jaxtyping import Array, Float
 from pyrox._core import call_context
 
+from pyrox_gp._inference import _per_site_expectation
 from pyrox_gp._protocols import Likelihood
 
 
@@ -268,41 +268,6 @@ def _psd_safe_cholesky(M: Float[Array, "N N"]) -> Float[Array, "N N"]:
     inputs is the realistic failure case this guards against.
     """
     return safe_cholesky(_psd_operator(symmetrize(M)))
-
-
-def _per_site_expectation(
-    integrator: AbstractIntegrator,
-    fn_scalar: Callable[[Float[Array, ""], Float[Array, ""]], Float[Array, ""]],
-    mean: Float[Array, " N"],
-    var: Float[Array, " N"],
-    y: Float[Array, " N"],
-) -> Float[Array, " N"]:
-    r"""Per-site Gaussian expectation via `gaussx`'s integrator API.
-
-    For each site $n$, evaluates
-    $\mathbb{E}_{f_n \sim \mathcal{N}(\text{mean}_n, \text{var}_n)}
-    [\text{fn\_scalar}(f_n, y_n)]$ by lifting ``(mean[n], var[n])`` into a
-    1-D `gaussx.GaussianState` and delegating to
-    ``integrator.integrate(fn_lifted, state).state.mean[0]``. Uses
-    `jax.vmap` over the site axis to recover the per-site
-    ``(N,) -> (N,)`` shape contract that `PosteriorLinearization`
-    needs. This sits on top of ``gaussx.AbstractIntegrator`` so users
-    can swap in `gaussx.MonteCarloIntegrator`,
-    `gaussx.UnscentedIntegrator`, etc., without changing pyrox.
-    """
-
-    def per_site(
-        m_n: Float[Array, ""], v_n: Float[Array, ""], y_n: Float[Array, ""]
-    ) -> Float[Array, ""]:
-        cov_op = lx.MatrixLinearOperator(v_n[None, None], lx.positive_semidefinite_tag)
-        state = GaussianState(mean=m_n[None], cov=cov_op)
-
-        def fn_lifted(f_arr: Float[Array, " 1"]) -> Float[Array, " 1"]:
-            return fn_scalar(f_arr[0], y_n)[None]
-
-        return integrator.integrate(fn_lifted, state).state.mean[0]
-
-    return jax.vmap(per_site)(mean, var, y)
 
 
 def _laplace_log_marginal(

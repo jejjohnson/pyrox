@@ -5,8 +5,11 @@ Covers :func:`svgp_elbo`, :func:`svgp_factor`, and :class:`ConjugateVI`.
 
 from __future__ import annotations
 
+import gaussx
+import jax
 import jax.numpy as jnp
 import jax.random as jr
+import lineax as lx
 import numpyro.distributions as nd
 import pytest
 from gaussx import GaussHermiteIntegrator, variational_elbo_gaussian
@@ -18,10 +21,13 @@ from pyrox_gp import (
     FullRankGuide,
     GaussianLikelihood,
     NaturalGuide,
+    PoissonLikelihood,
     SparseGPPrior,
     svgp_elbo,
     svgp_factor,
 )
+from pyrox_gp._inference import _ell_numerical, _per_site_expectation
+from pyrox_gp._protocols import Likelihood
 
 
 def _toy(M: int = 5, N: int = 10, seed: int = 0):
@@ -185,3 +191,84 @@ def test_cvi_nonconjugate_requires_integrator():
     cvi = ConjugateVI(damping=0.5)
     with pytest.raises(ValueError, match="integrator"):
         cvi.step(prior, guide, lik, X, y)
+
+
+# --- one per-site expectation (#334) ---------------------------------------
+
+
+def _integrate_per_site(integrator, fn, mean, var, y):
+    """The old path: the full ``integrate`` on a lifted 1-D Gaussian per site."""
+
+    def per_site(mean_n, var_n, y_n):
+        cov = lx.MatrixLinearOperator(var_n[None, None], lx.positive_semidefinite_tag)
+        state = gaussx.GaussianState(mean=mean_n[None], cov=cov)
+        lifted = lambda f: fn(f[0], y_n)[None]
+        return integrator.integrate(lifted, state).state.mean[0]
+
+    return jax.vmap(per_site)(mean, var, y)
+
+
+@pytest.mark.parametrize(
+    "integrator",
+    [
+        gaussx.GaussHermiteIntegrator(order=20),
+        gaussx.UnscentedIntegrator(alpha=1.0),
+        gaussx.TaylorIntegrator(),
+    ],
+    ids=["gauss_hermite", "unscented", "taylor"],
+)
+def test_per_site_expectation_matches_integrate(integrator):
+    mean = jnp.array([0.2, -0.4, 1.1])
+    var = jnp.array([0.5, 0.1, 0.9])
+    y = jnp.array([1.0, 0.0, 2.0])
+    fn = lambda f, y_n: y_n * f - jnp.exp(f)
+    got = _per_site_expectation(integrator, fn, mean, var, y)
+    expected = _integrate_per_site(integrator, fn, mean, var, y)
+    assert jnp.allclose(got, expected, rtol=1e-12, atol=0.0)
+
+
+def test_ell_numerical_matches_a_direct_sum_of_expectations():
+    lik = PoissonLikelihood()
+    integrator = gaussx.GaussHermiteIntegrator(order=20)
+    mean = jnp.array([0.2, -0.4])
+    var = jnp.array([0.5, 0.1])
+    y = jnp.array([1.0, 3.0])
+    per_site = _integrate_per_site(
+        integrator, lambda f, y_n: lik.log_prob(f[None], y_n[None]), mean, var, y
+    )
+    got = _ell_numerical(lik, y, mean, var, integrator)
+    assert jnp.allclose(got, per_site.sum(), rtol=1e-12, atol=0.0)
+
+
+class _RecordsInputs(Likelihood):
+    """A conditional likelihood whose log-density reads ``X``."""
+
+    def log_prob(self, f, y, X=None):
+        return -jnp.sum((y - f - X[0]) ** 2)
+
+
+class _OldSignature(Likelihood):
+    """A likelihood from before ``X``: a third argument would raise."""
+
+    def log_prob(self, f, y):
+        return -jnp.sum((y - f) ** 2)
+
+
+def test_ell_numerical_passes_each_site_its_input():
+    integrator = gaussx.GaussHermiteIntegrator(order=8)
+    mean = jnp.zeros(3)
+    var = jnp.zeros(3) + 1e-12
+    y = jnp.array([1.0, 2.0, 3.0])
+    X = jnp.array([[1.0], [2.0], [3.0]])
+    # y - f - X = 0 at every site when each site sees its own input.
+    got = _ell_numerical(_RecordsInputs(), y, mean, var, integrator, X)
+    assert jnp.allclose(got, 0.0, atol=1e-10)
+
+
+def test_ell_numerical_gives_an_old_signature_no_third_argument():
+    integrator = gaussx.GaussHermiteIntegrator(order=8)
+    y = jnp.array([1.0, 2.0])
+    X = jnp.array([[1.0], [2.0]])
+    got = _ell_numerical(_OldSignature(), y, jnp.zeros(2), jnp.ones(2), integrator, X)
+    # E[-(y - f)²] = -(y² + 1) for f ~ N(0, 1)
+    assert jnp.allclose(got, -(y**2 + 1.0).sum(), rtol=1e-12, atol=0.0)

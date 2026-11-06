@@ -18,6 +18,8 @@ All Gaussian linear algebra delegates to ``gaussx``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import einx
 import jax
 import jax.numpy as jnp
@@ -26,18 +28,76 @@ import numpyro
 from gaussx import (
     AbstractIntegrator as GaussxIntegrator,
     GaussianState,
-    log_likelihood_expectation,
+    mean_expectation,
     solve_matrix,
     symmetrize,
     variational_elbo_gaussian,
 )
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, PyTree
 from pyrox._core import call_context
 
 from pyrox_gp._guides import NaturalGuide
 from pyrox_gp._likelihoods import GaussianLikelihood
 from pyrox_gp._protocols import Guide, Likelihood, likelihood_accepts_inputs
 from pyrox_gp._sparse import SparseGPPrior
+
+
+def _site_expectation(
+    integrator: GaussxIntegrator,
+    fn: Callable[[Float[Array, ""], PyTree], Float[Array, ""]],
+    mean_n: Float[Array, ""],
+    var_n: Float[Array, ""],
+    y_n: PyTree,
+) -> Float[Array, ""]:
+    r"""Gaussian expectation at one site, $\mathbb{E}_{f_n}[\text{fn}(f_n, y_n)]$.
+
+    With $f_n \sim \mathcal{N}(\text{mean}_n, \text{var}_n)$. Point rules take
+    the weighted sum alone through `gaussx.mean_expectation`, with no output
+    covariance built; a rule with no points, such as Taylor, falls back to
+    ``integrate``. Any `gaussx.AbstractIntegrator` works.
+
+    Args:
+        integrator: The rule for the 1-D Gaussian.
+        fn: The integrand, from the site's scalar $f_n$ and its $y_n$.
+        mean_n: The site mean.
+        var_n: The site variance.
+        y_n: The site's data.
+
+    Returns:
+        The expectation, a scalar.
+    """
+    # q(fₙ) = N(mₙ, vₙ), a 1-D GaussianState
+    cov = lx.MatrixLinearOperator(var_n[None, None], lx.positive_semidefinite_tag)
+    state = GaussianState(mean=mean_n[None], cov=cov)
+    # 𝔼[fn(fₙ, yₙ)] = ∑ₚ wₚ fn(χₚ, yₙ)
+    expectation = mean_expectation(
+        lambda f: jnp.atleast_1d(fn(f[0], y_n)), state, integrator
+    )
+    return expectation[0]
+
+
+def _per_site_expectation(
+    integrator: GaussxIntegrator,
+    fn: Callable[[Float[Array, ""], PyTree], Float[Array, ""]],
+    mean: Float[Array, " N"],
+    var: Float[Array, " N"],
+    y: PyTree[Float[Array, " N ..."]],
+) -> Float[Array, " N"]:
+    """`_site_expectation` at every site.
+
+    Args:
+        integrator: The rule for each 1-D Gaussian.
+        fn: The integrand, from one site's scalar $f_n$ and its $y_n$.
+        mean: The site means.
+        var: The site variances.
+        y: The per-site data, a pytree with a leading site axis on each leaf.
+
+    Returns:
+        The expectation at each site.
+    """
+    return jax.vmap(lambda m, v, d: _site_expectation(integrator, fn, m, v, d))(
+        mean, var, y
+    )
 
 
 def _ell_numerical(
@@ -55,40 +115,30 @@ def _ell_numerical(
 
     ``X`` is consumed only by likelihoods whose parameters depend on the
     input (see `pyrox_gp.WarpedGaussianLikelihood` with a conditional
-    warp); scalar observation models ignore it. When ``None`` it is
-    broadcast rather than batched, so the unconditional path is
-    unchanged.
+    warp); scalar observation models ignore it.
 
     A `Likelihood` written against the pre-gh-204 ``log_prob(f, y)``
     signature is never handed the third argument -- it could not consume
     it, and passing it would raise ``TypeError`` at the first quadrature
     evaluation.
     """
-    pass_x = X is not None and likelihood_accepts_inputs(lik)
-
-    def _ell_one(
-        mu_n: Float[Array, ""],
-        var_n: Float[Array, ""],
-        y_n: Float[Array, ""],
-        X_n: Float[Array, " D"] | None,
-    ) -> Float[Array, ""]:
-        state = GaussianState(
-            mean=mu_n[None],
-            cov=lx.MatrixLinearOperator(
-                var_n[None, None], lx.positive_semidefinite_tag
-            ),
-        )
-        return log_likelihood_expectation(
-            (lambda f: lik.log_prob(f, y_n[None], X_n))
-            if pass_x
-            else (lambda f: lik.log_prob(f, y_n[None])),
-            state,
+    if X is not None and likelihood_accepts_inputs(lik):
+        expectations = _per_site_expectation(
             integrator,
+            lambda f_n, site: lik.log_prob(f_n[None], site[0][None], site[1]),
+            f_loc,
+            f_var,
+            (y, X),
         )
-
-    if X is None:
-        return jax.vmap(_ell_one, in_axes=(0, 0, 0, None))(f_loc, f_var, y, None).sum()
-    return jax.vmap(_ell_one)(f_loc, f_var, y, X).sum()
+    else:
+        expectations = _per_site_expectation(
+            integrator,
+            lambda f_n, y_n: lik.log_prob(f_n[None], y_n[None]),
+            f_loc,
+            f_var,
+            y,
+        )
+    return expectations.sum()
 
 
 def svgp_elbo(
@@ -352,16 +402,12 @@ class ConjugateVI:
             var_n: Float[Array, ""],
             y_n: Float[Array, ""],
         ) -> Float[Array, ""]:
-            state = GaussianState(
-                mean=mu_n[None],
-                cov=lx.MatrixLinearOperator(
-                    var_n[None, None], lx.positive_semidefinite_tag
-                ),
-            )
-            return log_likelihood_expectation(
-                lambda f: lik.log_prob(f, y_n[None]),
-                state,
+            return _site_expectation(
                 self.integrator,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+                lambda f_n, y: lik.log_prob(f_n[None], y[None]),
+                mu_n,
+                var_n,
+                y_n,
             )
 
         lik = likelihood
