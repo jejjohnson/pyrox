@@ -403,9 +403,6 @@ class PosteriorLinearizationMarkov(eqx.Module):
     and update the sites.
 
     Attributes:
-        integrator: Rule for the cavity expectations, any
-            `gaussx.AbstractIntegrator`. Default
-            ``gaussx.GaussHermiteIntegrator(order=20)``.
         max_iter: Iterations. Default ``20``.
         tol: ``inf``-norm tolerance on the posterior mean. Default ``1e-6``.
         damping: Step-size in (0, 1]. Default ``0.5``.
@@ -413,16 +410,20 @@ class PosteriorLinearizationMarkov(eqx.Module):
         deg: Deprecated. ``deg=k`` warns and means
             ``integrator=gaussx.GaussHermiteIntegrator(order=k)``; passing
             both raises ``ValueError``. Reads as ``None`` once resolved.
+        integrator: Rule for the cavity expectations, any
+            `gaussx.AbstractIntegrator`. Default
+            ``gaussx.GaussHermiteIntegrator(order=20)``.
     """
 
-    # None until __post_init__, which tells "not passed" from a passed rule so
-    # that deg and integrator together can raise.
-    integrator: AbstractIntegrator = eqx.field(default=None)
     max_iter: int = eqx.field(static=True, default=20)
     tol: float = eqx.field(static=True, default=1e-6)
     damping: float = eqx.field(static=True, default=0.5)
     precision_floor: float = eqx.field(static=True, default=1e-6)
     deg: int | None = eqx.field(static=True, default=None)
+    # Last, so positional arguments keep their meaning. None until
+    # __post_init__, which tells "not passed" from a passed rule so that deg and
+    # integrator together can raise.
+    integrator: AbstractIntegrator = eqx.field(default=None)
 
     def __post_init__(self) -> None:
         self.integrator = _resolve_integrator(self.integrator, self.deg)
@@ -514,10 +515,6 @@ class ExpectationPropagationMarkov(eqx.Module):
     stabilisation), and update sites with damping.
 
     Attributes:
-        integrator: Rule for the tilted moments. Default
-            ``gaussx.GaussHermiteIntegrator(order=20)``. EP reads only its
-            ``order``, for `gaussx.ep_tilted_moments`, so any other rule
-            raises ``TypeError``.
         max_iter: EP iterations. Default ``40``.
         tol: ``inf``-norm tolerance on the posterior mean. Default ``1e-5``.
         damping: Damping in (0, 1]. Default ``0.5``.
@@ -525,15 +522,19 @@ class ExpectationPropagationMarkov(eqx.Module):
         deg: Deprecated. ``deg=k`` warns and means
             ``integrator=gaussx.GaussHermiteIntegrator(order=k)``; passing
             both raises ``ValueError``. Reads as ``None`` once resolved.
+        integrator: Rule for the tilted moments. Default
+            ``gaussx.GaussHermiteIntegrator(order=20)``. EP reads only its
+            ``order``, for `gaussx.ep_tilted_moments`, so any other rule
+            raises ``TypeError``.
     """
 
-    # None until __post_init__; see PosteriorLinearizationMarkov.
-    integrator: AbstractIntegrator = eqx.field(default=None)
     max_iter: int = eqx.field(static=True, default=40)
     tol: float = eqx.field(static=True, default=1e-5)
     damping: float = eqx.field(static=True, default=0.5)
     precision_floor: float = eqx.field(static=True, default=1e-6)
     deg: int | None = eqx.field(static=True, default=None)
+    # Last and None until __post_init__; see PosteriorLinearizationMarkov.
+    integrator: AbstractIntegrator = eqx.field(default=None)
 
     def __post_init__(self) -> None:
         self.integrator = _resolve_integrator(self.integrator, self.deg)
