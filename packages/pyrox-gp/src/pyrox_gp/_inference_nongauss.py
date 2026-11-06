@@ -608,6 +608,27 @@ class PosteriorLinearization(eqx.Module):
 # --- Expectation propagation --------------------------------------------
 
 
+def _require_gauss_hermite(integrator: AbstractIntegrator) -> GaussHermiteIntegrator:
+    """Reject a rule EP cannot use: tilted moments are Gauss-Hermite only.
+
+    Args:
+        integrator: The rule passed to an EP strategy.
+
+    Returns:
+        The same rule, narrowed.
+
+    Raises:
+        TypeError: If ``integrator`` is not a `gaussx.GaussHermiteIntegrator`.
+    """
+    if not isinstance(integrator, GaussHermiteIntegrator):
+        raise TypeError(
+            "Expectation propagation takes its tilted moments from "
+            "gaussx.ep_tilted_moments, a Gauss-Hermite rule, so it needs a "
+            f"gaussx.GaussHermiteIntegrator; got {type(integrator).__name__}."
+        )
+    return integrator
+
+
 class ExpectationPropagation(eqx.Module):
     r"""Parallel expectation propagation (Minka 2001) with damping.
 
@@ -620,10 +641,9 @@ class ExpectationPropagation(eqx.Module):
 
     Attributes:
         integrator: Cavity integrator. Default
-            ``gaussx.GaussHermiteIntegrator(order=20)``. EP only reads
-            the integrator's ``order`` attribute when delegating to
-            `gaussx.ep_tilted_moments`; non-Gauss-Hermite
-            integrators fall back to ``order=20``.
+            ``gaussx.GaussHermiteIntegrator(order=20)``. EP reads only its
+            ``order``, for `gaussx.ep_tilted_moments`, so any other rule
+            raises ``TypeError``.
         max_iter: Iterations. Default ``40``.
         damping: Damping in (0, 1]. Default ``0.5``.
         tol: ``inf``-norm convergence on the posterior mean.
@@ -637,6 +657,9 @@ class ExpectationPropagation(eqx.Module):
     damping: float = eqx.field(static=True, default=0.5)
     tol: float = eqx.field(static=True, default=1e-6)
     precision_floor: float = eqx.field(static=True, default=1e-6)
+
+    def __check_init__(self) -> None:
+        _require_gauss_hermite(self.integrator)
 
     def fit(
         self,
@@ -658,7 +681,7 @@ class ExpectationPropagation(eqx.Module):
         def lp(f_n: Float[Array, ""], y_n: Float[Array, ""]) -> Float[Array, ""]:
             return log_prob_per_point(f_n[None], y_n[None])[0]
 
-        order = getattr(self.integrator, "order", 20)
+        order = _require_gauss_hermite(self.integrator).order
 
         def _per_site_tilted(
             m_n: Float[Array, ""],

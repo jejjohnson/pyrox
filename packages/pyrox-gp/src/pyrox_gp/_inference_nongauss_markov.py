@@ -21,13 +21,15 @@ self-consistent smoothed marginals at arbitrary test times.
 
 from __future__ import annotations
 
+import warnings
 from typing import TYPE_CHECKING
 
-import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 from gaussx import (
+    AbstractIntegrator,
+    GaussHermiteIntegrator,
     cavity_distribution,
     damped_natural_update,
     ep_tilted_moments,
@@ -35,10 +37,12 @@ from gaussx import (
 )
 from jaxtyping import Array, Float
 
+from pyrox_gp._inference import _per_site_expectation
 from pyrox_gp._inference_nongauss import (
     _check_scalar_latent,
     _log_prob_per_point_factory,
     _per_point_grad_hess,
+    _require_gauss_hermite,
 )
 from pyrox_gp._markov import (
     _build_dt_full,
@@ -356,6 +360,38 @@ class GaussNewtonMarkovInference(eqx.Module):
 # --- Posterior Linearization --------------------------------------------
 
 
+def _resolve_integrator(
+    integrator: AbstractIntegrator | None, deg: int | None
+) -> AbstractIntegrator:
+    """The strategy's rule, from the ``integrator`` and deprecated ``deg`` fields.
+
+    Args:
+        integrator: The rule passed, or ``None``.
+        deg: The deprecated Gauss-Hermite order passed, or ``None``.
+
+    Returns:
+        ``integrator``; else ``GaussHermiteIntegrator(order=deg)``; else the
+        default ``GaussHermiteIntegrator(order=20)``.
+
+    Raises:
+        ValueError: If both are passed.
+    """
+    if deg is None:
+        return GaussHermiteIntegrator(order=20) if integrator is None else integrator
+    if integrator is not None:
+        raise ValueError(
+            "Pass integrator or the deprecated deg, not both; got "
+            f"integrator={integrator!r} and deg={deg}."
+        )
+    warnings.warn(
+        "deg is deprecated; use "
+        f"integrator=gaussx.GaussHermiteIntegrator(order={deg}).",
+        DeprecationWarning,
+        stacklevel=4,
+    )
+    return GaussHermiteIntegrator(order=deg)
+
+
 class PosteriorLinearizationMarkov(eqx.Module):
     r"""Posterior linearization for `MarkovGPPrior` (Markov IPLF).
 
@@ -363,7 +399,7 @@ class PosteriorLinearizationMarkov(eqx.Module):
     linearization. At each iteration, with current sites producing
     smoothed marginals ``(m_n, V_n)``, form the cavity
     ``q_{\\setminus n}(f) = N(m_{c,n}, V_{c,n})``, evaluate the *expected*
-    per-point gradient and Hessian under the cavity (via Gauss-Hermite),
+    per-point gradient and Hessian under the cavity (via the integrator),
     and update the sites.
 
     Attributes:
@@ -371,14 +407,27 @@ class PosteriorLinearizationMarkov(eqx.Module):
         tol: ``inf``-norm tolerance on the posterior mean. Default ``1e-6``.
         damping: Step-size in (0, 1]. Default ``0.5``.
         precision_floor: Floor on the diagonal precision. Default ``1e-6``.
-        deg: Gauss-Hermite degree for the cavity expectations. Default ``20``.
+        deg: Deprecated. ``deg=k`` warns and means
+            ``integrator=gaussx.GaussHermiteIntegrator(order=k)``; passing
+            both raises ``ValueError``. Reads as ``None`` once resolved.
+        integrator: Rule for the cavity expectations, any
+            `gaussx.AbstractIntegrator`. Default
+            ``gaussx.GaussHermiteIntegrator(order=20)``.
     """
 
     max_iter: int = eqx.field(static=True, default=20)
     tol: float = eqx.field(static=True, default=1e-6)
     damping: float = eqx.field(static=True, default=0.5)
     precision_floor: float = eqx.field(static=True, default=1e-6)
-    deg: int = eqx.field(static=True, default=20)
+    deg: int | None = eqx.field(static=True, default=None)
+    # Last, so positional arguments keep their meaning. None until
+    # __post_init__, which tells "not passed" from a passed rule so that deg and
+    # integrator together can raise.
+    integrator: AbstractIntegrator = eqx.field(default=None)
+
+    def __post_init__(self) -> None:
+        self.integrator = _resolve_integrator(self.integrator, self.deg)
+        self.deg = None
 
     def fit(
         self,
@@ -386,20 +435,14 @@ class PosteriorLinearizationMarkov(eqx.Module):
         likelihood: Likelihood,
         y: Float[Array, " N"],
     ) -> NonGaussConditionedMarkovGP:
-        from gaussx import gauss_hermite_points
-
         _check_scalar_latent(likelihood)
         log_prob_per_point = _log_prob_per_point_factory(likelihood)
 
         def lp(f_n: Float[Array, ""], y_n: Float[Array, ""]) -> Float[Array, ""]:
             return log_prob_per_point(f_n[None], y_n[None])[0]
 
-        grad_fn = jax.vmap(jax.grad(lp))
-        hess_fn = jax.vmap(jax.grad(jax.grad(lp)))
-
-        nodes, weights = gauss_hermite_points(self.deg, dim=1)
-        x_nodes = nodes[:, 0]
-        w_nodes = weights / jnp.sqrt(2.0 * jnp.pi)
+        grad_lp = jax.grad(lp)
+        hess_lp = jax.grad(grad_lp)
 
         N = prior.times.shape[0]
         prior_mean = prior.mean(prior.times)
@@ -420,16 +463,14 @@ class PosteriorLinearizationMarkov(eqx.Module):
             )
             assert isinstance(cav_var, jax.Array)  # diagonal path in, diagonal out
 
-            std = jnp.sqrt(cav_var)
-            # Gauss-Hermite grid fₙ + σₙ ξ_q over (Q nodes, N sites).
-            f_grid = einx.add(
-                "q n, n -> q n", einx.multiply("q, n -> q n", x_nodes, std), cav_mean
+            # ḡₙ = 𝔼_{cav}[∂f log p(yₙ | f)]
+            g_avg = _per_site_expectation(
+                self.integrator, grad_lp, cav_mean, cav_var, y
             )
-            g_grid = jax.vmap(lambda f_row: grad_fn(f_row, y))(f_grid)
-            h_grid = jax.vmap(lambda f_row: hess_fn(f_row, y))(f_grid)
-            # Quadrature average = weighted sum over the node axis q → (N,).
-            g_avg = einx.dot("q, q n -> n", w_nodes, g_grid)
-            h_avg = einx.dot("q, q n -> n", w_nodes, h_grid)
+            # h̄ₙ = 𝔼_{cav}[∂²f log p(yₙ | f)]
+            h_avg = _per_site_expectation(
+                self.integrator, hess_lp, cav_mean, cav_var, y
+            )
 
             new_nat1, new_prec = newton_update(
                 cav_mean, g_avg, h_avg, precision_floor=self.precision_floor
@@ -478,15 +519,29 @@ class ExpectationPropagationMarkov(eqx.Module):
         tol: ``inf``-norm tolerance on the posterior mean. Default ``1e-5``.
         damping: Damping in (0, 1]. Default ``0.5``.
         precision_floor: Floor on the diagonal precision. Default ``1e-6``.
-        deg: Gauss-Hermite degree for the tilted-moment integrals.
-            Default ``20``.
+        deg: Deprecated. ``deg=k`` warns and means
+            ``integrator=gaussx.GaussHermiteIntegrator(order=k)``; passing
+            both raises ``ValueError``. Reads as ``None`` once resolved.
+        integrator: Rule for the tilted moments. Default
+            ``gaussx.GaussHermiteIntegrator(order=20)``. EP reads only its
+            ``order``, for `gaussx.ep_tilted_moments`, so any other rule
+            raises ``TypeError``.
     """
 
     max_iter: int = eqx.field(static=True, default=40)
     tol: float = eqx.field(static=True, default=1e-5)
     damping: float = eqx.field(static=True, default=0.5)
     precision_floor: float = eqx.field(static=True, default=1e-6)
-    deg: int = eqx.field(static=True, default=20)
+    deg: int | None = eqx.field(static=True, default=None)
+    # Last and None until __post_init__; see PosteriorLinearizationMarkov.
+    integrator: AbstractIntegrator = eqx.field(default=None)
+
+    def __post_init__(self) -> None:
+        self.integrator = _resolve_integrator(self.integrator, self.deg)
+        self.deg = None
+
+    def __check_init__(self) -> None:
+        _require_gauss_hermite(self.integrator)
 
     def fit(
         self,
@@ -514,14 +569,14 @@ class ExpectationPropagationMarkov(eqx.Module):
         # ``gaussx.ep_tilted_moments`` requires ``log_lik_fn(f)`` with the
         # per-site target baked in; close over ``y_n`` per site via vmap
         # to recover the (N,) shape contract.
-        deg = self.deg
+        order = _require_gauss_hermite(self.integrator).order
 
         def _per_site_tilted(
             m_n: Float[Array, ""],
             v_n: Float[Array, ""],
             y_n: Float[Array, ""],
         ) -> tuple[Float[Array, ""], Float[Array, ""]]:
-            return ep_tilted_moments(lambda f: lp(f, y_n), m_n, v_n, order=deg)
+            return ep_tilted_moments(lambda f: lp(f, y_n), m_n, v_n, order=order)
 
         converged = False
         n_iter = 0

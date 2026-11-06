@@ -14,10 +14,15 @@ Coverage strategy:
 
 from __future__ import annotations
 
+import dataclasses
+
+import gaussx
+import jax
 import jax.numpy as jnp
 import pytest
 from pyrox_gp import (
     BernoulliLikelihood,
+    ExpectationPropagation,
     ExpectationPropagationMarkov,
     GaussNewtonMarkovInference,
     GPPrior,
@@ -25,10 +30,14 @@ from pyrox_gp import (
     LaplaceInference,
     LaplaceMarkovInference,
     MarkovGPPrior,
+    Matern,
     MaternSDE,
     NonGaussConditionedMarkovGP,
+    PosteriorLinearization,
     PosteriorLinearizationMarkov,
 )
+from pyrox_gp._inference import _per_site_expectation
+from pyrox_gp._inference_nongauss import _log_prob_per_point_factory
 from pyrox_gp._inference_nongauss_markov import _prior_marginal_variance
 
 
@@ -213,3 +222,138 @@ def test_markov_laplace_runs_with_a_trend_prior() -> None:
     mean, var = post.predict(jnp.asarray([5.5, 6.0]))
     assert jnp.all(jnp.isfinite(mean))
     assert jnp.all(var > 0.0)
+
+
+# --- the integrator argument (#335) -----------------------------------------
+
+
+_MARKOV_STRATEGIES = [PosteriorLinearizationMarkov, ExpectationPropagationMarkov]
+
+
+def _assert_same_fit(first, second) -> None:
+    # Same nodes and weights, so the two runs differ by float64 round-off only.
+    assert first.n_iter == second.n_iter
+    assert jnp.allclose(first.site_nat1, second.site_nat1, rtol=1e-12, atol=1e-12)
+    assert jnp.allclose(first.site_nat2, second.site_nat2, rtol=1e-12, atol=1e-12)
+    assert jnp.allclose(
+        first.log_marginal_approx, second.log_marginal_approx, rtol=1e-12, atol=0.0
+    )
+
+
+@pytest.mark.parametrize("strategy", _MARKOV_STRATEGIES)
+def test_default_integrator_is_gauss_hermite_order_20(strategy) -> None:
+    built = strategy()
+    assert isinstance(built.integrator, gaussx.GaussHermiteIntegrator)
+    assert built.integrator.order == 20
+    assert built.deg is None
+
+
+@pytest.mark.parametrize("strategy", _MARKOV_STRATEGIES)
+def test_deg_warns_and_matches_the_integrator(strategy) -> None:
+    prior, _, y = _make_bernoulli_timeseries(8)
+    with pytest.warns(DeprecationWarning, match=r"GaussHermiteIntegrator\(order=10\)"):
+        from_deg = strategy(deg=10, max_iter=3)
+    from_integrator = strategy(
+        integrator=gaussx.GaussHermiteIntegrator(order=10), max_iter=3
+    )
+    _assert_same_fit(
+        from_deg.fit(prior, BernoulliLikelihood(), y),
+        from_integrator.fit(prior, BernoulliLikelihood(), y),
+    )
+
+
+@pytest.mark.parametrize("strategy", _MARKOV_STRATEGIES)
+def test_positional_arguments_keep_their_meaning(strategy) -> None:
+    built = strategy(10, 1e-3, 0.25, 1e-5)
+    assert built.max_iter == 10
+    assert built.tol == 1e-3
+    assert built.damping == 0.25
+    assert built.precision_floor == 1e-5
+    assert built.integrator.order == 20
+    with pytest.warns(DeprecationWarning, match="deg is deprecated"):
+        assert strategy(10, 1e-3, 0.25, 1e-5, 8).integrator.order == 8
+
+
+@pytest.mark.parametrize("strategy", _MARKOV_STRATEGIES)
+def test_deg_and_integrator_together_raise(strategy) -> None:
+    with pytest.raises(ValueError, match="not both"):
+        strategy(deg=10, integrator=gaussx.GaussHermiteIntegrator(order=10))
+
+
+@pytest.mark.parametrize("strategy", _MARKOV_STRATEGIES)
+def test_a_resolved_strategy_survives_replace(strategy) -> None:
+    with pytest.warns(DeprecationWarning):
+        built = strategy(deg=10)
+    rebuilt = dataclasses.replace(built, max_iter=2)
+    assert rebuilt.integrator.order == 10
+
+
+def test_posterior_linearization_cavity_expectations_match_the_old_grid() -> None:
+    """The grid the integrator replaced, built by hand as the reference."""
+    _, _, y = _make_bernoulli_timeseries(8)
+    likelihood = BernoulliLikelihood()
+    log_prob = _log_prob_per_point_factory(likelihood)
+    lp = lambda f_n, y_n: log_prob(f_n[None], y_n[None])[0]
+    grad_lp = jax.grad(lp)
+    mean = jnp.linspace(-1.0, 1.0, y.shape[0])
+    var = jnp.linspace(0.2, 1.5, y.shape[0])
+    points, weights = gaussx.gauss_hermite_points(20, dim=1)
+    grid = mean[None] + jnp.sqrt(var)[None] * points[:, 0][:, None]
+    per_node = jax.vmap(jax.vmap(grad_lp, in_axes=(0, 0)), in_axes=(0, None))(grid, y)
+    expected = (weights / jnp.sqrt(2.0 * jnp.pi))[None] @ per_node
+    got = _per_site_expectation(
+        gaussx.GaussHermiteIntegrator(order=20), grad_lp, mean, var, y
+    )
+    assert jnp.allclose(got, expected[0], rtol=1e-12, atol=1e-12)
+
+
+def test_posterior_linearization_converges_with_an_unscented_rule() -> None:
+    prior, _, y = _make_bernoulli_timeseries(8)
+    tol = 1e-6
+    unscented = PosteriorLinearizationMarkov(
+        integrator=gaussx.UnscentedIntegrator(alpha=1.0), max_iter=200, tol=tol
+    ).fit(prior, BernoulliLikelihood(), y)
+    hermite = PosteriorLinearizationMarkov(max_iter=200, tol=tol).fit(
+        prior, BernoulliLikelihood(), y
+    )
+    assert unscented.converged
+    # A 3-point and a 20-point rule on the same cavities: close, not identical.
+    assert jnp.max(jnp.abs(unscented.q_mean - hermite.q_mean)) < 0.1
+
+
+@pytest.mark.parametrize(
+    "strategy", [ExpectationPropagation, ExpectationPropagationMarkov]
+)
+def test_expectation_propagation_rejects_other_rules(strategy) -> None:
+    with pytest.raises(TypeError, match="GaussHermiteIntegrator"):
+        strategy(integrator=gaussx.UnscentedIntegrator())
+
+
+@pytest.mark.parametrize(
+    "dense, markov",
+    [
+        (PosteriorLinearization, PosteriorLinearizationMarkov),
+        (ExpectationPropagation, ExpectationPropagationMarkov),
+    ],
+)
+def test_dense_and_markov_strategies_agree_on_matern32(dense, markov) -> None:
+    """The SDE is exact for this kernel, so only the tol separates them."""
+    times = jnp.linspace(0.0, 3.0, 10)
+    y = (jnp.sin(2.0 * times) > 0.0).astype(jnp.float64)
+    tol = 1e-9
+    kwargs = {"max_iter": 400, "tol": tol}
+    dense_prior = GPPrior(
+        kernel=Matern(init_variance=1.0, init_lengthscale=0.7, nu=1.5),
+        X=times[:, None],
+        jitter=1e-10,
+    )
+    markov_prior = MarkovGPPrior(
+        MaternSDE(variance=1.0, lengthscale=0.7, order=1), times
+    )
+    likelihood = BernoulliLikelihood()
+    dense_fit = dense(**kwargs).fit(dense_prior, likelihood, y)
+    markov_fit = markov(**kwargs).fit(markov_prior, likelihood, y)
+    assert dense_fit.converged
+    assert markov_fit.converged
+    # 1e-5 is well above the tol and the 1e-10 jitter's effect on this 10-point Gram.
+    assert jnp.max(jnp.abs(dense_fit.q_mean - markov_fit.q_mean)) < 1e-5

@@ -531,7 +531,9 @@ diagonal-site math, but the global posterior recomputation runs through
 the Kalman filter / RTS smoother in `O(N d^3)` instead of a dense
 `O(N^3)` solve. Each `fit(prior, likelihood, y)` returns a
 `NonGaussConditionedMarkovGP` with the same `predict` API as the
-Gaussian-likelihood `ConditionedMarkovGP`.
+Gaussian-likelihood `ConditionedMarkovGP`. `PosteriorLinearizationMarkov` and
+`ExpectationPropagationMarkov` take the same `integrator` as their dense twins;
+expectation propagation accepts only a `gaussx.GaussHermiteIntegrator`.
 
 ::: pyrox_gp.LaplaceMarkovInference
 ::: pyrox_gp.GaussNewtonMarkovInference
