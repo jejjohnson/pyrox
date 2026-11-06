@@ -397,8 +397,7 @@ def _conditioner(seed: int = 3, D: int = 2):
 
 
 def test_x_none_path_is_not_silently_batched():
-    """With an unconditional warp, passing ``X`` must change nothing — this
-    pins the ``in_axes=(0, 0, 0, None)`` broadcast branch."""
+    """With an unconditional warp, passing ``X`` must change nothing."""
     lik = WarpedGaussianLikelihood(
         warp=_perturbed(_identity_spline(), scale=0.5),
         noise_var=jnp.asarray(0.1),
