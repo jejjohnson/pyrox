@@ -59,9 +59,37 @@ def test_project_does_not_declare_a_forbidden_package():
 
 
 @pytest.mark.parametrize("name", ["LastLayerLaplace", "last_layer_laplace"])
-def test_old_laplace_import_names_its_new_home(name):
-    with pytest.raises(ImportError, match=f"from pyrox_nn import {name}"):
-        exec(f"from pyrox.inference import {name}")
+def test_old_laplace_import_warns_and_returns_the_pyrox_nn_object(name):
+    pyrox_nn = pytest.importorskip("pyrox_nn")
+    with pytest.warns(DeprecationWarning, match=f"from pyrox_nn import {name}"):
+        got = getattr(pyrox.inference, name)
+    assert got is getattr(pyrox_nn, name)
+
+
+@pytest.mark.parametrize("name", ["LastLayerLaplace", "last_layer_laplace"])
+def test_old_laplace_import_names_pyrox_nn_when_it_is_not_installed(name):
+    # None in sys.modules makes the import raise, as if it were not installed.
+    code = (
+        "import sys\n"
+        "sys.modules['pyrox_nn'] = None\n"
+        "try:\n"
+        f"    from pyrox.inference import {name}\n"
+        "except ImportError as error:\n"
+        "    assert 'install pyrox-nn' in str(error), error\n"
+        "else:\n"
+        "    raise AssertionError('expected an ImportError')\n"
+    )
+    subprocess.run([sys.executable, "-W", "ignore", "-c", code], check=True)
+
+
+def test_importing_the_core_does_not_load_pyrox_nn():
+    modules = [m.name for m in pkgutil.walk_packages([str(SRC)], prefix="pyrox.")]
+    code = (
+        "import importlib, sys\n"
+        f"for m in {modules!r}: importlib.import_module(m)\n"
+        "assert 'pyrox_nn' not in sys.modules\n"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
 
 
 def test_inference_still_rejects_an_unknown_name():

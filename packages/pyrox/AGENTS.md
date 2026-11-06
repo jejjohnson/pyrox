@@ -56,6 +56,8 @@ Implementation: `_core/pyrox_module.py` (`PyroxModule`, the per-call
 `jax`, `equinox`, `numpyro`, `einx` (+ `jaxtyping`, which arrives through
 equinox). Extras: `optax`, `colab`. No internal dependencies, and no gaussx,
 lineax, kernellib or geonnax (`tests/test_core_import_guard.py`).
+`pyrox.inference.last_layer_laplace` and `LastLayerLaplace` are deprecated: a
+module `__getattr__` looks them up in `pyrox_nn` at access time, and warns.
 
 ## Tests
 

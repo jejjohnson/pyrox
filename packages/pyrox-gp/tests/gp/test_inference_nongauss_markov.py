@@ -263,6 +263,18 @@ def test_deg_warns_and_matches_the_integrator(strategy) -> None:
 
 
 @pytest.mark.parametrize("strategy", _MARKOV_STRATEGIES)
+def test_positional_arguments_keep_their_meaning(strategy) -> None:
+    built = strategy(10, 1e-3, 0.25, 1e-5)
+    assert built.max_iter == 10
+    assert built.tol == 1e-3
+    assert built.damping == 0.25
+    assert built.precision_floor == 1e-5
+    assert built.integrator.order == 20
+    with pytest.warns(DeprecationWarning, match="deg is deprecated"):
+        assert strategy(10, 1e-3, 0.25, 1e-5, 8).integrator.order == 8
+
+
+@pytest.mark.parametrize("strategy", _MARKOV_STRATEGIES)
 def test_deg_and_integrator_together_raise(strategy) -> None:
     with pytest.raises(ValueError, match="not both"):
         strategy(deg=10, integrator=gaussx.GaussHermiteIntegrator(order=10))
