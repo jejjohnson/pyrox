@@ -87,11 +87,9 @@ from __future__ import annotations
 
 from typing import cast
 
-import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import numpy as np
 import numpyro
 from flowjax.bijections import AbstractBijection
 from jaxtyping import Array, Float
@@ -108,6 +106,7 @@ from pyrox_gp._latent_factor import (
 from pyrox_gp._models import ConditionedGP, GPPrior
 from pyrox_gp._multi_output import _validate_kernel_scopes_unique
 from pyrox_gp._protocols import Kernel
+from pyrox_gp._warped import _pushforward_moments
 
 
 class LatentFactorGPPrior(eqx.Module):
@@ -367,10 +366,15 @@ class ConditionedLatentFactorGP(eqx.Module):
             include_noise: Add the observation noise variance. With a
                 warp, the noise lives in the warped space, so it is added
                 before the pushforward.
-            quad_order: Gauss-Hermite order for the warped pushforward.
-                Ignored when ``warp is None``. A moderate order is fine —
-                the quadrature appears only here, never in training.
+            quad_order: Gauss-Hermite order for the warped pushforward, in
+                ``[2, 256]``. Ignored when ``warp is None``. A moderate order
+                is fine — the quadrature appears only here, never in training.
 
+        Returns:
+            Tuple ``(mean, var)`` of marginal moments, each ``(T, P)``.
+
+        Raises:
+            ValueError: If ``quad_order`` is outside ``[2, 256]`` with a warp.
         """
         z_mean, z_var = self.predict_latents(X_new)
         # lfr_model gives each latent factor the covariance K + nugget*I,
@@ -389,20 +393,9 @@ class ConditionedLatentFactorGP(eqx.Module):
         warp = self.prior.warp
         if warp is None:
             return mean, var
-        nodes, weights = np.polynomial.hermite_e.hermegauss(quad_order)
-        nodes = jnp.asarray(nodes)
-        weights = jnp.asarray(weights) / np.sqrt(2.0 * np.pi)
-        # fs: (order, T, P) — per-node evaluation points in the warped space.
-        fs = mean[None] + jnp.sqrt(var)[None] * nodes[:, None, None]
-        g = jax.vmap(jax.vmap(warp.transform))(fs)
-        m1 = einx.dot("s, s t p -> t p", weights, g)
-        # Accumulate the *centered* second moment. E[G^2] - E[G]^2 cancels
-        # catastrophically when the transformed values carry a large offset
-        # relative to their spread (a mean of 1e4 with variance 1 loses the
-        # variance entirely in float32), and can even come out negative.
-        centered = g - m1[None]
-        var = einx.dot("s, s t p -> t p", weights, centered**2)
-        return m1, var
+        return _pushforward_moments(
+            jax.vmap(warp.transform), mean, var, order=quad_order
+        )
 
 
 def lfr_factor(
