@@ -37,7 +37,7 @@ import `api` or `preprocessing`, which import pandas at module scope.
 - **Per-example cores** run over `(*batch, D)` inputs through
   `_batching.vmap_over_flat_batch`, with the weights sampled once per model
   call.
-- **Never import `pyrox_gp`** (`tests/test_import_guard.py`): pyrox-nn and
+- **Never import `pyrox_gp`** (`tests/test_nn_import_guard.py`): pyrox-nn and
   pyrox-gp are siblings over `pyrox`. A caller may pass a `pyrox_gp` kernel to a
   layer, and tests may import it. Type a kernel field `kl.AbstractKernel`.
 - **Deterministic architecture belongs in geonnax**; basis functions come from

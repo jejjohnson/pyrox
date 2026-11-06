@@ -24,7 +24,8 @@ the next person will find and reuse it.
 
 Dependencies point one way: nothing imports upward. `pyrox-gp`, `pyrox-nn` and
 `pyrox-lgm` are siblings over `pyrox`, so `pyrox-nn` and `pyrox-lgm` never import
-`pyrox-gp` (`tests/test_import_guard.py` in each); a caller may still pass a
+`pyrox-gp` (`test_import_guard.py` in pyrox-lgm, `test_nn_import_guard.py` in
+pyrox-nn); a caller may still pass a
 `pyrox_gp` kernel to a `pyrox_nn` layer, and tests may import both.
 `pyrox` exports only `__version__`, `_core` and `inference`: the bridge's
 public home is `pyrox._core` despite the underscore.
@@ -177,7 +178,7 @@ fails under a handler, a transform or a second instance.
 | `packages/pyrox/tests/test_pyrox.py` | `pyrox._core`'s exports and types |
 | `packages/pyrox/tests/test_capabilities.py` | `docs/capabilities.md` is current; no name bound to two objects |
 | `tests/**/test_docstrings.py` (pyrox, pyrox-gp, pyrox-nn) | No Sphinx / RST markup in source |
-| `packages/pyrox-lgm/tests/test_import_guard.py`, `packages/pyrox-nn/tests/test_import_guard.py` | pyrox-lgm and pyrox-nn never import pyrox-gp |
+| `packages/pyrox-lgm/tests/test_import_guard.py`, `packages/pyrox-nn/tests/test_nn_import_guard.py` | pyrox-lgm and pyrox-nn never import pyrox-gp |
 | `packages/pyrox-gp/tests/gp/test_nn_split_deprecations.py` | The names that moved out of pyrox-gp warn and still work |
 | `packages/pyrox-lgm/tests/test_public_api.py`, `test_doctests.py` | lgm `__all__` names exist, no duplicates; lgm doctests run |
 | `packages/pyrox-lgm/tests/test_rinla_fixtures.py` | `inla()` against R-INLA reference fixtures (slow) |
