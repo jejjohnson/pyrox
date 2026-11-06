@@ -890,17 +890,16 @@ def _hyperpar_summaries(model, u_star, cov_u, marginals=None) -> dict[str, Summa
             # for exp, E = exp(mu + sigma^2 / 2)).
             sd_u = jnp.sqrt(jnp.diagonal(cov_u)[i : i + size])
             qs = [to_user(u_star[i : i + size] + zq * sd_u) for zq in z]
-            nodes, gh = np.polynomial.hermite_e.hermegauss(_EB_ORDER)
-            grid = np.stack(np.meshgrid(*[nodes] * size, indexing="ij"), -1)
-            wts = np.prod(np.meshgrid(*[gh] * size, indexing="ij"), axis=0)
-            wts = jnp.asarray((wts / wts.sum()).reshape(-1))
-            L = jnp.linalg.cholesky(cov_u[i : i + size, i : i + size])
-            us = u_star[i : i + size] + jnp.asarray(grid.reshape(-1, size)) @ L.T
-            values = jax.vmap(to_user)(us)
-            w = wts.reshape((-1,) + (1,) * (values.ndim - 1))
-            mean = jnp.sum(w * values, axis=0)
-            var = jnp.sum(w * values**2, axis=0) - mean**2
-            sd = jnp.sqrt(jnp.maximum(var, 0.0))
+            # (𝔼[g(u)], Cov[g(u)], ·) for u ~ N(u*, Σᵤ), g = to_user flattened
+            mean, cov, _ = gx.moment_transform(
+                lambda u: jnp.ravel(to_user(u)),
+                u_star[i : i + size],
+                cov_u[i : i + size, i : i + size],
+                integrator=gx.GaussHermiteIntegrator(order=_EB_ORDER),
+            )
+            mean = mean.reshape(qs[0].shape)
+            # sd = √diag(Cov[g(u)])
+            sd = jnp.sqrt(jnp.diagonal(cov)).reshape(qs[0].shape)
         out[key] = Summary(mean, sd, *qs)
         i += size
     return out

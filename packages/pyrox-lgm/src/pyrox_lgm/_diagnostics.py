@@ -44,9 +44,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
 
+import gaussx as gx
 import jax
 import jax.numpy as jnp
-import numpy as np
 from jax.scipy.special import logsumexp
 from jaxtyping import Array, Float
 
@@ -99,9 +99,10 @@ def diagnostics(result: INLAResult, *, order: int = 80) -> Diagnostics:
     """
     model, data = result.model, result.data
     y = jnp.asarray(data["y"])
-    nodes, gh = np.polynomial.hermite_e.hermegauss(order)
-    log_g = jnp.log(jnp.asarray(gh / gh.sum()))
-    z = jnp.asarray(nodes)
+    # Not y.dtype: count data can be integer.
+    points, gh = gx.gauss_hermite_points(order, 1, dtype=result.predictor_means.dtype)
+    log_g = jnp.log(gh / gh.sum())
+    z = points[:, 0]
     lik = model.likelihood
 
     def nodes_of(m, v):  # (n, order) quadrature nodes of N(m, v)
