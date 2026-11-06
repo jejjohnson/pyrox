@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from pyrox_gp._basis import (
+from geonnax.basis import (
     fourier_basis,
     fourier_basis_1d,
     fourier_eigenvalues,

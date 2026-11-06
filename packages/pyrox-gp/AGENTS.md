@@ -24,7 +24,7 @@ private `_*.py` modules, grouped by concept in `docs/capabilities.md`):
 | Multi-output | `_multi_output.py`, `_multi_output_models.py` | `ICMKernel`, `MultiOutputGPPrior` |
 | Latent factor | `_latent_factor.py`, `_latent_factor_models.py`, `_latent_init.py` | — |
 | Pathwise | `_pathwise.py` | `PathwiseSampler` |
-| Shared helpers (private) | `_context.py` (`_kernel_context`, `_kernel_contexts`), `_basis/` (spectral densities, RFF draws, geonnax bases; also used by pyrox-nn), `_kernel_operator.py` (`KernelOperator`, `freeze_kernel`) | — |
+| Shared helpers (private) | `_context.py` (deprecated aliases of `pyrox._core.call_context` and `call_contexts`), `_basis/` (RFF draws; the private `_isotropic_spectral_density`; deprecated re-exports of `geonnax.basis`), `_kernel_operator.py` (`KernelOperator`, `freeze_kernel`) | — |
 
 ## Contracts
 
@@ -38,7 +38,7 @@ private `_*.py` modules, grouped by concept in `docs/capabilities.md`):
   belongs in kernellib.
 - **The kernel context.** Evaluate a kernel more than once per model call
   (Gram + `diag`, several blocks, several latents) only inside
-  `with _kernel_context(kernel):` / `_kernel_contexts(kernels)`, so its
+  `with call_context(kernel):` / `call_contexts(kernels)` (from `pyrox._core`), so its
   hyperparameters are drawn once (`tests/gp/test_models.py`).
 - **Guides** subclass `Guide` (`sample(key)`, `log_prob(f)`); `svgp_elbo`
   also needs `predict(K_xz, K_zz_op, K_xx_diag)` and

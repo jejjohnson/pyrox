@@ -33,8 +33,8 @@ Rules for all of them:
   `solver: AbstractSolverStrategy | None` (guides resolve it with
   `_resolve_solver`); no new `cho_solve` / `solve_triangular` /
   `jnp.linalg.inv` on a Gram.
-- Every multi-call kernel evaluation inside `_kernel_context(kernel)` (or
-  `_kernel_contexts` for several latents).
+- Every multi-call kernel evaluation inside `call_context(kernel)` (or
+  `call_contexts` for several latents), from `pyrox._core`.
 - Sites registered by the component use a caller-supplied name (`gp_sample`
   / `gp_factor` style) or the bridge (`pyrox_sample` in a `PyroxModule`).
 - Inference strategies reuse `_prior_K`, `_per_point_grad_hess`,

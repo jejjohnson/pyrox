@@ -26,8 +26,8 @@ import lineax as lx
 import numpy as np
 from gaussx import BlockDiag, Kronecker, oilmm_back_project, oilmm_project, sum_operator
 from jaxtyping import Array, Float
+from pyrox._core import call_context, call_contexts
 
-from pyrox_gp._context import _kernel_context, _kernel_contexts
 from pyrox_gp._protocols import Kernel
 
 
@@ -229,7 +229,7 @@ class LMCKernel(eqx.Module):
         unique kernel instance, so reusing the same kernel across latents
         (for hyperparameter tying) registers each sample site exactly once.
         """
-        with _kernel_contexts(self.kernels):
+        with call_contexts(self.kernels):
             return tuple(
                 (self.coregionalization_matrix(q), kernel(X1, X2))
                 for q, kernel in enumerate(self.kernels)
@@ -288,7 +288,7 @@ class LMCKernel(eqx.Module):
 
     def diag(self, X: Float[Array, "N D"]) -> Float[Array, "N P"]:
         """Return per-input, per-output marginal variances with shape ``(N, P)``."""
-        with _kernel_contexts(self.kernels):
+        with call_contexts(self.kernels):
             # Per-latent variance kₙ ⊗ wₚ² → (N, P), summed over latents.
             terms = [
                 einx.multiply(
@@ -352,7 +352,7 @@ class ICMKernel(eqx.Module):
         X2: Float[Array, "N2 D"],
     ) -> tuple[Float[Array, "P P"], Float[Array, "N1 N2"]]:
         """Return the shared ``(B, K(X1, X2))`` Kronecker factors."""
-        with _kernel_context(self.kernel):
+        with call_context(self.kernel):
             return self.coregionalization_matrix(), self.kernel(X1, X2)
 
     def output_covariance(
@@ -397,7 +397,7 @@ class ICMKernel(eqx.Module):
 
     def diag(self, X: Float[Array, "N D"]) -> Float[Array, "N P"]:
         """Return per-input, per-output marginal variances with shape ``(N, P)``."""
-        with _kernel_context(self.kernel):
+        with call_context(self.kernel):
             # kₙ ⊗ diag(B)ₚ → (N, P) marginal variances.
             return einx.multiply(
                 "n, p -> n p",
@@ -505,7 +505,7 @@ class OILMMKernel(eqx.Module):
         All latent kernel evaluations share one per-call context per
         unique kernel instance, mirroring `LMCKernel.kronecker_factors`.
         """
-        with _kernel_contexts(self.kernels):
+        with call_contexts(self.kernels):
             return tuple(
                 (
                     einx.dot("i, j -> i j", self.mixing[:, q], self.mixing[:, q]),
@@ -555,7 +555,7 @@ class OILMMKernel(eqx.Module):
 
     def diag(self, X: Float[Array, "N D"]) -> Float[Array, "N P"]:
         """Return per-input, per-output marginal signal variances."""
-        with _kernel_contexts(self.kernels):
+        with call_contexts(self.kernels):
             # Per-latent variance kₙ ⊗ wₚ² → (N, P), summed over latents.
             terms = [
                 einx.multiply(
@@ -591,7 +591,7 @@ class SharedInducingPoints(eqx.Module):
         if not kernels:
             raise ValueError("kernels must be non-empty.")
         _validate_kernel_scopes_unique(kernels)
-        with _kernel_contexts(kernels):
+        with call_contexts(kernels):
             return tuple(kernel(self.locations, self.locations) for kernel in kernels)
 
     def K_uu_operator(self, kernels: tuple[Kernel, ...]) -> BlockDiag:
@@ -603,7 +603,7 @@ class SharedInducingPoints(eqx.Module):
         if not kernels:
             raise ValueError("kernels must be non-empty.")
         _validate_kernel_scopes_unique(kernels)
-        with _kernel_contexts(kernels):
+        with call_contexts(kernels):
             blocks = tuple(
                 _psd_matrix_op(kernel(self.locations, self.locations))
                 for kernel in kernels
@@ -623,7 +623,7 @@ class SharedInducingPoints(eqx.Module):
         if not kernels:
             raise ValueError("kernels must be non-empty.")
         _validate_kernel_scopes_unique(kernels)
-        with _kernel_contexts(kernels):
+        with call_contexts(kernels):
             return tuple(kernel(self.locations, X) for kernel in kernels)
 
     def inducing_blocks(
@@ -646,7 +646,7 @@ class SharedInducingPoints(eqx.Module):
         if not kernels:
             raise ValueError("kernels must be non-empty.")
         _validate_kernel_scopes_unique(kernels)
-        with _kernel_contexts(kernels):
+        with call_contexts(kernels):
             K_uu_blocks = tuple(
                 kernel(self.locations, self.locations) for kernel in kernels
             )

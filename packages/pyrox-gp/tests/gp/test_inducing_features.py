@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import gaussx
 import jax.numpy as jnp
+import kernellib as kl
 import lineax as lx
 import numpy as np
 import pytest
+from pyrox._core import freeze
 from pyrox_gp import (
     RBF,
     DecoupledInducingFeatures,
@@ -26,7 +28,6 @@ from pyrox_gp import (
     SlepianInducingFeatures,
     SparseGPPrior,
     SphericalHarmonicInducingFeatures,
-    funk_hecke_coefficients,
 )
 
 
@@ -73,7 +74,10 @@ def test_vff_k_uu_is_diagonal_and_survives_dispatch():
 
 def test_vff_k_uu_diagonal_matches_spectral_density():
     """Diagonal entries of K_uu equal ``S(sqrt(lambda_j)) + jitter``."""
-    from pyrox_gp._basis import fourier_eigenvalues, spectral_density
+    from geonnax.basis import fourier_eigenvalues
+    from pyrox_gp._basis._spectral_density import (
+        _isotropic_spectral_density as spectral_density,
+    )
 
     kernel = RBF(init_lengthscale=0.7, init_variance=1.5)
     features = FourierInducingFeatures.init(in_features=1, num_basis_per_dim=8, L=4.0)
@@ -138,7 +142,7 @@ def test_vff_predictive_blocks_returns_diagonal_op():
 def test_vish_funk_hecke_a0_matches_kernel_average():
     r""":math:`a_0 = 2\pi \int_{-1}^{1} k(t) dt` for the constant Legendre."""
     kernel = RBF(init_lengthscale=1.0, init_variance=1.0)
-    a = funk_hecke_coefficients(kernel, l_max=3, num_quadrature=128)
+    a = kl.funk_hecke_coefficients(freeze(kernel), l_max=3, num_quadrature=128)
     assert a.shape == (4,)
     assert float(a[0]) > 0
 
@@ -234,9 +238,9 @@ def test_slepian_inducing_k_ux_respects_cap_centre():
 
     # K_ux must agree with a direct evaluation that uses the cap-centred
     # frame, matching SlepianCapBasis.evaluate's convention.
-    from pyrox_gp._basis import real_spherical_harmonics
+    from geonnax.basis import real_spherical_harmonics
 
-    a = funk_hecke_coefficients(kernel, l_max=3, num_quadrature=256)
+    a = kl.funk_hecke_coefficients(freeze(kernel), l_max=3, num_quadrature=256)
     a_per_feature = a[
         jnp.asarray([ell for ell in range(4) for _ in range(2 * ell + 1)])
     ]

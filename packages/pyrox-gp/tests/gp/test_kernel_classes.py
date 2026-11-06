@@ -10,6 +10,7 @@ values keep their sites separate so stacked kernels compose cleanly.
 from __future__ import annotations
 
 import jax.numpy as jnp
+import kernellib as kl
 import numpyro.distributions as dist
 import pytest
 from kernellib import functional as _k
@@ -323,7 +324,9 @@ def test_spectral_density_accepts_singleton_ard_lengthscale():
     """``input_dim=1`` registers a ``(1,)`` lengthscale, which is a scalar
     in disguise — the 1-D closed forms stay valid, so it must not be
     rejected (FourierInducingFeatures relies on this)."""
-    from pyrox_gp._basis import spectral_density
+    from pyrox_gp._basis._spectral_density import (
+        _isotropic_spectral_density as spectral_density,
+    )
 
     ard = RBF(pyrox_name="RBF_ard_1d", input_dim=1, init_lengthscale=0.7)
     iso = RBF(pyrox_name="RBF_iso_1d", init_lengthscale=0.7)
@@ -338,7 +341,9 @@ def test_spectral_density_accepts_singleton_ard_lengthscale():
 def test_spectral_density_rejects_ard_kernels():
     """The registered closed forms are isotropic; an ARD lengthscale must
     raise rather than silently pair dimensions with unrelated frequencies."""
-    from pyrox_gp._basis import spectral_density
+    from pyrox_gp._basis._spectral_density import (
+        _isotropic_spectral_density as spectral_density,
+    )
 
     kernel = RBF(pyrox_name="RBF_ard_sd", input_dim=3)
     with kernel._get_context(), pytest.raises(NotImplementedError, match="isotropic"):
@@ -349,7 +354,9 @@ def test_spectral_density_singleton_ard_still_rejected_for_multidim_domain():
     """A ``(1,)`` lengthscale is only a scalar in disguise on a 1-D domain.
     With ``D > 1`` the kernel would reject the inputs, so the density must
     not silently describe a domain it cannot evaluate."""
-    from pyrox_gp._basis import spectral_density
+    from pyrox_gp._basis._spectral_density import (
+        _isotropic_spectral_density as spectral_density,
+    )
 
     kernel = RBF(pyrox_name="RBF_ard_1d_2ddomain", input_dim=1)
     with kernel._get_context(), pytest.raises(NotImplementedError, match="isotropic"):
@@ -387,12 +394,12 @@ def test_rff_rejects_mismatched_feature_dimensions():
 def test_funk_hecke_rejects_ard_kernels():
     """Funk-Hecke samples the kernel along one meridian, which is valid
     only for a zonal kernel; an ARD kernel is orientation dependent."""
-    from pyrox_gp import funk_hecke_coefficients
+    from pyrox._core import freeze
 
     kernel = RBF(pyrox_name="RBF_ard_zonal", input_dim=3)
     with kernel._get_context(), pytest.raises(NotImplementedError, match="zonal"):
-        funk_hecke_coefficients(kernel, l_max=3)
+        kl.funk_hecke_coefficients(freeze(kernel), l_max=3)
 
     iso = RBF(pyrox_name="RBF_iso_zonal")
     with iso._get_context():
-        assert funk_hecke_coefficients(iso, l_max=3).shape == (4,)
+        assert kl.funk_hecke_coefficients(freeze(iso), l_max=3).shape == (4,)

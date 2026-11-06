@@ -7,8 +7,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from geonnax.basis import real_spherical_harmonics
 from pyrox_gp import RBF, SphericalHarmonicInducingFeatures
-from pyrox_gp._basis import real_spherical_harmonics
 from pyrox_nn import (
     Cartesian3DEncoder,
     CyclicEncoder,

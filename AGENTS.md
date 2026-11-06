@@ -18,12 +18,14 @@ the next person will find and reuse it.
 | Package (dist) | Import | Use it for | Depends on (internal) |
 |---|---|---|---|
 | `pyrox` | `pyrox._core`, `pyrox.inference` | The bridge (`PyroxModule`, `pyrox_method`, `Parameterized`) and ensemble MAP / VI | — |
-| `pyrox-gp` | `pyrox_gp` | GP kernels (with priors), guides, likelihoods; exact, sparse, Markov, multi-output and warped GPs; non-Gaussian inference; pathwise sampling; the shared basis helpers (`_basis`) | pyrox |
-| `pyrox-nn` | `pyrox_nn` (+ `pyrox_nn.api`, `pyrox_nn.preprocessing` behind `[bnf]`) | Bayesian / uncertainty-aware layers on geonnax cores, the Bayesian Neural Field estimator | pyrox, pyrox-gp |
+| `pyrox-gp` | `pyrox_gp` | GP kernels (with priors), guides, likelihoods; exact, sparse, Markov, multi-output and warped GPs; non-Gaussian inference; pathwise sampling | pyrox |
+| `pyrox-nn` | `pyrox_nn` (+ `pyrox_nn.api`, `pyrox_nn.preprocessing` behind `[bnf]`) | Bayesian / uncertainty-aware layers on geonnax cores, the Bayesian Neural Field estimator | pyrox (**never** pyrox-gp) |
 | `pyrox-lgm` | `pyrox_lgm` | Latent Gaussian models in precision form: GMRF components, PC priors, `inla()` | pyrox (**never** pyrox-gp) |
 
-Dependencies point one way: nothing imports upward, and `pyrox-lgm` never
-imports `pyrox-gp` (`packages/pyrox-lgm/tests/test_import_guard.py`).
+Dependencies point one way: nothing imports upward. `pyrox-gp`, `pyrox-nn` and
+`pyrox-lgm` are siblings over `pyrox`, so `pyrox-nn` and `pyrox-lgm` never import
+`pyrox-gp` (`tests/test_import_guard.py` in each); a caller may still pass a
+`pyrox_gp` kernel to a `pyrox_nn` layer, and tests may import both.
 `pyrox` exports only `__version__`, `_core` and `inference`: the bridge's
 public home is `pyrox._core` despite the underscore.
 
@@ -71,8 +73,11 @@ fails under a handler, a transform or a second instance.
 | A Gaussian log-density, KL, whitening, conditioning | `gaussx.gaussian_log_prob`, `gaussian_kl`, `whitened_svgp_predict`, `whiten_covariance`, `conditional` |
 | A Kalman filter / RTS smoother / SDE autocovariance | `gaussx.kalman_filter`, `rts_smoother`, `sde_autocovariance`; the `MarkovGPPrior` family here |
 | A kernel function | `kernellib.functional`; as a module with priors, the `pyrox_gp` kernels |
-| Calling one kernel several times in one model (Gram + diag, several blocks) | `with pyrox_gp._context._kernel_context(kernel):` (`_kernel_contexts` for several) |
-| Fourier / spherical-harmonic / Slepian bases, spectral densities, RFF draws | `pyrox_gp._basis` (re-exports `geonnax.basis` + `spectral_density`, RFF draws) |
+| Calling one module several times in one model (Gram + diag, several blocks) | `with pyrox._core.call_context(kernel):` (`call_contexts` for several) |
+| Resolving a kernel's priors once, for code that takes a plain kernellib kernel | `pyrox._core.freeze(kernel)` |
+| Fourier / spherical-harmonic / Slepian bases | `geonnax.basis` |
+| Spectral densities, Funk–Hecke coefficients | kernellib (`unit_spectral_density`, `spectral_density`, `kl.funk_hecke_coefficients`) on `freeze(kernel)` |
+| RFF prior draws for a pyrox kernel | `pyrox_gp._basis` (`draw_rff_cosine_basis`, `evaluate_rff_cosine_paths`) |
 | A network core | `geonnax`; wrap it with `eqx.tree_at` + sites (see `pyrox_nn._sngp`, `_vssgp`) |
 | Flattening `(*batch, D)` around a single-example core | `pyrox_nn._batching.vmap_over_flat_batch` |
 | An ensemble of MAP / VI fits, a per-group optimiser | `pyrox.inference` (`ensemble_map`, `ensemble_vi`, `EnsembleMAP`, `EnsembleVI`, `param_group_optimizer`) |
@@ -109,7 +114,7 @@ fails under a handler, a transform or a second instance.
   close over the module (`jax.jit(handlers.seed(model, 0))`) rather than
   passing it as an argument.
 - **The private helpers are API across packages.** The `PyroxModule`
-  methods `_get_context` (used by `pyrox_gp._context` and
+  methods `_get_context` (used by `pyrox._core.call_context` and
   `pyrox_gp._kernel_operator`), `_pyrox_scope_name` (by
   `pyrox_gp._multi_output`) and `_pyrox_fullname` (by `pyrox_nn`) are called
   downstream: don't rename them.
@@ -143,7 +148,7 @@ fails under a handler, a transform or a second instance.
   (`pyrox_gp._inference_nongauss`, `pyrox_gp._latent_factor`); new code adds
   none, and a change that touches one is a chance to convert it.
 - **One draw per model call.** Evaluate a kernel with priors more than once
-  only inside `_kernel_context(kernel)`, or the second call resamples
+  only inside `call_context(kernel)`, or the second call resamples
   (`seed`) or collides (`trace`).
 - **Dtypes.** The suite runs with x64 on (root `conftest.py`); build
   constants with the input's dtype so float32 callers stay float32.
@@ -172,7 +177,8 @@ fails under a handler, a transform or a second instance.
 | `packages/pyrox/tests/test_pyrox.py` | `pyrox._core`'s exports and types |
 | `packages/pyrox/tests/test_capabilities.py` | `docs/capabilities.md` is current; no name bound to two objects |
 | `tests/**/test_docstrings.py` (pyrox, pyrox-gp, pyrox-nn) | No Sphinx / RST markup in source |
-| `packages/pyrox-lgm/tests/test_import_guard.py` | pyrox-lgm never imports pyrox-gp |
+| `packages/pyrox-lgm/tests/test_import_guard.py`, `packages/pyrox-nn/tests/test_import_guard.py` | pyrox-lgm and pyrox-nn never import pyrox-gp |
+| `packages/pyrox-gp/tests/gp/test_nn_split_deprecations.py` | The names that moved out of pyrox-gp warn and still work |
 | `packages/pyrox-lgm/tests/test_public_api.py`, `test_doctests.py` | lgm `__all__` names exist, no duplicates; lgm doctests run |
 | `packages/pyrox-lgm/tests/test_rinla_fixtures.py` | `inla()` against R-INLA reference fixtures (slow) |
 

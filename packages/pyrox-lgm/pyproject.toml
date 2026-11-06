@@ -24,7 +24,7 @@ classifiers = [
 dependencies = [
     "pyrox",
     "gaussx[numpyro]>=0.6.5",
-    "kernellib>=0.0.17",
+    "kernellib>=0.0.22",
     "matfree>=0.6.0",
     "numpyro>=0.21",
     "optax>=0.2.8",
@@ -43,7 +43,7 @@ Repository = "https://github.com/jejjohnson/pyrox"
 # Neither is on PyPI yet; resolve the release tags from GitHub, in step with
 # pyrox-gp's sources (one version per package across the workspace).
 gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.6.5" }
-kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.17" }
+kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.22" }
 
 [build-system]
 requires = ["hatchling>=1.27"]

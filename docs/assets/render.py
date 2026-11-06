@@ -332,30 +332,30 @@ def write_hero() -> None:
 
 PACKAGES = {
     # name: (x, y, w, description, extra dependencies)
-    "pyrox-nn": (
-        30,
-        20,
-        400,
-        "Bayesian layers" + DOT + "SIREN" + DOT + "SNGP" + DOT + "BNF",
-        "+ geonnax",
-    ),
     "pyrox-gp": (
         30,
-        160,
+        20,
         400,
         "kernels" + DOT + "guides" + DOT + "likelihoods" + DOT + "GP models",
         "+ gaussx" + DOT + "kernellib" + DOT + "geonnax" + DOT + "flowjax",
     ),
+    "pyrox-nn": (
+        30,
+        130,
+        400,
+        "Bayesian layers" + DOT + "SIREN" + DOT + "SNGP" + DOT + "BNF",
+        "+ kernellib" + DOT + "geonnax",
+    ),
     "pyrox-lgm": (
-        530,
-        90,
+        30,
+        240,
         400,
         "GMRF components" + DOT + "PC priors" + DOT + "inla()",
         "+ gaussx" + DOT + "kernellib" + DOT + "matfree",
     ),
     "pyrox": (
-        270,
-        300,
+        510,
+        130,
         420,
         "PyroxModule" + DOT + "Parameterized" + DOT + "ensemble MAP / VI",
         "+ jax" + DOT + "equinox" + DOT + "numpyro",
@@ -365,16 +365,16 @@ PACKAGES = {
 
 def write_layers() -> None:
     """The four packages; arrows point at what each one imports."""
-    width, height, h = 960, 484, 92
+    width, height, h = 960, 416, 92
     for mode, t in THEME.items():
         head = f"layers-{mode}-head"
         a = t["arrow"]
         parts = [arrow_defs(head, a)]
 
-        # nn → gp, gp → pyrox, lgm → pyrox (pyrox-lgm never imports pyrox-gp).
-        parts.append(line([(230, 112), (230, 157)], a, head))
-        parts.append(line([(230, 252), (230, 346), (267, 346)], a, head))
-        parts.append(line([(730, 182), (730, 346), (693, 346)], a, head))
+        # gp, nn and lgm are siblings: each imports pyrox, and none another.
+        parts.append(line([(430, 66), (470, 66), (470, 176), (507, 176)], a, head))
+        parts.append(line([(430, 176), (507, 176)], a, head))
+        parts.append(line([(430, 286), (470, 286), (470, 176), (507, 176)], a, head))
 
         for name, (x, y, w, desc, deps) in PACKAGES.items():
             core = name == "pyrox"
@@ -397,22 +397,22 @@ def write_layers() -> None:
             parts.append(text(x + 80, y + 77, deps, size=12.5, fill=t["muted"]))
 
         parts.append(
-            f'<rect x="20" y="420" width="920" height="44" rx="10" fill="{t["band"]}"/>'
+            f'<rect x="20" y="352" width="920" height="44" rx="10" fill="{t["band"]}"/>'
         )
         for x, head_word, names in [
             (44, "Foundations", ["jax", "equinox", "numpyro", "einx"]),
             (500, "GeoML", ["gaussx", "kernellib", "geonnax", "matfree", "flowjax"]),
         ]:
             parts.append(
-                f'<text x="{x}" y="447" font-family="{SANS}" font-size="13" '
+                f'<text x="{x}" y="379" font-family="{SANS}" font-size="13" '
                 f'fill="{t["muted"]}"><tspan font-weight="700" fill="{t["text"]}">'
                 f"{head_word}</tspan>  {DOT.join(names)}</text>"
             )
 
         label = (
-            "pyrox-nn builds on pyrox-gp, which builds on pyrox; pyrox-lgm builds "
-            "on pyrox directly. All sit on JAX, Equinox and NumPyro and on the "
-            "GeoML packages gaussx, kernellib and geonnax."
+            "pyrox-gp, pyrox-nn and pyrox-lgm are siblings that each build on pyrox "
+            "directly. All sit on JAX, Equinox and NumPyro and on the GeoML packages "
+            "gaussx, kernellib and geonnax."
         )
         (OUT / f"layers-{mode}.svg").write_text(
             svg(width, height, label, "pyrox package layers", "\n".join(parts))

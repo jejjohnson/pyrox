@@ -32,7 +32,7 @@ packages' `AGENTS.md`.
    `<x>_scale`; structural settings registered as params.
 4. **Kernel context.** A kernel with priors evaluated more than once per
    model call (Gram + `diag`, several blocks or latents) outside
-   `_kernel_context` / `_kernel_contexts`.
+   `call_context` / `call_contexts`.
 5. **Handlers and inference.** Code that only works under `seed` but not
    `trace`, `substitute`, `condition`, `plate`, SVI, `Predictive`; a model
    whose site set depends on data values; a guide whose sites don't match

@@ -39,8 +39,8 @@ from gaussx import (
 )
 from jaxtyping import Array, Float
 from numpyro import distributions as dist
+from pyrox._core import call_context
 
-from pyrox_gp._context import _kernel_context
 from pyrox_gp._kernel_operator import freeze_kernel, matrix_free_operator
 from pyrox_gp._protocols import Kernel, Likelihood
 
@@ -202,14 +202,14 @@ class GPPrior(eqx.Module):
         covariance.
 
         The operator construction and any subsequent hyperparameter
-        capture share one `_kernel_context`, so for Pattern B/C
+        capture share one `call_context`, so for Pattern B/C
         kernels with priors the cached operator and the resolved
         hyperparameters on the returned `ConditionedGP` come from
         the same draw. Downstream consumers (notably
         `pyrox_gp.PathwiseSampler`) reuse those values to stay
         consistent with the cached operator.
         """
-        with _kernel_context(self.kernel):
+        with call_context(self.kernel):
             operator = self._noisy_operator(noise_var)
             resolved_hyperparams = _resolve_kernel_hyperparams(self.kernel)
         residual = y - self.mean(self.X)
@@ -270,7 +270,7 @@ def _resolve_kernel_hyperparams(
 ) -> tuple[Float[Array, ""], Float[Array, ""]] | None:
     """Capture ``(variance, lengthscale)`` for kernels that expose them.
 
-    Must be called inside the same `_kernel_context` as the
+    Must be called inside the same `call_context` as the
     kernel evaluation that downstream code wants to stay consistent
     with — Pattern B/C kernels register their priors per call, and a
     fresh outer context would resample.
@@ -324,7 +324,7 @@ class GradientPosterior(NamedTuple):
 def _derivative_kernel(kernel: Kernel) -> kl.AbstractKernel:
     """Freeze ``kernel`` to a plain kernellib kernel for differentiation.
 
-    Must run inside the caller's `_kernel_context`, so the frozen
+    Must run inside the caller's `call_context`, so the frozen
     hyperparameters are the draw every other kernel read in the call sees.
     A `pyrox_gp` kernel without a kernellib counterpart cannot be frozen;
     its ``NotImplementedError`` is re-raised with what to do about it.
@@ -415,7 +415,7 @@ class ConditionedGP(eqx.Module):
 
     def predict_mean(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
         r"""$\mu_* = \mu(X_*) + K_{*f}\,\alpha$."""
-        with _kernel_context(self.prior.kernel):
+        with call_context(self.prior.kernel):
             K_cross = self.prior.kernel(X_star, self.prior.X)
         return self.prior.mean(X_star) + predict_mean(self.cache, K_cross)
 
@@ -432,7 +432,7 @@ class ConditionedGP(eqx.Module):
         register their NumPyro sites once and reuse them across both
         kernel calls (and the cached training solve).
         """
-        with _kernel_context(self.prior.kernel):
+        with call_context(self.prior.kernel):
             K_cross = self.prior.kernel(X_star, self.prior.X)
             K_diag = self.prior.kernel.diag(X_star)
         return predict_variance(
@@ -450,7 +450,7 @@ class ConditionedGP(eqx.Module):
         Both kernel evaluations share a single kernel context; see
         `predict_var`.
         """
-        with _kernel_context(self.prior.kernel):
+        with call_context(self.prior.kernel):
             return self.predict_mean(X_star), self.predict_var(X_star)
 
     def sample(
@@ -467,7 +467,7 @@ class ConditionedGP(eqx.Module):
         predictive covariance explicitly and draw from
         `gaussx.MultivariateNormal`.
         """
-        with _kernel_context(self.prior.kernel):
+        with call_context(self.prior.kernel):
             mean = self.predict_mean(X_star)
             var = self.predict_var(X_star)
         std = jnp.sqrt(jnp.clip(var, min=0.0))
@@ -569,7 +569,7 @@ class ConditionedGP(eqx.Module):
         if cov not in ("marginal", "full", "none"):
             raise ValueError(f"cov must be 'marginal', 'full' or 'none', got {cov!r}.")
         D = X_star.shape[-1]
-        with _kernel_context(self.prior.kernel):
+        with call_context(self.prior.kernel):
             k = _derivative_kernel(self.prior.kernel)
             G = _cross_gradient(k, X_star, self.prior.X)
         mean = einx.id(
@@ -635,7 +635,7 @@ class ConditionedGP(eqx.Module):
             ```
         """
         D = X_star.shape[-1]
-        with _kernel_context(self.prior.kernel):
+        with call_context(self.prior.kernel):
             k = _derivative_kernel(self.prior.kernel)
             G = _cross_gradient(k, X_star, self.prior.X)
             K_cross = k(X_star, self.prior.X)
@@ -682,7 +682,7 @@ class ConditionedGP(eqx.Module):
             curvature = jnp.trace(hess, axis1=-2, axis2=-1)  # Laplacian of mu
             ```
         """
-        with _kernel_context(self.prior.kernel):
+        with call_context(self.prior.kernel):
             k = _derivative_kernel(self.prior.kernel)
         kl.DerivativeIndexed(k)  # kernellib's mean-square differentiability check
         X, alpha, mean_fn = self.prior.X, self.cache.alpha, self.prior.mean_fn

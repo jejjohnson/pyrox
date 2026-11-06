@@ -89,6 +89,14 @@ _GEONNAX = (
     " same name and swaps its parameters for sites"
 )
 ALLOWED_SHARED_NAMES: dict[str, str] = {
+    "SphericalHarmonicFeatures": (
+        "pyrox_nn's layer samples Bayesian weights on the harmonics; kernellib's"
+        " is the deterministic feature map of the same name."
+    ),
+    "funk_hecke_coefficients": (
+        "pyrox_gp's name is a deprecated alias: it resolves a kernel's priors and"
+        " calls kernellib's."
+    ),
     **dict.fromkeys(
         [
             "Constant",

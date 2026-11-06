@@ -38,14 +38,18 @@ import einx
 import equinox as eqx
 import geonnax
 import jax.numpy as jnp
+import kernellib as kl
 import numpyro.distributions as dist
 
 # Pure-JAX feature transforms moved to geonnax with the package split;
 # re-export them (self-alias form marks them as intentional re-exports)
 # so `from pyrox_nn._features import fourier_features` keeps working.
 from geonnax.basis import (
+    fourier_basis,
     fourier_features as fourier_features,
+    harmonic_degrees,
     interaction_features as interaction_features,
+    real_spherical_harmonics,
     seasonal_features as seasonal_features,
     seasonal_frequencies as seasonal_frequencies,
     standardize as standardize,
@@ -53,16 +57,8 @@ from geonnax.basis import (
 )
 from geonnax.geo import lonlat_to_cartesian3d
 from jaxtyping import Array, Float
+from pyrox._core import freeze
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
-from pyrox_gp import funk_hecke_coefficients
-from pyrox_gp._basis import (
-    fourier_basis,
-    harmonic_degrees,
-    real_spherical_harmonics,
-    spectral_density,
-)
-from pyrox_gp._context import _kernel_context
-from pyrox_gp._protocols import Kernel
 
 from pyrox_nn._batching import vmap_over_flat_batch
 
@@ -675,17 +671,19 @@ class HSGPFeatures(PyroxModule):
         num_basis_per_dim: Per-axis number of 1D eigenfunctions; total
             basis count is ``prod(num_basis_per_dim)``.
         L: Per-axis box half-width.
-        kernel: A stationary kernel from `pyrox_gp` whose spectral
-            density supplies the per-basis prior variance. Currently
-            `pyrox_gp.RBF` and `pyrox_gp.Matern` are
-            supported by `pyrox_gp._basis.spectral_density`.
+        kernel: A stationary kernel whose spectral density supplies the
+            per-basis prior variance: a kernellib kernel with a closed-form
+            density, or a `pyrox_gp` kernel with priors (`pyrox_gp.RBF`,
+            `pyrox_gp.Matern`), which is frozen once per call. An ARD
+            lengthscale raises ``NotImplementedError``: the basis gives
+            frequency magnitudes, which a per-axis lengthscale cannot use.
         pyrox_name: Explicit scope name for NumPyro site registration.
     """
 
     in_features: int = eqx.field(static=True)
     num_basis_per_dim: tuple[int, ...] = eqx.field(static=True)
     L: tuple[float, ...] = eqx.field(static=True)
-    kernel: Kernel
+    kernel: kl.AbstractKernel
     pyrox_name: str | None = None
 
     @classmethod
@@ -695,7 +693,7 @@ class HSGPFeatures(PyroxModule):
         num_basis_per_dim: int | tuple[int, ...],
         L: float | tuple[float, ...],
         *,
-        kernel: Kernel,
+        kernel: kl.AbstractKernel,
     ) -> HSGPFeatures:
         if isinstance(num_basis_per_dim, int):
             num_basis_per_dim = (num_basis_per_dim,) * in_features
@@ -733,16 +731,61 @@ class HSGPFeatures(PyroxModule):
     @pyrox_method
     def __call__(self, x: Float[Array, "N D_in"]) -> Float[Array, " N"]:
         Phi, lam = fourier_basis(x, self.num_basis_per_dim, self.L)  # (N, M), (M,)
-        # Spectral density evaluated under the kernel's own context so any
-        # priors on (variance, lengthscale) register exactly once.
-        with _kernel_context(self.kernel):
-            S = spectral_density(self.kernel, lam, D=self.in_features)
+        # freeze registers any priors on (variance, lengthscale) exactly once.
+        S = _spectral_weights(freeze(self.kernel), lam, self.in_features)
         sqrt_S = jnp.sqrt(S)
         alpha = self.pyrox_sample(
             "alpha",
             dist.Normal(0.0, 1.0).expand([self.num_basis]).to_event(1),
         )
         return einx.dot("n m, m -> n", Phi, sqrt_S * alpha)
+
+
+def _spectral_weights(
+    kernel: kl.AbstractKernel,
+    eigenvalues: Float[Array, " M"],
+    in_features: int,
+) -> Float[Array, " M"]:
+    r"""Spectral density at the Laplacian eigenvalues, $S(\sqrt{\lambda_j})$.
+
+    $S(\sqrt{\lambda}) = \sigma^2 \ell^D s(\ell^2 \lambda)$, with $s$ the
+    kernel's unit-lengthscale density in squared magnitudes, which avoids a
+    square root whose gradient is infinite at $\lambda = 0$.
+
+    Args:
+        kernel: A frozen stationary kernel with a closed-form density.
+        eigenvalues: The eigenvalues $\lambda_j$.
+        in_features: The input dimension $D$.
+
+    Returns:
+        The density at each eigenvalue.
+
+    Raises:
+        NotImplementedError: For a kernel that is not stationary, or an ARD
+            lengthscale, which would pair input dimensions with unrelated
+            frequencies.
+    """
+    if not isinstance(kernel, kl.AbstractStationaryKernel):
+        raise NotImplementedError(
+            f"HSGPFeatures needs a stationary kernel with a closed-form spectral "
+            f"density, such as RBF or Matern; got {type(kernel).__name__}."
+        )
+    lengthscale = kernel.lengthscale
+    if jnp.ndim(lengthscale) != 0:
+        # A one-element per-axis lengthscale is a scalar on a 1-D domain only.
+        if jnp.size(lengthscale) != 1 or in_features != 1:
+            raise NotImplementedError(
+                "HSGPFeatures needs an isotropic kernel; got a lengthscale of "
+                f"shape {jnp.shape(lengthscale)} (ARD). Build the kernel without "
+                "input_dim."
+            )
+        lengthscale = jnp.reshape(lengthscale, ())
+    # ℓ² λⱼ
+    scaled = lengthscale**2 * eigenvalues
+    # s(ℓ² λⱼ)
+    unit_density = kernel.unit_spectral_density(scaled, in_features)
+    # S(√λⱼ) = σ² ℓᴰ s(ℓ² λⱼ)
+    return kernel.variance * lengthscale**in_features * unit_density
 
 
 class SphericalHarmonicFeatures(PyroxModule):
@@ -769,25 +812,25 @@ class SphericalHarmonicFeatures(PyroxModule):
     $k_L(n, n') = \sum_{l \le L} a_l \sum_m Y_{lm}(n) Y_{lm}(n')$, linear in
     the number of points. This is the NN-side dual of
     `pyrox_gp.SphericalHarmonicInducingFeatures` (VISH, Dutordoir et al.,
-    2020): same harmonics, same `pyrox_gp.funk_hecke_coefficients`.
+    2020): same harmonics, same `kernellib.funk_hecke_coefficients`.
 
-    The kernel is any isotropic `pyrox_gp` kernel, evaluated on the
-    embedded unit vectors (chordal distance), as in VISH. A kernel with a
-    per-dimension (ARD) lengthscale is not zonal and raises
-    ``NotImplementedError``. Coefficients that quadrature round-off pushes
-    below zero are clipped to zero (a kernel restricted from
+    The kernel is any isotropic kernel, kernellib's or a `pyrox_gp` kernel
+    with priors, evaluated on the embedded unit vectors (chordal distance), as
+    in VISH. A kernel with a per-dimension (ARD) lengthscale is not zonal and
+    raises ``NotImplementedError``. Coefficients that quadrature round-off
+    pushes below zero are clipped to zero (a kernel restricted from
     $\mathbb{R}^3$ to the sphere has $a_l \ge 0$).
 
     **Sites.** ``<pyrox_name>.alpha`` with prior
     $\mathcal{N}(0, I_{(L+1)^2})$; any priors on the kernel's
     hyperparameters register once per call under the kernel's own scope
-    (evaluated inside `pyrox_gp._context._kernel_context`).
+    (the kernel is frozen once per call by `pyrox._core.freeze`).
 
     Attributes:
         l_max: Maximum harmonic degree $L$ (inclusive); the layer has
             ``(l_max + 1) ** 2`` features.
-        kernel: An isotropic `pyrox_gp` kernel (e.g. `pyrox_gp.Matern`,
-            `pyrox_gp.RBF`) built without ``input_dim``.
+        kernel: An isotropic kernel (e.g. `pyrox_gp.Matern`, `pyrox_gp.RBF`,
+            `kernellib.Matern`) built without ``input_dim``.
         input_mode: ``"xyz"`` for unit vectors ``(N, 3)``, or ``"lonlat"``
             for ``(N, 2)`` longitude / latitude columns.
         input_unit: Unit of the ``"lonlat"`` columns, ``"degrees"`` or
@@ -812,7 +855,7 @@ class SphericalHarmonicFeatures(PyroxModule):
         ((3,), 121)
     """
 
-    kernel: Kernel
+    kernel: kl.AbstractKernel
     l_max: int = eqx.field(static=True)
     input_mode: Literal["xyz", "lonlat"] = eqx.field(static=True, default="xyz")
     input_unit: Literal["degrees", "radians"] | None = eqx.field(
@@ -826,7 +869,7 @@ class SphericalHarmonicFeatures(PyroxModule):
         cls,
         *,
         l_max: int,
-        kernel: Kernel,
+        kernel: kl.AbstractKernel,
         input_mode: Literal["xyz", "lonlat"] = "xyz",
         input_unit: Literal["degrees", "radians"] | None = None,
         num_quadrature: int = 256,
@@ -895,17 +938,14 @@ class SphericalHarmonicFeatures(PyroxModule):
                 )
             x = lonlat_to_cartesian3d(x, input_unit=self.input_unit)  # (N, 3)
         Y = real_spherical_harmonics(x, self.l_max)  # (N, M)
-        # Funk-Hecke coefficients; the helper rejects ARD lengthscales. It
-        # opens its own kernel context, so this outer one is a no-op today
-        # (contexts are reentrant); it is kept, as in HSGPFeatures, so that
-        # any kernel call added here shares the same hyperprior draw.
-        with _kernel_context(self.kernel):
-            a = funk_hecke_coefficients(
-                self.kernel, self.l_max, num_quadrature=self.num_quadrature
-            )  # (l_max + 1,)
-        # a_l >= 0 for a kernel restricted from R^3; quadrature round-off can
-        # push tail coefficients below 0 (often in float32). Clip them with a
-        # double where: sqrt(maximum(a, 0)) has a 0 * inf = NaN gradient there.
+        # Funk-Hecke coefficients; kernellib rejects ARD lengthscales. freeze
+        # registers any priors on the hyperparameters exactly once.
+        a = kl.funk_hecke_coefficients(
+            freeze(self.kernel), self.l_max, num_quadrature=self.num_quadrature
+        )  # (l_max + 1,)
+        # a_l >= 0 for a kernel restricted from R^3, and kernellib clips the
+        # quadrature round-off below 0. Keep the double where: sqrt(a) at a = 0
+        # has a 0 * inf = NaN gradient.
         pos = a > 0
         sqrt_a_l = jnp.where(pos, jnp.sqrt(jnp.where(pos, a, 1.0)), 0.0)
         degrees = jnp.asarray(harmonic_degrees(self.l_max))  # (M,) degree l per column

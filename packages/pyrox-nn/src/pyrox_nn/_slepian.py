@@ -16,10 +16,10 @@ from typing import Literal
 import equinox as eqx
 import jax.numpy as jnp
 import numpyro.distributions as dist
+from geonnax.basis import slepian_cap_basis
 from geonnax.geo import lonlat_to_cartesian3d
 from jaxtyping import Array, Float
 from pyrox._core import Parameterized, pyrox_method
-from pyrox_gp._basis import slepian_cap_basis
 
 
 def _unit_xyz(

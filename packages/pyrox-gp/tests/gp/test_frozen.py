@@ -8,6 +8,7 @@ import kernellib as kl
 import numpyro.distributions as dist
 import pytest
 from numpyro import handlers
+from pyrox._core import call_context
 from pyrox_gp import (
     RBF,
     Constant,
@@ -19,8 +20,10 @@ from pyrox_gp import (
     RationalQuadratic,
     White,
 )
-from pyrox_gp._basis import draw_rff_cosine_basis, spectral_density
-from pyrox_gp._context import _kernel_context
+from pyrox_gp._basis import draw_rff_cosine_basis
+from pyrox_gp._basis._spectral_density import (
+    _isotropic_spectral_density as spectral_density,
+)
 
 
 X = jnp.linspace(-1.0, 1.0, 5)[:, None]
@@ -64,7 +67,7 @@ def test_frozen_registers_one_site_per_prior():
     k = _prior_rbf("RBF_frozen_trace")
 
     def model():
-        with _kernel_context(k):
+        with call_context(k):
             return k.frozen(), k.frozen()
 
     tr = handlers.trace(handlers.seed(model, 0)).get_trace()
@@ -79,7 +82,7 @@ def test_frozen_shares_the_draw_with_kernel_evaluation():
     k = _prior_rbf("RBF_frozen_shared")
 
     def model():
-        with _kernel_context(k):
+        with call_context(k):
             return k.frozen()(X, X), k(X, X)
 
     frozen_gram, gram = handlers.seed(model, 1)()

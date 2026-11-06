@@ -45,18 +45,18 @@ import equinox as eqx
 import jax.numpy as jnp
 import kernellib as kl
 import lineax as lx
-from jaxtyping import Array, Float, Int, PRNGKeyArray
-
-from pyrox_gp._basis import (
+from geonnax.basis import (
     SlepianCapBasis,
     fourier_basis,
     fourier_eigenvalues,
     harmonic_degrees,
     real_spherical_harmonics,
     slepian_cap_basis,
-    spectral_density,
 )
-from pyrox_gp._context import _kernel_context
+from jaxtyping import Array, Float, Int, PRNGKeyArray
+from pyrox._core import call_context, freeze
+
+from pyrox_gp._basis._spectral_density import _isotropic_spectral_density
 from pyrox_gp._kernels import RBF, Matern
 from pyrox_gp._protocols import Kernel
 
@@ -103,7 +103,7 @@ def _is_stationary(kernel: Kernel) -> bool:
     """Whether ``kernel`` has a registered closed-form spectral density.
 
     Used as the structural-stationarity check for inducing features that
-    derive ``K_uu`` from `pyrox_gp._basis.spectral_density`. Conservative
+    derive ``K_uu`` from the kernel's closed-form spectral density. Conservative
     by design — kernels that *are* stationary but lack a registered
     spectral density (e.g. ``RationalQuadratic``) currently return ``False``.
     """
@@ -206,9 +206,9 @@ class FourierInducingFeatures(eqx.Module):
     ) -> lx.DiagonalLinearOperator:
         """Diagonal $K_{uu}$ — entries ``S(sqrt(lambda_j))`` plus jitter."""
         self._check_stationary(kernel)
-        with _kernel_context(kernel):
+        with call_context(kernel):
             lam = fourier_eigenvalues(self.num_basis_per_dim, self.L, self.in_features)
-            S = spectral_density(kernel, lam, D=self.in_features)
+            S = _isotropic_spectral_density(kernel, lam, D=self.in_features)
         return _diagonal_with_jitter(S, jitter)
 
     def k_ux(self, x: Float[Array, "N D"], kernel: Kernel) -> Float[Array, "N M"]:
@@ -216,9 +216,9 @@ class FourierInducingFeatures(eqx.Module):
         self._check_stationary(kernel)
         if x.ndim != 2 or x.shape[-1] != self.in_features:
             raise ValueError(f"x must be (N, {self.in_features}); got shape {x.shape}.")
-        with _kernel_context(kernel):
+        with call_context(kernel):
             Phi, lam = fourier_basis(x, self.num_basis_per_dim, self.L)
-            S = spectral_density(kernel, lam, D=self.in_features)
+            S = _isotropic_spectral_density(kernel, lam, D=self.in_features)
         return Phi * S[None, :]
 
 
@@ -227,85 +227,28 @@ class FourierInducingFeatures(eqx.Module):
 # ---------------------------------------------------------------------------
 
 
-def _reject_anisotropic(kernel: Kernel) -> None:
-    """Reject per-dimension lengthscales in the Funk-Hecke path.
-
-    The coefficients below sample the kernel along a single meridian and
-    reuse each value for every order of a harmonic degree, which is valid
-    only for a zonal kernel — one that depends on ``x . x'`` alone. Unequal
-    axis lengthscales make the kernel orientation-dependent, so the
-    harmonic covariance stops being diagonal and the resulting ``K_uu`` /
-    ``k_ux`` would be silently wrong.
-    """
-    getter = getattr(kernel, "get_param", None)
-    if getter is None:
-        return
-    try:
-        lengthscale = getter("lengthscale")
-    except (KeyError, AttributeError):
-        return
-    if jnp.ndim(lengthscale) != 0 and jnp.size(lengthscale) > 1:
-        raise NotImplementedError(
-            "Funk-Hecke coefficients require a zonal (isotropic) kernel, but "
-            f"this kernel has a per-dimension lengthscale of shape "
-            f"{jnp.shape(lengthscale)}. An ARD kernel is orientation "
-            "dependent, so the spherical-harmonic covariance is no longer "
-            "diagonal. Use a kernel built without input_dim for the "
-            "spherical-harmonic / Slepian inducing features."
-        )
-
-
 def funk_hecke_coefficients(
     kernel: Kernel,
     l_max: int,
     *,
     num_quadrature: int = 256,
 ) -> Float[Array, " l_max_plus_1"]:
-    r"""Funk-Hecke coefficients of a zonal kernel on $S^2$.
+    r"""Deprecated: use `kernellib.funk_hecke_coefficients` on a frozen kernel.
 
-    For a kernel of the form $k(x, x') = \kappa(x \cdot x')$ on the
-    unit 2-sphere, the Funk-Hecke theorem gives:
-
-    $$
-    a_l = 2\pi \int_{-1}^{1} \kappa(t)\,P_l(t)\,dt.
-    $$
-
-    Returns ``(l_max + 1,)`` coefficients indexed by ``l``. We treat any
-    Euclidean kernel as zonal-on-the-sphere via
-    $\kappa(t) = k_{\mathrm{euc}}(\hat{n}_0, \hat{n}_t)$ for unit
-    vectors at angular separation ``arccos(t)``.
+    Replace it with
+    ``kernellib.funk_hecke_coefficients(pyrox._core.freeze(kernel), l_max)``,
+    whose default convention is this function's,
+    $a_l = 2\pi \int_{-1}^{1} \kappa(t)\,P_l(t)\,dt$.
     """
-    # Gauss-Legendre quadrature nodes on [-1, 1] (host-side setup constants).
-    t, w = _gauss_legendre_nodes(num_quadrature)
-    # Build pairs of unit vectors: x0 = (0, 0, 1), x_t = (sin(arccos t), 0, t).
-    sin_t = jnp.sqrt(jnp.maximum(1.0 - t**2, 0.0))
-    n0 = jnp.array([0.0, 0.0, 1.0])
-    nT = jnp.stack([sin_t, jnp.zeros_like(t), t], axis=-1)  # (Q, 3)
-    # Single batched kernel call — stays on-device and keeps autodiff edges
-    # to any hyperparameters sampled inside ``kernel``. Taking row 0 of the
-    # ``(1, Q)`` Gram is O(Q), not O(Q^2).
-    with _kernel_context(kernel):
-        _reject_anisotropic(kernel)
-        kt = kernel(n0[None, :], nT)[0]  # (Q,)
-    # Evaluate P_l(t) for l = 0, ..., l_max via three-term recurrence.
-    P_lm1 = jnp.ones_like(t)  # P_0
-    P_l = t  # P_1
-    coeffs = [2.0 * jnp.pi * jnp.sum(w * kt)]  # a_0 = 2pi * int kt * 1 dt
-    if l_max >= 1:
-        coeffs.append(2.0 * jnp.pi * jnp.sum(w * kt * P_l))  # a_1
-    for ell in range(2, l_max + 1):
-        P_lp1 = ((2 * ell - 1) * t * P_l - (ell - 1) * P_lm1) / ell
-        coeffs.append(2.0 * jnp.pi * jnp.sum(w * kt * P_lp1))
-        P_lm1, P_l = P_l, P_lp1
-    return jnp.stack(coeffs, axis=0)
-
-
-def _gauss_legendre_nodes(n: int) -> tuple[Float[Array, " n"], Float[Array, " n"]]:
-    """Numpy Gauss-Legendre nodes/weights on [-1, 1] (used at construction time)."""
-    import numpy as np
-
-    nodes, weights = np.polynomial.legendre.leggauss(n)
-    return jnp.asarray(nodes), jnp.asarray(weights)
+    warnings.warn(
+        "pyrox_gp.funk_hecke_coefficients is deprecated; use "
+        "kernellib.funk_hecke_coefficients(pyrox._core.freeze(kernel), l_max).",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    return kl.funk_hecke_coefficients(
+        freeze(kernel), l_max, num_quadrature=num_quadrature
+    )
 
 
 class SphericalHarmonicInducingFeatures(eqx.Module):
@@ -345,8 +288,8 @@ class SphericalHarmonicInducingFeatures(eqx.Module):
         return (self.l_max + 1) ** 2
 
     def _per_feature_coeffs(self, kernel: Kernel) -> Float[Array, " M"]:
-        a = funk_hecke_coefficients(
-            kernel, self.l_max, num_quadrature=self.num_quadrature
+        a = kl.funk_hecke_coefficients(
+            freeze(kernel), self.l_max, num_quadrature=self.num_quadrature
         )
         # Each l contributes 2l+1 features with the same coefficient.
         return jnp.concatenate(
@@ -450,8 +393,8 @@ class SlepianInducingFeatures(eqx.Module):
         return self.basis.num_modes
 
     def _per_feature_coeffs(self, kernel: Kernel) -> Float[Array, " M"]:
-        a = funk_hecke_coefficients(
-            kernel, self.l_max, num_quadrature=self.num_quadrature
+        a = kl.funk_hecke_coefficients(
+            freeze(kernel), self.l_max, num_quadrature=self.num_quadrature
         )
         return a[jnp.asarray(harmonic_degrees(self.l_max))]
 
@@ -509,7 +452,7 @@ def _graph_spectrum(
             "LaplacianInducingFeatures supports RBF (graph heat) and Matern "
             f"(graph Matérn) kernels; got {type(kernel).__name__}."
         )
-    with _kernel_context(kernel):
+    with call_context(kernel):
         frozen = kernel.frozen()
     if isinstance(kernel, Matern):
         return kl.functional.graph_matern_spectrum(

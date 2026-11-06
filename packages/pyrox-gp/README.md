@@ -3,8 +3,7 @@
 Gaussian process building blocks on top of
 [`pyrox`](../pyrox): kernels and kernel protocols, variational guides,
 likelihoods, exact / sparse / Markov GP models, multi-output
-structures, pathwise sampling, and the shared spectral basis helpers
-(`pyrox_gp._basis`).
+structures, and pathwise sampling.
 
 ## Install
 
@@ -20,4 +19,4 @@ uv add "pyrox-gp @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=pack
 |--------|---------|
 | `pyrox_gp` | Public API: `GPPrior`, `ConditionedGP`, `SparseGPPrior`, kernels, guides, likelihoods, … |
 | `kernellib.functional` | Pure kernel functions (closed-form math primitives), hosted upstream in kernellib |
-| `pyrox_gp._basis` | Kernel spectral densities + RFF prior draws shared with `pyrox-nn` |
+| `pyrox_gp._basis` | RFF prior draws for pyrox kernels |

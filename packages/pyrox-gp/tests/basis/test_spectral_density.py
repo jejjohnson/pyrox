@@ -7,7 +7,9 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from pyrox_gp import RBF, Matern, Periodic
-from pyrox_gp._basis import spectral_density
+from pyrox_gp._basis._spectral_density import (
+    _isotropic_spectral_density as spectral_density,
+)
 
 
 jax.config.update("jax_enable_x64", True)

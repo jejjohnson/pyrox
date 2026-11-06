@@ -32,8 +32,8 @@ from gaussx import (
     variational_elbo_gaussian,
 )
 from jaxtyping import Array, Float
+from pyrox._core import call_context
 
-from pyrox_gp._context import _kernel_context
 from pyrox_gp._guides import NaturalGuide
 from pyrox_gp._likelihoods import GaussianLikelihood
 from pyrox_gp._protocols import Guide, Likelihood, likelihood_accepts_inputs
@@ -144,7 +144,7 @@ def svgp_elbo(
         ValueError: If a non-conjugate likelihood is used without an
             integrator.
     """
-    with _kernel_context(prior.kernel):
+    with call_context(prior.kernel):
         K_zz_op, K_xz, K_xx_diag = prior.predictive_blocks(X)
 
     f_loc, f_var = guide.predict(K_xz, K_zz_op, K_xx_diag)  # ty: ignore[unresolved-attribute]
@@ -280,7 +280,7 @@ class ConjugateVI:
         Returns:
             Updated `NaturalGuide`.
         """
-        with _kernel_context(prior.kernel):
+        with call_context(prior.kernel):
             K_zz_op, K_xz, K_xx_diag = prior.predictive_blocks(X)
 
         f_loc, f_var = guide.predict(K_xz, K_zz_op, K_xx_diag)
