@@ -226,6 +226,14 @@ deviation.
 
 ::: pyrox_nn.MCSoftmaxDenseFA
 
+## Post-hoc last-layer Laplace
+
+A Gaussian posterior over a chosen parameter group (typically the last layer) of one fitted model, from the generalized Gauss-Newton Hessian, with a linearized predictive and evidence-tuned prior precision.
+
+::: pyrox_nn.last_layer_laplace
+
+::: pyrox_nn.LastLayerLaplace
+
 ## Bayesian Neural Field stack
 
 ::: pyrox_nn.Standardization

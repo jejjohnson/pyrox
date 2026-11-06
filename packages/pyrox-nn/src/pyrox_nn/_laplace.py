@@ -1,9 +1,7 @@
 """Post-hoc last-layer Laplace approximation with a GGN Hessian.
 
-See [`last_layer_laplace`][pyrox.inference.last_layer_laplace]. The linear
-algebra goes through ``gaussx`` on PSD-tagged ``lineax`` operators; both are
-optional (``pip install pyrox[laplace]``) and imported lazily, following the
-same convention as ``optax`` in the ensemble primitives.
+See [`last_layer_laplace`][pyrox_nn.last_layer_laplace]. The linear algebra goes
+through ``gaussx`` on PSD-tagged ``lineax`` operators.
 """
 
 from __future__ import annotations
@@ -13,23 +11,13 @@ from typing import Any, Literal
 
 import einx
 import equinox as eqx
+import gaussx
 import jax
 import jax.numpy as jnp
+import lineax as lx
 import numpyro.distributions as dist
 from jax.flatten_util import ravel_pytree
 from jaxtyping import Array, Float, PyTree
-
-
-def _require_gaussx() -> tuple[Any, Any]:
-    try:
-        import gaussx
-        import lineax as lx
-    except ImportError as e:
-        raise ImportError(
-            "pyrox.inference.last_layer_laplace requires `gaussx` and `lineax`. "
-            "Install via `pip install pyrox[laplace]`."
-        ) from e
-    return gaussx, lx
 
 
 def _split(
@@ -63,7 +51,7 @@ def _forward(
 class LastLayerLaplace(eqx.Module):
     r"""Gaussian posterior over a selected parameter group of a fitted model.
 
-    Built by [`last_layer_laplace`][pyrox.inference.last_layer_laplace].
+    Built by [`last_layer_laplace`][pyrox_nn.last_layer_laplace].
     With $w$ the selected weights (the rest frozen at the MAP), $J$ the
     Jacobian $\partial f / \partial w$ at the linearization point $w^*$ on
     the training inputs and Gaussian noise $\sigma^2$, the log-likelihood is
@@ -138,7 +126,6 @@ class LastLayerLaplace(eqx.Module):
             ``MatrixLinearOperator`` (full) or a ``DiagonalLinearOperator``
             (diag).
         """
-        gaussx, lx = _require_gaussx()
         shift = self._lam(prior_precision) + self.jitter
         if self.structure == "diag":
             return lx.DiagonalLinearOperator(self.ggn + shift)
@@ -158,7 +145,6 @@ class LastLayerLaplace(eqx.Module):
         Returns:
             The mode of the quadratic-model posterior.
         """
-        gaussx, _ = _require_gaussx()
         rhs = self._g_matvec(self.w_map) + self.loglik_grad
         return gaussx.solve(self.precision(prior_precision), rhs)
 
@@ -180,7 +166,6 @@ class LastLayerLaplace(eqx.Module):
         Returns:
             ``(mean, var)``, each shaped like ``predict_fn(params, x)``.
         """
-        gaussx, _ = _require_gaussx()
         _, unravel, rest = _split(self.params, self.param_filter)
         f = _forward(self.predict_fn, unravel, rest, x)
         f_map = self.predict_fn(self.params, x)
@@ -224,7 +209,6 @@ class LastLayerLaplace(eqx.Module):
         Returns:
             Scalar log evidence.
         """
-        gaussx, _ = _require_gaussx()
         lam = self._lam(prior_precision)
         w_lam = self.mode(lam)
         delta = w_lam - self.w_map
@@ -272,7 +256,6 @@ class LastLayerLaplace(eqx.Module):
             A new `LastLayerLaplace` with the tuned ``prior_precision`` and
             ``w_mean`` $= w_\lambda$ at it.
         """
-        gaussx, lx = _require_gaussx()
         dtype = self.w_map.dtype
         if self.structure == "diag":
             g = self.ggn
@@ -384,7 +367,7 @@ def last_layer_laplace(
         >>> import jax
         >>> import jax.numpy as jnp
         >>> import jax.random as jr
-        >>> from pyrox.inference import last_layer_laplace
+        >>> from pyrox_nn import last_layer_laplace
         >>> model = eqx.nn.MLP(1, 1, 16, 2, activation=jnp.sin, key=jr.key(0))
         >>> X = jnp.linspace(-1.0, 1.0, 50)[:, None]
         >>> y = jnp.sin(3.0 * X[:, 0])
@@ -405,7 +388,6 @@ def last_layer_laplace(
         >>> mean.shape, var.shape
         ((7,), (7,))
     """
-    gaussx, _ = _require_gaussx()
     if structure not in ("full", "diag"):
         raise ValueError(f"structure must be 'full' or 'diag', got {structure!r}.")
     w, unravel, rest = _split(params, param_filter)

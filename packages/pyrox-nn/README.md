@@ -21,6 +21,6 @@ uv add "pyrox-nn[bnf] @ git+https://github.com/jejjohnson/pyrox.git#subdirectory
 
 | Module | Purpose |
 |--------|---------|
-| `pyrox_nn` | Public API: Bayesian layer wrappers + geonnax re-exports |
+| `pyrox_nn` | Public API: Bayesian layer wrappers, `last_layer_laplace` + geonnax re-exports |
 | `pyrox_nn.api` | `BayesianNeuralFieldMAP` / estimator entry points |
 | `pyrox_nn.preprocessing` | pandas → array preprocessing for the BNF stack |

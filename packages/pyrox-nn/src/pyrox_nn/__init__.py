@@ -9,6 +9,8 @@ After the ``geonnax`` split, ``pyrox_nn`` consists of:
   ``_siren``, ``_mfn``, ``_vssgp``, ``_heteroscedastic``, ``_ensemble``,
   ``_sngp``, ``_conditioning``, ``_bnf``, ``_slepian``. Each holds a
   ``geonnax`` core and registers NumPyro sample / param sites.
+* **Post-hoc posteriors** (`pyrox_nn._laplace`): the last-layer GGN Laplace
+  posterior of a fitted network, which registers no sites.
 * **BNF + pandas-free helpers** (`pyrox_nn._bnf`,
   `pyrox_nn._features`).
 
@@ -104,6 +106,7 @@ from pyrox_nn._heteroscedastic import (
     MCSigmoidDenseFA,
     MCSoftmaxDenseFA,
 )
+from pyrox_nn._laplace import LastLayerLaplace, last_layer_laplace
 from pyrox_nn._mfn import BayesianFourierNet, BayesianGaborNet
 from pyrox_nn._siren import BayesianSIREN
 from pyrox_nn._slepian import BayesianSlepianEncoder
@@ -159,6 +162,7 @@ __all__ = [
     "LaplaceCosineFeatures",
     "LaplaceFourierFeatures",
     "LaplaceRandomFeatureCovariance",
+    "LastLayerLaplace",
     "LayerNormEnsemble",
     "LearnedDeformation",
     "LonLatScale",
@@ -187,6 +191,7 @@ __all__ = [
     "deg2rad",
     "fourier_features",
     "interaction_features",
+    "last_layer_laplace",
     "lonlat_scale",
     "lonlat_to_cartesian3d",
     "mfn_forward",

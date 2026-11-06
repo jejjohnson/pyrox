@@ -2030,10 +2030,6 @@ colab = [
     { name = "pandas" },
     { name = "watermark" },
 ]
-laplace = [
-    { name = "gaussx" },
-    { name = "lineax" },
-]
 optax = [
     { name = "optax" },
 ]
@@ -2042,16 +2038,14 @@ optax = [
 requires-dist = [
     { name = "einx", specifier = ">=0.4.3" },
     { name = "equinox", specifier = ">=0.13.8" },
-    { name = "gaussx", marker = "extra == 'laplace'", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.5" },
     { name = "jax", specifier = ">=0.10.1" },
-    { name = "lineax", marker = "extra == 'laplace'", specifier = ">=0.1.1" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
     { name = "numpyro", specifier = ">=0.21" },
     { name = "optax", marker = "extra == 'optax'", specifier = ">=0.2.8" },
     { name = "pandas", marker = "extra == 'colab'", specifier = ">=3.0.3" },
     { name = "watermark", marker = "extra == 'colab'", specifier = ">=2.6.0" },
 ]
-provides-extras = ["optax", "laplace", "colab"]
+provides-extras = ["optax", "colab"]
 
 [[package]]
 name = "pyrox-gp"
@@ -2208,8 +2202,10 @@ version = "0.1.1"
 source = { editable = "packages/pyrox-nn" }
 dependencies = [
     { name = "einx" },
+    { name = "gaussx" },
     { name = "geonnax" },
     { name = "kernellib" },
+    { name = "lineax" },
     { name = "pyrox" },
 ]
 
@@ -2235,8 +2231,10 @@ xarray = [
 [package.metadata]
 requires-dist = [
     { name = "einx", specifier = ">=0.4.3" },
+    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.5" },
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.11" },
     { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.22" },
+    { name = "lineax", specifier = ">=0.1.1" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
     { name = "optax", marker = "extra == 'bnf'", specifier = ">=0.2.8" },
     { name = "optax", marker = "extra == 'optax'", specifier = ">=0.2.8" },

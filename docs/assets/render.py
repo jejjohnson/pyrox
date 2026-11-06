@@ -344,7 +344,7 @@ PACKAGES = {
         130,
         400,
         "Bayesian layers" + DOT + "SIREN" + DOT + "SNGP" + DOT + "BNF",
-        "+ kernellib" + DOT + "geonnax",
+        "+ gaussx" + DOT + "kernellib" + DOT + "geonnax",
     ),
     "pyrox-lgm": (
         30,

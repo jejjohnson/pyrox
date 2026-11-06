@@ -11,12 +11,12 @@ the core.
 |---|---|
 | `pyrox` | `__version__` and the two namespaces below; no class re-exports |
 | `pyrox._core` | `PyroxModule`, `pyrox_method`, `Parameterized`, `PyroxParam`, `PyroxSample`, `call_context`, `call_contexts`, `freeze` (the bridge's public home, despite the underscore) |
-| `pyrox.inference` | `ensemble_map`, `ensemble_vi`, `EnsembleMAP`, `EnsembleVI`, `ensemble_init`, `ensemble_loss`, `ensemble_step`, `ensemble_predict`, `EnsembleState`, `EnsembleResult`, `param_group_optimizer`, `last_layer_laplace`, `LastLayerLaplace` |
+| `pyrox.inference` | `ensemble_map`, `ensemble_vi`, `EnsembleMAP`, `EnsembleVI`, `ensemble_init`, `ensemble_loss`, `ensemble_step`, `ensemble_predict`, `EnsembleState`, `EnsembleResult`, `param_group_optimizer` |
 
 Implementation: `_core/pyrox_module.py` (`PyroxModule`, the per-call
 `_Context`, the duplicate-param guard, `pyrox_method`),
 `_core/parameterized.py`, `_core/context.py` (`call_context`, `call_contexts`,
-`freeze`), `_core/descriptors.py` (value objects nothing consumes), `inference/_ensemble.py`, `inference/_param_groups.py`, `inference/_laplace.py`.
+`freeze`), `_core/descriptors.py` (value objects nothing consumes), `inference/_ensemble.py`, `inference/_param_groups.py`.
 
 ## Contracts
 
@@ -54,8 +54,8 @@ Implementation: `_core/pyrox_module.py` (`PyroxModule`, the per-call
 ## Dependencies
 
 `jax`, `equinox`, `numpyro`, `einx` (+ `jaxtyping`, which arrives through
-equinox). Extras: `optax`, `laplace` (gaussx + lineax, imported lazily by
-`_require_gaussx()`), `colab`. No internal dependencies.
+equinox). Extras: `optax`, `colab`. No internal dependencies, and no gaussx,
+lineax, kernellib or geonnax (`tests/test_core_import_guard.py`).
 
 ## Tests
 
