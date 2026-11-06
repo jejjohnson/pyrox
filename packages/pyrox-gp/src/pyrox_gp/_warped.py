@@ -20,9 +20,12 @@ the latent space), not correctness.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+import einx
+import gaussx
 import jax
 import jax.numpy as jnp
-import numpy as np
 import numpyro.distributions as nd
 from flowjax.bijections import AbstractBijection
 from jaxtyping import Array, Float
@@ -145,6 +148,65 @@ class WarpedGaussianLikelihood(Likelihood):
         return nd.Normal(g, jnp.sqrt(self.noise_var)).log_prob(y).sum()
 
 
+def _pushforward_moments(
+    transform: Callable[[Float[Array, " *batch"]], Float[Array, " *batch"]],
+    mean: Float[Array, " *batch"],
+    var: Float[Array, " *batch"],
+    *,
+    order: int,
+) -> tuple[Float[Array, " *batch"], Float[Array, " *batch"]]:
+    r"""Mean and centred variance of $G(f)$, with $f \sim N(\mu, \sigma^2)$ elementwise.
+
+    With probabilists' Gauss-Hermite nodes $\xi_k$ and normalised weights
+    $\tilde w_k = w_k / \sqrt{2\pi}$,
+
+    $$
+    m_1 = \sum_k \tilde w_k\, G(\mu + \sigma \xi_k), \qquad
+    v = \sum_k \tilde w_k\, (G(\mu + \sigma \xi_k) - m_1)^2 .
+    $$
+
+    Args:
+        transform: The warp $G$, applied to one batch-shaped array per node.
+        mean: The means $\mu$, in any batch shape.
+        var: The variances $\sigma^2$, in the same shape.
+        order: Number of nodes $Q$, in ``[2, 256]``.
+
+    Returns:
+        Tuple ``(m1, v)`` in the shape and dtype of ``mean``.
+
+    Raises:
+        ValueError: If ``order`` is outside ``[2, 256]``.
+    """
+    if not 2 <= order <= 256:
+        # order == 1 places a single node at the mean, so the centred second
+        # moment is zero and every bit of latent uncertainty would be silently
+        # discarded. The rule overflows to NaN by order 512.
+        raise ValueError(
+            f"order must be in [2, 256]; got {order}. A single quadrature "
+            "node cannot represent any spread."
+        )
+    points, raw_weights = gaussx.gauss_hermite_points(order, 1, dtype=mean.dtype)
+    # w̃ₖ = wₖ / √(2π), so ∑ₖ w̃ₖ = 1
+    weights = raw_weights / jnp.sqrt(jnp.asarray(2.0 * jnp.pi, dtype=mean.dtype))
+    # σ = √v_f
+    std = jnp.sqrt(var)
+    # σ ξₖ
+    spread = einx.multiply("q, ... -> q ...", points[:, 0], std)
+    # fₖ = μ + σ ξₖ
+    latent = einx.add("q ..., ... -> q ...", spread, mean)
+    # gₖ = G(fₖ)
+    warped = jax.vmap(transform)(latent)
+    # m₁ = ∑ₖ w̃ₖ gₖ
+    first_moment = jnp.asarray(einx.dot("q, q ... -> ...", weights, warped))
+    # gₖ − m₁. Centred, never E[G²] − m₁², which cancels catastrophically once
+    # G's output carries a large offset relative to its spread: an Affine warp
+    # centred near 1e4 loses the whole variance in float32, and can go negative.
+    centred = einx.subtract("q ..., ... -> q ...", warped, first_moment)
+    # v = ∑ₖ w̃ₖ (gₖ − m₁)²
+    variance = jnp.asarray(einx.dot("q, q ... -> ...", weights, centred**2))
+    return first_moment, variance
+
+
 def warped_predictive_moments(
     lik: WarpedGaussianLikelihood,
     f_loc: Float[Array, " N"],
@@ -157,7 +219,7 @@ def warped_predictive_moments(
 
     $$
     m_1 = \mathbb{E}_{q(f)}[G(f)], \qquad
-    m_2 = \sigma^2 + \mathbb{E}_{q(f)}[G(f)^2] - m_1^2
+    m_2 = \sigma^2 + \mathbb{E}_{q(f)}[(G(f) - m_1)^2]
     $$
 
     Note $m_1 \neq G(\mathbb{E}[f])$ whenever $G$ is nonlinear -- warping the
@@ -173,29 +235,16 @@ def warped_predictive_moments(
             nodes.
         order: Gauss-Hermite nodes; at least 2, since one node carries no
             spread. Values above ~256 are numerically unreliable
-            (``hermegauss`` overflows to ``NaN`` by order 512).
+            (the rule overflows to ``NaN`` by order 512).
 
     Returns:
         Tuple of ``(mean, variance)`` in observation space, both ``(N,)``.
+
+    Raises:
+        ValueError: If ``order`` is outside ``[2, 256]``.
     """
-    if not 2 <= order <= 256:
-        # order == 1 places a single node at the mean, so the centered
-        # second moment is identically zero and every bit of latent
-        # uncertainty would be silently discarded.
-        raise ValueError(
-            f"order must be in [2, 256]; got {order}. A single quadrature "
-            "node cannot represent any spread."
-        )
-    x, w = np.polynomial.hermite_e.hermegauss(order)
-    x = jnp.asarray(x)
-    w = jnp.asarray(w) / np.sqrt(2.0 * np.pi)
-    fs = f_loc[None, :] + jnp.sqrt(f_var)[None, :] * x[:, None]
-    # _apply_warp broadcasts the (N, D) inputs across the node axis.
-    g = _apply_warp(lik.warp, fs, X)
-    m1 = jnp.sum(w[:, None] * g, axis=0)
-    # Centered second moment. Subtracting m1**2 from the raw second moment
-    # cancels catastrophically once G's output carries a large offset
-    # relative to its spread (an Affine warp centred near 1e4 loses the
-    # whole variance in float32, and can go negative).
-    m2 = lik.noise_var + jnp.sum(w[:, None] * (g - m1[None, :]) ** 2, axis=0)
-    return m1, m2
+    # _apply_warp broadcasts the (N, D) inputs across one node's (N,) values.
+    first_moment, variance = _pushforward_moments(
+        lambda f: _apply_warp(lik.warp, f, X), f_loc, f_var, order=order
+    )
+    return first_moment, lik.noise_var + variance

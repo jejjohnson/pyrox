@@ -51,6 +51,8 @@ from flowjax.bijections import AbstractBijection
 from gaussx import LGSSM, MaskedLGSSM
 from jaxtyping import Array, Bool, Float
 
+from pyrox_gp._warped import _pushforward_moments
+
 
 def _require_flows() -> ModuleType:
     """Import ``gauss_flows``, with an install hint when it is absent."""
@@ -347,8 +349,8 @@ class NormalizingKalmanPrior(eqx.Module):
         $$
         \mathbb{E}[y_t] = \int G(z)\, N(z; \mu_t, \sigma_t^2)\, dz,
         \qquad
-        \mathrm{Var}[y_t] = \int G(z)^2 N(z; \mu_t, \sigma_t^2)\, dz
-          - \mathbb{E}[y_t]^2 .
+        \mathrm{Var}[y_t] = \int (G(z) - \mathbb{E}[y_t])^2
+          N(z; \mu_t, \sigma_t^2)\, dz .
         $$
 
         The returned mean is $\mathbb{E}[G(z)]$, **not**
@@ -380,17 +382,18 @@ class NormalizingKalmanPrior(eqx.Module):
                 `log_marginal`.
             n_ahead: Number of forecast steps appended after the
                 training grid.
-            order: Gauss-Hermite order for the warped pushforward.
-                Ignored when ``warp is None``.
+            order: Gauss-Hermite order for the warped pushforward, in
+                ``[2, 256]``. Ignored when ``warp is None``.
 
         Returns:
             Tuple ``(mean, var)`` of observation-space marginal moments,
-            each of shape ``(T + n_ahead, M)``. Variances are clamped at
-            zero, so ``sqrt`` on them is always safe.
+            each of shape ``(T + n_ahead, M)``. Variances are non-negative,
+            so ``sqrt`` on them is always safe.
 
         Raises:
             ValueError: If ``y`` or ``mask`` does not match the base
-                event shape, or if the warp is not elementwise.
+                event shape, if the warp is not elementwise, or if ``order``
+                is outside ``[2, 256]`` with a warp.
         """
         y = jnp.asarray(y)
         n_steps, n_channels = self.n_steps, self.n_channels
@@ -460,19 +463,10 @@ class NormalizingKalmanPrior(eqx.Module):
         if self.warp is None:
             return mz + mean_grid, vz
 
-        nodes, weights = np.polynomial.hermite_e.hermegauss(order)
-        nodes = jnp.asarray(nodes, dtype=y.dtype)
-        weights = jnp.asarray(weights, dtype=y.dtype) / np.sqrt(2.0 * np.pi)
-        # fs: (order, T', M) — per-node evaluation points in the warped space.
-        fs = mz[None] + jnp.sqrt(vz)[None] * nodes[:, None, None]
-        g = jax.vmap(jax.vmap(self.warp.transform))(fs)
-        m1 = jnp.asarray(einx.dot("s, s t m -> t m", weights, g))
-        m2 = jnp.asarray(einx.dot("s, s t m -> t m", weights, g**2))
-        # E[G^2] - E[G]^2 cancels catastrophically for a concentrated
-        # predictive: the two moments agree to working precision and the
-        # difference can land just below zero, which callers would turn
-        # into NaN on the first sqrt.
-        return m1 + mean_grid, jnp.maximum(m2 - m1**2, 0.0)
+        first_moment, variance = _pushforward_moments(
+            jax.vmap(self.warp.transform), mz, vz, order=order
+        )
+        return first_moment + mean_grid, variance
 
 
 def normalizing_kalman_factor(

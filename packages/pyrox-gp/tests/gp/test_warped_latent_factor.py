@@ -320,6 +320,28 @@ def test_predictive_mean_is_not_warp_of_mean():
     assert bool((mean > naive).all())
 
 
+@pytest.mark.parametrize("quad_order", [0, 1, 512])
+def test_predict_rejects_a_quad_order_out_of_range(quad_order):
+    cond, X = _conditioned_with_warp(Exp(shape=(P,)))
+    with pytest.raises(ValueError, match="order must be in"):
+        cond.predict(X[:2], quad_order=quad_order)
+
+
+def test_predict_returns_the_dtype_of_the_warped_moments(monkeypatch):
+    """The kernels here carry float64 params, so pin the moments to float32."""
+    cond, X = _conditioned_with_warp(Exp(shape=(P,)))
+    moments = lfr_predictive_moments(
+        *cond.predict_latents(X[:2]), cond.mu_W, cond.Sigma_W
+    )
+    single = tuple(jnp.asarray(m, dtype=jnp.float32) for m in moments)
+    monkeypatch.setattr(
+        "pyrox_gp._latent_factor_models.lfr_predictive_moments",
+        lambda *args, **kwargs: single,
+    )
+    mean, var = cond.predict(X[:2])
+    assert mean.dtype == var.dtype == jnp.float32
+
+
 @pytest.mark.slow
 def test_predictive_moments_vs_monte_carlo():
     """Observation-space quadrature moments vs Monte Carlo, 2% relative."""

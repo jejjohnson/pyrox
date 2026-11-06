@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import sys
 
+import equinox as eqx
 import gaussx
 import jax
 import jax.numpy as jnp
@@ -452,11 +453,7 @@ def test_predict_rejects_channel_mixing_warps():
 
 
 def test_predict_variances_are_non_negative():
-    """Quadrature variances are clamped, so ``sqrt`` is always safe.
-
-    A near-deterministic predictive makes ``E[G^2]`` and ``E[G]^2``
-    agree to working precision, and the subtraction can land below zero.
-    """
+    """Centred quadrature variances are sums of squares, so ``sqrt`` is safe."""
     pytest.importorskip("gauss_flows")
     base = _base()
     # Near-zero process and observation noise => concentrated marginals.
@@ -474,3 +471,47 @@ def test_predict_variances_are_non_negative():
     _, var = NormalizingKalmanPrior(tiny, warp=warp).predict(y)
     assert jnp.all(var >= 0.0)
     assert jnp.all(jnp.isfinite(jnp.sqrt(var)))
+
+
+def _float32(tree):
+    """``tree`` with every inexact array in float32."""
+    return jax.tree.map(
+        lambda a: a.astype(jnp.float32) if eqx.is_inexact_array(a) else a, tree
+    )
+
+
+def test_predict_keeps_the_variance_of_a_large_offset_warp_in_float32():
+    """A raw ``E[G²] - E[G]²`` cannot resolve this: at a 1e4 offset float32
+    spaces ``E[G²] ≈ 1e8`` about 8 apart, far coarser than the unit variance."""
+    pytest.importorskip("gauss_flows")
+    from flowjax.bijections import Affine
+
+    base = _float32(_base())
+    offset = jnp.full(M, 1e4, dtype=jnp.float32)
+    # flowjax builds its scale parameter in the default dtype, so cast the warp.
+    warp = _float32(Affine(loc=offset, scale=jnp.ones(M)))
+    z = jnp.asarray(base.sample(jr.key(23)), dtype=jnp.float32)
+    # The warp shifts by the offset alone, so the variance is the unwarped one.
+    _, expected = NormalizingKalmanPrior(base).predict(z)
+    _, var = NormalizingKalmanPrior(base, warp=warp).predict(z + offset)
+    assert var.dtype == jnp.float32
+    assert jnp.allclose(var, expected, rtol=2e-2, atol=0.0)
+
+
+def test_predict_returns_the_input_dtype():
+    base = _float32(_base())
+    warp = _exp_warp()
+    z = jnp.asarray(base.sample(jr.key(29)), dtype=jnp.float32)
+    y = jax.vmap(warp.transform)(z)
+    assert y.dtype == jnp.float32
+    mean, var = NormalizingKalmanPrior(base, warp=warp).predict(y)
+    assert mean.dtype == var.dtype == jnp.float32
+
+
+@pytest.mark.parametrize("order", [0, 1, 512])
+def test_predict_rejects_an_order_out_of_range(order):
+    base = _base()
+    warp = _exp_warp()
+    y = jax.vmap(warp.transform)(base.sample(jr.key(31)))
+    with pytest.raises(ValueError, match="order must be in"):
+        NormalizingKalmanPrior(base, warp=warp).predict(y, order=order)

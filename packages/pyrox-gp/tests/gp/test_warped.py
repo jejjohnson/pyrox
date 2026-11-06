@@ -22,7 +22,7 @@ import numpy as np
 import numpyro.distributions as nd
 import optax
 import pytest
-from flowjax.bijections import RationalQuadraticSpline
+from flowjax.bijections import Exp, RationalQuadraticSpline
 from gaussx import GaussHermiteIntegrator
 from pyrox_gp import (
     RBF,
@@ -35,7 +35,7 @@ from pyrox_gp import (
 )
 from pyrox_gp._inference import _ell_numerical
 from pyrox_gp._protocols import Likelihood
-from pyrox_gp._warped import _apply_warp
+from pyrox_gp._warped import _apply_warp, _pushforward_moments
 
 
 jax.config.update("jax_enable_x64", True)
@@ -281,6 +281,37 @@ def test_predictive_mean_is_not_warp_of_mean():
     mean, _ = warped_predictive_moments(lik, f_loc, f_var)
     naive = warp.transform(f_loc[0])
     assert not jnp.allclose(mean[0], naive, atol=1e-3)
+
+
+def test_pushforward_moments_match_the_lognormal_closed_form():
+    # μ and σ² from a smooth grid; order 64 integrates exp to round-off here.
+    mean = jnp.array([[-0.5, 0.0], [0.3, 1.0]])
+    var = jnp.array([[0.04, 0.25], [0.16, 0.09]])
+    first_moment, variance = _pushforward_moments(jnp.exp, mean, var, order=64)
+    # m₁ = e^{μ+σ²/2}
+    expected_mean = jnp.exp(mean + var / 2.0)
+    # v = (e^{σ²} - 1) e^{2μ+σ²}
+    expected_variance = jnp.expm1(var) * jnp.exp(2.0 * mean + var)
+    assert jnp.allclose(first_moment, expected_mean, rtol=1e-12, atol=0.0)
+    assert jnp.allclose(variance, expected_variance, rtol=1e-12, atol=0.0)
+
+
+def test_pushforward_moments_are_centred_in_float32():
+    """Raw E[G²] - E[G]² cannot resolve a unit variance at a 1e4 offset."""
+    mean = jnp.zeros(3, dtype=jnp.float32)
+    var = jnp.ones(3, dtype=jnp.float32)
+    first_moment, variance = _pushforward_moments(
+        lambda f: f + 1e4, mean, var, order=32
+    )
+    assert first_moment.dtype == variance.dtype == jnp.float32
+    assert jnp.allclose(variance, var, rtol=2e-2, atol=0.0)
+
+
+def test_warped_predictive_moments_return_the_input_dtype():
+    lik = WarpedGaussianLikelihood(warp=Exp(), noise_var=jnp.float32(0.1))
+    f_loc = jnp.zeros(2, dtype=jnp.float32)
+    mean, var = warped_predictive_moments(lik, f_loc, jnp.ones(2, dtype=jnp.float32))
+    assert mean.dtype == var.dtype == jnp.float32
 
 
 def test_order_out_of_range_raises():
