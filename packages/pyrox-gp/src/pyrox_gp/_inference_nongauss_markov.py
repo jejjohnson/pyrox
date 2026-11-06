@@ -384,7 +384,8 @@ def _resolve_integrator(
             f"integrator={integrator!r} and deg={deg}."
         )
     warnings.warn(
-        f"deg is deprecated; use integrator=gaussx.GaussHermiteIntegrator(order={deg}).",
+        "deg is deprecated; use "
+        f"integrator=gaussx.GaussHermiteIntegrator(order={deg}).",
         DeprecationWarning,
         stacklevel=4,
     )
