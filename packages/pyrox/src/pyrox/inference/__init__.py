@@ -17,16 +17,15 @@
 * `ensemble_vi` — fit mean-field VI in one call
 * `ensemble_predict` — vmap a predictive over the ensemble axis
 
-**Post-hoc posteriors:**
-
-* `last_layer_laplace` — GGN Laplace posterior over a parameter group of
-  a fitted model, with a linearized predictive (`LastLayerLaplace`)
-
 **Optimizer helpers:**
 
 * `param_group_optimizer` — different optax optimizers (typically
   different learning rates) per labelled parameter group
 """
+
+import importlib
+import warnings
+from typing import Any
 
 from pyrox.inference._ensemble import (
     EnsembleMAP,
@@ -40,7 +39,6 @@ from pyrox.inference._ensemble import (
     ensemble_step,
     ensemble_vi,
 )
-from pyrox.inference._laplace import LastLayerLaplace, last_layer_laplace
 from pyrox.inference._param_groups import param_group_optimizer
 
 
@@ -49,13 +47,34 @@ __all__ = [
     "EnsembleResult",
     "EnsembleState",
     "EnsembleVI",
-    "LastLayerLaplace",
     "ensemble_init",
     "ensemble_loss",
     "ensemble_map",
     "ensemble_predict",
     "ensemble_step",
     "ensemble_vi",
-    "last_layer_laplace",
     "param_group_optimizer",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    """Serve what moved to pyrox-nn, with a `DeprecationWarning`.
+
+    Looked up at access time, so importing the core never loads pyrox-nn and the
+    core does not depend on it.
+    """
+    if name not in {"LastLayerLaplace", "last_layer_laplace"}:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    warnings.warn(
+        f"pyrox.inference.{name} is deprecated; use `from pyrox_nn import {name}`.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    try:
+        pyrox_nn = importlib.import_module("pyrox_nn")
+    except ImportError as error:
+        raise ImportError(
+            f"pyrox.inference.{name} moved to pyrox-nn; install pyrox-nn and use "
+            f"`from pyrox_nn import {name}`."
+        ) from error
+    return getattr(pyrox_nn, name)

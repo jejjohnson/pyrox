@@ -1,4 +1,4 @@
-"""Tests for `pyrox.inference.last_layer_laplace` (#322).
+"""Tests for `pyrox_nn.last_layer_laplace` (#322).
 
 The reference is closed-form Bayesian linear regression (BLR) on frozen
 features: for a last layer linear in its weights the GGN Laplace posterior
@@ -15,7 +15,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import pytest
-from pyrox.inference import LastLayerLaplace, last_layer_laplace
+from pyrox_nn import LastLayerLaplace, last_layer_laplace
 
 
 SIGMA = 0.3
@@ -446,7 +446,7 @@ def test_docstring_example_runs():
     the old ``"layers[-1]"`` selector matched no key path)."""
     import doctest
 
-    from pyrox.inference import _laplace
+    from pyrox_nn import _laplace
 
     finder = doctest.DocTestFinder()
     runner = doctest.DocTestRunner()

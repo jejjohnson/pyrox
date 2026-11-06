@@ -60,13 +60,6 @@ it is almost here, extend it where it lives. Regenerate with
 | `ensemble_step` | function | Perform one ensemble update step on a batch. |
 | `ensemble_vi` | function | One-shot wrapper around `EnsembleVI`. |
 
-#### Post-hoc last-layer Laplace approximation with a GGN Hessian. (`pyrox.inference._laplace`)
-
-| Name | Kind | What it does |
-|---|---|---|
-| `LastLayerLaplace` | class | Gaussian posterior over a selected parameter group of a fitted model. |
-| `last_layer_laplace` | function | Fit a post-hoc GGN Laplace posterior over a parameter group. |
-
 #### Per-parameter-group optimizer helper. (`pyrox.inference._param_groups`)
 
 | Name | Kind | What it does |
@@ -363,6 +356,13 @@ it is almost here, extend it where it lives. Regenerate with
 | `GaussianRegressionHead` | class | Bayesian heteroscedastic regression head (mean plus log-scale). |
 | `MCSigmoidDenseFA` | class | Heteroscedastic multi-label output layer (FA noise + sigmoid). |
 | `MCSoftmaxDenseFA` | class | Heteroscedastic multi-class output layer (FA noise + softmax). |
+
+#### Post-hoc last-layer Laplace approximation with a GGN Hessian. (`pyrox_nn._laplace`)
+
+| Name | Kind | What it does |
+|---|---|---|
+| `LastLayerLaplace` | class | Gaussian posterior over a selected parameter group of a fitted model. |
+| `last_layer_laplace` | function | Fit a post-hoc GGN Laplace posterior over a parameter group. |
 
 #### Bayesian Multiplicative Filter Networks. (`pyrox_nn._mfn`)
 

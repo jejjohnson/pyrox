@@ -19,7 +19,7 @@ the next person will find and reuse it.
 |---|---|---|---|
 | `pyrox` | `pyrox._core`, `pyrox.inference` | The bridge (`PyroxModule`, `pyrox_method`, `Parameterized`) and ensemble MAP / VI | — |
 | `pyrox-gp` | `pyrox_gp` | GP kernels (with priors), guides, likelihoods; exact, sparse, Markov, multi-output and warped GPs; non-Gaussian inference; pathwise sampling | pyrox |
-| `pyrox-nn` | `pyrox_nn` (+ `pyrox_nn.api`, `pyrox_nn.preprocessing` behind `[bnf]`) | Bayesian / uncertainty-aware layers on geonnax cores, the Bayesian Neural Field estimator | pyrox (**never** pyrox-gp) |
+| `pyrox-nn` | `pyrox_nn` (+ `pyrox_nn.api`, `pyrox_nn.preprocessing` behind `[bnf]`) | Bayesian / uncertainty-aware layers on geonnax cores, the Bayesian Neural Field estimator, last-layer Laplace | pyrox (**never** pyrox-gp) |
 | `pyrox-lgm` | `pyrox_lgm` | Latent Gaussian models in precision form: GMRF components, PC priors, `inla()` | pyrox (**never** pyrox-gp) |
 
 Dependencies point one way: nothing imports upward. `pyrox-gp`, `pyrox-nn` and
@@ -28,7 +28,8 @@ Dependencies point one way: nothing imports upward. `pyrox-gp`, `pyrox-nn` and
 pyrox-nn); a caller may still pass a
 `pyrox_gp` kernel to a `pyrox_nn` layer, and tests may import both.
 `pyrox` exports only `__version__`, `_core` and `inference`: the bridge's
-public home is `pyrox._core` despite the underscore.
+public home is `pyrox._core` despite the underscore. The core never imports
+gaussx, lineax, kernellib or geonnax (`packages/pyrox/tests/test_core_import_guard.py`).
 
 ## What pyrox is built on
 
@@ -39,7 +40,7 @@ fails under a handler, a transform or a second instance.
 |---|---|---|
 | **NumPyro** | Sample / param / factor sites, handlers, MCMC, SVI, autoguides, distributions | Sites inside a module go through `pyrox_sample` / `pyrox_param` so they are scoped, cached per call and guarded; models stay plain NumPyro functions that every handler composes with. |
 | **Equinox** | Immutable `eqx.Module` pytrees, `filter_*` transforms, `eqx.tree_at` | Modules, guides and likelihoods are `eqx.Module`s; states and results are `eqx.Module`s or NamedTuples (both pytrees); never a dataclass for anything traced. Configuration (shapes, names, flags) is `eqx.field(static=True)`. Rebuilding a pytree skips `__init__`. |
-| **gaussx** | Every solve, logdet, Cholesky, Gaussian density, KL, GP conditioning, Kalman filter, quadrature, GMRF | Linear algebra on a covariance or precision goes through gaussx on a PSD-tagged operator, never `jnp.linalg` / `cho_solve`. Models carry `solver: AbstractSolverStrategy \| None` (default `DenseSolver()`). |
+| **gaussx** (not the `pyrox` core) | Every solve, logdet, Cholesky, Gaussian density, KL, GP conditioning, Kalman filter, quadrature, GMRF | Linear algebra on a covariance or precision goes through gaussx on a PSD-tagged operator, never `jnp.linalg` / `cho_solve`. Models carry `solver: AbstractSolverStrategy \| None` (default `DenseSolver()`). |
 | **kernellib** | Kernel math (`kernellib.functional`), `AbstractKernel` (= `pyrox_gp.Kernel`), kernel operators, landmark selection, graphs | pyrox-gp kernels wrap kernellib; new kernel math goes to kernellib, not here. |
 | **geonnax** | Deterministic network cores, encoders, basis functions | pyrox-nn wraps a geonnax core and swaps its parameters for sites; new deterministic architecture goes to geonnax. |
 | **lineax** | Operators and tags | Dense Grams enter as `lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)`. |
@@ -82,6 +83,7 @@ fails under a handler, a transform or a second instance.
 | A network core | `geonnax`; wrap it with `eqx.tree_at` + sites (see `pyrox_nn._sngp`, `_vssgp`) |
 | Flattening `(*batch, D)` around a single-example core | `pyrox_nn._batching.vmap_over_flat_batch` |
 | An ensemble of MAP / VI fits, a per-group optimiser | `pyrox.inference` (`ensemble_map`, `ensemble_vi`, `EnsembleMAP`, `EnsembleVI`, `param_group_optimizer`) |
+| A Gaussian posterior over a fitted network's last layer | `pyrox_nn.last_layer_laplace` |
 | GMRF precisions (iid, RW1/2, AR1, Besag, BYM2, SPDE) | gaussx GMRF builders; as LGM components, `pyrox_lgm` |
 | A dense-reference check in a test | gaussx / `jnp.linalg` on the materialised matrix (fine in tests) |
 
@@ -179,6 +181,7 @@ fails under a handler, a transform or a second instance.
 | `packages/pyrox/tests/test_capabilities.py` | `docs/capabilities.md` is current; no name bound to two objects |
 | `tests/**/test_docstrings.py` (pyrox, pyrox-gp, pyrox-nn) | No Sphinx / RST markup in source |
 | `packages/pyrox-lgm/tests/test_import_guard.py`, `packages/pyrox-nn/tests/test_nn_import_guard.py` | pyrox-lgm and pyrox-nn never import pyrox-gp |
+| `packages/pyrox/tests/test_core_import_guard.py` | The core imports no gaussx, lineax, kernellib or geonnax |
 | `packages/pyrox-gp/tests/gp/test_nn_split_deprecations.py` | The names that moved out of pyrox-gp warn and still work |
 | `packages/pyrox-lgm/tests/test_public_api.py`, `test_doctests.py` | lgm `__all__` names exist, no duplicates; lgm doctests run |
 | `packages/pyrox-lgm/tests/test_rinla_fixtures.py` | `inla()` against R-INLA reference fixtures (slow) |
