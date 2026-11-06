@@ -23,6 +23,8 @@
   different learning rates) per labelled parameter group
 """
 
+import importlib
+import warnings
 from typing import Any
 
 from pyrox.inference._ensemble import (
@@ -56,12 +58,23 @@ __all__ = [
 
 
 def __getattr__(name: str) -> Any:
-    """Name the new home of what moved out of the core."""
-    if name in {"LastLayerLaplace", "last_layer_laplace"}:
-        # ImportError, not AttributeError: `from … import` would replace the
-        # message of an AttributeError with its own generic one.
+    """Serve what moved to pyrox-nn, with a `DeprecationWarning`.
+
+    Looked up at access time, so importing the core never loads pyrox-nn and the
+    core does not depend on it.
+    """
+    if name not in {"LastLayerLaplace", "last_layer_laplace"}:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    warnings.warn(
+        f"pyrox.inference.{name} is deprecated; use `from pyrox_nn import {name}`.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    try:
+        pyrox_nn = importlib.import_module("pyrox_nn")
+    except ImportError as error:
         raise ImportError(
             f"pyrox.inference.{name} moved to pyrox-nn; install pyrox-nn and use "
             f"`from pyrox_nn import {name}`."
-        )
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+        ) from error
+    return getattr(pyrox_nn, name)
