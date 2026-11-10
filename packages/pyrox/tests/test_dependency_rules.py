@@ -44,6 +44,10 @@ PACKAGES: dict[str, tuple[str, tuple[str, ...]]] = {
         "packages/pyrox-nn/pyproject.toml",
         ("packages/pyrox-nn/src/pyrox_nn",),
     ),
+    "pyrox-ssm": (
+        "packages/pyrox-ssm/pyproject.toml",
+        ("packages/pyrox-ssm/src/pyrox_ssm",),
+    ),
 }
 
 #: stack libraries pyrox may not use: import name -> distribution

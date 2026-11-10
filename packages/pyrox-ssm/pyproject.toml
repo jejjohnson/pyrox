@@ -1,0 +1,57 @@
+[project]
+name = "pyrox-ssm"
+version = "0.0.0"
+description = "State-space models as NumPyro models on top of pyrox and gaussx: temporal GPs and Gaussian state-space models whose inference recurses in time."
+authors = [
+    {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
+]
+license = "MIT"
+license-files = ["LICENSE"]
+readme = "README.md"
+keywords = ["jax", "equinox", "numpyro", "state-space-models", "kalman-filter", "temporal-gaussian-processes"]
+requires-python = ">=3.12"
+classifiers = [
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Natural Language :: English",
+    "Intended Audience :: Science/Research",
+    "Development Status :: 2 - Pre-Alpha",
+]
+# No pyrox-gp, pyrox-lgm or pyrox-nn: state-space models recurse in time and
+# need nothing from the sibling packages (tests/test_ssm_import_guard.py).
+dependencies = [
+    "pyrox",
+    "gaussx[numpyro]>=0.6.14",
+    "equinox>=0.13.8",
+    "einx>=0.4.3",
+    "numpyro>=0.21",
+]
+
+[project.optional-dependencies]
+# `pip install pyrox-ssm[flows]` enables normalizing-flow observation warps,
+# as `pyrox-gp[flows]` does. Pinned by commit, matching pyrox-gp.
+flows = [
+    "flowjax>=0.9",
+    "gauss-flows @ git+https://github.com/jejjohnson/gauss_flows.git@bdb23f076ebaaf1ba042aa52ea593487cef3204e",
+]
+
+[project.urls]
+Repository = "https://github.com/jejjohnson/pyrox"
+
+[tool.uv.sources]
+# Not on PyPI yet; resolve the release tag from GitHub, in step with the
+# other members' sources (one version per package across the workspace).
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.6.14" }
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+# The flows extra pins gauss-flows by a direct URL until it ships to PyPI.
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pyrox_ssm"]

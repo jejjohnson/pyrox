@@ -10,6 +10,7 @@ pyrox bridges [Equinox](https://docs.kidger.site/equinox/) modules and [NumPyro]
 - **`pyrox_gp`** — Gaussian process building blocks: kernels, sparse/variational GPs, non-Gaussian inference, pathwise samplers, Markov (Kalman) GPs, multi-output GPs.
 - **`pyrox_nn`** — Bayesian and uncertainty-aware NN layers: dense variants, spectral layers, SNGP, ensembles, the Bayesian Neural Field stack.
 - **`pyrox_lgm`** — latent Gaussian models in precision form: GMRF components, PC priors, `inla()`.
+- **`pyrox_ssm`** — state-space models as NumPyro models, whose inference recurses in time (scaffold).
 
 ## Installation
 

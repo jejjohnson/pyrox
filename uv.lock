@@ -20,6 +20,7 @@ members = [
     "pyrox-lgm",
     "pyrox-monorepo",
     "pyrox-nn",
+    "pyrox-ssm",
 ]
 overrides = [
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=v0.6.14" },
@@ -2149,6 +2150,7 @@ dev = [
     { name = "pyrox-gp" },
     { name = "pyrox-lgm" },
     { name = "pyrox-nn" },
+    { name = "pyrox-ssm" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "xarray" },
@@ -2187,6 +2189,7 @@ dev = [
     { name = "pyrox-gp", editable = "packages/pyrox-gp" },
     { name = "pyrox-lgm", editable = "packages/pyrox-lgm" },
     { name = "pyrox-nn", editable = "packages/pyrox-nn" },
+    { name = "pyrox-ssm", editable = "packages/pyrox-ssm" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "xarray", specifier = ">=2025.1" },
@@ -2263,6 +2266,36 @@ requires-dist = [
     { name = "xarray", marker = "extra == 'xarray'", specifier = ">=2025.1" },
 ]
 provides-extras = ["optax", "bnf", "xarray", "colab"]
+
+[[package]]
+name = "pyrox-ssm"
+version = "0.0.0"
+source = { editable = "packages/pyrox-ssm" }
+dependencies = [
+    { name = "einx" },
+    { name = "equinox" },
+    { name = "gaussx" },
+    { name = "numpyro" },
+    { name = "pyrox" },
+]
+
+[package.optional-dependencies]
+flows = [
+    { name = "flowjax" },
+    { name = "gauss-flows" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "einx", specifier = ">=0.4.3" },
+    { name = "equinox", specifier = ">=0.13.8" },
+    { name = "flowjax", marker = "extra == 'flows'", specifier = ">=0.9" },
+    { name = "gauss-flows", marker = "extra == 'flows'", git = "https://github.com/jejjohnson/gauss_flows.git?rev=bdb23f076ebaaf1ba042aa52ea593487cef3204e" },
+    { name = "gaussx", extras = ["numpyro"], git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.14" },
+    { name = "numpyro", specifier = ">=0.21" },
+    { name = "pyrox", editable = "packages/pyrox" },
+]
+provides-extras = ["flows"]
 
 [[package]]
 name = "pytest"

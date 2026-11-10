@@ -79,6 +79,22 @@
           "jsonpath": "$.package[?(@.name.value=='pyrox-lgm')].version"
         }
       ]
+    },
+    "packages/pyrox-ssm": {
+      "release-type": "python",
+      "package-name": "pyrox-ssm",
+      "component": "pyrox-ssm",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "extra-files": [
+        "src/pyrox_ssm/__init__.py",
+        {
+          "type": "toml",
+          "path": "/uv.lock",
+          "jsonpath": "$.package[?(@.name.value=='pyrox-ssm')].version"
+        }
+      ]
     }
   }
 }
