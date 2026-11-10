@@ -15,12 +15,14 @@ from __future__ import annotations
 import time
 import warnings
 
+import equinox as eqx
 import gaussx as gx
 import jax
 import jax.numpy as jnp
 import kernellib as kl
 import numpy as np
 import pyrox_lgm as lgm
+import pyrox_lgm._inla as inla_mod
 import pytest
 from pyrox_lgm._inla import _fit_point, _log_post
 from pyrox_lgm._result import mixture_summary
@@ -205,6 +207,75 @@ def test_theta_init_must_match_the_hyperparameters():
     model, data = _gaussian_rw2()
     with pytest.raises(ValueError, match=r"theta_init must have shape \(2,\)"):
         lgm.inla(model, data, theta_init=np.zeros(3))
+
+
+class _Quadratic(eqx.Module):
+    """A stand-in model whose log-posterior of u is -(u - c)^2 / (2 s^2)."""
+
+    centre: jax.Array
+    scale: jax.Array
+
+    def laplace(self, u, data, *, projector, max_newton):
+        del data, projector, max_newton
+        value = -0.5 * jnp.sum(((u - self.centre) / self.scale) ** 2)
+        return _QuadraticFit(value, jnp.asarray(True))
+
+    def log_prior(self, u):
+        return jnp.zeros((), u.dtype)
+
+
+class _QuadraticFit(eqx.Module):
+    log_marginal: jax.Array
+    converged: jax.Array
+
+
+def test_theta_mode_reaches_the_mode_of_a_quadratic():
+    # One optx.minimise to the closed-form mode u* = c; the gradient there is
+    # below the tolerance, so the error is at most tol * s^2 = 4e-6.
+    model = _Quadratic(jnp.array([1.7]), jnp.array([2.0]))
+    u, steps, ok = inla_mod._theta_mode(
+        model, None, {}, 1, jnp.zeros(1), max_iter=50, tol=1e-6, verbose=False
+    )
+    assert ok
+    assert int(steps) < 50
+    assert np.allclose(u, 1.7, atol=4e-6)
+
+
+def test_theta_mode_reports_an_unconverged_start_without_raising():
+    # The inner fit at u0 failed (+inf): the search stops and asks inla() to
+    # escalate the Newton budget, through solution.result.
+    class Unconverged(_Quadratic):
+        def laplace(self, u, data, *, projector, max_newton):
+            fit = super().laplace(u, data, projector=projector, max_newton=max_newton)
+            return _QuadraticFit(fit.log_marginal, jnp.asarray(False))
+
+    model = Unconverged(jnp.array([1.7]), jnp.array([2.0]))
+    _, _, ok = inla_mod._theta_mode(
+        model, None, {}, 1, jnp.zeros(1), max_iter=50, tol=1e-6, verbose=False
+    )
+    assert not ok
+
+
+def test_laplace_log_marginal_gradient_matches_central_differences():
+    # d/du of argminax's Laplace log-marginal, through the implicit mode, for
+    # a Poisson RW1 + intercept model, against central differences in x64
+    # (measured relative error 1.4e-10, bounded here at 1e-6).
+    n = 20
+    t = np.arange(n)
+    y = np.random.default_rng(0).poisson(np.exp(1.0 + np.sin(t / 3.0)))
+    model = lgm.LGM(
+        (lgm.RW1(n, name="t"),), lgm.FixedEffects(("intercept",)), lgm.Poisson()
+    )
+    data = {"y": y.astype(float), "t": t}
+
+    def log_marginal(u):
+        return model.laplace(u, data).log_marginal
+
+    u = jnp.array([0.4])
+    h = 1e-5
+    fd = (log_marginal(u + h) - log_marginal(u - h)) / (2 * h)
+    assert bool(model.laplace(u, data).converged)
+    assert np.isclose(float(jax.grad(log_marginal)(u)[0]), float(fd), rtol=1e-6)
 
 
 def test_any_generic_structure_assembles():

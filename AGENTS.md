@@ -44,7 +44,8 @@ fails under a handler, a transform or a second instance.
 | **kernellib** | Kernel math (`kernellib.functional`), `AbstractKernel` (= `pyrox_gp.Kernel`), kernel operators, landmark selection, graphs | pyrox-gp kernels wrap kernellib; new kernel math goes to kernellib, not here. |
 | **geonnax** | Deterministic network cores, encoders, basis functions | pyrox-nn wraps a geonnax core and swaps its parameters for sites; new deterministic architecture goes to geonnax. |
 | **lineax** | Operators and tags | Dense Grams enter as `lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)`. |
-| **matfree**, **optax** | Lanczos (PC priors), L-BFGS (`inla`), optimisers (ensemble MAP) | optax is optional in `pyrox` (`[optax]`): import it lazily (`_require_optax`). |
+| **argminax**, **optimistix** | Laplace modes and evidence (`inla`'s inner fit, `last_layer_laplace`), L-BFGS (`inla`'s mode search) | A Newton loop to a Laplace mode goes through `argminax.solve.laplace_mode`, not a hand-written loop. |
+| **matfree**, **optax** | Lanczos (PC priors), optimisers (ensemble MAP) | optax is optional in `pyrox` (`[optax]`): import it lazily (`_require_optax`). |
 | **einx**, **jaxtyping** | Axis-naming array ops; shape annotations | Contractions are written with einx (`einx.dot("... i, i o -> ... o", …)`); public arrays are jaxtyping-annotated. |
 | **jax** | `jit`, `grad`, `vmap`, PRNG, x64 | Pure functions, explicit keys, no Python control flow on traced values; the test suite runs with x64 on. |
 

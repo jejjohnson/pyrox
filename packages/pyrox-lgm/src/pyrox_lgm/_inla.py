@@ -4,8 +4,9 @@ Integrated nested Laplace approximations (Rue, Martino & Chopin, 2009) in
 three steps:
 
 1. the hyperparameter mode of $\log\tilde\pi(u\mid y) = \log\tilde\pi(y\mid\theta)
-   + \log\pi(u)$ (gaussx's Laplace marginal, with exact gradients), by L-BFGS
-   in the unconstrained coordinates $u$;
+   + \log\pi(u)$ (the Laplace marginal of `argminax.solve.laplace_mode`, with
+   exact gradients), by optimistix L-BFGS in the unconstrained coordinates
+   $u$;
 2. an integration design $\{u_k, w_k\}$ around it: by default R-INLA's own
    (`_rinla_design`: its fixed grid for $m \le 2$, a CCD above, both
    stretched by the skewness corrections), or `gaussx.theta_design`'s
@@ -29,8 +30,9 @@ import gaussx as gx
 import jax
 import jax.numpy as jnp
 import numpy as np
-import optax
-from jaxtyping import ArrayLike
+import optimistix as optx
+from argminax.solve import laplace_mode
+from jaxtyping import Array, ArrayLike
 
 from pyrox_lgm._model import LGM
 from pyrox_lgm._result import INLAResult, Summary, mixture_summary
@@ -133,16 +135,37 @@ _RINLA_LIMIT = 5.0
 # Module-level compiled pieces. They take the model, the projector and the
 # data as arguments (not closures), so a second ``inla()`` on a model of the
 # same structure reuses every compilation.
-_SOLVER = optax.lbfgs()
 
 
-def _neg_log_post(model, A, data, max_newton, u):
+def _neg_log_post(u, args):
     # +inf where the inner Newton fit has not converged: the line search
     # rejects such a candidate, and _theta_mode fails on an accepted one,
     # so no unconverged fit steers the mode.
+    model, A, data, max_newton = args
     fit = model.laplace(u, data, projector=A, max_newton=max_newton)
     value = -(fit.log_marginal + model.log_prior(u))
     return jnp.where(fit.converged, value, jnp.inf)
+
+
+class _GradientLBFGS(optx.LBFGS):
+    r"""Optimistix L-BFGS that stops on the gradient, $\max|\nabla_u| <$ ``atol``.
+
+    `optx.LBFGS` stops when both the step and the change in value are small;
+    the mode search stops, as before, when the gradient at the last accepted
+    iterate is. An accepted iterate whose value is not finite (its inner fit
+    did not converge, which only the starting point can be) stops the search
+    with ``RESULTS.nonlinear_divergence``.
+    """
+
+    def terminate(self, fn, y, args, options, state, tags):
+        del fn, y, args, options, tags
+        started = ~state.first_step
+        finite = jnp.isfinite(state.f_info.f)
+        small = jnp.max(jnp.abs(state.f_info.grad), initial=0.0) < self.atol
+        result = optx.RESULTS.where(
+            started & ~finite, optx.RESULTS.nonlinear_divergence, state.result
+        )
+        return started & (small | ~finite), result
 
 
 @eqx.filter_jit
@@ -161,16 +184,6 @@ class _UnconvergedProbe(Exception):
 
 
 @eqx.filter_jit
-def _lbfgs_step(model, A, data, max_newton, u, state):
-    def f(v):
-        return _neg_log_post(model, A, data, max_newton, v)
-
-    value, grad = optax.value_and_grad_from_state(f)(u, state=state)
-    updates, state = _SOLVER.update(grad, state, u, value=value, grad=grad, value_fn=f)
-    return optax.apply_updates(u, updates), state, value, grad
-
-
-@eqx.filter_jit
 def _hessian(model, A, data, max_newton, u):
     def lp(v):
         return model.log_posterior_theta(v, data, projector=A, max_newton=max_newton)
@@ -186,7 +199,7 @@ def _fit_point(model, A, data, u, n_iter, subspace, sla=False):
         jnp.asarray(data["y"]), model._likelihood_theta(theta), data
     )
     offset = model.offset(data)
-    fit = gx.laplace_mode(prior, lik, projector=A, offset=offset, max_iter=n_iter)
+    fit = laplace_mode(prior, lik, projector=A, offset=offset, max_iter=n_iter)
     var = fit.factor.diag_inv()
     G = HV = None
     if isinstance(prior, gx.IntrinsicGMRF):
@@ -200,8 +213,18 @@ def _fit_point(model, A, data, u, n_iter, subspace, sla=False):
     if sla:
         mean, skew = _simplified_laplace(fit, lik, A, offset, var, G, HV)
     if subspace:
+        # gaussx types the correction's input as its own LaplaceResult, whose
+        # fields argminax's result has: rebuild it, no numerics change.
+        laplace = gx.LaplaceResult(
+            mode=fit.mode,
+            hessian=fit.hessian,
+            factor=fit.factor,
+            log_marginal=fit.log_marginal,
+            n_iter=fit.n_iter,
+            converged=fit.converged,
+        )
         mean = gx.vb_mean_correction(
-            fit,
+            laplace,
             prior,
             lik,
             subspace=jnp.asarray(subspace),
@@ -307,35 +330,45 @@ def _predictor_variance(A, selected, G, HV):
     return jax.ops.segment_sum(coef * sigma, jnp.asarray(pair_row), m)
 
 
-def _theta_mode(model, A, data, max_newton, u0, *, max_iter, tol, verbose):
-    """Minimise the negative log-posterior of ``u`` by optax L-BFGS.
+def _theta_mode(
+    model, A, data, max_newton, u0, *, max_iter, tol, verbose
+) -> tuple[Array, Array, bool]:
+    """Minimise the negative log-posterior of ``u`` by optimistix L-BFGS.
 
-    Returns the mode, the iterations taken, and whether every accepted
-    iterate's inner fit converged (``False`` asks `inla` to escalate).
+    One compiled ``optx.minimise`` (`_GradientLBFGS`, at most ``max_iter``
+    steps, each a line-search trial); its ``result`` is read once, after it.
+    Returns the mode, the steps taken, and whether every accepted iterate's
+    inner fit converged (``False`` asks `inla` to escalate).
 
     Raises:
         RuntimeError: If the gradient tolerance is not met in ``max_iter``.
+        FloatingPointError: If the search ends on non-finite values.
     """
-    u, state = u0, _SOLVER.init(u0)
-    for i in range(max_iter):
-        u_new, state, value, grad = _lbfgs_step(model, A, data, max_newton, u, state)
-        if not np.isfinite(float(value)):  # the inner fit at u did not converge
-            return u, i, False
-        gnorm = float(jnp.max(jnp.abs(grad)))
-        if verbose:
-            print(
-                f"theta-mode iter {i}: -log post {float(value):.6f}, |grad| {gnorm:.2e}"
-            )
-        if not np.all(np.isfinite(np.asarray(u_new))):
-            raise FloatingPointError("theta-mode search produced non-finite values")
-        if gnorm < tol:
-            return u, i, True
-        u = u_new
-    raise RuntimeError(
-        f"theta-mode search did not reach |grad| < {tol} in {max_iter} "
-        "iterations; the Hessian and design would be built off the mode. Raise "
-        "max_theta_iter, loosen theta_tol or pass a closer theta_init"
+    # optx.LBFGS's __init__ is inherited at runtime; ty does not see it.
+    solver = _GradientLBFGS(rtol=0.0, atol=tol, verbose=verbose)  # ty: ignore[missing-argument]
+    solution = optx.minimise(
+        _neg_log_post,
+        solver,
+        u0,
+        args=(model, A, data, max_newton),
+        max_steps=max_iter,
+        throw=False,
     )
+    u, steps, result = solution.value, solution.stats["num_steps"], solution.result
+    if result == optx.RESULTS.nonlinear_divergence:  # the inner fit at u0 failed
+        return u, steps, False
+    if result == optx.RESULTS.nonlinear_max_steps_reached:
+        raise RuntimeError(
+            f"theta-mode search did not reach |grad| < {tol} in {max_iter} "
+            "iterations; the Hessian and design would be built off the mode. Raise "
+            "max_theta_iter, loosen theta_tol or pass a closer theta_init"
+        )
+    if result != optx.RESULTS.successful or not bool(jnp.all(jnp.isfinite(u))):
+        raise FloatingPointError(
+            f"theta-mode search failed ({optx.RESULTS[result]}) or produced "
+            "non-finite values"
+        )
+    return u, steps, True
 
 
 def _ccd_unit(m: int) -> np.ndarray:
@@ -470,18 +503,20 @@ def inla(
             dimension.
         key: Unused by the deterministic design; reserved for stochastic
             strategies. Accepted so call sites stay stable.
-        max_newton: Newton iterations per inner Laplace fit; a design point
+        max_newton: Newton iterations per inner Laplace fit (the damped
+            Newton loop of `argminax.solve.laplace_mode`); a design point
             that does not converge is re-run with four times as many, then
             dropped with a warning.
         theta_init: Starting unconstrained $u$ (default zeros: every
             positive hyperparameter at 1, every interval one at its centre).
-        max_theta_iter: L-BFGS iterations for the mode; not reaching
-            ``theta_tol`` within them raises.
+        max_theta_iter: Optimistix L-BFGS steps for the mode (each
+            line-search trial is a step); not reaching ``theta_tol`` within
+            them raises.
         theta_tol: Stop when $\max|\nabla_u| <$ ``theta_tol``.
         grid_step: Step in standardised $z$ of ``integration="grid"``.
         grid_threshold: Log-density drop from the mode at which
             ``integration="grid"`` stops.
-        verbose: Print the mode search.
+        verbose: Print the mode search (optimistix's per-step report).
 
     Returns:
         An `INLAResult`.

@@ -27,7 +27,8 @@ dependencies = [
     "kernellib>=0.0.22",
     "matfree>=0.6.0",
     "numpyro>=0.21",
-    "optax>=0.2.8",
+    "argminax[numpyro]>=0.0.6",
+    "optimistix>=0.1.0",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +45,10 @@ Repository = "https://github.com/jejjohnson/pyrox"
 # pyrox-gp's sources (one version per package across the workspace).
 gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.6.14" }
 kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.22" }
+# The inner Newton loop of `inla()` (`argminax.solve.laplace_mode`), at the
+# v0.0.6 release, in step with pyrox-nn's source. argminax pins gaussx v0.6.13
+# by URL; the root override keeps the workspace's one gaussx instead.
+argminax = { git = "https://github.com/jejjohnson/argminax.git", rev = "v0.0.6" }
 
 [build-system]
 requires = ["hatchling>=1.27"]

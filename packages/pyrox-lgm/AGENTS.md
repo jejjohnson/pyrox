@@ -19,7 +19,8 @@ One facade, `pyrox_lgm`:
 
 - **Never import pyrox-gp** (`tests/test_import_guard.py`: an AST scan plus a
   subprocess import check). Precisions come from gaussx GMRF builders,
-  graphs from kernellib, Lanczos from matfree, L-BFGS from optax.
+  graphs from kernellib, Lanczos from matfree, the inner Newton loop from
+  argminax (`argminax.solve.laplace_mode`), L-BFGS from optimistix.
 - **Components are plain `eqx.Module`s**, not `PyroxModule`s: subclass
   `AbstractComponent` and provide `name` (static), `n_nodes`,
   `theta_spec() -> {key: (prior, transform)}` and `prior(theta, *,
