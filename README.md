@@ -72,7 +72,7 @@ uv add "pyrox-nn @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=pack
 uv add "pyrox-lgm @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-lgm"
 ```
 
-`pyrox-gp`, `pyrox-nn` and `pyrox-lgm` depend on [gaussx](https://github.com/jejjohnson/gaussx) and [kernellib](https://github.com/jejjohnson/kernellib), which are also installed from GitHub.
+`pyrox-gp`, `pyrox-nn` and `pyrox-lgm` depend on [gaussx](https://github.com/jejjohnson/gaussx) and [kernellib](https://github.com/jejjohnson/kernellib), and `pyrox-nn` also on [argminax](https://github.com/jejjohnson/argminax), all installed from GitHub.
 kernellib v0.0.22 pins geonnax v0.0.8 while pyrox needs geonnax v0.0.11, so until a kernellib release pins that, add this override to your project's `pyproject.toml`, which also keeps one gaussx across the packages:
 
 ```toml

@@ -45,6 +45,20 @@ wheels = [
 ]
 
 [[package]]
+name = "argminax"
+version = "0.0.4"
+source = { git = "https://github.com/jejjohnson/argminax.git?rev=v0.0.4#5992322c0c8ed06744254e7d331a83549fb69b21" }
+dependencies = [
+    { name = "equinox" },
+    { name = "gaussx" },
+    { name = "jax" },
+    { name = "jaxlib" },
+    { name = "jaxtyping" },
+    { name = "lineax" },
+    { name = "optimistix" },
+]
+
+[[package]]
 name = "asttokens"
 version = "3.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2201,6 +2215,7 @@ name = "pyrox-nn"
 version = "0.1.1"
 source = { editable = "packages/pyrox-nn" }
 dependencies = [
+    { name = "argminax" },
     { name = "einx" },
     { name = "gaussx" },
     { name = "geonnax" },
@@ -2230,6 +2245,7 @@ xarray = [
 
 [package.metadata]
 requires-dist = [
+    { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?rev=v0.0.4" },
     { name = "einx", specifier = ">=0.4.3" },
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.5" },
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.11" },

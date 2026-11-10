@@ -26,6 +26,7 @@ dependencies = [
     "lineax>=0.1.1",
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.11",
     "einx>=0.4.3",
+    "argminax>=0.0.4",
 ]
 
 [project.optional-dependencies]
@@ -63,6 +64,10 @@ Repository = "https://github.com/jejjohnson/pyrox"
 # pyrox-gp's and pyrox-lgm's sources (one version per package across the workspace).
 gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.6.5" }
 kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.22" }
+# The curvature, evidence and prior-precision search of `last_layer_laplace`,
+# at the v0.0.4 release. argminax pins gaussx v0.6.12 by URL; the root
+# override keeps the workspace's one gaussx instead.
+argminax = { git = "https://github.com/jejjohnson/argminax.git", rev = "v0.0.4" }
 
 [build-system]
 requires = ["hatchling>=1.27"]

@@ -20,6 +20,7 @@ members = ["packages/*"]
 # git dependency, which conflicts with the newer tags the workspace needs; the
 # override keeps one gaussx and one geonnax for every member. Move it in step with pyrox-gp's gaussx and geonnax sources, and with the
 # override snippet users copy from README.md (Installation).
+# argminax v0.0.4 (pyrox-nn) pins gaussx v0.6.12 by URL; the same override replaces it.
 override-dependencies = [
     "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.6.5",
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.11",

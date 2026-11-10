@@ -1,7 +1,9 @@
 """Post-hoc last-layer Laplace approximation with a GGN Hessian.
 
-See [`last_layer_laplace`][pyrox_nn.last_layer_laplace]. The linear algebra goes
-through ``gaussx`` on PSD-tagged ``lineax`` operators.
+See [`last_layer_laplace`][pyrox_nn.last_layer_laplace]. The posterior is an
+``argminax.curvature.Laplace``, whose evidence and prior-precision search come
+from ``argminax.diagnose``; the rest of the linear algebra goes through
+``gaussx`` on PSD-tagged ``lineax`` operators.
 """
 
 from __future__ import annotations
@@ -9,6 +11,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Literal
 
+import argminax.curvature
+import argminax.diagnose
 import einx
 import equinox as eqx
 import gaussx
@@ -133,6 +137,18 @@ class LastLayerLaplace(eqx.Module):
         h = gaussx.symmetrize(self.ggn) + shift * jnp.eye(p, dtype=self.ggn.dtype)
         return lx.MatrixLinearOperator(h, lx.positive_semidefinite_tag)
 
+    def _posterior(
+        self, prior_precision: Array | float | None = None
+    ) -> argminax.curvature.Laplace:
+        """N(w_λ, H_λ⁻¹), the quadratic model's posterior, as an argminax Laplace."""
+        lam = self._lam(prior_precision)
+        precision = self.precision(lam)
+        if self.structure == "diag":
+            # lineax does not infer PSD for a diagonal; G + λ I has a
+            # non-negative one, and argminax requires the tag
+            precision = lx.TaggedLinearOperator(precision, lx.positive_semidefinite_tag)
+        return argminax.curvature.Laplace(self.mode(lam), precision)
+
     def mode(self, prior_precision: Array | float | None = None) -> Array:
         r"""$w_\lambda = H_\lambda^{-1} (G w^* + b)$, shape ``(P,)``.
 
@@ -200,7 +216,11 @@ class LastLayerLaplace(eqx.Module):
         The mode $w_\lambda$ is re-solved for each $\lambda$, so for a
         model linear in $w$ this is the exact Bayesian linear-regression
         evidence at every $\lambda$ (the jitter counts as part of $G$), not
-        only at the $\lambda$ that produced $w^*$.
+        only at the $\lambda$ that produced $w^*$. $w_\lambda$ is the
+        minimum of the quadratic model's cost, so this is
+        ``argminax.diagnose.evidence`` at that minimum, with the prior
+        $\mathcal{N}(0, \lambda^{-1} I)$ and the Gaussian normaliser
+        carried by $\ell^*$.
 
         Args:
             prior_precision: $\lambda$ to evaluate at; defaults to the
@@ -210,17 +230,22 @@ class LastLayerLaplace(eqx.Module):
             Scalar log evidence.
         """
         lam = self._lam(prior_precision)
-        w_lam = self.mode(lam)
+        posterior = self._posterior(lam)
+        w_lam = posterior.mode
         delta = w_lam - self.w_map
         p = self.w_map.shape[0]
-        return (
+        # the cost at the minimum w_λ,
+        # J = −(ℓ⋆ + bᵀΔ − ½ ΔᵀGΔ) + (λ/2) ‖w_λ‖²
+        cost = -(
             self.log_likelihood
             + jnp.dot(self.loglik_grad, delta)
             - 0.5 * jnp.dot(delta, self._g_matvec(delta))
-            - 0.5 * lam * jnp.sum(w_lam**2)
-            + 0.5 * p * jnp.log(lam)
-            - 0.5 * gaussx.logdet(self.precision(lam))
-        )
+        ) + 0.5 * lam * jnp.sum(w_lam**2)
+        # ℓ⋆ already holds −½ log |2π σ² I|, and log |Sₐ| = −P log λ
+        zero = jnp.zeros((), dtype=self.w_map.dtype)
+        return argminax.diagnose.evidence(
+            posterior, cost, zero, prior_cov_logdet=-p * jnp.log(lam)
+        ).value
 
     def optimize_prior_precision(
         self, *, num_grid: int = 4097, num_refine: int = 100
@@ -241,11 +266,13 @@ class LastLayerLaplace(eqx.Module):
             - \tfrac{1}{2} \sum_i \log (g_i + \lambda).
         $$
 
-        It is maximized over $\log \lambda$ on a grid spanning half the
-        dtype's exponent range each way (so $\lambda$ and every term stay
-        finite, even when $w^* = 0$), then refined by golden-section search
-        in the grid cell either side of the best point. For a model linear
-        in $w$ this maximizes the exact evidence.
+        ``argminax.diagnose.optimize_prior_precision`` maximizes it over
+        $\log \lambda$ on a grid spanning half the dtype's exponent range
+        each way (so $\lambda$ and every term stay finite, even when
+        $w^* = 0$), then refines by golden-section search in the grid cell
+        either side of the best point; pyrox-nn supplies the eigenvalues
+        $g$ and the fit terms in $\omega$. For a model linear in $w$ this
+        maximizes the exact evidence.
 
         Args:
             num_grid: Grid points on $\log \lambda$.
@@ -255,6 +282,10 @@ class LastLayerLaplace(eqx.Module):
         Returns:
             A new `LastLayerLaplace` with the tuned ``prior_precision`` and
             ``w_mean`` $= w_\lambda$ at it.
+
+        Raises:
+            ValueError: If ``num_grid`` is below 3 or ``num_refine`` is
+                negative (argminax's ``ValidationError``).
         """
         dtype = self.w_map.dtype
         if self.structure == "diag":
@@ -271,37 +302,21 @@ class LastLayerLaplace(eqx.Module):
         # Round-off can leave eigenvalues of the PSD G slightly negative.
         g = jnp.clip(g.astype(dtype), 0.0) + self.jitter
         c = g * d + beta
-        p = self.w_map.shape[0]
 
-        def evidence(log_lam: Array) -> Array:
-            lam = jnp.exp(log_lam)
+        def fit_term(lam: Float[Array, ""]) -> Float[Array, ""]:
+            # βᵀ(ω − d) − ½ ∑ᵢ gᵢ (ωᵢ − dᵢ)² − (λ/2) ‖ω‖²; argminax adds
+            # (P/2) log λ − ½ ∑ᵢ log(gᵢ + λ)
             omega = c / (g + lam)
             delta = omega - d
             return (
                 jnp.dot(beta, delta)
                 - 0.5 * jnp.sum(g * delta**2)
                 - 0.5 * lam * jnp.sum(omega**2)
-                + 0.5 * p * log_lam
-                - 0.5 * jnp.sum(jnp.log(g + lam))
             )
 
-        bound = 0.5 * jnp.log(jnp.finfo(dtype).max)
-        grid = jnp.linspace(-bound, bound, num_grid, dtype=dtype)
-        best = jnp.argmax(jax.vmap(evidence)(grid))
-        step = grid[1] - grid[0]
-        lo = jnp.maximum(grid[best] - step, -bound)
-        hi = jnp.minimum(grid[best] + step, bound)
-        ratio = (jnp.sqrt(5.0) - 1.0) / 2.0
-
-        def golden(_: int, bracket: tuple[Array, Array]) -> tuple[Array, Array]:
-            a, b = bracket
-            x1 = b - ratio * (b - a)
-            x2 = a + ratio * (b - a)
-            left = evidence(x1) >= evidence(x2)
-            return jnp.where(left, a, x1), jnp.where(left, x2, b)
-
-        lo, hi = jax.lax.fori_loop(0, num_refine, golden, (lo, hi))
-        lam = jnp.exp(0.5 * (lo + hi)).astype(dtype)
+        lam = argminax.diagnose.optimize_prior_precision(
+            g, fit_term, num_grid=num_grid, num_refine=num_refine
+        )
         return eqx.tree_at(
             lambda m: (m.prior_precision, m.w_mean), self, (lam, self.mode(lam))
         )
@@ -338,6 +353,14 @@ def last_layer_laplace(
     matrix and this is exact Bayesian linear regression on those features.
     $J$ is formed densely with forward-mode autodiff, one pass per weight,
     so keep the group small (a last layer, not the network).
+
+    The curvature, the evidence and the prior-precision search come from
+    argminax: `LastLayerLaplace.log_marginal_likelihood` is
+    ``argminax.diagnose.evidence`` at an ``argminax.curvature.Laplace``
+    over $w$, $\mathcal{N}(w_\lambda, H_\lambda^{-1})$, and
+    `LastLayerLaplace.optimize_prior_precision` is
+    ``argminax.diagnose.optimize_prior_precision``. pyrox-nn keeps the
+    choice of weights, the dense GGN and the linearized predictive.
 
     Args:
         predict_fn: ``(params, x) -> f``; any output shape (flattened for
