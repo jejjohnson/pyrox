@@ -5,6 +5,6 @@ the package whose inference recurses in time. ``pyrox_ssm`` never imports
 ``pyrox_gp``, ``pyrox_lgm`` or ``pyrox_nn``.
 """
 
-__version__ = "0.0.0"  # x-release-please-version
+__version__ = "0.1.0"  # x-release-please-version
 
 __all__: list[str] = []
