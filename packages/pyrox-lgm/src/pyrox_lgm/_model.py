@@ -27,6 +27,7 @@ import jax.numpy as jnp
 import lineax as lx
 import numpy as np
 import numpyro.distributions as dist
+from argminax.solve import LaplaceModeResult, laplace_mode
 from jaxtyping import Array, ArrayLike, Float
 from numpyro.distributions.transforms import Transform
 
@@ -403,7 +404,7 @@ class LGM(eqx.Module):
         """The unnormalised log-posterior of the unconstrained hyperparameters.
 
         $\\log\\tilde\\pi(u \\mid y) = \\log\\tilde\\pi(y\\mid\\theta)
-        + \\log\\pi(u)$. Exact gradients flow through gaussx's
+        + \\log\\pi(u)$. Exact gradients flow through argminax's
         implicit-differentiated Laplace mode. Pass a prebuilt ``projector`` to
         keep host work out of a traced loop.
         """
@@ -417,14 +418,15 @@ class LGM(eqx.Module):
         *,
         projector: gx.SparseOperator | None = None,
         max_newton: int = 50,
-    ) -> gx.LaplaceResult:
-        """The Laplace approximation of $x \\mid y, \\theta = T(u)$."""
+    ) -> LaplaceModeResult:
+        """The Laplace approximation of $x \\mid y, \\theta = T(u)$, by
+        `argminax.solve.laplace_mode`."""
         theta = self.unflatten(u)
         A = self.projector(data) if projector is None else projector
         lik = self.likelihood.build(
             jnp.asarray(data["y"]), self._likelihood_theta(theta), data
         )
-        return gx.laplace_mode(
+        return laplace_mode(
             self.latent_prior(theta),
             lik,
             projector=A,

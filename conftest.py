@@ -43,12 +43,4 @@ def _gaussx_deprecations_are_errors():
         return
     with warnings.catch_warnings():
         warnings.simplefilter("error", GaussxDeprecationWarning)
-        # pyrox-lgm's inla() still calls gaussx.laplace_mode, deprecated in
-        # gaussx 0.6.13 in favour of argminax.solve.laplace_mode. Its move to
-        # argminax is a separate change, which deletes this exemption.
-        warnings.filterwarnings(
-            "ignore",
-            message=r"gaussx\.laplace_mode is deprecated",
-            category=GaussxDeprecationWarning,
-        )
         yield
