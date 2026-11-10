@@ -23,7 +23,7 @@ classifiers = [
 # from the covariance-form GP package (tests/test_import_guard.py).
 dependencies = [
     "pyrox",
-    "gaussx[numpyro]>=0.6.14",
+    "gaussx[numpyro]>=0.6.15",
     "kernellib>=0.0.22",
     "matfree>=0.6.0",
     "numpyro>=0.21",
@@ -43,7 +43,7 @@ Repository = "https://github.com/jejjohnson/pyrox"
 [tool.uv.sources]
 # Neither is on PyPI yet; resolve the release tags from GitHub, in step with
 # pyrox-gp's sources (one version per package across the workspace).
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.6.14" }
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.6.15" }
 kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.22" }
 # The inner Newton loop of `inla()` (`argminax.solve.laplace_mode`), at the
 # v0.0.6 release, in step with pyrox-nn's source. argminax pins gaussx v0.6.13

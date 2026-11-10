@@ -71,6 +71,7 @@ nav:
       - Overview: api/reference.md
       - Capability Index: capabilities.md
       - Core: api/core.md
+      - Likelihoods: api/likelihoods.md
       - GP: api/gp.md
       - NN:
           - Overview: api/nn.md

@@ -7,6 +7,7 @@ composable GP building blocks. The reference is organised by subpackage:
 | Section | What's inside |
 |---------|---------------|
 | [Core](core.md) | The Equinox-to-NumPyro bridge — `PyroxModule`, `PyroxParam`, `PyroxSample`, `Parameterized`, `pyrox_method` |
+| [Likelihoods](likelihoods.md) | The `Likelihood` and `Guide` protocols every package builds on, and `GaussianLikelihood` |
 | [GP](gp.md) | Kernels, sparse/variational GPs, guides, likelihoods, non-Gaussian inference strategies, pathwise samplers, Markov (Kalman) GPs, multi-output GPs |
 | [NN](nn.md) | Bayesian and uncertainty-aware layers — dense variants, spectral / random-feature layers, SNGP, ensembles, heteroscedastic heads, the BNF stack |
 | [NN — Geo encoders](nn/geo_encoders.md) | Longitude/latitude, cyclic, spherical-harmonic, and Slepian input encoders |

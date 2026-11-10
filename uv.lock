@@ -23,7 +23,7 @@ members = [
     "pyrox-ssm",
 ]
 overrides = [
-    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=v0.6.14" },
+    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=v0.6.15" },
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.11" },
 ]
 
@@ -691,8 +691,8 @@ dependencies = [
 
 [[package]]
 name = "gaussx"
-version = "0.6.14"
-source = { git = "https://github.com/jejjohnson/gaussx.git?rev=v0.6.14#f1d940040e9abcd2877d6eef458f091bb676858d" }
+version = "0.6.15"
+source = { git = "https://github.com/jejjohnson/gaussx.git?rev=v0.6.15#6f98b6800b575b1221c9405cc7b7f4995d7490d2" }
 dependencies = [
     { name = "einx" },
     { name = "equinox" },
@@ -2099,7 +2099,7 @@ requires-dist = [
     { name = "einx", specifier = ">=0.4.3" },
     { name = "flowjax", specifier = ">=0.9" },
     { name = "gauss-flows", marker = "extra == 'flows'", git = "https://github.com/jejjohnson/gauss_flows.git?rev=bdb23f076ebaaf1ba042aa52ea593487cef3204e" },
-    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.14" },
+    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.15" },
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.11" },
     { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.22" },
     { name = "lineax", specifier = ">=0.1.1" },
@@ -2133,7 +2133,7 @@ xarray = [
 [package.metadata]
 requires-dist = [
     { name = "argminax", extras = ["numpyro"], git = "https://github.com/jejjohnson/argminax.git?rev=v0.0.6" },
-    { name = "gaussx", extras = ["numpyro"], git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.14" },
+    { name = "gaussx", extras = ["numpyro"], git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.15" },
     { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.22" },
     { name = "matfree", specifier = ">=0.6.0" },
     { name = "numpyro", specifier = ">=0.21" },
@@ -2257,7 +2257,7 @@ xarray = [
 requires-dist = [
     { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?rev=v0.0.6" },
     { name = "einx", specifier = ">=0.4.3" },
-    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.14" },
+    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.15" },
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.11" },
     { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.22" },
     { name = "lineax", specifier = ">=0.1.1" },
@@ -2298,7 +2298,7 @@ requires-dist = [
     { name = "equinox", specifier = ">=0.13.8" },
     { name = "flowjax", marker = "extra == 'flows'", specifier = ">=0.9" },
     { name = "gauss-flows", marker = "extra == 'flows'", git = "https://github.com/jejjohnson/gauss_flows.git?rev=bdb23f076ebaaf1ba042aa52ea593487cef3204e" },
-    { name = "gaussx", extras = ["numpyro"], git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.14" },
+    { name = "gaussx", extras = ["numpyro"], git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.15" },
     { name = "numpyro", specifier = ">=0.21" },
     { name = "pyrox", editable = "packages/pyrox" },
 ]

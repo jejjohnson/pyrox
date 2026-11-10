@@ -20,4 +20,4 @@ uv add "pyrox-ssm @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=pac
 uv add "pyrox-ssm[flows] @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-ssm"
 ```
 
-Until kernellib pins gaussx v0.6.14, the project also needs the gaussx override described in the [root README](../../README.md#installation).
+Until kernellib pins gaussx v0.6.15, the project also needs the gaussx override described in the [root README](../../README.md#installation).

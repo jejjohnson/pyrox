@@ -43,7 +43,7 @@ INDEX = ROOT / "docs" / "capabilities.md"
 # Public homes, in order: (distribution, [public modules]). ``pyrox._core``
 # is the public home of the bridge despite its underscore.
 PACKAGES: dict[str, list[str]] = {
-    "pyrox": ["pyrox._core", "pyrox.inference"],
+    "pyrox": ["pyrox._core", "pyrox.inference", "pyrox.likelihoods"],
     "pyrox-gp": ["pyrox_gp"],
     "pyrox-nn": ["pyrox_nn", "pyrox_nn.api", "pyrox_nn.preprocessing"],
     "pyrox-lgm": ["pyrox_lgm"],

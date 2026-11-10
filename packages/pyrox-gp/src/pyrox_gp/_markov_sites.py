@@ -1,0 +1,244 @@
+r"""Per-site likelihood numerics for the Markov track, on gaussx.
+
+The four Markov modules (`pyrox_gp._markov`, `_sparse_markov`,
+`_inference_nongauss_markov`, `_markov_flow`) import from here rather than
+from the rest of pyrox-gp, so they can move to pyrox-ssm, which depends only
+on the pyrox core and gaussx (#356, #363).
+
+`as_gaussx_likelihood` views a pyrox `Likelihood` (summed over points) as a
+`gaussx.CallableLikelihood` (one log density per site),
+
+$$
+\ell(f_i, d_i) = \log p(y_i \mid f_i, X_i), \qquad
+\log p(y \mid f) = \sum_i \ell(f_i, d_i),
+$$
+
+so the per-site derivatives and expectations come from gaussx
+(``site_derivatives``, `gaussx.expected_log_likelihood`).
+`_check_scalar_latent` and `_require_gauss_hermite` are copies of the checks
+in `pyrox_gp._inference_nongauss`, and `_pushforward_moments` a copy of the
+one in `pyrox_gp._warped` (no gaussx function computes it yet).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+
+import einx
+import equinox as eqx
+import gaussx
+import jax
+import jax.numpy as jnp
+import lineax as lx
+from gaussx import AbstractIntegrator, CallableLikelihood, GaussHermiteIntegrator
+from jaxtyping import Array, Float, PyTree
+from pyrox.likelihoods import Likelihood, likelihood_accepts_inputs
+
+
+def _check_scalar_latent(lik: Likelihood) -> None:
+    latent_dim = getattr(lik, "latent_dim", 1)
+    if latent_dim != 1:
+        msg = (
+            f"{type(lik).__name__} declares latent_dim={latent_dim}; the "
+            "scalar-latent advanced inference strategies (Laplace, GN, EP, "
+            "PL, QN) do not yet support multi-latent likelihoods. Use SVGP "
+            "or wait for the multi-latent inference follow-up."
+        )
+        raise ValueError(msg)
+
+
+def _require_gauss_hermite(integrator: AbstractIntegrator) -> GaussHermiteIntegrator:
+    """Reject a rule EP cannot use: tilted moments are Gauss-Hermite only.
+
+    Args:
+        integrator: The rule passed to an EP strategy.
+
+    Returns:
+        The same rule, narrowed.
+
+    Raises:
+        TypeError: If ``integrator`` is not a `gaussx.GaussHermiteIntegrator`.
+    """
+    if not isinstance(integrator, GaussHermiteIntegrator):
+        raise TypeError(
+            "Expectation propagation takes its tilted moments from "
+            "gaussx.ep_tilted_moments, a Gauss-Hermite rule, so it needs a "
+            f"gaussx.GaussHermiteIntegrator; got {type(integrator).__name__}."
+        )
+    return integrator
+
+
+class _SiteLogDensity(eqx.Module):
+    r"""One site's $\ell(f_i, d_i)$ from a pyrox likelihood summed over points.
+
+    An `equinox.Module` rather than a closure, so the likelihood's parameters
+    stay leaves of the `gaussx.CallableLikelihood` pytree.
+
+    Attributes:
+        likelihood: The pyrox likelihood.
+        with_inputs: Whether each site's data carries its inputs $X_i$.
+    """
+
+    likelihood: Likelihood
+    with_inputs: bool = eqx.field(static=True)
+
+    def __call__(self, f_i: Float[Array, ""], site: PyTree) -> Float[Array, ""]:
+        if self.with_inputs:
+            y_i, x_i = site
+            # ℓ(fᵢ, (yᵢ, Xᵢ)) = log p(yᵢ ∣ fᵢ, Xᵢ)
+            return self.likelihood.log_prob(f_i[None], y_i[None], x_i)
+        # ℓ(fᵢ, yᵢ) = log p(yᵢ ∣ fᵢ)
+        return self.likelihood.log_prob(f_i[None], site[None])
+
+
+def as_gaussx_likelihood(
+    lik: Likelihood,
+    y: Float[Array, " N"],
+    X: Float[Array, "N D"] | None = None,
+) -> CallableLikelihood:
+    r"""Per-site view of a pyrox likelihood, as a `gaussx.CallableLikelihood`.
+
+    pyrox's ``log_prob`` is summed over points, so site $i$'s term is the
+    likelihood on that point alone,
+
+    $$
+    \ell(f_i, (y_i, X_i)) = \texttt{lik.log\_prob}(f_{i:i+1}, y_{i:i+1}, X_i).
+    $$
+
+    ``X`` is passed only to a likelihood whose ``log_prob`` takes it
+    (`pyrox.likelihoods.likelihood_accepts_inputs`); otherwise each site's
+    data is $y_i$ alone.
+
+    Args:
+        lik: A scalar-latent pyrox likelihood.
+        y: The observations, one per site.
+        X: The inputs, one row per site, for an input-dependent likelihood.
+
+    Returns:
+        The likelihood as a sum of per-site log densities, with
+        ``site_derivatives`` and `gaussx.expected_log_likelihood`.
+
+    Raises:
+        ValueError: If ``lik`` is multi-latent (``latent_dim > 1``): its
+            Hessian in $f$ is not diagonal across one site's latents.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> from pyrox_gp import BernoulliLikelihood
+        >>> y = jnp.array([1.0, 0.0])
+        >>> site_lik = as_gaussx_likelihood(BernoulliLikelihood(), y)
+        >>> g, h = site_lik.site_derivatives(jnp.zeros(2))
+        >>> g.tolist(), h.tolist()
+        ([0.5, -0.5], [-0.25, -0.25])
+    """
+    _check_scalar_latent(lik)
+    if X is not None and likelihood_accepts_inputs(lik):
+        return CallableLikelihood(_SiteLogDensity(lik, with_inputs=True), (y, X))
+    return CallableLikelihood(_SiteLogDensity(lik, with_inputs=False), y)
+
+
+def _cavity_site_derivatives(
+    site_lik: CallableLikelihood,
+    mean: Float[Array, " N"],
+    var: Float[Array, " N"],
+    integrator: AbstractIntegrator,
+) -> tuple[Float[Array, " N"], Float[Array, " N"]]:
+    r"""Expected per-site gradient and curvature under independent Gaussians.
+
+    With $\mathcal{E}(\mu) = \sum_i \mathbb{E}[\ell(f_i, d_i)]$ for
+    $f_i \sim N(\mu_i, v_i)$, the Bonnet and Price identities give
+
+    $$
+    \bar g_i = \mathbb{E}[\partial_f \ell(f_i, d_i)]
+             = \partial_{\mu_i} \mathcal{E}, \qquad
+    \bar h_i = \mathbb{E}[\partial_f^2 \ell(f_i, d_i)]
+             = \partial_{\mu_i}^2 \mathcal{E}.
+    $$
+
+    $\mathcal{E}$ is `gaussx.expected_log_likelihood` on the diagonal state.
+    A rule whose nodes are $\mu + \sqrt{v}\,\xi_k$ (Gauss-Hermite, unscented,
+    a fixed-key Monte Carlo) makes the two identities exact for the rule, not
+    only in the limit: differentiating the weighted sum in $\mu$
+    differentiates $\ell$ at each node. $\mathcal{E}$ is a sum of one term per
+    site, so its Hessian is diagonal and one forward pass of the gradient
+    along $\mathbf{1}$ reads it off.
+
+    Args:
+        site_lik: The per-site likelihood (`as_gaussx_likelihood`).
+        mean: The site means $\mu$.
+        var: The site variances $v$.
+        integrator: The rule for each one-dimensional site expectation.
+
+    Returns:
+        Tuple ``(g_bar, h_bar)``, one entry per site.
+    """
+
+    def expected(site_mean: Float[Array, " N"]) -> Float[Array, ""]:
+        # q(f) = 𝒩(μ, diag(v))
+        state = gaussx.GaussianState(site_mean, lx.DiagonalLinearOperator(var))
+        # 𝓔(μ) = ∑ᵢ 𝔼[ℓ(fᵢ, dᵢ)]
+        return gaussx.expected_log_likelihood(site_lik, state, integrator)
+
+    # ḡ = ∇_μ 𝓔, h̄ = diag ∇²_μ 𝓔 (diagonal: 𝓔 is a sum over sites)
+    return jax.jvp(jax.grad(expected), (mean,), (jnp.ones_like(mean),))
+
+
+def _pushforward_moments(
+    transform: Callable[[Float[Array, " *batch"]], Float[Array, " *batch"]],
+    mean: Float[Array, " *batch"],
+    var: Float[Array, " *batch"],
+    *,
+    order: int,
+) -> tuple[Float[Array, " *batch"], Float[Array, " *batch"]]:
+    r"""Mean and centred variance of $G(f)$, with $f \sim N(\mu, \sigma^2)$ elementwise.
+
+    With probabilists' Gauss-Hermite nodes $\xi_k$ and normalised weights
+    $\tilde w_k = w_k / \sqrt{2\pi}$,
+
+    $$
+    m_1 = \sum_k \tilde w_k\, G(\mu + \sigma \xi_k), \qquad
+    v = \sum_k \tilde w_k\, (G(\mu + \sigma \xi_k) - m_1)^2 .
+    $$
+
+    A copy of `pyrox_gp._warped._pushforward_moments`; a candidate for gaussx.
+
+    Args:
+        transform: The warp $G$, applied to one batch-shaped array per node.
+        mean: The means $\mu$, in any batch shape.
+        var: The variances $\sigma^2$, in the same shape.
+        order: Number of nodes $Q$, in ``[2, 256]``.
+
+    Returns:
+        Tuple ``(m1, v)`` in the shape and dtype of ``mean``.
+
+    Raises:
+        ValueError: If ``order`` is outside ``[2, 256]``.
+    """
+    if not 2 <= order <= 256:
+        # order == 1 places a single node at the mean, so the centred second
+        # moment is zero and every bit of latent uncertainty would be silently
+        # discarded. The rule overflows to NaN by order 512.
+        raise ValueError(
+            f"order must be in [2, 256]; got {order}. A single quadrature "
+            "node cannot represent any spread."
+        )
+    points, raw_weights = gaussx.gauss_hermite_points(order, 1, dtype=mean.dtype)
+    # w̃ₖ = wₖ / √(2π), so ∑ₖ w̃ₖ = 1
+    weights = raw_weights / jnp.sqrt(jnp.asarray(2.0 * jnp.pi, dtype=mean.dtype))
+    # σ = √v_f
+    std = jnp.sqrt(var)
+    # σ ξₖ
+    spread = einx.multiply("q, ... -> q ...", points[:, 0], std)
+    # fₖ = μ + σ ξₖ
+    latent = einx.add("q ..., ... -> q ...", spread, mean)
+    # gₖ = G(fₖ)
+    warped = jax.vmap(transform)(latent)
+    # m₁ = ∑ₖ w̃ₖ gₖ
+    first_moment = jnp.asarray(einx.dot("q, q ... -> ...", weights, warped))
+    # gₖ − m₁. Centred, never E[G²] − m₁², which cancels catastrophically once
+    # G's output carries a large offset relative to its spread: an Affine warp
+    # centred near 1e4 loses the whole variance in float32, and can go negative.
+    centred = einx.subtract("q ..., ... -> q ...", warped, first_moment)
+    # v = ∑ₖ w̃ₖ (gₖ − m₁)²
+    variance = jnp.asarray(einx.dot("q, q ... -> ...", weights, centred**2))
+    return first_moment, variance

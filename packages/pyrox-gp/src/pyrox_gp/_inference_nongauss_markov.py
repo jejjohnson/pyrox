@@ -36,14 +36,8 @@ from gaussx import (
     newton_update,
 )
 from jaxtyping import Array, Float
+from pyrox.likelihoods import Likelihood
 
-from pyrox_gp._inference import _per_site_expectation
-from pyrox_gp._inference_nongauss import (
-    _check_scalar_latent,
-    _log_prob_per_point_factory,
-    _per_point_grad_hess,
-    _require_gauss_hermite,
-)
 from pyrox_gp._markov import (
     _build_dt_full,
     _is_stationary,
@@ -51,7 +45,11 @@ from pyrox_gp._markov import (
     _require_stationary,
     _rts_smoother,
 )
-from pyrox_gp._protocols import Likelihood
+from pyrox_gp._markov_sites import (
+    _cavity_site_derivatives,
+    _require_gauss_hermite,
+    as_gaussx_likelihood,
+)
 
 
 if TYPE_CHECKING:
@@ -262,8 +260,7 @@ class LaplaceMarkovInference(eqx.Module):
         likelihood: Likelihood,
         y: Float[Array, " N"],
     ) -> NonGaussConditionedMarkovGP:
-        _check_scalar_latent(likelihood)
-        log_prob_per_point = _log_prob_per_point_factory(likelihood)
+        site_lik = as_gaussx_likelihood(likelihood, y)
 
         N = prior.times.shape[0]
         prior_mean = prior.mean(prior.times)
@@ -274,7 +271,7 @@ class LaplaceMarkovInference(eqx.Module):
         converged = False
         n_iter = 0
         for it in range(self.max_iter):
-            g, h = _per_point_grad_hess(log_prob_per_point, f, y)
+            g, h = site_lik.site_derivatives(f)
             new_nat1, Lam = newton_update(f, g, h, precision_floor=self.precision_floor)
             nat1, nat2 = damped_natural_update(
                 nat1, nat2, new_nat1, Lam, lr=self.damping
@@ -290,7 +287,7 @@ class LaplaceMarkovInference(eqx.Module):
                 break
 
         # Final site naturals at convergence.
-        g, h = _per_point_grad_hess(log_prob_per_point, f, y)
+        g, h = site_lik.site_derivatives(f)
         nat1, Lam = newton_update(f, g, h, precision_floor=self.precision_floor)
         nat2 = jnp.maximum(Lam, self.precision_floor)
         q_mean, q_var, log_marg = _markov_smoothed_posterior(prior, nat1, nat2)
@@ -298,7 +295,7 @@ class LaplaceMarkovInference(eqx.Module):
         # pseudo-data fit so the reported scalar is the standard Laplace
         # log-marginal approximation rather than the Kalman pseudo-data
         # likelihood.
-        ll_data = log_prob_per_point(q_mean, y).sum()
+        ll_data = site_lik.log_prob(q_mean)
         pseudo_targets = nat1 / nat2
         ll_pseudo = -0.5 * jnp.sum(jnp.log(2.0 * jnp.pi / nat2)) - 0.5 * jnp.sum(
             nat2 * (q_mean - pseudo_targets) ** 2
@@ -435,14 +432,7 @@ class PosteriorLinearizationMarkov(eqx.Module):
         likelihood: Likelihood,
         y: Float[Array, " N"],
     ) -> NonGaussConditionedMarkovGP:
-        _check_scalar_latent(likelihood)
-        log_prob_per_point = _log_prob_per_point_factory(likelihood)
-
-        def lp(f_n: Float[Array, ""], y_n: Float[Array, ""]) -> Float[Array, ""]:
-            return log_prob_per_point(f_n[None], y_n[None])[0]
-
-        grad_lp = jax.grad(lp)
-        hess_lp = jax.grad(grad_lp)
+        site_lik = as_gaussx_likelihood(likelihood, y)
 
         N = prior.times.shape[0]
         prior_mean = prior.mean(prior.times)
@@ -463,13 +453,9 @@ class PosteriorLinearizationMarkov(eqx.Module):
             )
             assert isinstance(cav_var, jax.Array)  # diagonal path in, diagonal out
 
-            # ḡₙ = 𝔼_{cav}[∂f log p(yₙ | f)]
-            g_avg = _per_site_expectation(
-                self.integrator, grad_lp, cav_mean, cav_var, y
-            )
-            # h̄ₙ = 𝔼_{cav}[∂²f log p(yₙ | f)]
-            h_avg = _per_site_expectation(
-                self.integrator, hess_lp, cav_mean, cav_var, y
+            # ḡₙ = 𝔼_{cav}[∂f log p(yₙ | f)], h̄ₙ = 𝔼_{cav}[∂²f log p(yₙ | f)]
+            g_avg, h_avg = _cavity_site_derivatives(
+                site_lik, cav_mean, cav_var, self.integrator
             )
 
             new_nat1, new_prec = newton_update(
@@ -549,11 +535,7 @@ class ExpectationPropagationMarkov(eqx.Module):
         likelihood: Likelihood,
         y: Float[Array, " N"],
     ) -> NonGaussConditionedMarkovGP:
-        _check_scalar_latent(likelihood)
-        log_prob_per_point = _log_prob_per_point_factory(likelihood)
-
-        def lp(f_n: Float[Array, ""], y_n: Float[Array, ""]) -> Float[Array, ""]:
-            return log_prob_per_point(f_n[None], y_n[None])[0]
+        site_lik = as_gaussx_likelihood(likelihood, y)
 
         N = prior.times.shape[0]
         prior_mean = prior.mean(prior.times)
@@ -567,16 +549,18 @@ class ExpectationPropagationMarkov(eqx.Module):
         q_var = _prior_marginal_variance(prior).astype(prior_mean.dtype)
 
         # ``gaussx.ep_tilted_moments`` requires ``log_lik_fn(f)`` with the
-        # per-site target baked in; close over ``y_n`` per site via vmap
+        # per-site target baked in; close over the site data ``d_n`` via vmap
         # to recover the (N,) shape contract.
         order = _require_gauss_hermite(self.integrator).order
 
         def _per_site_tilted(
             m_n: Float[Array, ""],
             v_n: Float[Array, ""],
-            y_n: Float[Array, ""],
+            d_n: Float[Array, ""],
         ) -> tuple[Float[Array, ""], Float[Array, ""]]:
-            return ep_tilted_moments(lambda f: lp(f, y_n), m_n, v_n, order=order)
+            return ep_tilted_moments(
+                lambda f: site_lik.log_density(f, d_n), m_n, v_n, order=order
+            )
 
         converged = False
         n_iter = 0
@@ -586,7 +570,9 @@ class ExpectationPropagationMarkov(eqx.Module):
             )
             assert isinstance(cav_var, jax.Array)  # diagonal path in, diagonal out
 
-            tilted_mean, tilted_var = jax.vmap(_per_site_tilted)(cav_mean, cav_var, y)
+            tilted_mean, tilted_var = jax.vmap(_per_site_tilted)(
+                cav_mean, cav_var, site_lik.data
+            )
 
             new_prec = jnp.reciprocal(tilted_var) - jnp.reciprocal(cav_var)
             new_prec = jnp.maximum(new_prec, self.precision_floor)

@@ -16,13 +16,13 @@ members = ["packages/*"]
 
 [tool.uv]
 # kernellib's own `[tool.uv.sources]` pins gaussx and geonnax to their git tags
-# (gaussx v0.6.5, geonnax v0.0.8 for kernellib v0.0.22; the override moves them to gaussx v0.6.14 and geonnax v0.0.11). uv honours that for a
+# (gaussx v0.6.5, geonnax v0.0.8 for kernellib v0.0.22; the override moves them to gaussx v0.6.15 and geonnax v0.0.11). uv honours that for a
 # git dependency, which conflicts with the newer tags the workspace needs; the
 # override keeps one gaussx and one geonnax for every member. Move it in step with pyrox-gp's gaussx and geonnax sources, and with the
 # override snippet users copy from README.md (Installation).
 # argminax v0.0.6 (pyrox-nn, pyrox-lgm) pins gaussx v0.6.13 by URL; the same override replaces it.
 override-dependencies = [
-    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.6.14",
+    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.6.15",
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.11",
 ]
 
@@ -104,6 +104,7 @@ ignore = ["E402", "E721", "E731", "E741"]
 # math notation throughout the array-heavy modules (einx specs, shape
 # annotations, and Unicode equations), so suppress them there.
 "packages/pyrox/src/pyrox/inference/**" = ["F722", "RUF001", "RUF002", "RUF003"]
+"packages/pyrox/src/pyrox/likelihoods.py" = ["F722", "RUF001", "RUF002", "RUF003"]
 "packages/pyrox-gp/src/pyrox_gp/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "packages/pyrox-nn/src/pyrox_nn/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "packages/pyrox-lgm/src/pyrox_lgm/**" = ["F722", "RUF001", "RUF002", "RUF003"]

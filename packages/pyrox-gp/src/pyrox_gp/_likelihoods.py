@@ -2,7 +2,8 @@
 
 Three kinds of likelihood ship in this module:
 
-* **Concrete analytic** — `GaussianLikelihood` carries closed-form
+* **Concrete analytic** — `GaussianLikelihood` (re-exported from
+  `pyrox.likelihoods`) carries closed-form
   expected log-likelihood, so `svgp_elbo` can skip numerical
   integration entirely and use
   `gaussx.variational_elbo_gaussian`.
@@ -34,31 +35,9 @@ import equinox as eqx
 import jax.numpy as jnp
 import numpyro.distributions as nd
 from jaxtyping import Array, Float, Int
+from pyrox.likelihoods import GaussianLikelihood as GaussianLikelihood
 
 from pyrox_gp._protocols import Likelihood
-
-
-class GaussianLikelihood(Likelihood):
-    r"""Gaussian observation model $p(y \mid f) = N(y \mid f, \sigma^2)$.
-
-    The only likelihood with a closed-form expected log-likelihood,
-    enabling the analytical Titsias ELBO via
-    `gaussx.variational_elbo_gaussian`.
-
-    Attributes:
-        noise_var: Observation noise variance $\sigma^2$.
-    """
-
-    noise_var: float | Float[Array, ""]
-
-    def log_prob(
-        self,
-        f: Float[Array, " ..."],
-        y: Float[Array, " ..."],
-        X: Float[Array, " ..."] | None = None,
-    ) -> Float[Array, ""]:
-        r"""Sum of per-point Gaussian log-densities."""
-        return nd.Normal(f, jnp.sqrt(self.noise_var)).log_prob(y).sum()
 
 
 class DistLikelihood(Likelihood):

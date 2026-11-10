@@ -25,20 +25,21 @@ take expectations against a ``GaussianState``.
 * `Kernel` — covariance structure, ``(X1, X2) -> Gram``; an alias of
   ``kernellib.AbstractKernel``.
 * `SDEKernel` — re-exported from `gaussx._ssm`.
-* `Guide` — variational posterior structure.
-* `Likelihood` — observation model.
+* `Guide` — variational posterior structure; re-exported from
+  `pyrox.likelihoods`.
+* `Likelihood` — observation model; re-exported from `pyrox.likelihoods`,
+  with ``likelihood_accepts_inputs``.
 """
 
 from __future__ import annotations
 
-import inspect
-from abc import abstractmethod
-from typing import Any
-
-import equinox as eqx
 from gaussx import SDEKernel as SDEKernel
-from jaxtyping import Array, Float
 from kernellib import AbstractKernel
+from pyrox.likelihoods import (
+    Guide as Guide,
+    Likelihood as Likelihood,
+    likelihood_accepts_inputs as likelihood_accepts_inputs,
+)
 
 
 # ``Kernel`` is kernellib's ``AbstractKernel``: same abstract ``__call__``,
@@ -51,101 +52,3 @@ Kernel = AbstractKernel
 # ``SDEKernel`` lives in `gaussx._ssm` since gaussx 0.0.11; we
 # re-export it at the top of this module so ``pyrox_gp.SDEKernel`` keeps
 # resolving for downstream callers.
-
-
-class Guide(eqx.Module):
-    """Abstract base for variational posterior families.
-
-    Concrete guides (``DeltaGuide``, ``MeanFieldGuide``, ``LowRankGuide``,
-    ``FullRankGuide``, etc.) land in the dedicated guide waves (#28, #29).
-    The whitening principle keeps optimization geometry well-conditioned —
-    sample from a unit-scale latent and unwhiten with the prior Cholesky.
-
-    Two distinct entry points:
-
-    * `sample` / `log_prob` — pure variational draws and
-      densities. ``sample(self, key)`` returns a draw from ``q(f)``;
-      ``log_prob(self, f)`` evaluates ``log q(f)``. Neither touches the
-      NumPyro trace.
-    * ``register(name, prior)`` (optional) — the NumPyro-integration hook
-      invoked by `pyrox_gp.gp_sample` when a guide is supplied. Use
-      it to register a sample / param site (or compose one out of guide
-      state) under ``name`` and return the latent function value. Concrete
-      guides that participate in `gp_sample` should implement this;
-      the protocol leaves it unspecified so guides usable purely outside
-      NumPyro stay valid.
-    """
-
-    @abstractmethod
-    def sample(self, key: Any) -> Float[Array, " ..."]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def log_prob(self, f: Float[Array, " ..."]) -> Float[Array, ""]:
-        raise NotImplementedError
-
-
-class Likelihood(eqx.Module):
-    """Abstract base for observation models.
-
-    Implements the conditional ``p(y | f)``. The advanced inference
-    strategies in `pyrox_gp._inference_nongauss` integrate
-    ``log p(y | f)`` against a Gaussian cavity via any
-    `gaussx.AbstractIntegrator`. Concrete scalar-latent likelihoods
-    (`GaussianLikelihood`, `BernoulliLikelihood`,
-    `PoissonLikelihood`, `StudentTLikelihood`) and
-    multi-latent ones (`SoftmaxLikelihood`,
-    `HeteroscedasticGaussianLikelihood`) live in
-    `pyrox_gp._likelihoods`.
-
-    Multi-latent likelihoods declare ``latent_dim: int`` as a static
-    field (e.g. ``latent_dim = num_classes`` for softmax). Scalar
-    likelihoods may omit the field; consumers should read
-    ``getattr(lik, "latent_dim", 1)``.
-    """
-
-    @abstractmethod
-    def log_prob(
-        self,
-        f: Float[Array, " ..."],
-        y: Float[Array, " ..."],
-        X: Float[Array, " ..."] | None = None,
-    ) -> Float[Array, ""]:
-        """Conditional ``p(y | f)``, optionally conditioned on inputs.
-
-        ``X`` is consumed only by likelihoods whose parameters are
-        functions of the input (see `pyrox_gp.WarpedGaussianLikelihood`
-        with a conditional warp). Scalar observation models ignore it.
-        """
-        raise NotImplementedError
-
-
-def likelihood_accepts_inputs(lik: Likelihood) -> bool:
-    """Whether ``lik.log_prob`` takes the optional trailing ``X``.
-
-    The protocol widened in gh-204 to carry the inputs an
-    input-dependent observation model conditions on. Third-party
-    `Likelihood` subclasses written against the original
-    ``log_prob(self, f, y)`` are still concrete and valid, and handing
-    one a third positional argument raises ``TypeError`` at the first
-    quadrature evaluation -- so probe rather than assume.
-
-    Static Python on the unbound signature, evaluated once per trace, so
-    it costs nothing under ``jit``.
-    """
-    try:
-        params = list(inspect.signature(lik.log_prob).parameters.values())
-    except (TypeError, ValueError):  # unintrospectable callable
-        return False
-    if any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params):
-        return True
-    positional = [
-        p
-        for p in params
-        if p.kind
-        in (
-            inspect.Parameter.POSITIONAL_ONLY,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-        )
-    ]
-    return len(positional) >= 3
