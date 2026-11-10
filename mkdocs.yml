@@ -33,7 +33,7 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
-          paths: [packages/pyrox/src, packages/pyrox-gp/src, packages/pyrox-nn/src, packages/pyrox-lgm/src]
+          paths: [packages/pyrox/src, packages/pyrox-gp/src, packages/pyrox-nn/src, packages/pyrox-lgm/src, packages/pyrox-ssm/src]
           options:
             docstring_style: google
             docstring_section_style: table
@@ -78,6 +78,7 @@ nav:
           - Conditioning: api/nn/conditioning.md
           - MFN: api/nn/mfn.md
       - LGM: api/lgm.md
+      - SSM: api/ssm.md
       - Inference: api/inference.md
       - Preprocessing: api/preprocessing.md
       - Estimator: api/api.md
