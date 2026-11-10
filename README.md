@@ -78,7 +78,7 @@ kernellib v0.0.22 pins geonnax v0.0.8 while pyrox needs geonnax v0.0.11, so unti
 ```toml
 [tool.uv]
 override-dependencies = [
-    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.6.5",
+    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.6.14",
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.11",
 ]
 ```
