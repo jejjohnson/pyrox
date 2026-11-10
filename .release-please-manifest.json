@@ -1,7 +1,7 @@
 {
-  "packages/pyrox": "0.2.0",
+  "packages/pyrox": "0.2.1",
   "packages/pyrox-gp": "0.2.0",
   "packages/pyrox-nn": "0.2.0",
   "packages/pyrox-lgm": "0.1.3",
-  "packages/pyrox-ssm": "0.0.0"
+  "packages/pyrox-ssm": "0.1.0"
 }

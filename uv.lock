@@ -2035,7 +2035,7 @@ wheels = [
 
 [[package]]
 name = "pyrox"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/pyrox" }
 dependencies = [
     { name = "einx" },
@@ -2276,7 +2276,7 @@ provides-extras = ["optax", "bnf", "xarray", "colab"]
 
 [[package]]
 name = "pyrox-ssm"
-version = "0.0.0"
+version = "0.1.0"
 source = { editable = "packages/pyrox-ssm" }
 dependencies = [
     { name = "einx" },

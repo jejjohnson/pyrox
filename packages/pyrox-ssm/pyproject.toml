@@ -1,6 +1,6 @@
 [project]
 name = "pyrox-ssm"
-version = "0.0.0"
+version = "0.1.0"
 description = "State-space models as NumPyro models on top of pyrox and gaussx: temporal GPs and Gaussian state-space models whose inference recurses in time."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
