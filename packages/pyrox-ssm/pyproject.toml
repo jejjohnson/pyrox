@@ -20,7 +20,7 @@ classifiers = [
     "Development Status :: 2 - Pre-Alpha",
 ]
 # No pyrox-gp, pyrox-lgm or pyrox-nn: state-space models recurse in time and
-# need nothing from the sibling packages (tests/test_import_guard.py).
+# need nothing from the sibling packages (tests/test_ssm_import_guard.py).
 dependencies = [
     "pyrox",
     "gaussx[numpyro]>=0.6.14",
