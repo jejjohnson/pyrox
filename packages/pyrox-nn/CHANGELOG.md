@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0](https://github.com/jejjohnson/pyrox/compare/pyrox-nn-v0.1.1...pyrox-nn-v0.2.0) (2026-11-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **nn:** pyrox.inference.last_layer_laplace and LastLayerLaplace, released in pyrox-v0.1.2, are now pyrox_nn.last_layer_laplace and pyrox_nn.LastLayerLaplace, and the pyrox[laplace] extra is gone.
+
+### Code Refactoring
+
+* **nn:** move last_layer_laplace from the pyrox core to pyrox-nn ([#338](https://github.com/jejjohnson/pyrox/issues/338)) ([eb160ad](https://github.com/jejjohnson/pyrox/commit/eb160addfad27177ce45409ead31fbbc7a373a4e))
+
 ## [0.1.1](https://github.com/jejjohnson/pyrox/compare/pyrox-nn-v0.1.0...pyrox-nn-v0.1.1) (2026-10-23)
 
 
