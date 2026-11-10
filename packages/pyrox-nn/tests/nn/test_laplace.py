@@ -11,9 +11,11 @@ relative tolerances are many orders above the round-off of the
 from __future__ import annotations
 
 import equinox as eqx
+import gaussx
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import lineax as lx
 import pytest
 from pyrox_nn import LastLayerLaplace, last_layer_laplace
 
@@ -278,6 +280,126 @@ def test_evidence_argument_matches_rebuilt_posterior(blr):
     assert jnp.allclose(
         post.log_marginal_likelihood(0.3), other.log_marginal_likelihood()
     )
+
+
+# -- argminax delegation (#348) ------------------------------------------------
+#
+# The evidence and the λ search moved to argminax. The two functions below are
+# the pyrox-nn implementations they replaced (pyrox 3d16c53), kept as the
+# reference that the public methods still return the same values.
+
+
+def _pre_argminax_evidence(post, lam):
+    w_lam = post.mode(lam)
+    delta = w_lam - post.w_map
+    p = post.w_map.shape[0]
+    return (
+        post.log_likelihood
+        + jnp.dot(post.loglik_grad, delta)
+        - 0.5 * jnp.dot(delta, post._g_matvec(delta))
+        - 0.5 * lam * jnp.sum(w_lam**2)
+        + 0.5 * p * jnp.log(lam)
+        - 0.5 * gaussx.logdet(post.precision(lam))
+    )
+
+
+def _pre_argminax_search(post, num_grid=4097, num_refine=100):
+    dtype = post.w_map.dtype
+    if post.structure == "diag":
+        g, d, beta = post.ggn, post.w_map, post.loglik_grad
+    else:
+        g, q = gaussx.eig(
+            lx.MatrixLinearOperator(
+                gaussx.symmetrize(post.ggn), lx.positive_semidefinite_tag
+            )
+        )
+        d, beta = q.T @ post.w_map, q.T @ post.loglik_grad
+    g = jnp.clip(g.astype(dtype), 0.0) + post.jitter
+    c = g * d + beta
+    p = post.w_map.shape[0]
+
+    def evidence(log_lam):
+        lam = jnp.exp(log_lam)
+        omega = c / (g + lam)
+        delta = omega - d
+        return (
+            jnp.dot(beta, delta)
+            - 0.5 * jnp.sum(g * delta**2)
+            - 0.5 * lam * jnp.sum(omega**2)
+            + 0.5 * p * log_lam
+            - 0.5 * jnp.sum(jnp.log(g + lam))
+        )
+
+    bound = 0.5 * jnp.log(jnp.finfo(dtype).max)
+    grid = jnp.linspace(-bound, bound, num_grid, dtype=dtype)
+    best = jnp.argmax(jax.vmap(evidence)(grid))
+    step = grid[1] - grid[0]
+    lo = jnp.maximum(grid[best] - step, -bound)
+    hi = jnp.minimum(grid[best] + step, bound)
+    ratio = (jnp.sqrt(5.0) - 1.0) / 2.0
+
+    def golden(_, bracket):
+        a, b = bracket
+        x1 = b - ratio * (b - a)
+        x2 = a + ratio * (b - a)
+        left = evidence(x1) >= evidence(x2)
+        return jnp.where(left, a, x1), jnp.where(left, x2, b)
+
+    lo, hi = jax.lax.fori_loop(0, num_refine, golden, (lo, hi))
+    return jnp.exp(0.5 * (lo + hi)).astype(dtype)
+
+
+@pytest.mark.parametrize("structure", ["full", "diag"])
+def test_evidence_matches_the_pre_argminax_implementation(stale, structure):
+    post = _fit(stale, structure=structure, prior_precision=50.0, jitter=1e-8)
+    for lam in (0.1, 2.0, 50.0, 300.0):
+        # The same terms summed in another order: float64 round-off of an
+        # O(1e2) evidence is ~1e-14 relative.
+        assert jnp.allclose(
+            post.log_marginal_likelihood(lam),
+            _pre_argminax_evidence(post, lam),
+            rtol=1e-12,
+        )
+
+
+@pytest.mark.parametrize("structure", ["full", "diag"])
+def test_search_matches_the_pre_argminax_implementation(stale, structure):
+    post = _fit(stale, structure=structure, prior_precision=50.0, jitter=1e-8)
+    tuned = post.optimize_prior_precision()
+    # The same grid, evidence and golden-section steps, op for op: bitwise
+    # equal when written; 1e-12 leaves room for an ulp in the grid bounds,
+    # which argminax takes in Python floats.
+    assert jnp.allclose(tuned.prior_precision, _pre_argminax_search(post), rtol=1e-12)
+    small = post.optimize_prior_precision(num_grid=65, num_refine=7)
+    reference = _pre_argminax_search(post, num_grid=65, num_refine=7)
+    assert jnp.allclose(small.prior_precision, reference, rtol=1e-12)
+
+
+@pytest.mark.parametrize("structure", ["full", "diag"])
+def test_posterior_logdet_and_mode_match_gaussx(stale, structure):
+    post = _fit(stale, structure=structure, prior_precision=50.0)
+    laplace = post._posterior(2.0)
+    assert jnp.allclose(
+        laplace.logdet_precision(), gaussx.logdet(post.precision(2.0)), rtol=1e-10
+    )
+    assert jnp.allclose(laplace.mode, post.mode(2.0), rtol=1e-12)
+
+
+def test_jit_of_the_evidence_and_the_search(stale):
+    post = _fit(stale, prior_precision=50.0)
+    evidence = eqx.filter_jit(lambda m, lam: m.log_marginal_likelihood(lam))
+    assert jnp.allclose(
+        evidence(post, 2.0), post.log_marginal_likelihood(2.0), rtol=1e-12
+    )
+    tuned = eqx.filter_jit(lambda m: m.optimize_prior_precision())(post)
+    assert jnp.allclose(
+        tuned.prior_precision, post.optimize_prior_precision().prior_precision
+    )
+
+
+def test_search_rejects_a_grid_below_three_points(blr):
+    with pytest.raises(ValueError, match="num_grid"):
+        _fit(blr).optimize_prior_precision(num_grid=2)
 
 
 # -- transforms and validation ---------------------------------------------------
