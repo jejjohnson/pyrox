@@ -22,7 +22,7 @@ members = [
     "pyrox-nn",
 ]
 overrides = [
-    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=v0.6.5" },
+    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=v0.6.14" },
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.11" },
 ]
 
@@ -685,8 +685,8 @@ dependencies = [
 
 [[package]]
 name = "gaussx"
-version = "0.6.5"
-source = { git = "https://github.com/jejjohnson/gaussx.git?rev=v0.6.5#12ff91a68da2886478e9b3a1d0d4c0745d74ca41" }
+version = "0.6.14"
+source = { git = "https://github.com/jejjohnson/gaussx.git?rev=v0.6.14#f1d940040e9abcd2877d6eef458f091bb676858d" }
 dependencies = [
     { name = "einx" },
     { name = "equinox" },
@@ -2093,7 +2093,7 @@ requires-dist = [
     { name = "einx", specifier = ">=0.4.3" },
     { name = "flowjax", specifier = ">=0.9" },
     { name = "gauss-flows", marker = "extra == 'flows'", git = "https://github.com/jejjohnson/gauss_flows.git?rev=bdb23f076ebaaf1ba042aa52ea593487cef3204e" },
-    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.5" },
+    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.14" },
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.11" },
     { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.22" },
     { name = "lineax", specifier = ">=0.1.1" },
@@ -2125,7 +2125,7 @@ xarray = [
 
 [package.metadata]
 requires-dist = [
-    { name = "gaussx", extras = ["numpyro"], git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.5" },
+    { name = "gaussx", extras = ["numpyro"], git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.14" },
     { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.22" },
     { name = "matfree", specifier = ">=0.6.0" },
     { name = "numpyro", specifier = ">=0.21" },
@@ -2247,7 +2247,7 @@ xarray = [
 requires-dist = [
     { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?rev=v0.0.4" },
     { name = "einx", specifier = ">=0.4.3" },
-    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.5" },
+    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.14" },
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.11" },
     { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.22" },
     { name = "lineax", specifier = ">=0.1.1" },
