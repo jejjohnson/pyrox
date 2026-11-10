@@ -48,7 +48,7 @@ never import equinox; extraction and simulations import no JAX at all.
   `GeneralizedExtremeValueDistribution` and `GeneralizedParetoDistribution`
   are `pipekit_cycle.ObservationNoise` (`covariance()`,
   `sample(key, shape=...)`), `XarrayQuantileRegressor` is a
-  `pipekit.Predictor`. `tests/test_interop.py` checks this against local
+  `pipekit_ops.Predictor`. `tests/test_interop.py` checks this against local
   mirrors of the Protocols. No test checks the import ban itself: review it.
 - **NumPyro owns inference.** MCMC, SVI, `Predictive`, handlers and masking
   (`d.mask(m)`) are NumPyro's; never re-implement them, and delegate to an

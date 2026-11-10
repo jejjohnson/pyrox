@@ -33,7 +33,7 @@ class _ObservationNoise(Protocol):
 
 @runtime_checkable
 class _Predictor(Protocol):
-    """Local mirror of ``pipekit.protocols.Predictor``."""
+    """Local mirror of ``pipekit_ops.protocols.Predictor``."""
 
     def predict(self, x: Any) -> Any: ...
 

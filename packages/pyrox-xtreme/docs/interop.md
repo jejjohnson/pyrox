@@ -18,7 +18,7 @@ xtremax                     ──imports──▶  jax, numpyro, xarray, …   
 ```
 
 Anything that composes xtremax functions into pipekit graphs
-(`pipekit.Lambda`, `Sequential`, `AssertShape`, `Quarantine`, …) lives in
+(`pipekit_ops.Lambda`, `Sequential`, `AssertShape`, `Quarantine`, …) lives in
 downstream workflow repositories and example notebooks — never in
 `src/xtremax/`.
 
@@ -29,9 +29,9 @@ runtime-checkable Protocols:
 
 | pipekit Protocol | Required members | xtremax class | Status |
 |---|---|---|---|
-| `pipekit.Predictor` | `predict(x)` | `XarrayQuantileRegressor` | ✅ conforms with zero changes — the pattern to emulate |
+| `pipekit_ops.Predictor` | `predict(x)` | `XarrayQuantileRegressor` | ✅ conforms with zero changes — the pattern to emulate |
 | `pipekit_cycle.ObservationNoise` | `covariance()`, `sample(key, shape)` | `GeneralizedExtremeValueDistribution`, `GeneralizedParetoDistribution` | ✅ conforms — `covariance()` added for this seam; `sample(key, sample_shape)` was already positionally compatible |
-| `pipekit.FittableTransformer` | `fit(...)`, `transform(...)` | — | no candidate today; wrap downstream if needed |
+| `pipekit_ops.FittableTransformer` | `fit(...)`, `transform(...)` | — | no candidate today; wrap downstream if needed |
 
 ### The `ObservationNoise` seam
 
@@ -69,7 +69,7 @@ stochastic (perturbed-observation) methods only need `sample`.
 
 ### The `Predictor` pattern
 
-`XarrayQuantileRegressor.predict(X)` matches `pipekit.Predictor`
+`XarrayQuantileRegressor.predict(X)` matches `pipekit_ops.Predictor`
 exactly, without xtremax knowing pipekit exists. When adding new
 model-like classes, prefer sklearn-style member names (`predict`, `fit`,
 `transform`) so pipekit interop comes for free.
