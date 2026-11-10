@@ -101,6 +101,8 @@ nav:
       - "Markov Gaussian Processes — Matern Kernels in State-Space Form": notebooks/markov_gp_sde_kernels.ipynb
       - "Markov Gaussian Processes — Kalman Filtering and RTS Smoothing": notebooks/markov_gp_kalman.ipynb
       - "MCMC with INLA — A Parameter Outside the Latent Gaussian Model": notebooks/lgm_mcmc_inla.ipynb
+  - Explainers:
+      - "Averaging kernel vs KISS-GP": explainers/averaging_kernel_kiss_gp.md
   - Contributing: contributing.md
   - Changelog: CHANGELOG.md
 
