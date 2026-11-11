@@ -104,6 +104,7 @@ nav:
       - "State-space models (pyrox-ssm)":
           - "Markov Gaussian Processes — Matern Kernels in State-Space Form": notebooks/ssm/markov_gp_sde_kernels.ipynb
           - "Markov Gaussian Processes — Kalman Filtering and RTS Smoothing": notebooks/ssm/markov_gp_kalman.ipynb
+          - "Non-Gaussian Markov GP Inference — Laplace, Gauss–Newton, Posterior Linearisation and EP": notebooks/ssm/markov_gp_nongauss.ipynb
   - Explainers:
       - "Averaging kernel vs KISS-GP": explainers/averaging_kernel_kiss_gp.md
   - Contributing: contributing.md
