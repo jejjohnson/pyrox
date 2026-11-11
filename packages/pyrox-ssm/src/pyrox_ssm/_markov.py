@@ -38,6 +38,8 @@ from jaxtyping import Array, Bool, Float
 from numpyro import distributions as dist
 from pyrox.likelihoods import Likelihood
 
+from pyrox_ssm._lgssm import LinearGaussianSSMPrior
+
 
 if TYPE_CHECKING:
     from pyrox_ssm._inference_nongauss_markov import NonGaussConditionedMarkovGP
@@ -79,29 +81,38 @@ def _kalman_filter(
     ``mask[k] = 0`` skips the update (no information from ``residual[k]``
     enters the state). ``R_seq`` is the per-step observation variance.
 
-    Delegates to `gaussx.kalman_filter` (gaussx 0.0.13 added the
-    time-varying / mask generalisation that pyrox needs). ``F`` is unused
-    by the gaussx call — it's accepted for API symmetry with the prior
-    pyrox implementation, which constructed the predict step from
-    ``F`` rather than from the discretised ``A_seq``. Kept so downstream
-    call sites and the existing test signature don't shift.
+    Delegates to `pyrox_ssm.LinearGaussianSSMPrior.filter`, the one
+    `gaussx.kalman_filter` call site, with the scalar observation lifted to
+    ``(N, 1)`` and a zero initial mean. ``F`` is unused, since the predict
+    comes from the discretised ``A_seq``; it is kept so the call sites and
+    the existing test signature don't shift.
     """
-    del F  # gaussx derives the predict from A_seq directly
-    # Lift the per-step residual / noise to the (N, 1) / (N, 1, 1) shapes the
-    # gaussx Kalman filter expects for a scalar observation model.
-    obs = einx.id("n -> n 1", residual)
+    del F  # the predict comes from A_seq directly
+    # Lift the per-step noise to the (N, 1, 1) stack of a scalar observation
+    # model; the (N,) residual is lifted to (N, 1) by the prior.
     R_3d = einx.id("n -> n 1 1", R_seq)
     init_mean = jnp.zeros(init_cov.shape[0], dtype=init_cov.dtype)
-    state = gaussx.kalman_filter(
+    lgssm = LinearGaussianSSMPrior(
         transition=A_seq,
         obs_model=H,
         process_noise=Q_seq,
         obs_noise=R_3d,
-        observations=obs,
         init_mean=init_mean,
         init_cov=init_cov,
-        mask=mask.astype(bool),
     )
+    return _filter_tuple(lgssm.filter(residual, mask=mask.astype(bool)))
+
+
+def _filter_tuple(
+    state: FilterState,
+) -> tuple[
+    Float[Array, "N d"],
+    Float[Array, "N d d"],
+    Float[Array, "N d"],
+    Float[Array, "N d d"],
+    Float[Array, ""],
+]:
+    """Unpack a `gaussx.FilterState` into the tuple the Markov helpers use."""
     return (
         state.predicted_means,
         state.predicted_covs,
@@ -376,11 +387,62 @@ class MarkovGPPrior(eqx.Module):
             return jnp.zeros_like(times)
         return self.mean_fn(times)
 
-    def _residual(self, y: Float[Array, " N"]) -> Float[Array, " N"]:
-        return y - self.mean(self.times)
-
     def _R(self, noise_var: Float[Array, ""]) -> Float[Array, ""]:
         return jnp.asarray(noise_var) + jnp.asarray(self.obs_noise_floor)
+
+    def _observed(self, mask: Bool[Array, " N"] | None) -> Bool[Array, " N"] | None:
+        """``mask`` checked against ``times``, or ``None`` when not given."""
+        return None if mask is None else _observation_mask(mask, self.times)
+
+    def as_lgssm(self, noise_var: Float[Array, ""]) -> LinearGaussianSSMPrior:
+        r"""This prior as a `pyrox_ssm.LinearGaussianSSMPrior`.
+
+        With $\Delta t_1 = 0$ and $\Delta t_k = t_k - t_{k-1}$, the
+        kernel's discretisation gives the transitions and process noise,
+
+        $$
+        (A_k, Q_k) = \mathrm{discretise}(\Delta t_k), \qquad
+        H_k = H, \qquad R_k = \sigma_n^2 + \epsilon, \qquad
+        b_k = \mu(t_k), \qquad (m_0, P_0) = (0, P_{\mathrm{init}}),
+        $$
+
+        where $\epsilon$ is ``obs_noise_floor``, $\mu$ the mean function
+        and $P_{\mathrm{init}}$ `initial_covariance` ($P_\infty$ for a
+        stationary kernel). The zero first step makes $A_1 = I$ and
+        $Q_1 = 0$, so the first observation sees the initial state itself.
+        `filter`, `smooth` and `log_marginal` run through this model, so
+        the two give the same results bit for bit.
+
+        Args:
+            noise_var: Observation noise variance $\sigma_n^2$.
+
+        Returns:
+            The `pyrox_ssm.LinearGaussianSSMPrior` over ``times``, with
+            $T = N$ steps, state dimension $d$ and one output.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> from pyrox_ssm import MaternSDE, MarkovGPPrior
+            >>> prior = MarkovGPPrior(MaternSDE(1.0, 0.5, order=1), jnp.arange(4.0))
+            >>> lgssm = prior.as_lgssm(jnp.asarray(0.1))
+            >>> lgssm.transition.shape, lgssm.obs_model.shape
+            ((4, 2, 2), (1, 2))
+            >>> y = jnp.array([0.1, 0.4, 0.3, 0.2])
+            >>> log_marg = lgssm.log_marginal(y)  # == prior.log_marginal(y, 0.1)
+        """
+        _F, _L, H, _Qc, _P_inf = self.sde_kernel.sde_params()
+        init_cov = self.initial_covariance()
+        A_seq, Q_seq = self.sde_kernel.discretise_sequence(_build_dt_full(self.times))
+        R_seq = jnp.broadcast_to(self._R(noise_var), self.times.shape)
+        return LinearGaussianSSMPrior(
+            transition=A_seq,
+            obs_model=H,
+            process_noise=Q_seq,
+            obs_noise=einx.id("n -> n 1 1", R_seq),
+            init_mean=jnp.zeros(init_cov.shape[0], dtype=init_cov.dtype),
+            init_cov=init_cov,
+            obs_offset=einx.id("n -> n 1", self.mean(self.times)),
+        )
 
     def filter(
         self,
@@ -431,14 +493,8 @@ class MarkovGPPrior(eqx.Module):
             >>> mask = jnp.array([True, False, True, True])
             >>> *_, log_marg = prior.filter(y, jnp.asarray(0.1), mask=mask)
         """
-        F, _L, H, _Qc, _P_inf = self.sde_kernel.sde_params()
-        init_cov = self.initial_covariance()
-        dt_full = _build_dt_full(self.times)
-        A_seq, Q_seq = self.sde_kernel.discretise_sequence(dt_full)
-        residual = self._residual(_sanitise(y, mask))
-        observed = _observation_mask(mask, self.times)
-        R_seq = jnp.broadcast_to(self._R(noise_var), self.times.shape)
-        return _kalman_filter(F, H, init_cov, A_seq, Q_seq, residual, observed, R_seq)
+        lgssm = self.as_lgssm(noise_var)
+        return _filter_tuple(lgssm.filter(y, mask=self._observed(mask)))
 
     def log_marginal(
         self,
@@ -475,8 +531,8 @@ class MarkovGPPrior(eqx.Module):
             >>> mask = jnp.array([True, True, True, False])
             >>> log_marg = prior.log_marginal(y, jnp.asarray(0.1), mask=mask)
         """
-        *_, log_marg = self.filter(y, noise_var, mask=mask)
-        return log_marg
+        lgssm = self.as_lgssm(noise_var)
+        return lgssm.log_marginal(y, mask=self._observed(mask))
 
     def smooth(
         self,
@@ -508,18 +564,8 @@ class MarkovGPPrior(eqx.Module):
             >>> m.shape, P.shape
             ((4, 2), (4, 2, 2))
         """
-        F, _L, H, _Qc, _P_inf = self.sde_kernel.sde_params()
-        init_cov = self.initial_covariance()
-        dt_full = _build_dt_full(self.times)
-        A_seq, Q_seq = self.sde_kernel.discretise_sequence(dt_full)
-        residual = self._residual(_sanitise(y, mask))
-        observed = _observation_mask(mask, self.times)
-        R_seq = jnp.broadcast_to(self._R(noise_var), self.times.shape)
-        m_pred, P_pred, m_filt, P_filt, log_marg = _kalman_filter(
-            F, H, init_cov, A_seq, Q_seq, residual, observed, R_seq
-        )
-        m_smooth, P_smooth = _rts_smoother(m_pred, P_pred, m_filt, P_filt, A_seq)
-        return m_smooth, P_smooth, log_marg
+        lgssm = self.as_lgssm(noise_var)
+        return lgssm.smooth(y, mask=self._observed(mask))
 
     def condition(
         self,

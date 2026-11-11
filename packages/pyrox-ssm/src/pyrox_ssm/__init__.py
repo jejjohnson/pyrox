@@ -4,6 +4,9 @@ Temporal GPs and Gaussian state-space models on top of pyrox and gaussx, in
 the package whose inference recurses in time. ``pyrox_ssm`` never imports
 ``pyrox_gp``, ``pyrox_lgm`` or ``pyrox_nn``.
 
+* Linear-Gaussian state-space models: `LinearGaussianSSMPrior`,
+  `ConditionedLinearGaussianSSM`, `lgssm_factor`; the general model given
+  by its transition, observation and noise matrices.
 * Markov GPs: `MarkovGPPrior`, `ConditionedMarkovGP`, `markov_gp_factor`,
   `markov_gp_sample`; the Kalman filter and RTS smoother over an SDE kernel.
 * Sparse Markov GPs: `SparseMarkovGPPrior`, `SparseConditionedMarkovGP`,
@@ -42,6 +45,11 @@ from pyrox_ssm._inference_nongauss_markov import (
     NonGaussConditionedMarkovGP,
     PosteriorLinearizationMarkov,
 )
+from pyrox_ssm._lgssm import (
+    ConditionedLinearGaussianSSM,
+    LinearGaussianSSMPrior,
+    lgssm_factor,
+)
 from pyrox_ssm._markov import (
     ConditionedMarkovGP,
     MarkovGPPrior,
@@ -60,6 +68,7 @@ from pyrox_ssm._sparse_markov import (
 __version__ = "0.1.0"  # x-release-please-version
 
 __all__ = [
+    "ConditionedLinearGaussianSSM",
     "ConditionedMarkovGP",
     "ConstantSDE",
     "CosineSDE",
@@ -67,6 +76,7 @@ __all__ = [
     "GaussNewtonMarkovInference",
     "IntegratedWienerSDE",
     "LaplaceMarkovInference",
+    "LinearGaussianSSMPrior",
     "MarkovGPPrior",
     "MaternSDE",
     "NonGaussConditionedMarkovGP",
@@ -80,6 +90,7 @@ __all__ = [
     "SparseMarkovGPPrior",
     "SumSDE",
     "__version__",
+    "lgssm_factor",
     "markov_gp_factor",
     "markov_gp_sample",
     "pad_sites",
