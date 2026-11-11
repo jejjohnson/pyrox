@@ -45,14 +45,9 @@ import equinox as eqx
 import jax.numpy as jnp
 import kernellib as kl
 import lineax as lx
-from geonnax.basis import (
-    SlepianCapBasis,
-    fourier_basis,
-    fourier_eigenvalues,
-    harmonic_degrees,
-    real_spherical_harmonics,
-    slepian_cap_basis,
-)
+from functax.basis.fourier import fourier_basis, fourier_eigenvalues
+from functax.basis.slepian import SlepianCapBasis, slepian_cap_basis
+from functax.basis.sphere import harmonic_degrees, real_spherical_harmonics
 from jaxtyping import Array, Float, Int, PRNGKeyArray
 from pyrox._core import call_context, freeze
 

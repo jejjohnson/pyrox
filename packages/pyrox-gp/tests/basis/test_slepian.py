@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
-from geonnax.basis import (
+from functax.basis.slepian import (
     shannon_number,
     slepian_cap_basis,
     slepian_cap_eigh_per_m,

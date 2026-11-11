@@ -6,8 +6,9 @@ This module hosts two related groups:
    `seasonal_frequencies`, `seasonal_features`,
    `interaction_features`, `standardize`,
    `unstandardize`. Stateless functions re-exported from
-   `geonnax.basis` (the implementations moved there with the
-   package split) for the deterministic coordinate-encoder layers.
+   `functax.basis.features` (the first three) and `geonnax.basis`
+   (the rest), where the implementations moved with the package
+   split, for the deterministic coordinate-encoder layers.
 2. *Bayesian random-feature layers* — `RBFFourierFeatures`,
    `MaternFourierFeatures`, `LaplaceFourierFeatures`,
    `RandomKitchenSinks`, `RBFCosineFeatures`,
@@ -41,21 +42,23 @@ import jax.numpy as jnp
 import kernellib as kl
 import numpyro.distributions as dist
 
-# Pure-JAX feature transforms moved to geonnax with the package split;
-# re-export them (self-alias form marks them as intentional re-exports)
-# so `from pyrox_nn._features import fourier_features` keeps working.
-from geonnax.basis import (
-    fourier_basis,
+# Pure-JAX feature transforms moved to functax (the bases) and geonnax (the
+# rest) with the package split; re-export them (self-alias form marks them as
+# intentional re-exports) so `from pyrox_nn._features import fourier_features`
+# keeps working.
+from functax.basis.features import (
     fourier_features as fourier_features,
-    harmonic_degrees,
-    interaction_features as interaction_features,
-    real_spherical_harmonics,
     seasonal_features as seasonal_features,
     seasonal_frequencies as seasonal_frequencies,
+)
+from functax.basis.fourier import fourier_basis
+from functax.basis.sphere import harmonic_degrees, real_spherical_harmonics
+from functax.geometry import lonlat_to_unit
+from geonnax.basis import (
+    interaction_features as interaction_features,
     standardize as standardize,
     unstandardize as unstandardize,
 )
-from geonnax.geo import lonlat_to_cartesian3d
 from jaxtyping import Array, Float
 from pyrox._core import freeze
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
@@ -936,7 +939,7 @@ class SphericalHarmonicFeatures(PyroxModule):
                     "input_mode='lonlat' needs an explicit input_unit, "
                     "'degrees' or 'radians'."
                 )
-            x = lonlat_to_cartesian3d(x, input_unit=self.input_unit)  # (N, 3)
+            x = lonlat_to_unit(x, unit=self.input_unit)  # (N, 3)
         Y = real_spherical_harmonics(x, self.l_max)  # (N, M)
         # Funk-Hecke coefficients; kernellib rejects ARD lengthscales. freeze
         # registers any priors on the hyperparameters exactly once.

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import geonnax.basis
+import importlib
+
 import jax.numpy as jnp
 import kernellib as kl
 import numpy as np
@@ -10,7 +11,7 @@ import pytest
 from numpyro import handlers
 from pyrox._core import call_context, freeze
 from pyrox_gp import RBF, Matern, RationalQuadratic, funk_hecke_coefficients
-from pyrox_gp._basis import spectral_density
+from pyrox_gp._basis import _FUNCTAX_BASIS_FAMILIES, spectral_density
 from pyrox_gp._context import _kernel_context, _kernel_contexts
 
 
@@ -81,13 +82,16 @@ def test_funk_hecke_alias_resolves_a_prior_once():
     assert samples == ["RBF.lengthscale"]
 
 
-@pytest.mark.parametrize("name", ["fourier_basis", "slepian_cap_basis"])
-def test_basis_reexport_warns_and_returns_the_geonnax_object(name):
+@pytest.mark.parametrize(
+    ("name", "family"),
+    sorted(_FUNCTAX_BASIS_FAMILIES.items()),
+)
+def test_basis_reexport_warns_and_returns_the_functax_object(name, family):
     import pyrox_gp._basis as basis
 
-    with pytest.warns(DeprecationWarning, match="geonnax.basis"):
+    with pytest.warns(DeprecationWarning, match=rf"functax\.basis\.{family}"):
         got = getattr(basis, name)
-    assert got is getattr(geonnax.basis, name)
+    assert got is getattr(importlib.import_module(f"functax.basis.{family}"), name)
 
 
 def test_basis_rejects_an_unknown_name():

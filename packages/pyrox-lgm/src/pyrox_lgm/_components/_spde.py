@@ -11,7 +11,11 @@ prior `PCMatern` (R-INLA's ``inla.spde2.pcmatern``).
 
 from __future__ import annotations
 
+import math
+
 import equinox as eqx
+import functax.geometry as fgeo
+import functax.interp as finterp
 import gaussx as gx
 import jax.numpy as jnp
 import lineax as lx
@@ -43,8 +47,10 @@ class SPDE(AbstractComponent):
       (``d = 2``).
     - ``grid=shape``: the finite-difference SPDE on a regular lattice with
       ``spacing`` (`gaussx.spde_precision_grid`, diagonalised exactly by its
-      Kronecker structure). Nodes are the grid cells in C order; ``d`` is
-      ``len(shape)``.
+      Kronecker structure). Nodes are the grid cells in C order, node
+      ``(i_1, ..., i_d)`` at ``(i_1, ..., i_d) * spacing``; `project_points`
+      builds the multilinear projector for locations inside the grid (a
+      functax `Linear` plan). ``d`` is ``len(shape)``.
 
     The hyperparameter ``"range_sigma"`` is the pair ``[range, sigma]``
     under the joint `PCMatern` prior.
@@ -184,10 +190,75 @@ class SPDE(AbstractComponent):
         return gx.SparseOperator.from_coo(rows, cols, tau**2 * h**self.d * vals, (n, n))
 
     def project_points(self, points: Float[ArrayLike, "n D"]) -> gx.SparseOperator:
-        """Barycentric ``(n, V)`` projector from mesh vertices to ``points``."""
-        if self.vertices is None or self.triangles is None:
-            raise ValueError("project_points needs a mesh; index grid cells directly")
+        r"""The ``(n, N)`` projector $A$ from the field's nodes to ``points``.
+
+        Row $k$ holds the weights $\psi_i(s_k)$ of the nodes around location
+        $s_k$, so $(A w)_k = \sum_i \psi_i(s_k) w_i$ interpolates a nodal
+        field $w$; each row sums to one and reproduces affine fields exactly.
+
+        - On a mesh, $\psi_i$ are the P1 hat functions: the barycentric
+          weights of the triangle holding $s_k$ (`gaussx.fem_projector`,
+          ``N = V``).
+        - On a grid, $\psi_i$ are the multilinear hat functions of the
+          lattice, $2^d$ entries per row (a functax `Linear` plan onto the
+          node coordinates ``index * spacing``, ``N = prod(shape)``).
+
+        Args:
+            points: Locations, one row each, in the node coordinates: ``(n, 2)``
+                or ``(n, 3)`` on a mesh, ``(n, d)`` on a grid.
+
+        Returns:
+            $A$, a `gaussx.SparseOperator` of shape ``(n, N)``.
+
+        Raises:
+            ValueError: If a location lies outside the mesh or the grid, if
+                ``points`` does not have ``d`` columns on a grid, or if a grid
+                axis has a single node.
+
+        Examples:
+            >>> import numpy as np
+            >>> import pyrox_lgm as lgm
+            >>> spde = lgm.SPDE(grid=(3, 4), spacing=0.5)
+            >>> A = np.asarray(spde.project_points(np.array([[0.25, 0.5]])).as_matrix())
+            >>> A.shape, float(A.sum())
+            ((1, 12), 1.0)
+            >>> np.nonzero(A[0])[0].tolist(), A[0, [1, 5]].tolist()
+            ([1, 5], [0.5, 0.5])
+        """
+        if self.shape is not None:
+            return _grid_projector(self.shape, self.spacing, points)
+        assert self.vertices is not None and self.triangles is not None
         return gx.fem_projector(self.vertices, self.triangles, points)
+
+
+def _grid_projector(
+    shape: tuple[int, ...], spacing: float, points: Float[ArrayLike, "n d"]
+) -> gx.SparseOperator:
+    """Multilinear ``(n, prod(shape))`` projector from C-ordered grid nodes."""
+    pts = jnp.asarray(points)
+    if not jnp.issubdtype(pts.dtype, jnp.floating):
+        pts = pts.astype(float)
+    d = len(shape)
+    if pts.ndim != 2 or pts.shape[1] != d:
+        raise ValueError(
+            f"points must be (n, {d}) on a {d}-D grid; got shape {pts.shape}"
+        )
+    if min(shape) < 2:
+        raise ValueError(
+            f"project_points needs at least two nodes per grid axis; got {shape}"
+        )
+    axes = [fgeo.Axis(jnp.arange(n, dtype=pts.dtype) * spacing) for n in shape]
+    plan = finterp.Linear().plan(
+        fgeo.RectilinearGrid(axes),
+        fgeo.Points(pts),
+        policies=finterp.Policies(outside="raise"),
+    )
+    indices, weights = plan.to_gaussx()  # (n, 2^d) node indices and weights
+    n_points, taps = indices.shape
+    rows = np.repeat(np.arange(n_points), taps)
+    return gx.SparseOperator.from_coo(
+        rows, np.asarray(indices).ravel(), weights.ravel(), (n_points, math.prod(shape))
+    )
 
 
 def _path_laplacians(shape: tuple[int, ...]) -> lx.AbstractLinearOperator:

@@ -24,7 +24,7 @@ Read "The contracts" in the root `AGENTS.md` (sites) and
 - **Wrapped core** (a geonnax module whose arrays become sites): exemplars
   `_sngp.py`, `_vssgp.py`, `_heteroscedastic.py`.
 - **GP-flavoured features** (spectral densities, HSGP): exemplar
-  `HSGPFeatures` in `_features.py` (uses `geonnax.basis`, kernellib's
+  `HSGPFeatures` in `_features.py` (uses `functax.basis.fourier`, kernellib's
   spectral densities and `pyrox._core.freeze`; never import `pyrox_gp`).
 
 ## 3. Write it (`src/pyrox_nn/_<family>.py`)

@@ -23,6 +23,7 @@ members = [
     "pyrox-ssm",
 ]
 overrides = [
+    { name = "functax", extras = ["jax"], git = "https://github.com/jejjohnson/functax.git?rev=v0.0.6" },
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?rev=v0.6.15" },
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.11" },
 ]
@@ -668,6 +669,23 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/90/b2/2a3d1374b7780999d3184e171e25439a8358c47b481f68be883c14086b4c/frozendict-2.4.7.tar.gz", hash = "sha256:e478fb2a1391a56c8a6e10cc97c4a9002b410ecd1ac28c18d780661762e271bd", size = 317082, upload-time = "2025-11-11T22:40:14.251Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/38/74/f94141b38a51a553efef7f510fc213894161ae49b88bffd037f8d2a7cb2f/frozendict-2.4.7-py3-none-any.whl", hash = "sha256:972af65924ea25cf5b4d9326d549e69a9a4918d8a76a9d3a7cd174d98b237550", size = 16264, upload-time = "2025-11-11T22:40:12.836Z" },
+]
+
+[[package]]
+name = "functax"
+version = "0.0.6"
+source = { git = "https://github.com/jejjohnson/functax.git?rev=v0.0.6#7fdcd2729fe8d6a62de0ab2330ae6ae2da133ea2" }
+dependencies = [
+    { name = "numpy" },
+]
+
+[package.optional-dependencies]
+jax = [
+    { name = "einx" },
+    { name = "equinox" },
+    { name = "jax" },
+    { name = "jaxtyping" },
+    { name = "lineax" },
 ]
 
 [[package]]
@@ -2074,8 +2092,8 @@ source = { editable = "packages/pyrox-gp" }
 dependencies = [
     { name = "einx" },
     { name = "flowjax" },
+    { name = "functax", extra = ["jax"] },
     { name = "gaussx" },
-    { name = "geonnax" },
     { name = "kernellib" },
     { name = "lineax" },
     { name = "pyrox" },
@@ -2098,9 +2116,9 @@ optax = [
 requires-dist = [
     { name = "einx", specifier = ">=0.4.3" },
     { name = "flowjax", specifier = ">=0.9" },
+    { name = "functax", extras = ["jax"], git = "https://github.com/jejjohnson/functax.git?rev=v0.0.6" },
     { name = "gauss-flows", marker = "extra == 'flows'", git = "https://github.com/jejjohnson/gauss_flows.git?rev=bdb23f076ebaaf1ba042aa52ea593487cef3204e" },
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.15" },
-    { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.11" },
     { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.22" },
     { name = "lineax", specifier = ">=0.1.1" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
@@ -2117,6 +2135,7 @@ version = "0.1.3"
 source = { editable = "packages/pyrox-lgm" }
 dependencies = [
     { name = "argminax", extra = ["numpyro"] },
+    { name = "functax", extra = ["jax"] },
     { name = "gaussx" },
     { name = "kernellib" },
     { name = "matfree" },
@@ -2133,6 +2152,7 @@ xarray = [
 [package.metadata]
 requires-dist = [
     { name = "argminax", extras = ["numpyro"], git = "https://github.com/jejjohnson/argminax.git?rev=v0.0.6" },
+    { name = "functax", extras = ["jax"], git = "https://github.com/jejjohnson/functax.git?rev=v0.0.6" },
     { name = "gaussx", extras = ["numpyro"], git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.15" },
     { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.22" },
     { name = "matfree", specifier = ">=0.6.0" },
@@ -2227,6 +2247,7 @@ source = { editable = "packages/pyrox-nn" }
 dependencies = [
     { name = "argminax" },
     { name = "einx" },
+    { name = "functax", extra = ["jax"] },
     { name = "gaussx" },
     { name = "geonnax" },
     { name = "kernellib" },
@@ -2257,6 +2278,7 @@ xarray = [
 requires-dist = [
     { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?rev=v0.0.6" },
     { name = "einx", specifier = ">=0.4.3" },
+    { name = "functax", extras = ["jax"], git = "https://github.com/jejjohnson/functax.git?rev=v0.0.6" },
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.15" },
     { name = "geonnax", git = "https://github.com/jejjohnson/geonnax.git?rev=v0.0.11" },
     { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.22" },

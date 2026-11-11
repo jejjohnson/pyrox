@@ -34,12 +34,9 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpyro.distributions as dist
+from functax.basis.features import fourier_features, seasonal_features
 from geonnax import NeuralFieldMLP
-from geonnax.basis import (
-    fourier_features,
-    interaction_features,
-    seasonal_features,
-)
+from geonnax.basis import interaction_features
 from jaxtyping import Array, Float
 from pyrox._core.pyrox_module import PyroxModule, pyrox_method
 

@@ -74,7 +74,7 @@ def test_vff_k_uu_is_diagonal_and_survives_dispatch():
 
 def test_vff_k_uu_diagonal_matches_spectral_density():
     """Diagonal entries of K_uu equal ``S(sqrt(lambda_j)) + jitter``."""
-    from geonnax.basis import fourier_eigenvalues
+    from functax.basis.fourier import fourier_eigenvalues
     from pyrox_gp._basis._spectral_density import (
         _isotropic_spectral_density as spectral_density,
     )
@@ -238,7 +238,7 @@ def test_slepian_inducing_k_ux_respects_cap_centre():
 
     # K_ux must agree with a direct evaluation that uses the cap-centred
     # frame, matching SlepianCapBasis.evaluate's convention.
-    from geonnax.basis import real_spherical_harmonics
+    from functax.basis.sphere import real_spherical_harmonics
 
     a = kl.funk_hecke_coefficients(freeze(kernel), l_max=3, num_quadrature=256)
     a_per_feature = a[

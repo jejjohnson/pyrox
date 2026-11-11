@@ -41,7 +41,7 @@ import `api` or `preprocessing`, which import pandas at module scope.
   pyrox-gp are siblings over `pyrox`. A caller may pass a `pyrox_gp` kernel to a
   layer, and tests may import it. Type a kernel field `kl.AbstractKernel`.
 - **Deterministic architecture belongs in geonnax**; basis functions come from
-  `geonnax.basis`; spectral densities and Funk–Hecke coefficients from kernellib.
+  the `functax.basis` family modules; spectral densities and Funk–Hecke coefficients from kernellib.
   `pyrox._core.freeze(kernel)` resolves a kernel's hyperpriors to one site each
   and returns the plain kernellib kernel kernellib's functions take (see
   `HSGPFeatures`).
