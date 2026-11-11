@@ -148,13 +148,16 @@ def as_gaussx_likelihood(
             Hessian in $f$ is not diagonal across one site's latents.
 
     Examples:
+        A Gaussian likelihood has $g_i = (y_i - f_i) / \sigma^2$ and
+        $h_i = -1 / \sigma^2$ at every site:
+
         >>> import jax.numpy as jnp
-        >>> from pyrox_gp import BernoulliLikelihood
-        >>> y = jnp.array([1.0, 0.0])
-        >>> site_lik = as_gaussx_likelihood(BernoulliLikelihood(), y)
+        >>> from pyrox.likelihoods import GaussianLikelihood
+        >>> y = jnp.array([1.0, -1.0])
+        >>> site_lik = as_gaussx_likelihood(GaussianLikelihood(noise_var=0.5), y)
         >>> g, h = site_lik.site_derivatives(jnp.zeros(2))
-        >>> g.tolist(), h.tolist()
-        ([0.5, -0.5], [-0.25, -0.25])
+        >>> jnp.round(g, 4).tolist(), jnp.round(h, 4).tolist()
+        ([2.0, -2.0], [-2.0, -2.0])
     """
     _check_scalar_latent(lik)
     with_inputs = X is not None and likelihood_accepts_inputs(lik)
