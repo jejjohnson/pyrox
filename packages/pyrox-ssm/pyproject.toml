@@ -28,6 +28,7 @@ dependencies = [
     "lineax>=0.1.1",
     "einx>=0.4.3",
     "numpyro>=0.21",
+    "optimistix>=0.1.0",
 ]
 
 [project.optional-dependencies]

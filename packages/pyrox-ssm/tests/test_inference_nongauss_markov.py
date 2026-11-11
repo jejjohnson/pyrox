@@ -230,7 +230,7 @@ _MARKOV_STRATEGIES = [PosteriorLinearizationMarkov, ExpectationPropagationMarkov
 
 def _assert_same_fit(first, second) -> None:
     # Same nodes and weights, so the two runs differ by float64 round-off only.
-    assert first.n_iter == second.n_iter
+    assert jnp.array_equal(first.n_iter, second.n_iter)
     assert jnp.allclose(first.site_nat1, second.site_nat1, rtol=1e-12, atol=1e-12)
     assert jnp.allclose(first.site_nat2, second.site_nat2, rtol=1e-12, atol=1e-12)
     assert jnp.allclose(
