@@ -24,7 +24,7 @@ path.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 import einx
 import equinox as eqx
@@ -852,12 +852,237 @@ def markov_gp_sample(
 
     Registers a single ``numpyro.sample(name, MVN(mu, K))`` site where ``K``
     is the dense Gram derived from the SDE autocovariance
-    ``H exp(F|tau|) P_inf H^T``. This is the simple, dense path — use it
-    when ``N`` is small. Scalable Markov-aware sample sites land in a
-    later wave alongside non-Gaussian likelihood support.
+    ``H exp(F|tau|) P_inf H^T``. This is the simple, dense path: building
+    ``K`` costs $O(N^2 d^3)$ and every log-density evaluation an $O(N^3)$
+    Cholesky, so use it when ``N`` is a few hundred at most and the kernel
+    is stationary. For longer series, a non-stationary kernel, or NUTS over
+    a non-Gaussian likelihood, use `markov_gp_innovations_sample`, which
+    builds the same path from whitened innovations in $O(N d^3)$.
     """
     K = _dense_sde_gram(prior.sde_kernel, prior.times)
     mu = prior.mean(prior.times)
     return numpyro.sample(  # ty: ignore[invalid-return-type]
         name, dist.MultivariateNormal(mu, covariance_matrix=K)
     )
+
+
+_SqrtMethod = Literal["cholesky", "eigh"]
+_SQRT_METHODS: tuple[str, ...] = ("cholesky", "eigh")
+
+
+def _covariance_root(
+    cov: Float[Array, "d d"], *, sqrt: _SqrtMethod, jitter: float
+) -> Float[Array, "d d"]:
+    r"""A square root $L$ of one state covariance, $L L^\top = \Sigma$.
+
+    ``"cholesky"`` factors $\Sigma + \beta I$ with `gaussx.cholesky`, so
+    $L L^\top = \Sigma + \beta I$; ``"eigh"`` takes the symmetric root
+    $Q \operatorname{diag}(\sqrt{\max(\gamma, 0)}) Q^\top$ with
+    `gaussx.sqrt`, exact for a singular $\Sigma$ and with finite gradients
+    at repeated eigenvalues.
+    """
+    op = lx.MatrixLinearOperator(cov, lx.positive_semidefinite_tag)
+    if sqrt == "cholesky":
+        return gaussx.cholesky(gaussx.add_jitter(op, jitter)).as_matrix()
+    return gaussx.sqrt(op).as_matrix()
+
+
+def markov_gp_from_innovations(
+    prior: MarkovGPPrior,
+    eps: Float[Array, "N d"],
+    *,
+    sqrt: _SqrtMethod = "cholesky",
+    jitter: float = 1e-10,
+) -> Float[Array, " N"]:
+    r"""Latent path of a Markov GP from whitened innovations, in linear time.
+
+    With $\Delta t_k = t_k - t_{k-1}$ and $(A_k, Q_k)$ the kernel's
+    discretisation over $\Delta t_k$ (the time convention of
+    `MarkovGPPrior.as_lgssm`), the state is run forward from standard
+    normal innovations $\varepsilon_k \sim \mathcal{N}(0, I_d)$ by a
+    `jax.lax.scan`,
+
+    $$
+    x_1 = L_0 \varepsilon_1, \qquad
+    x_k = A_k x_{k-1} + L_{Q,k} \varepsilon_k \quad (k = 2, \dots, N), \qquad
+    f(t_k) = H x_k + \mu(t_k),
+    $$
+
+    where $L_0 L_0^\top = P_0$ (`MarkovGPPrior.initial_covariance`, so
+    $P_\infty$ for a stationary kernel) and $L_{Q,k} L_{Q,k}^\top = Q_k$.
+    The map $\varepsilon \mapsto f$ is linear, $f = \mu + M \varepsilon$
+    with $M M^\top = K$ the prior covariance of the path, so for a
+    stationary kernel $f$ has the law `markov_gp_sample` draws from. Time
+    is $O(N d^3)$ and memory $O(N d^2)$: no $N \times N$ array is formed,
+    and a non-stationary kernel such as `gaussx.IntegratedWienerSDE` works
+    as well as a stationary one.
+
+    Use it as a non-centred parameterisation of the latent path: sample
+    ``eps`` and compute ``f`` deterministically, which is what NUTS prefers
+    and what `markov_gp_innovations_sample` registers. `markov_gp_sample`'s
+    dense ``MultivariateNormal`` site stays the simpler choice for short
+    series (a few hundred points) of a stationary kernel.
+
+    The square roots are taken by ``sqrt``. $Q_k$ is only positive
+    *semi*-definite when $\Delta t_k$ is small (it is computed as a
+    difference, and its round-off can be slightly indefinite) and, for
+    `gaussx.IntegratedWienerSDE`, close to singular whenever $\Delta t_k$
+    is small.
+
+    * ``"cholesky"`` (the default): `gaussx.cholesky` of
+      $\Sigma + \beta I$ with $\beta$ = ``jitter``, so each covariance is
+      inflated by $\beta I$. Cheapest; fine in float64 for the default
+      $\beta = 10^{-10}$ unless the round-off in $Q_k$ exceeds $\beta$
+      (large variances, very short lengthscales), when the factor turns
+      ``NaN``.
+    * ``"eigh"``: the symmetric root
+      $Q \operatorname{diag}(\sqrt{\max(\gamma, 0)}) Q^\top$ from
+      `gaussx.sqrt` (a dense ``eigh`` with a Sylvester-equation
+      derivative). It clips negative round-off, needs no jitter and is
+      exact for a singular $Q_k$, so it is the one that handles a $Q_k$
+      that is only positive semi-definite, and the one to use in float32.
+      ``jitter`` is ignored.
+
+    Args:
+        prior: The `MarkovGPPrior` over the $N$ sorted times.
+        eps: Standard normal innovations of shape ``(N, d)``, one row per
+            time, with $d$ = ``prior.state_dim``. Batch over several paths
+            with `jax.vmap`.
+        sqrt: How the covariance square roots are taken, ``"cholesky"`` or
+            ``"eigh"``.
+        jitter: The diagonal $\beta$ added before the Cholesky factor.
+
+    Returns:
+        The path $f(t_1), \dots, f(t_N)$, shape ``(N,)``, mean included.
+
+    Raises:
+        ValueError: If ``eps`` is not ``(N, d)`` or ``sqrt`` is unknown.
+
+    Examples:
+        >>> import jax
+        >>> import jax.numpy as jnp
+        >>> import jax.random as jr
+        >>> import pyrox_ssm as pss
+        >>> times = jnp.linspace(0.0, 10.0, 500)
+        >>> prior = pss.MarkovGPPrior(pss.MaternSDE(1.0, 0.5, order=1), times)
+        >>> eps = jr.normal(jr.key(0), (500, prior.state_dim))
+        >>> f = pss.markov_gp_from_innovations(prior, eps)
+        >>> f.shape
+        (500,)
+        >>> eps_batch = jr.normal(jr.key(1), (8, 500, prior.state_dim))
+        >>> paths = jax.vmap(pss.markov_gp_from_innovations, in_axes=(None, 0))(
+        ...     prior, eps_batch
+        ... )
+        >>> paths.shape
+        (8, 500)
+    """
+    if sqrt not in _SQRT_METHODS:
+        raise ValueError(f"sqrt must be one of {_SQRT_METHODS!r}, got {sqrt!r}")
+    n, d = prior.times.shape[0], prior.state_dim
+    eps = jnp.asarray(eps)
+    if eps.shape != (n, d):
+        raise ValueError(
+            f"eps must have shape ({n}, {d}), one row of {d} innovations per "
+            f"time for a state dimension of {d}, got {tuple(eps.shape)!r}"
+        )
+    _F, _L, H, _Qc, _P_inf = prior.sde_kernel.sde_params()
+    # The leading zero step gives A_1 = I, so starting from x_0 = 0 and
+    # replacing Q_1 = 0 by P_0 makes the first step draw x_1 = L_0 eps_1.
+    A_seq, Q_seq = prior.sde_kernel.discretise_sequence(_build_dt_full(prior.times))
+    cov_seq = Q_seq.at[0].set(prior.initial_covariance())
+    L_seq = jax.vmap(lambda cov: _covariance_root(cov, sqrt=sqrt, jitter=jitter))(
+        cov_seq
+    )
+
+    def step(
+        x_prev: Float[Array, " d"],
+        inputs: tuple[Float[Array, "d d"], Float[Array, "d d"], Float[Array, " d"]],
+    ) -> tuple[Float[Array, " d"], Float[Array, " d"]]:
+        A, L, e = inputs
+        # xₖ = Aₖ xₖ₋₁ + L_{Q,k} εₖ
+        x = einx.dot("i j, j -> i", A, x_prev) + einx.dot("i j, j -> i", L, e)
+        return x, x
+
+    x_init = jnp.zeros((d,), dtype=jnp.result_type(L_seq, eps))
+    _, x_seq = jax.lax.scan(step, x_init, (A_seq, L_seq, eps))
+    # f(tₖ) = H xₖ + μ(tₖ)
+    f = einx.dot("n d, o d -> n o", x_seq, H)[:, 0]
+    return f + prior.mean(prior.times)
+
+
+def markov_gp_innovations_sample(
+    name: str,
+    prior: MarkovGPPrior,
+    *,
+    sqrt: _SqrtMethod = "cholesky",
+    jitter: float = 1e-10,
+) -> Float[Array, " N"]:
+    r"""Sample a Markov-GP latent path through whitened innovations.
+
+    Registers the innovations as one sample site and the path, built from
+    them by `markov_gp_from_innovations`, as a deterministic one,
+
+    $$
+    \varepsilon \sim \mathcal{N}(0, I_{N d}), \qquad
+    f = \mu + M \varepsilon, \qquad M M^\top = K,
+    $$
+
+    so the path costs $O(N d^3)$ per model evaluation instead of the
+    $O(N^3)$ Cholesky of `markov_gp_sample`, and NUTS sees a whitened,
+    non-centred parameterisation. Use it for long series, non-stationary
+    kernels, and non-Gaussian likelihoods sampled with NUTS or fitted with
+    SVI; keep `markov_gp_sample` for short series of a stationary kernel.
+    The ``sqrt`` and ``jitter`` options are those of
+    `markov_gp_from_innovations`; ``"eigh"`` handles a process noise $Q_k$
+    that is only positive semi-definite (closely spaced times,
+    `gaussx.IntegratedWienerSDE`).
+
+    It registers two sites, unscoped like `markov_gp_sample`'s:
+
+    * ``f"{name}_eps"``, the innovations: ``Normal(0, 1)`` of shape
+      ``(N, d)`` with both dimensions in the event
+      (``.expand([N, d]).to_event(2)``);
+    * ``name``, a ``numpyro.deterministic`` holding the path of shape
+      ``(N,)``, so `numpyro.infer.Predictive` returns it.
+
+    Args:
+        name: The deterministic site's name; the innovations site is
+            ``f"{name}_eps"``.
+        prior: The `MarkovGPPrior` over the $N$ sorted times.
+        sqrt: How the covariance square roots are taken, ``"cholesky"`` or
+            ``"eigh"``.
+        jitter: The diagonal added before the Cholesky factor.
+
+    Returns:
+        The path $f(t_1), \dots, f(t_N)$, shape ``(N,)``.
+
+    Examples:
+        A Bernoulli series with a latent Matérn-3/2 path:
+
+        >>> import jax.numpy as jnp
+        >>> import jax.random as jr
+        >>> import numpyro
+        >>> import numpyro.distributions as dist
+        >>> from numpyro.infer import MCMC, NUTS
+        >>> import pyrox_ssm as pss
+        >>> times = jnp.linspace(0.0, 10.0, 200)
+        >>> y = (jnp.sin(times) > 0).astype(jnp.int32)
+        >>> def model(times, y):
+        ...     ell = numpyro.sample("lengthscale", dist.LogNormal(0.0, 1.0))
+        ...     sde = pss.MaternSDE(variance=1.0, lengthscale=ell, order=1)
+        ...     f = pss.markov_gp_innovations_sample("f", pss.MarkovGPPrior(sde, times))
+        ...     numpyro.sample("y", dist.Bernoulli(logits=f), obs=y)
+        >>> mcmc = MCMC(
+        ...     NUTS(model), num_warmup=100, num_samples=100, progress_bar=False
+        ... )
+        >>> mcmc.run(jr.key(0), times, y)
+        >>> mcmc.get_samples()["f"].shape
+        (100, 200)
+    """
+    n, d = prior.times.shape[0], prior.state_dim
+    zero = jnp.zeros((), dtype=prior.times.dtype)
+    eps = numpyro.sample(
+        f"{name}_eps", dist.Normal(zero, 1.0).expand([n, d]).to_event(2)
+    )
+    f = markov_gp_from_innovations(prior, jnp.asarray(eps), sqrt=sqrt, jitter=jitter)
+    return numpyro.deterministic(name, f)  # ty: ignore[invalid-return-type]

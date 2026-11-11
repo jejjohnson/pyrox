@@ -9,6 +9,8 @@ the package whose inference recurses in time. ``pyrox_ssm`` never imports
   by its transition, observation and noise matrices.
 * Markov GPs: `MarkovGPPrior`, `ConditionedMarkovGP`, `markov_gp_factor`,
   `markov_gp_sample`; the Kalman filter and RTS smoother over an SDE kernel.
+  `markov_gp_from_innovations` and `markov_gp_innovations_sample` build the
+  latent path from whitened innovations in linear time.
 * Sparse Markov GPs: `SparseMarkovGPPrior`, `SparseConditionedMarkovGP`,
   `sparse_markov_elbo`, `sparse_markov_factor`.
 * Non-Gaussian likelihoods on a Markov GP: `LaplaceMarkovInference`,
@@ -59,6 +61,8 @@ from pyrox_ssm._markov import (
     ConditionedMarkovGP,
     MarkovGPPrior,
     markov_gp_factor,
+    markov_gp_from_innovations,
+    markov_gp_innovations_sample,
     markov_gp_sample,
 )
 from pyrox_ssm._sites import pad_sites
@@ -98,6 +102,8 @@ __all__ = [
     "__version__",
     "lgssm_factor",
     "markov_gp_factor",
+    "markov_gp_from_innovations",
+    "markov_gp_innovations_sample",
     "markov_gp_sample",
     "markov_laplace_factor",
     "pad_sites",
