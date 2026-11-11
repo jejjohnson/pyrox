@@ -2306,6 +2306,7 @@ dependencies = [
     { name = "gaussx" },
     { name = "lineax" },
     { name = "numpyro" },
+    { name = "optimistix" },
     { name = "pyrox" },
 ]
 
@@ -2324,6 +2325,7 @@ requires-dist = [
     { name = "gaussx", extras = ["numpyro"], git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.15" },
     { name = "lineax", specifier = ">=0.1.1" },
     { name = "numpyro", specifier = ">=0.21" },
+    { name = "optimistix", specifier = ">=0.1.0" },
     { name = "pyrox", editable = "packages/pyrox" },
 ]
 provides-extras = ["flows"]

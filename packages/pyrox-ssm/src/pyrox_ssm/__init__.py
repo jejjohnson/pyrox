@@ -13,7 +13,8 @@ the package whose inference recurses in time. ``pyrox_ssm`` never imports
   `sparse_markov_elbo`, `sparse_markov_factor`.
 * Non-Gaussian likelihoods on a Markov GP: `LaplaceMarkovInference`,
   `GaussNewtonMarkovInference`, `PosteriorLinearizationMarkov`,
-  `ExpectationPropagationMarkov`, all returning `NonGaussConditionedMarkovGP`.
+  `ExpectationPropagationMarkov`, all returning `NonGaussConditionedMarkovGP`,
+  and `markov_laplace_factor`, the approximate evidence as a NumPyro factor.
 * Ragged sites: `pad_sites` pads per-site series to one shape and returns
   the observation mask every Markov entry point takes.
 * The gaussx SDE kernels (`MaternSDE`, `SumSDE`, …) and the `SDEKernel`
@@ -44,6 +45,7 @@ from pyrox_ssm._inference_nongauss_markov import (
     LaplaceMarkovInference,
     NonGaussConditionedMarkovGP,
     PosteriorLinearizationMarkov,
+    markov_laplace_factor,
 )
 from pyrox_ssm._lgssm import (
     ConditionedLinearGaussianSSM,
@@ -93,6 +95,7 @@ __all__ = [
     "lgssm_factor",
     "markov_gp_factor",
     "markov_gp_sample",
+    "markov_laplace_factor",
     "pad_sites",
     "sparse_markov_elbo",
     "sparse_markov_factor",

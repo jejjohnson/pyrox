@@ -143,7 +143,7 @@ def test_mask_none_and_all_true_match_the_unmasked_strategy(strategy) -> None:
             "log_marginal_approx",
         ):
             assert jnp.array_equal(getattr(cond, name), getattr(unmasked, name)), name
-        assert cond.n_iter == unmasked.n_iter
+        assert jnp.array_equal(cond.n_iter, unmasked.n_iter)
         for a, b in zip(cond.predict(t_star), unmasked.predict(t_star), strict=True):
             assert jnp.array_equal(a, b)
 
@@ -206,7 +206,7 @@ def test_nongauss_masking_step_k_equals_dropping_it(strategy) -> None:
     dropped = strategy.fit(_prior(times[keep]), lik, yb[keep])
 
     assert masked.site_nat1[K] == 0.0 and masked.site_nat2[K] == 0.0
-    assert masked.n_iter == dropped.n_iter
+    assert jnp.array_equal(masked.n_iter, dropped.n_iter)
     for name in ("site_nat1", "site_nat2", "q_mean", "q_var"):
         assert jnp.allclose(
             getattr(masked, name)[keep], getattr(dropped, name), rtol=RTOL, atol=1e-13
