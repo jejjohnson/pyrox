@@ -82,13 +82,65 @@ def test_grid_spde_assembles_to_the_exact_sparse_precision(shape, alpha, spacing
     assert np.allclose(Q.as_matrix(), gmrf.precision.as_matrix())
 
 
+def _grid_nodes(shape, spacing):
+    """Node coordinates ``index * spacing`` in C order, ``(N, d)``."""
+    axes = [np.arange(n) * spacing for n in shape]
+    return np.stack(np.meshgrid(*axes, indexing="ij"), -1).reshape(-1, len(shape))
+
+
+@pytest.mark.parametrize(("shape", "spacing"), [((7,), 0.3), ((5, 4), 0.7)])
+def test_spde_grid_projector_interpolates_affine_functions_exactly(shape, spacing):
+    spde = lgm.SPDE(grid=shape, alpha=2, spacing=spacing)
+    extent = (np.asarray(shape) - 1) * spacing
+    pts = np.random.default_rng(0).uniform(0.0, extent, size=(25, len(shape)))
+    A = spde.project_points(pts)
+    assert isinstance(A, gx.SparseOperator)
+    A = np.asarray(A.as_matrix())
+    assert A.shape == (25, spde.n_nodes)
+    # Multilinear weights: 2^d taps per row, a partition of unity, and exact
+    # on affine fields; the tolerance is float64 round-off.
+    assert ((A != 0).sum(axis=1) <= 2 ** len(shape)).all()
+    np.testing.assert_allclose(A.sum(axis=1), 1.0, rtol=0.0, atol=1e-12)
+    slope = np.array([2.0, -3.0])[: len(shape)]
+    f = _grid_nodes(shape, spacing) @ slope + 0.5
+    np.testing.assert_allclose(A @ f, pts @ slope + 0.5, rtol=0.0, atol=1e-12)
+
+
+@pytest.mark.parametrize(("shape", "spacing"), [((6,), 0.5), ((4, 3), 0.7)])
+def test_spde_grid_projector_at_the_nodes_is_the_identity(shape, spacing):
+    spde = lgm.SPDE(grid=shape, alpha=2, spacing=spacing)
+    A = np.asarray(spde.project_points(_grid_nodes(shape, spacing)).as_matrix())
+    np.testing.assert_allclose(A, np.eye(spde.n_nodes), rtol=0.0, atol=1e-12)
+
+
+def test_spde_grid_projector_rejects_points_outside_the_grid():
+    spde = lgm.SPDE(grid=(4, 4), spacing=0.5)  # nodes span [0, 1.5]^2
+    with pytest.raises(ValueError, match="outside"):
+        spde.project_points(np.array([[0.5, 0.5], [1.6, 0.2]]))
+    with pytest.raises(ValueError, match=r"\(n, 2\)"):
+        spde.project_points(np.zeros((3, 3)))
+    with pytest.raises(ValueError, match="two nodes"):
+        lgm.SPDE(grid=(1, 5)).project_points(np.zeros((1, 2)))
+
+
+def test_spde_grid_component_takes_locations_in_the_model_projector():
+    spde = lgm.SPDE(grid=(5, 4), spacing=0.5, name="field")
+    model = lgm.LGM(components=(spde,), likelihood=lgm.Gaussian())
+    pts = np.random.default_rng(1).uniform(0.0, 1.5, size=(9, 2))
+    A = model.projector({"y": np.zeros(9), "field": pts})
+    np.testing.assert_allclose(
+        np.asarray(A.as_matrix()), np.asarray(spde.project_points(pts).as_matrix())
+    )
+
+
 def test_spde_validation():
     with pytest.raises(ValueError, match="exactly one"):
         lgm.SPDE()
+    with pytest.raises(ValueError, match="exactly one"):
+        V, T = _square_mesh()
+        lgm.SPDE(mesh=(V, T), grid=(4, 4))
     with pytest.raises(ValueError, match="nu"):
         lgm.SPDE(grid=(4, 4), alpha=1)  # nu = 0 in 2-D
-    with pytest.raises(ValueError, match="mesh"):
-        lgm.SPDE(grid=(4, 4)).project_points(np.zeros((1, 2)))
 
 
 @pytest.mark.slow

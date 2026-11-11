@@ -157,8 +157,8 @@ class LGM(eqx.Module):
 
     ``data`` holds ``"y"``, an optional ``"offset"``, the node index of each
     observation for every component (``data[component.name]``; an
-    `SPDE` on a mesh also takes ``(n, 2)`` points) and the fixed-effect
-    covariates.
+    `SPDE` also takes locations, ``(n, 2)`` points on a mesh or ``(n, d)`` on
+    a grid) and the fixed-effect covariates.
 
     Args:
         components: Latent components, with distinct names.

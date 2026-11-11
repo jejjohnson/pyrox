@@ -45,7 +45,8 @@ fails under a handler, a transform or a second instance.
 | **Equinox** | Immutable `eqx.Module` pytrees, `filter_*` transforms, `eqx.tree_at` | Modules, guides and likelihoods are `eqx.Module`s; states and results are `eqx.Module`s or NamedTuples (both pytrees); never a dataclass for anything traced. Configuration (shapes, names, flags) is `eqx.field(static=True)`. Rebuilding a pytree skips `__init__`. |
 | **gaussx** (not the `pyrox` core) | Every solve, logdet, Cholesky, Gaussian density, KL, GP conditioning, Kalman filter, quadrature, GMRF | Linear algebra on a covariance or precision goes through gaussx on a PSD-tagged operator, never `jnp.linalg` / `cho_solve`. Models carry `solver: AbstractSolverStrategy \| None` (default `DenseSolver()`). |
 | **kernellib** | Kernel math (`kernellib.functional`), `AbstractKernel` (= `pyrox_gp.Kernel`), kernel operators, landmark selection, graphs | pyrox-gp kernels wrap kernellib; new kernel math goes to kernellib, not here. |
-| **geonnax** | Deterministic network cores, encoders, basis functions | pyrox-nn wraps a geonnax core and swaps its parameters for sites; new deterministic architecture goes to geonnax. |
+| **geonnax** | Deterministic network cores, encoders | pyrox-nn wraps a geonnax core and swaps its parameters for sites; new deterministic architecture goes to geonnax. |
+| **functax** | Bases (`functax.basis.<family>`), grids and point sets, interpolation plans | Take a basis from its family module, never re-implement it; a grid-to-points projector is a local plan's stencil (`plan.to_gaussx()`) under `Policies(outside="raise")`. |
 | **lineax** | Operators and tags | Dense Grams enter as `lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)`. |
 | **argminax**, **optimistix** | Laplace modes and evidence (`inla`'s inner fit, `last_layer_laplace`), L-BFGS (`inla`'s mode search) | A Newton loop to a Laplace mode goes through `argminax.solve.laplace_mode`, not a hand-written loop. |
 | **matfree**, **optax** | Lanczos (PC priors), optimisers (ensemble MAP) | optax is optional in `pyrox` (`[optax]`): import it lazily (`_require_optax`). |
@@ -57,12 +58,12 @@ fails under a handler, a transform or a second instance.
 1. **Search the capability index.** [`docs/capabilities.md`](docs/capabilities.md)
    lists every public name in the four packages, grouped by the module that
    defines it, with a one-line summary; then the public API of gaussx,
-   kernellib and geonnax. It is generated (`make capabilities`) and checked
+   kernellib, geonnax and functax. It is generated (`make capabilities`) and checked
    by `packages/pyrox/tests/test_capabilities.py`.
 2. **Search the shared helpers** in the table below and the package's
    `AGENTS.md`.
 3. **If it is missing, add it at the right level.** Kernel math → kernellib;
-   deterministic network cores and basis functions → geonnax; structured
+   deterministic network cores → geonnax; basis functions → functax; structured
    linear algebra and Gaussian algebra → gaussx; the probabilistic wrapper →
    here, in the lowest package every caller already depends on.
 4. **One object, one home.** A name means one thing across the workspace; the
@@ -81,7 +82,7 @@ fails under a handler, a transform or a second instance.
 | A kernel function | `kernellib.functional`; as a module with priors, the `pyrox_gp` kernels |
 | Calling one module several times in one model (Gram + diag, several blocks) | `with pyrox._core.call_context(kernel):` (`call_contexts` for several) |
 | Resolving a kernel's priors once, for code that takes a plain kernellib kernel | `pyrox._core.freeze(kernel)` |
-| Fourier / spherical-harmonic / Slepian bases | `geonnax.basis` |
+| Fourier / spherical-harmonic / Slepian bases | the `functax.basis` family modules (`fourier`, `sphere`, `slepian`, …) |
 | Spectral densities, Funk–Hecke coefficients | kernellib (`unit_spectral_density`, `spectral_density`, `kl.funk_hecke_coefficients`) on `freeze(kernel)` |
 | RFF prior draws for a pyrox kernel | `pyrox_gp._basis` (`draw_rff_cosine_basis`, `evaluate_rff_cosine_paths`) |
 | A network core | `geonnax`; wrap it with `eqx.tree_at` + sites (see `pyrox_nn._sngp`, `_vssgp`) |
@@ -89,6 +90,7 @@ fails under a handler, a transform or a second instance.
 | An ensemble of MAP / VI fits, a per-group optimiser | `pyrox.inference` (`ensemble_map`, `ensemble_vi`, `EnsembleMAP`, `EnsembleVI`, `param_group_optimizer`) |
 | A Gaussian posterior over a fitted network's last layer | `pyrox_nn.last_layer_laplace` |
 | GMRF precisions (iid, RW1/2, AR1, Besag, BYM2, SPDE) | gaussx GMRF builders; as LGM components, `pyrox_lgm` |
+| Interpolating a grid field to points (a sparse projector) | a `functax.interp` plan (`Linear().plan(grid, points)`, `plan.to_gaussx()`), as `pyrox_lgm.SPDE.project_points` does |
 | A dense-reference check in a test | gaussx / `jnp.linalg` on the materialised matrix (fine in tests) |
 
 ## The contracts

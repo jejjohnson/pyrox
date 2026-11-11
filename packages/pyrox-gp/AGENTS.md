@@ -23,7 +23,7 @@ private `_*.py` modules, grouped by concept in `docs/capabilities.md`):
 | Multi-output | `_multi_output.py`, `_multi_output_models.py` | `ICMKernel`, `MultiOutputGPPrior` |
 | Latent factor | `_latent_factor.py`, `_latent_factor_models.py`, `_latent_init.py` | — |
 | Pathwise | `_pathwise.py` | `PathwiseSampler` |
-| Shared helpers (private) | `_context.py` (deprecated aliases of `pyrox._core.call_context` and `call_contexts`), `_basis/` (RFF draws; the private `_isotropic_spectral_density`; deprecated re-exports of `geonnax.basis`), `_kernel_operator.py` (`KernelOperator`, `freeze_kernel`) | — |
+| Shared helpers (private) | `_context.py` (deprecated aliases of `pyrox._core.call_context` and `call_contexts`), `_basis/` (RFF draws; the private `_isotropic_spectral_density`; deprecated re-exports of the `functax.basis` family modules), `_kernel_operator.py` (`KernelOperator`, `freeze_kernel`) | — |
 
 The Markov / state-space track (`MarkovGPPrior`, the SDE kernels, the Markov non-Gaussian and sparse strategies, `NormalizingKalmanPrior`) lives in pyrox-ssm. `__init__.py`'s `__getattr__` raises an `ImportError` naming the `pyrox_ssm` home of each old name (`_MOVED_TO_SSM`; `tests/gp/test_moved_names.py`); pyrox-gp cannot re-export it, since pyrox-ssm is a sibling.
 

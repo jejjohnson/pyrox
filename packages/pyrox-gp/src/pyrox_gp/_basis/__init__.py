@@ -5,8 +5,8 @@
   `pyrox_gp._pathwise`.
 
 Deprecated: `spectral_density` (use kernellib's ``unit_spectral_density`` on
-``pyrox._core.freeze(kernel)``) and the `geonnax.basis` names this module used
-to re-export (import them from `geonnax.basis`).
+``pyrox._core.freeze(kernel)``) and the basis names this module used to
+re-export (import them from their `functax.basis` family module).
 """
 
 import importlib
@@ -17,45 +17,46 @@ from pyrox_gp._basis._rff import draw_rff_cosine_basis, evaluate_rff_cosine_path
 from pyrox_gp._basis._spectral_density import spectral_density
 
 
-_GEONNAX_BASIS_NAMES = frozenset(
-    {
-        "SlepianCapBasis",
-        "divfree_basis",
-        "eof_basis",
-        "fourier_basis",
-        "fourier_basis_1d",
-        "fourier_eigenvalues",
-        "fourier_eigenvalues_1d",
-        "gabor_frame",
-        "gabor_frame_grid",
-        "gaussian_window_features",
-        "graph_laplacian_eigpairs",
-        "harmonic_degrees",
-        "rbf_basis",
-        "real_spherical_harmonics",
-        "shannon_number",
-        "slepian_cap_basis",
-        "slepian_cap_eigh_per_m",
-        "slepian_concentration_matrix",
-        "spherical_rbf_basis",
-        "wavelet_basis_1d",
-        "wavelet_basis_2d",
-        "wendland_c2",
-        "wendland_c4",
-    }
-)
+# The basis names this module used to re-export, each with its functax family
+# module (`functax.basis.<family>`), where it now lives unchanged.
+_FUNCTAX_BASIS_FAMILIES = {
+    "SlepianCapBasis": "slepian",
+    "divfree_basis": "vector",
+    "eof_basis": "eigen",
+    "fourier_basis": "fourier",
+    "fourier_basis_1d": "fourier",
+    "fourier_eigenvalues": "fourier",
+    "fourier_eigenvalues_1d": "fourier",
+    "gabor_frame": "local",
+    "gabor_frame_grid": "local",
+    "gaussian_window_features": "features",
+    "graph_laplacian_eigpairs": "eigen",
+    "harmonic_degrees": "sphere",
+    "rbf_basis": "local",
+    "real_spherical_harmonics": "sphere",
+    "shannon_number": "slepian",
+    "slepian_cap_basis": "slepian",
+    "slepian_cap_eigh_per_m": "slepian",
+    "slepian_concentration_matrix": "slepian",
+    "spherical_rbf_basis": "local",
+    "wavelet_basis_1d": "local",
+    "wavelet_basis_2d": "local",
+    "wendland_c2": "local",
+    "wendland_c4": "local",
+}
 
 
 def __getattr__(name: str) -> Any:
-    """Serve the old `geonnax.basis` re-exports, with a `DeprecationWarning`."""
-    if name not in _GEONNAX_BASIS_NAMES:
+    """Serve the old basis re-exports from functax, with a `DeprecationWarning`."""
+    family = _FUNCTAX_BASIS_FAMILIES.get(name)
+    if family is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     warnings.warn(
-        f"pyrox_gp._basis.{name} is deprecated; import it from geonnax.basis.",
+        f"pyrox_gp._basis.{name} is deprecated; import it from functax.basis.{family}.",
         DeprecationWarning,
         stacklevel=2,
     )
-    return getattr(importlib.import_module("geonnax.basis"), name)
+    return getattr(importlib.import_module(f"functax.basis.{family}"), name)
 
 
 __all__ = [

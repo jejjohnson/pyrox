@@ -3,7 +3,7 @@
 ``docs/capabilities.md`` lists each public object of the five packages once,
 at its public home, grouped by the module that defines it, with the first
 sentence of its docstring. It then lists the public API of the GeoML
-libraries the packages build on (gaussx, kernellib, geonnax). Agents and
+libraries the packages build on (gaussx, kernellib, geonnax, functax). Agents and
 people search it before writing a helper ("Reuse before you write" in
 ``AGENTS.md``).
 
@@ -53,7 +53,19 @@ PACKAGES: dict[str, list[str]] = {
 UPSTREAM: dict[str, list[str]] = {
     "gaussx": ["gaussx"],
     "kernellib": ["kernellib", "kernellib.functional"],
-    "geonnax": ["geonnax", "geonnax.basis", "geonnax.geo"],
+    "geonnax": ["geonnax", "geonnax.geo"],
+    "functax": [
+        "functax.basis.features",
+        "functax.basis.fourier",
+        "functax.basis.sphere",
+        "functax.basis.slepian",
+        "functax.basis.local",
+        "functax.basis.polynomial",
+        "functax.basis.vector",
+        "functax.basis.eigen",
+        "functax.geometry",
+        "functax.interp",
+    ],
 }
 UPSTREAM_BLURB = {
     "gaussx": (
@@ -68,8 +80,15 @@ UPSTREAM_BLURB = {
         " `kernellib.functional`. pyrox-gp's kernels wrap these."
     ),
     "geonnax": (
-        "Deterministic Equinox network cores, encoders and basis functions."
-        " pyrox-nn wraps a geonnax core and swaps its parameters for sites."
+        "Deterministic Equinox network cores and encoders. pyrox-nn wraps a"
+        " geonnax core and swaps its parameters for sites."
+    ),
+    "functax": (
+        "Bases (Fourier, spherical-harmonic, Slepian, local, …) in one family"
+        " module each, grids and point sets, and interpolation plans with"
+        " their sparse stencils. pyrox-gp and pyrox-nn take their bases from"
+        " it; pyrox-lgm's grid `SPDE.project_points` is a `functax.interp`"
+        " `Linear` plan."
     ),
 }
 
@@ -90,6 +109,11 @@ _GEONNAX = (
     " same name and swaps its parameters for sites"
 )
 ALLOWED_SHARED_NAMES: dict[str, str] = {
+    "Kernel": (
+        "pyrox_gp.Kernel is kernellib's AbstractKernel, the base of the GP"
+        " kernels; functax.interp.Kernel is the cross-kernel protocol its"
+        " kernel interpolation schemes take."
+    ),
     "SphericalHarmonicFeatures": (
         "pyrox_nn's layer samples Bayesian weights on the harmonics; kernellib's"
         " is the deterministic feature map of the same name."
@@ -315,9 +339,9 @@ def render() -> str:
         f"Every public name in the five pyrox packages ({total} of them), each",
         "listed once at its public home and grouped by the module that defines",
         "it, with the first sentence of its docstring; then the public API of",
-        "gaussx, kernellib and geonnax, which the packages build on. Search this",
-        "page before writing a helper: if what you need is here, compose it; if",
-        "it is almost here, extend it where it lives. Regenerate with",
+        "gaussx, kernellib, geonnax and functax, which the packages build on.",
+        "Search this page before writing a helper: if what you need is here,",
+        "compose it; if it is almost here, extend it where it lives. Regenerate with",
         "`make capabilities` after changing a public API",
         "(`packages/pyrox/tests/test_capabilities.py` checks it is current).",
         "",

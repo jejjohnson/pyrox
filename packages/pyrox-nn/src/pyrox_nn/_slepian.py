@@ -16,8 +16,8 @@ from typing import Literal
 import equinox as eqx
 import jax.numpy as jnp
 import numpyro.distributions as dist
-from geonnax.basis import slepian_cap_basis
-from geonnax.geo import lonlat_to_cartesian3d
+from functax.basis.slepian import slepian_cap_basis
+from functax.geometry import lonlat_to_unit
 from jaxtyping import Array, Float
 from pyrox._core import Parameterized, pyrox_method
 
@@ -34,7 +34,7 @@ def _unit_xyz(
         return x
     if x.ndim != 2 or x.shape[-1] != 2:
         raise ValueError(f"x must be (N, 2) when input_mode='lonlat'; got {x.shape}.")
-    return lonlat_to_cartesian3d(x, input_unit="radians")
+    return lonlat_to_unit(x, unit="radians")
 
 
 class BayesianSlepianEncoder(Parameterized):

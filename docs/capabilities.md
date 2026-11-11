@@ -5,9 +5,9 @@
 Every public name in the five pyrox packages (249 of them), each
 listed once at its public home and grouped by the module that defines
 it, with the first sentence of its docstring; then the public API of
-gaussx, kernellib and geonnax, which the packages build on. Search this
-page before writing a helper: if what you need is here, compose it; if
-it is almost here, extend it where it lives. Regenerate with
+gaussx, kernellib, geonnax and functax, which the packages build on.
+Search this page before writing a helper: if what you need is here,
+compose it; if it is almost here, extend it where it lives. Regenerate with
 `make capabilities` after changing a public API
 (`packages/pyrox/tests/test_capabilities.py` checks it is current).
 
@@ -383,13 +383,13 @@ it is almost here, extend it where it lives. Regenerate with
 | `SphericalHarmonicEncoder` | class | Re-exported from `geonnax`. |
 | `cyclic_encode` | function | Re-exported from `geonnax`. |
 | `deg2rad` | function | Re-exported from `geonnax`. |
-| `fourier_features` | function | Re-exported from `geonnax`. |
+| `fourier_features` | function | Re-exported from `functax`. |
 | `interaction_features` | function | Re-exported from `geonnax`. |
 | `lonlat_scale` | function | Re-exported from `geonnax`. |
 | `lonlat_to_cartesian3d` | function | Re-exported from `geonnax`. |
 | `mfn_forward` | function | Re-exported from `geonnax`. |
-| `seasonal_features` | function | Re-exported from `geonnax`. |
-| `seasonal_frequencies` | function | Re-exported from `geonnax`. |
+| `seasonal_features` | function | Re-exported from `functax`. |
+| `seasonal_frequencies` | function | Re-exported from `functax`. |
 | `spherical_harmonic_encode` | function | Re-exported from `geonnax`. |
 | `standardize` | function | Re-exported from `geonnax`. |
 | `unstandardize` | function | Re-exported from `geonnax`. |
@@ -586,7 +586,7 @@ it is almost here, extend it where it lives. Regenerate with
 
 <!-- upstream -->
 
-Listed at gaussx 0.6.15, kernellib 0.0.22, geonnax 0.0.11.
+Listed at gaussx 0.6.15, kernellib 0.0.22, geonnax 0.0.11, functax 0.0.6.
 
 ## Upstream: `gaussx`
 
@@ -1227,7 +1227,7 @@ Kernels (`AbstractKernel`, stationary and dot-product families), kernel operator
 
 ## Upstream: `geonnax`
 
-Deterministic Equinox network cores, encoders and basis functions. pyrox-nn wraps a geonnax core and swaps its parameters for sites.
+Deterministic Equinox network cores and encoders. pyrox-nn wraps a geonnax core and swaps its parameters for sites.
 
 ### `geonnax`
 
@@ -1342,60 +1342,6 @@ Deterministic Equinox network cores, encoders and basis functions. pyrox-nn wrap
 | `rff_forward` | function | Shared RFF feature map: ``sqrt(1/D) [cos(xW/l), sin(xW/l)]``. |
 | `siren_W_limit` | function | Return the half-width ``a`` of the ``U(-a, a)`` weight init for a SIREN layer. |
 
-### `geonnax.basis`
-
-| Name | Kind | What it does |
-|---|---|---|
-| `SlepianBasis` | class | Slepian functions of a general region, in the real spherical-harmonic basis. |
-| `SlepianCapBasis` | class | Precomputed Slepian cap eigendecomposition in the real-SH basis. |
-| `associated_legendre` | function | Associated Legendre functions $P_l^m(t)$ for $0 \le m \le l \le l_{\max}$. |
-| `associated_legendre_indices` | function | The ``(l, m)`` pair of each column of `associated_legendre`. |
-| `cotangent_laplacian_eigpairs` | function | Smallest eigenpairs of the cotangent Laplace–Beltrami operator of a mesh. |
-| `curlfree_basis` | function | Curl-free vector basis: gradients of the box Laplacian eigenfunctions. |
-| `divfree_basis` | function | Divergence-free vector basis from box-Dirichlet stream functions. |
-| `eof_basis` | function | Leading ``n_modes`` empirical orthogonal functions of a data matrix. |
-| `fibonacci_sphere` | function | The Fibonacci lattice: ``n`` near-uniform points on the unit sphere. |
-| `fourier_basis` | function | Tensor-product Laplacian eigenpairs on $[-L, L]^D$ (Dirichlet by default). |
-| `fourier_basis_1d` | function | Evaluate the first ``num_basis`` 1D Laplacian eigenfunctions on ``[-L, L]``. |
-| `fourier_eigenvalues` | function | Return the flattened sum-of-squares eigenvalues for a ``D``-dimensional box. |
-| `fourier_eigenvalues_1d` | function | Return $\lambda_j = (j\pi / (2L))^2$ for ``j = 1, ..., num_basis``. |
-| `fourier_features` | function | Cos/sin Fourier basis at dyadic frequencies. |
-| `gabor_frame` | function | Evaluate a bank of Gabor atoms (Gaussian envelope times oscillation). |
-| `gabor_frame_grid` | function | Build a dyadic radial-Gabor frame over a bounded box. |
-| `gauss_legendre` | function | Gauss–Legendre nodes and weights on $[-1, 1]$. |
-| `gauss_legendre_grid` | function | Gauss–Legendre grid on the sphere with its quadrature weights. |
-| `gaussian_window_features` | function | Gaussian-window-in-time basis, the temporal analogue of an RBF column. |
-| `graph_laplacian_eigpairs` | function | Smallest ``num_basis`` Laplacian eigenpairs of an undirected graph. |
-| `harmonic_degrees` | function | Return the per-harmonic degree ``l`` for the flattened ``(l_max + 1)^2`` block. |
-| `healpix_grid` | function | HEALPix pixel centres with their equal-area weights. |
-| `icosphere` | function | Subdivided icosahedron: a quasi-uniform triangle mesh of the sphere. |
-| `interaction_features` | function | Element-wise products on selected pairs of input columns. |
-| `latlon_grid` | function | Regular cell-centred lat/lon grid with exact cell-area weights. |
-| `legendre_polynomials` | function | Legendre polynomials $P_0(t), \ldots, P_{l_{\max}}(t)$. |
-| `mesh_vertex_areas` | function | Lumped (barycentric) vertex areas of a triangle mesh. |
-| `needlet_basis` | function | Spherical needlets for scales $j = 0, \ldots, j_{\max}$, plus the constant. |
-| `needlet_window` | function | The needlet window $b$: smooth, supported in $[1/B, B]$, a partition of unity. |
-| `rbf_basis` | function | Evaluate a placeable radial basis at given centres and widths. |
-| `real_spherical_harmonics` | function | Evaluate real spherical harmonics up to degree ``l_max``. |
-| `seasonal_features` | function | Cos/sin features at multiples of $2\pi / \tau_p$. |
-| `seasonal_frequencies` | function | Flatten ``(period, harmonic_count)`` pairs into Python lists. |
-| `shannon_number` | function | Return the spherical-cap Shannon number for a bandlimit and area. |
-| `shell_basis` | function | Spherical harmonics times radial polynomials on a spherical shell. |
-| `slepian_cap_basis` | function | Construct a Slepian basis for an axisymmetric spherical cap. |
-| `slepian_cap_eigh_per_m` | function | Solve the cap Slepian eigenproblem one azimuthal block at a time. |
-| `slepian_concentration_matrix` | function | Build the real-SH concentration matrix for a north-pole cap. |
-| `slepian_polar_gap_basis` | function | Slepian functions of the band between two polar caps (a polar gap). |
-| `slepian_region_basis` | function | Slepian functions of a region given by a quadrature over it. |
-| `spherical_polygon_mask` | function | Which points lie inside a spherical polygon. |
-| `spherical_rbf_basis` | function | Placeable radial basis on the unit 2-sphere, in geodesic distance. |
-| `standardize` | function | Affine standardize: ``(x - mu) / std``. |
-| `unstandardize` | function | Inverse of `standardize`: ``z * std + mu``. |
-| `vector_spherical_harmonics` | function | Gradient and toroidal vector spherical harmonics for $1 \le l \le l_{\max}$. |
-| `wavelet_basis_1d` | function | Orthonormal 1D DWT synthesis-basis matrix on a periodic length-``n`` grid. |
-| `wavelet_basis_2d` | function | Separable orthonormal 2D DWT basis as a Kronecker product. |
-| `wendland_c2` | function | Wendland $C^2$ kernel, positive definite in dimensions $d \le 3$. |
-| `wendland_c4` | function | Wendland $C^4$ kernel, positive definite in dimensions $d \le 3$. |
-
 ### `geonnax.geo`
 
 | Name | Kind | What it does |
@@ -1415,3 +1361,196 @@ Deterministic Equinox network cores, encoders and basis functions. pyrox-nn wrap
 | `rotation_to_pole` | function | The rotation $R$ with $R\,\hat u(\text{centre}) = (0, 0, 1)$. |
 | `spherical_harmonic_encode` | function | Lift lon/lat to $S^2$ and evaluate real spherical harmonics. |
 | `tangent_to_cartesian` | function | East/north components ``(u, v)`` to 3-D tangent vectors $u\hat e + v\hat n$. |
+
+## Upstream: `functax`
+
+Bases (Fourier, spherical-harmonic, Slepian, local, …) in one family module each, grids and point sets, and interpolation plans with their sparse stencils. pyrox-gp and pyrox-nn take their bases from it; pyrox-lgm's grid `SPDE.project_points` is a `functax.interp` `Linear` plan.
+
+### `functax.basis.features`
+
+| Name | Kind | What it does |
+|---|---|---|
+| `fourier_features` | function | Cosines and sines of a coordinate at dyadic frequencies. |
+| `gaussian_window_features` | function | Gaussian windows in time, the temporal analogue of an RBF column. |
+| `rff_cosine_forward` | function | Random Fourier features with random phases, one cosine per frequency. |
+| `rff_forward` | function | Random Fourier features at given frequencies, cosines then sines. |
+| `seasonal_features` | function | Cosines and sines of a time at the harmonics of given periods. |
+| `seasonal_frequencies` | function | The frequencies of the seasonal features, as Python lists. |
+
+### `functax.basis.fourier`
+
+| Name | Kind | What it does |
+|---|---|---|
+| `fourier_basis` | function | The tensor-product Laplacian eigenpairs on the box [−L, L]^D. |
+| `fourier_basis_1d` | function | The first ``num_basis`` Laplacian eigenfunctions on [−L, L]. |
+| `fourier_eigenvalues` | function | The eigenvalues of `fourier_basis` alone, λ_(j₁, …, j_D) = ∑_d λ_{j_d}. |
+| `fourier_eigenvalues_1d` | function | The eigenvalues λ_j = (jπ/(2L))² of `fourier_basis_1d`, j = 1, …, num_basis. |
+
+### `functax.basis.sphere`
+
+| Name | Kind | What it does |
+|---|---|---|
+| `harmonic_degrees` | function | The degree l of each column of `real_spherical_harmonics`. |
+| `needlet_basis` | function | Spherical needlets at the scales j = 0, …, j_max, plus the constant. |
+| `needlet_window` | function | The needlet window b: smooth, supported in [1/B, B], a partition of unity. |
+| `real_spherical_harmonics` | function | The real spherical harmonics Y_lm up to degree ``l_max``. |
+| `shell_basis` | function | Spherical harmonics times radial polynomials on a spherical shell. |
+| `vector_spherical_harmonics` | function | The gradient and toroidal vector spherical harmonics for 1 ≤ l ≤ l_max. |
+
+### `functax.basis.slepian`
+
+| Name | Kind | What it does |
+|---|---|---|
+| `SlepianBasis` | class | The Slepian functions of a general region, in the real harmonic basis. |
+| `SlepianCapBasis` | class | A Slepian cap eigendecomposition in the real spherical-harmonic basis. |
+| `shannon_number` | function | The Shannon number N = (l_max + 1)² A / (4π), the count of concentrated modes. |
+| `slepian_cap_basis` | function | A Slepian basis for an axisymmetric spherical cap. |
+| `slepian_cap_eigh_per_m` | function | The cap Slepian eigenproblem D g = λ g, solved one azimuthal block at a time. |
+| `slepian_concentration_matrix` | function | The concentration matrix D_ij = ∫_cap Y_i Y_j dΩ of a north-pole cap. |
+| `slepian_polar_gap_basis` | function | The Slepian functions of the band between two polar caps (a polar gap). |
+| `slepian_region_basis` | function | The Slepian functions of a region given by a quadrature over it. |
+| `spherical_polygon_mask` | function | Which points lie inside a spherical polygon. |
+
+### `functax.basis.local`
+
+| Name | Kind | What it does |
+|---|---|---|
+| `gabor_frame` | function | A bank of Gabor atoms, Gaussian envelopes times oscillations. |
+| `gabor_frame_grid` | function | A dyadic radial Gabor frame over a box. |
+| `rbf_basis` | function | A placeable radial basis at given centres and widths. |
+| `spherical_rbf_basis` | function | A placeable radial basis on the unit sphere, in geodesic distance. |
+| `wavelet_basis_1d` | function | The orthonormal 1-D DWT synthesis basis on a periodic grid of length n. |
+| `wavelet_basis_2d` | function | The separable orthonormal 2-D DWT basis, the Kronecker product Φ_y ⊗ Φ_x. |
+| `wendland_c2` | function | The Wendland C² kernel K(r) = (1 − r)₊⁴ (4r + 1). |
+| `wendland_c4` | function | The Wendland C⁴ kernel K(r) = (1 − r)₊⁶ (35r² + 18r + 3)/3. |
+
+### `functax.basis.polynomial`
+
+| Name | Kind | What it does |
+|---|---|---|
+| `associated_legendre` | function | The associated Legendre functions P_l^m(t) for 0 ≤ m ≤ l ≤ l_max. |
+| `associated_legendre_indices` | function | The (l, m) of each column of `associated_legendre`. |
+| `legendre_polynomials` | function | The Legendre polynomials P₀(t), …, P_{l_max}(t). |
+| `legendre_series` | function | The Legendre series f(x) = ∑ₗ cₗ Pₗ(x), l = 0, …, L, evaluated elementwise. |
+
+### `functax.basis.vector`
+
+| Name | Kind | What it does |
+|---|---|---|
+| `curlfree_basis` | function | Curl-free vector atoms, the gradients of the box Laplacian eigenfunctions. |
+| `divfree_basis` | function | Divergence-free vector atoms, the skew gradients of box stream functions. |
+
+### `functax.basis.eigen`
+
+| Name | Kind | What it does |
+|---|---|---|
+| `cotangent_laplacian_eigpairs` | function | The smallest eigenpairs of the cotangent Laplace–Beltrami operator. |
+| `eof_basis` | function | The leading ``n_modes`` empirical orthogonal functions of a data matrix. |
+| `graph_laplacian_eigpairs` | function | The ``num_basis`` smallest Laplacian eigenpairs of an undirected graph. |
+
+### `functax.geometry`
+
+| Name | Kind | What it does |
+|---|---|---|
+| `AffineGrid` | class | A regular 2-D grid given by an affine transform and a shape. |
+| `Axis` | class | One strictly monotone coordinate axis, optionally periodic or in time. |
+| `CurvilinearGrid` | class | A 2-D grid whose node coordinates are given per node, such as a swath. |
+| `Metric` | constant | Re-exported from `typing`. |
+| `Points` | class | Scattered sites, with the metric their distances use. |
+| `RectilinearGrid` | class | A tensor-product grid with one `Axis` per dimension. |
+| `cartesian_to_tangent` | function | 3-D vectors to their east and north components (v · ê, v · n̂). |
+| `chebyshev_nodes` | function | The Chebyshev nodes of degree N on [a, b], from b down to a. |
+| `chord_distance` | function | The straight-line distance through the sphere between every pair. |
+| `ecef_to_lonlat` | function | Earth-centred, Earth-fixed coordinates to geodetic (λ, φ) and height. |
+| `enu_basis` | function | The local east, north and up unit vectors at each point. |
+| `fibonacci_sphere` | function | The Fibonacci lattice: n near-uniform points on the unit sphere. |
+| `from_pixel` | function | Map fractional pixel (row, col) to coordinates (x, y): the inverse of `to_pixel`. |
+| `gauss_legendre_grid` | function | The Gauss–Legendre grid on the sphere, with its quadrature weights. |
+| `geodesic_distance` | function | The great-circle distance between every pair. |
+| `healpix_grid` | function | HEALPix pixel centres, each weighted by the equal pixel area. |
+| `icosphere` | function | The subdivided icosahedron, a quasi-uniform triangle mesh of the sphere. |
+| `latlon_grid` | function | The regular cell-centred lon/lat grid, weighted by exact cell areas. |
+| `local_tangent_plane` | function | Project points onto the tangent plane at ``origin``, as (east, north). |
+| `lonlat_to_ecef` | function | Geodetic (λ, φ) and height to Earth-centred, Earth-fixed coordinates. |
+| `lonlat_to_unit` | function | Lift longitude and latitude onto the unit sphere. |
+| `mesh_vertex_areas` | function | The lumped (barycentric) vertex areas of a triangle mesh. |
+| `pairwise_distance` | function | The distance from every source to every target, in their shared metric. |
+| `pixel_centres` | function | The x and y of every pixel centre of a grid, each of shape (rows, cols). |
+| `rotation_to_pole` | function | The rotation R with R û(centre) = (0, 0, 1). |
+| `spherical_polygon_area` | function | The signed area of a spherical polygon with great-circle edges. |
+| `tangent_to_cartesian` | function | East and north components (u, v) to the 3-D tangent vector u ê + v n̂. |
+| `to_pixel` | function | Map coordinates (x, y) to fractional pixel (row, col), centres at integers. |
+| `unit_to_lonlat` | function | Longitude and latitude of vectors on (or off) the unit sphere. |
+| `window` | function | The row and column slices of the pixels that cover ``bounds``. |
+
+### `functax.interp`
+
+| Name | Kind | What it does |
+|---|---|---|
+| `Akima` | class | Akima's local cubic, as SciPy's ``Akima1DInterpolator(method="akima")``. |
+| `BSpline` | class | A B-spline of order k on every axis: (k + 1)ᴰ taps, after the prefilter. |
+| `BSplineBasis` | class | The centred B-spline of order k (degree k): k + 1 taps per axis. |
+| `BandedPrefilter` | class | c = B⁻¹ y per axis: the B-spline prefilter, separable on a grid. |
+| `Basis` | class | A local basis on one axis: S relative taps, and weights from the offsets. |
+| `Binning` | class | Aggregate scattered samples into grid cells: Hᵀ y, normalised for the mean. |
+| `BinningPlan` | class | A plan from N samples to M cells: the sums, means or counts per cell. |
+| `BrownianBridge` | class | The Brownian bridge between the knots of one axis, cell by cell. |
+| `Chebyshev` | class | The Chebyshev series of samples on Chebyshev nodes, read at arbitrary points. |
+| `ChebyshevFit` | class | c = P C y: the first K Chebyshev coefficients of samples on Chebyshev nodes. |
+| `ChebyshevInterpolant` | class | A fitted Chebyshev series f̂(x) = ∑ₖ cₖ Tₖ(ξ(x)), read at targets by `clenshaw`. |
+| `ComposedPlan` | class | ``outer @ inner``: H_outer H_inner 𝒮_inner, one plan with the product stencil. |
+| `Conservative` | class | First-order conservative remapping: each target cell's area-weighted mean. |
+| `Cubic` | class | Keys cubic convolution on every axis: 4ᴰ taps per target, no prefilter. |
+| `CubicBasis` | class | Keys cubic convolution: taps i − 1 … i + 2, weights W(1 + t) … W(2 − t). |
+| `CubicSpline` | class | The interpolating C² cubic spline, as ``scipy.interpolate.CubicSpline``. |
+| `Delaunay` | class | Linear interpolation on a triangulation of the sources: D + 1 taps per target. |
+| `DerivativePlan` | class | A plan whose read-out holds basis derivatives: ∂ᵐf̂/∂x_cᵐ at the targets. |
+| `Fit` | class | c = 𝒮(y), applied once per field before the read-out. |
+| `Fourier` | class | Band-limited Fourier resampling from N to M nodes of one periodic axis. |
+| `FourierReadout` | class | H y = (M/N) Re F⁻¹_M[S F_N y], band-limited resampling by two FFTs. |
+| `GaussianPlan` | class | A plan read as a Gaussian posterior: f(X*) ∣ y ~ 𝒩(H 𝒮(y), Σ*). |
+| `HermiteFit` | class | [y; m] from y: the values in increasing-knot order and their slopes. |
+| `Identity` | class | The fit of every local scheme: c = y. |
+| `Interpolant` | class | A fitted field f̂(x) = ∑ₛ wₛ(t(x)) c_{iₛ(x)}, read at any targets. |
+| `InverseDistance` | class | Inverse-distance weighting of the Q nearest scattered sources. |
+| `Kernel` | class | k(x, x′): the (M, N) cross-kernel of M targets and N sources. |
+| `KernelCovariance` | class | Σ*(x, x′) = k(x, x′) − h(x)ᵀ A⁻¹ h(x′), the posterior covariance of a kernel fit. |
+| `KernelReadout` | class | The dense read-out of a kernel scheme: f̂(X*) = K* c + P* b. |
+| `KernelSolve` | class | [c; b] = A⁻¹ [y; 0], the saddle-point system of a kernel and a tail. |
+| `Kriging` | class | Kriging: the best linear unbiased predictor under a covariance k and a drift. |
+| `Linear` | class | Linear on every axis: 2ᴰ taps per target, weights ∏_d (1 − t_d or t_d). |
+| `LinearBasis` | class | Linear: taps i and i + 1, with weights 1 − t and t. |
+| `LocalGeometry` | class | What a local plan was built from: the source, the target coordinates, the bases. |
+| `LocalScheme` | class | A scheme with one local basis per axis and the identity fit. |
+| `Nearest` | class | Nearest neighbour on every axis: one tap per target, weight 1. |
+| `NearestBasis` | class | Nearest neighbour: one tap, the closer of i and i + 1, with weight 1. |
+| `NonlinearPlan` | class | A plan whose fit depends on y: no fixed operator or adjoint, but `linearize`. |
+| `Pchip` | class | Monotone piecewise cubic Hermite (Fritsch-Carlson), as SciPy's PCHIP. |
+| `Plan` | class | f̂(X*) = H 𝒮(y), fitted once, applied to many fields. |
+| `Policies` | class | Outside the domain, at missing samples, and at the edges. |
+| `Polyharmonic` | class | The polyharmonic spline φ(r) = ±rᵏ for odd k, ±rᵏ log r for even k. |
+| `PosteriorCovariance` | class | Σ*, the (M, M) posterior covariance of the field at M targets. |
+| `RBF` | class | Radial basis function interpolation: f̂(x) = ∑ⱼ cⱼ k(x, xⱼ) + ∑ₚ bₚ pₚ(x). |
+| `RadialKernel` | class | k(x, x′) = φ(‖x − x′‖), Euclidean in the coordinates as given. |
+| `Readout` | class | c → f̂(X*): the read-out of a plan, from coefficients to target values. |
+| `Scheme` | class | An interpolation scheme: configuration, frozen into a `Plan` by `plan`. |
+| `SeriesInterpolant` | class | A 1-D series field f̂ read at targets chosen inside the trace. |
+| `SeriesScheme` | class | A scheme on one axis with a cubic Hermite read-out and its own slopes. |
+| `Steffen` | class | Steffen's monotone cubic: no overshoot between knots, by construction. |
+| `Stencil` | class | A sparse read-out H: row k reads S source values at flat indices. |
+| `Tensor` | class | One local scheme per source axis, as one tensor stencil. |
+| `TransposedStencil` | class | f̂ = diag(s) Hᵀ y: a sampling stencil H used backwards, scaled per cell. |
+| `Wendland` | class | The compact Wendland kernel φ(r) = ψ(r/ρ), zero for r ≥ ρ. |
+| `WindowedPlan` | class | ``plan[window]``: the rows of a grid target inside a window, sources unchanged. |
+| `bspline` | function | The centred B-spline βᵏ of degree k at x. |
+| `check_outside` | function | Enforce ``outside="raise"`` on the host; no-op for every other policy. |
+| `clenshaw` | function | The Chebyshev series f(x) = ∑ₖ aₖ Tₖ(ξ(x)) by Clenshaw's recurrence. |
+| `compose` | function | H = H_outer H_inner: apply ``inner`` first, then ``outer``, as one stencil. |
+| `index_positions` | function | The fractional index position u of each target, so node j sits at u = j. |
+| `locate` | function | The cell index i, the offset t ∈ [0, 1) and the inside flag of each target. |
+| `locate_curvilinear` | function | The cell (r, c), the offset (s, t) and the inside flag of targets on a swath. |
+| `overlap_weights_1d` | function | The (M, N) overlap lengths \|cⱼ ∩ Cᵢ\| of every target and source cell. |
+| `plan_key` | function | sha256 hex of the scheme, the policies and both geometries' bytes. |
+| `remap_taps` | function | Bring tap indices back onto [0, N − 1] by a boundary rule. |
+| `spline_poles` | function | The poles zₚ of the order-k B-spline prefilter, as in ``scipy.ndimage``. |
+| `tensor_stencil` | function | H = H₁ ⊗ … ⊗ H_D: one local basis per source axis, read at the targets. |

@@ -29,6 +29,7 @@ dependencies = [
     "numpyro>=0.21",
     "argminax[numpyro]>=0.0.6",
     "optimistix>=0.1.0",
+    "functax[jax] @ git+https://github.com/jejjohnson/functax.git@v0.0.6",
 ]
 
 [project.optional-dependencies]
@@ -53,6 +54,10 @@ argminax = { git = "https://github.com/jejjohnson/argminax.git", rev = "v0.0.6" 
 [build-system]
 requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+# functax is declared via a PEP 508 direct URL until it ships to PyPI.
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pyrox_lgm"]
