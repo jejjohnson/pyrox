@@ -247,8 +247,15 @@ uv run pytest --no-cov packages/pyrox-gp/tests/gp/test_kernel_classes.py -v
 
 ### Test tiers
 
-- CI ("Tests", `ci.yml`) runs `uv run pytest -v -m "not slow"` on Python 3.12
-  and 3.13, with coverage gated at 80 % across all four packages.
+- CI ("Tests", `ci.yml`) runs the fast tier (`-m "not slow"`) as one parallel
+  job per package, each gating its own package's coverage at 80 %. On a pull
+  request it runs only the packages the change can affect, on Python 3.13: the
+  core or shared config (`pyproject.toml`, `uv.lock`, `conftest.py`) runs every
+  package, pyrox-gp also runs pyrox-nn (whose tests import it), any package
+  change also runs the core suite (its capability and dependency checks scan
+  every package), and docs or notebooks alone run none. On `main` every package
+  runs on 3.12 and 3.13. The "Tests passed" check summarises the matrix. To
+  reproduce one job: `uv run pytest -m "not slow" -o addopts="" --cov=packages/<pkg>/src --cov-fail-under=80 packages/<pkg>/tests`.
 - `@pytest.mark.slow` marks the expensive tests (convergence sweeps, long
   SVI / NUTS fits, R-INLA comparisons; the core bridge's short NUTS / SVI
   checks are unmarked and run in CI). **No workflow runs the slow ones**, so run the slow tests of what you touched
