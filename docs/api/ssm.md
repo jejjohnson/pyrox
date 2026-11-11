@@ -106,6 +106,26 @@ def local_level(y, mask):
 ::: pyrox_ssm.ConditionedLinearGaussianSSM
 ::: pyrox_ssm.lgssm_factor
 
+## Nonlinear state-space models
+
+`nonlinear_ssm_factor` scores a series under nonlinear dynamics `x_k = f(x_{k-1}) + eta_k` and observations `y_k = h(x_k) + eps_k` with `gaussx.nonlinear_kalman_filter`, adds its log likelihood to the NumPyro model and returns the `gaussx.FilterState`; the gaussx integrator picks the filter (`TaylorIntegrator` for the EKF, `UnscentedIntegrator` for the UKF and the default, `CubatureIntegrator` for the CKF, `GaussHermiteIntegrator`, `MonteCarloIntegrator`). The log likelihood is gaussx's moment-matched surrogate, exact only when `f` and `h` are affine, and the time convention and the `mask=` are those of `LinearGaussianSSMPrior`:
+
+```python
+import jax.numpy as jnp
+import numpyro
+import numpyro.distributions as dist
+import pyrox_ssm as pss
+
+def log_emission(y):  # x_k = a x_{k-1} + eta_k,  y_k = exp(x_k) + eps_k
+    a = numpyro.sample("a", dist.Uniform(-1.0, 1.0))
+    pss.nonlinear_ssm_factor(
+        "y", lambda x: a * x, jnp.exp, 0.1 * jnp.eye(1), 0.05 * jnp.eye(1),
+        y, jnp.zeros(1), jnp.eye(1),
+    )
+```
+
+::: pyrox_ssm.nonlinear_ssm_factor
+
 ## Markov GP — Kalman / RTS workflow
 
 `MarkovGPPrior` consumes any [`SDEKernel`][pyrox_ssm.SDEKernel] over a sorted
