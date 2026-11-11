@@ -764,7 +764,7 @@ class PosteriorLinearizationMarkov(eqx.Module):
     so a fit traces under `jax.jit` and differentiates through ``adjoint``.
 
     Attributes:
-        max_iter: Iterations. Default ``20``.
+        max_iter: Iterations. Default ``30``.
         tol: Convergence tolerance on the site naturals, as in
             `LaplaceMarkovInference`: every $\lambda_n$ and $\Lambda_n$ changed
             by less than ``0.1 * tol * (1 + |new value|)``. Default ``1e-6``.
@@ -780,7 +780,7 @@ class PosteriorLinearizationMarkov(eqx.Module):
             ``optimistix.ImplicitAdjoint``, as in `LaplaceMarkovInference`.
     """
 
-    max_iter: int = eqx.field(static=True, default=20)
+    max_iter: int = eqx.field(static=True, default=30)
     tol: float = eqx.field(static=True, default=1e-6)
     damping: float = eqx.field(static=True, default=0.5)
     precision_floor: float = eqx.field(static=True, default=1e-6)
