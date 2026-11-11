@@ -25,6 +25,7 @@ dependencies = [
     "pyrox",
     "gaussx[numpyro]>=0.6.15",
     "equinox>=0.13.8",
+    "lineax>=0.1.1",
     "einx>=0.4.3",
     "numpyro>=0.21",
 ]

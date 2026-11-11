@@ -18,17 +18,18 @@ $$
 
 is independent of $x_t$. The Kalman recursion therefore stays exact, the
 marginal likelihood stays closed-form, and ``numpyro.factor`` over the
-collapsed marginal is valid — exactly as `pyrox_gp.markov_gp_factor`
+collapsed marginal is valid — exactly as `pyrox_ssm.markov_gp_factor`
 is for the unwarped scalar case. In particular, **none of
-`pyrox_gp._inference_nongauss_markov` is needed here**: a warped
+`pyrox_ssm._inference_nongauss_markov` is needed here**: a warped
 observation model is *not* a non-Gaussian likelihood in the sense that
 module handles (no CVI, no posterior linearisation, no Gauss-Newton), and
 no changes to that module accompany this one.
 
 The base `gaussx.LGSSM` / `gaussx.MaskedLGSSM` is a hard
-``pyrox-gp`` dependency, so the **unwarped** multivariate state-space
-model works with no flow dependencies at all. Passing a ``warp`` requires
-the ``flows`` extra (``pip install 'pyrox-gp[flows]'``), which supplies
+``pyrox-ssm`` dependency, so the **unwarped** multivariate state-space
+model needs no ``gauss_flows`` at runtime (importing `pyrox_ssm.flows`
+needs ``flowjax``, which the ``flows`` extra installs). Passing a ``warp``
+requires the ``flows`` extra (``pip install 'pyrox-ssm[flows]'``), which supplies
 ``gauss_flows.normalizing_kalman_filter`` — including its masked
 change-of-variables handling and its rejection of channel-mixing warps
 over a masked base.
@@ -51,7 +52,7 @@ from flowjax.bijections import AbstractBijection
 from gaussx import LGSSM, MaskedLGSSM
 from jaxtyping import Array, Bool, Float
 
-from pyrox_gp._markov_sites import _pushforward_moments
+from pyrox_ssm._markov_sites import _pushforward_moments
 
 
 def _require_flows() -> ModuleType:
@@ -61,7 +62,7 @@ def _require_flows() -> ModuleType:
     except ImportError as exc:
         raise ImportError(
             "A non-None warp on NormalizingKalmanPrior requires the flows "
-            "extra: pip install 'pyrox-gp[flows]'"
+            "extra: pip install 'pyrox-ssm[flows]'"
         ) from exc
     return gauss_flows
 
@@ -79,7 +80,7 @@ class NormalizingKalmanPrior(eqx.Module):
     r"""Normalizing Kalman Filter prior over a multivariate time grid.
 
     Wraps a `gaussx.LGSSM` (or `gaussx.MaskedLGSSM`) base and an
-    optional per-timestep observation warp into the ``pyrox_gp`` model
+    optional per-timestep observation warp into the ``pyrox_ssm`` model
     surface, so the state-space parameters and the warp can carry NumPyro
     priors and be fitted with any ``pyrox.inference`` driver
     (`pyrox.inference.EnsembleMAP`, `pyrox.inference.EnsembleVI`, SVI,
@@ -123,7 +124,7 @@ class NormalizingKalmanPrior(eqx.Module):
     Examples:
         >>> import jax.numpy as jnp, jax.random as jr
         >>> from gaussx import LGSSM
-        >>> from pyrox_gp import NormalizingKalmanPrior
+        >>> from pyrox_ssm.flows import NormalizingKalmanPrior
         >>> T, M = 12, 2
         >>> base = LGSSM(0.9 * jnp.eye(M), jnp.eye(M), 0.1 * jnp.eye(M),
         ...              0.2 * jnp.eye(M), jnp.zeros(M), jnp.eye(M), n_steps=T)
@@ -479,7 +480,7 @@ def normalizing_kalman_factor(
 
     Computes the exact collapsed marginal via `NormalizingKalmanPrior.log_marginal`
     and adds it as ``numpyro.factor(name, ...)``. Mirrors
-    `pyrox_gp.markov_gp_factor` — the latent state path is marginalised
+    `pyrox_ssm.markov_gp_factor` — the latent state path is marginalised
     analytically, so the model only carries sample sites for the
     state-space (and warp) hyperparameters.
 

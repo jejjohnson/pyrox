@@ -1,8 +1,8 @@
 """Kalman-based Markov GP prior on top of the SDE-kernel surface.
 
 Stationary 1-D GP kernels with rational spectral densities admit exact
-linear-Gaussian state-space representations (see `pyrox_gp._sde_kernels`
-and the `pyrox_gp.SDEKernel` protocol). This module turns those
+linear-Gaussian state-space representations (see `gaussx._ssm`
+and the `pyrox_ssm.SDEKernel` protocol). This module turns those
 representations into a working temporal-GP model: forward Kalman filter for
 the marginal log-likelihood, backward RTS smoother for the posterior, and a
 NumPyro-aware shell so the path drops into models the same way
@@ -40,7 +40,7 @@ from pyrox.likelihoods import Likelihood
 
 
 if TYPE_CHECKING:
-    from pyrox_gp._inference_nongauss_markov import NonGaussConditionedMarkovGP
+    from pyrox_ssm._inference_nongauss_markov import NonGaussConditionedMarkovGP
 
 
 class _NonGaussMarkovStrategy(Protocol):
@@ -204,8 +204,8 @@ def _build_dt_full(times: Float[Array, " N"]) -> Float[Array, " N"]:
 class MarkovGPPrior(eqx.Module):
     r"""Linear-time temporal GP prior over a sorted 1-D grid.
 
-    Wraps any `pyrox_gp.SDEKernel` (e.g. `pyrox_gp.MaternSDE`,
-    `pyrox_gp.SumSDE`, `pyrox_gp.PeriodicSDE`) to give Kalman
+    Wraps any `pyrox_ssm.SDEKernel` (e.g. `pyrox_ssm.MaternSDE`,
+    `pyrox_ssm.SumSDE`, `pyrox_ssm.PeriodicSDE`) to give Kalman
     filtering for the marginal log-likelihood and RTS smoothing for the
     posterior on the training grid. Supports an optional mean function and a
     small observation-noise floor for numerical stability.
@@ -233,15 +233,15 @@ class MarkovGPPrior(eqx.Module):
             `gaussx.IntegratedWienerSDE`. Supply it to state what is known
             about the level (and its derivatives) before the first
             observation. Worth supplying for the site-based non-Gaussian
-            strategies in particular: `pyrox_gp.PosteriorLinearizationMarkov`
-            and `pyrox_gp.ExpectationPropagationMarkov` seed their cavities
+            strategies in particular: `pyrox_ssm.PosteriorLinearizationMarkov`
+            and `pyrox_ssm.ExpectationPropagationMarkov` seed their cavities
             from the prior marginal variance, and a very diffuse prior can
             overflow their quadrature under an exponential-link likelihood
             — as a stationary kernel with an equally large variance does.
 
     Examples:
         >>> import jax.numpy as jnp
-        >>> from pyrox_gp import MaternSDE, MarkovGPPrior
+        >>> from pyrox_ssm import MaternSDE, MarkovGPPrior
         >>> times = jnp.linspace(0.0, 5.0, 50)
         >>> sde = MaternSDE(variance=1.0, lengthscale=0.5, order=1)
         >>> prior = MarkovGPPrior(sde, times)
@@ -419,12 +419,12 @@ class MarkovGPPrior(eqx.Module):
 
         Convenience that forwards to ``strategy.fit(self, likelihood, y)``.
         Pick any of the Markov-aware site-based strategies in
-        `pyrox_gp._inference_nongauss_markov`:
-        `pyrox_gp.LaplaceMarkovInference`,
-        `pyrox_gp.GaussNewtonMarkovInference`,
-        `pyrox_gp.PosteriorLinearizationMarkov`, or
-        `pyrox_gp.ExpectationPropagationMarkov`. Returns a
-        `pyrox_gp.NonGaussConditionedMarkovGP` with the same
+        `pyrox_ssm._inference_nongauss_markov`:
+        `pyrox_ssm.LaplaceMarkovInference`,
+        `pyrox_ssm.GaussNewtonMarkovInference`,
+        `pyrox_ssm.PosteriorLinearizationMarkov`, or
+        `pyrox_ssm.ExpectationPropagationMarkov`. Returns a
+        `pyrox_ssm.NonGaussConditionedMarkovGP` with the same
         ``predict`` API as the Gaussian-likelihood
         `ConditionedMarkovGP`.
         """

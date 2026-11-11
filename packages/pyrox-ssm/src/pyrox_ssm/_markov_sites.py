@@ -1,9 +1,8 @@
 r"""Per-site likelihood numerics for the Markov track, on gaussx.
 
-The four Markov modules (`pyrox_gp._markov`, `_sparse_markov`,
-`_inference_nongauss_markov`, `_markov_flow`) import from here rather than
-from the rest of pyrox-gp, so they can move to pyrox-ssm, which depends only
-on the pyrox core and gaussx.
+The Markov modules (`pyrox_ssm._markov`, `_sparse_markov`,
+`_inference_nongauss_markov`, `flows._markov_flow`) import their per-site
+numerics from here, so pyrox-ssm depends only on the pyrox core and gaussx.
 
 `as_gaussx_likelihood` views a pyrox `Likelihood` (summed over points) as a
 `gaussx.CallableLikelihood` (one log density per site),

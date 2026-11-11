@@ -25,15 +25,15 @@ from __future__ import annotations
 import jax.numpy as jnp
 import jax.random as jr
 import pytest
-from pyrox_gp import (
-    FullRankGuide,
-    GaussianLikelihood,
+from pyrox.likelihoods import GaussianLikelihood
+from pyrox_ssm import (
     MaternSDE,
     SparseConditionedMarkovGP,
     SparseMarkovGPPrior,
     sparse_markov_elbo,
     sparse_markov_factor,
 )
+from ssm_reference import FullRankGuide
 
 
 def _make_problem(n: int = 12, m: int = 6):
@@ -88,7 +88,7 @@ def test_elbo_gaussian_likelihood_finite() -> None:
 
 
 def test_elbo_non_gaussian_without_integrator_raises() -> None:
-    from pyrox_gp import BernoulliLikelihood
+    from ssm_reference import BernoulliLikelihood
 
     prior, times, y = _make_problem()
     guide = FullRankGuide.init(prior.num_inducing, scale=0.3)

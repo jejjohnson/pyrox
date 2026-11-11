@@ -1,7 +1,7 @@
 # pyrox-gp (`pyrox_gp`) — agent rules
 
 Gaussian-process building blocks on the pyrox bridge: kernels with priors,
-guides, likelihoods, exact / sparse / Markov / multi-output / warped GPs,
+guides, likelihoods, exact / sparse / multi-output / warped GPs,
 non-Gaussian inference and pathwise sampling. The root
 [`AGENTS.md`](../../AGENTS.md) applies too.
 
@@ -12,19 +12,20 @@ private `_*.py` modules, grouped by concept in `docs/capabilities.md`):
 
 | Concept | Module | Exemplar |
 |---|---|---|
-| Protocols | `_protocols.py` (`Kernel` = `kernellib.AbstractKernel`; `Guide`, `Likelihood` re-exported from `pyrox.likelihoods`; `SDEKernel` from gaussx) | — |
+| Protocols | `_protocols.py` (`Kernel` = `kernellib.AbstractKernel`; `Guide`, `Likelihood` re-exported from `pyrox.likelihoods`) | — |
 | Kernels | `_kernels.py` (`_ParameterizedKernel(Parameterized, Kernel)`) | `RBF`; `Matern` for a static structural field |
 | Exact GP | `_models.py` (`GPPrior`, `ConditionedGP`, `gp_factor`, `gp_sample`) | — |
 | Guides | `_guides.py` | `FullRankGuide`, `WhitenedGuide`, `NaturalGuide` |
 | Likelihoods | `_likelihoods.py`, `_warped.py` | `PoissonLikelihood`, `StudentTLikelihood`, `WarpedGaussianLikelihood` |
 | SVGP inference | `_inference.py` (`svgp_elbo`, `svgp_factor`, `ConjugateVI`) | — |
-| Non-Gaussian inference | `_inference_nongauss.py`, `_inference_nongauss_markov.py` | `LaplaceInference` |
-| Sparse / inducing | `_sparse.py`, `_inducing.py`, `_inducing_init.py`, `_sparse_markov.py`, `_preconditioned.py` | `FourierInducingFeatures` |
-| Markov / state space | `_markov.py`, `_markov_flow.py`, `_markov_sites.py` (private: the gaussx per-site adapter the Markov modules use instead of the rest of pyrox-gp) | `MarkovGPPrior` |
+| Non-Gaussian inference | `_inference_nongauss.py` | `LaplaceInference` |
+| Sparse / inducing | `_sparse.py`, `_inducing.py`, `_inducing_init.py`, `_preconditioned.py` | `FourierInducingFeatures` |
 | Multi-output | `_multi_output.py`, `_multi_output_models.py` | `ICMKernel`, `MultiOutputGPPrior` |
 | Latent factor | `_latent_factor.py`, `_latent_factor_models.py`, `_latent_init.py` | — |
 | Pathwise | `_pathwise.py` | `PathwiseSampler` |
 | Shared helpers (private) | `_context.py` (deprecated aliases of `pyrox._core.call_context` and `call_contexts`), `_basis/` (RFF draws; the private `_isotropic_spectral_density`; deprecated re-exports of `geonnax.basis`), `_kernel_operator.py` (`KernelOperator`, `freeze_kernel`) | — |
+
+The Markov / state-space track (`MarkovGPPrior`, the SDE kernels, the Markov non-Gaussian and sparse strategies, `NormalizingKalmanPrior`) lives in pyrox-ssm. `__init__.py`'s `__getattr__` raises an `ImportError` naming the `pyrox_ssm` home of each old name (`_MOVED_TO_SSM`; `tests/gp/test_moved_names.py`); pyrox-gp cannot re-export it, since pyrox-ssm is a sibling.
 
 ## Contracts
 

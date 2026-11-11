@@ -3,7 +3,7 @@
 Couples the site-based view from `pyrox_gp._inference_nongauss`
 (each likelihood factor contributes a diagonal Gaussian site with
 naturals $(\\lambda, \\Lambda)$) to the linear-time Kalman /
-RTS-smoother backbone in `pyrox_gp._markov`.
+RTS-smoother backbone in `pyrox_ssm._markov`.
 
 Each iteration runs the filter + smoother once with per-step
 pseudo-observation variance $R_n = 1/\\Lambda_n$ and pseudo-target
@@ -38,14 +38,14 @@ from gaussx import (
 from jaxtyping import Array, Float
 from pyrox.likelihoods import Likelihood
 
-from pyrox_gp._markov import (
+from pyrox_ssm._markov import (
     _build_dt_full,
     _is_stationary,
     _kalman_filter,
     _require_stationary,
     _rts_smoother,
 )
-from pyrox_gp._markov_sites import (
+from pyrox_ssm._markov_sites import (
     _cavity_site_derivatives,
     _require_gauss_hermite,
     as_gaussx_likelihood,
@@ -53,7 +53,7 @@ from pyrox_gp._markov_sites import (
 
 
 if TYPE_CHECKING:
-    from pyrox_gp._markov import MarkovGPPrior
+    from pyrox_ssm._markov import MarkovGPPrior
 
 
 # --- core smoother helpers ----------------------------------------------
@@ -140,7 +140,7 @@ def _markov_smoothed_posterior(
 class NonGaussConditionedMarkovGP(eqx.Module):
     """Markov GP conditioned on a non-Gaussian likelihood via a site-based strategy.
 
-    Equivalent role to `pyrox_gp.ConditionedMarkovGP` but the
+    Equivalent role to `pyrox_ssm.ConditionedMarkovGP` but the
     posterior over training latents is a generic Gaussian
     approximation produced by one of the strategies in this module
     rather than the closed-form Gaussian-likelihood smoother. Predictions

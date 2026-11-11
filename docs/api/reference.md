@@ -8,7 +8,8 @@ composable GP building blocks. The reference is organised by subpackage:
 |---------|---------------|
 | [Core](core.md) | The Equinox-to-NumPyro bridge — `PyroxModule`, `PyroxParam`, `PyroxSample`, `Parameterized`, `pyrox_method` |
 | [Likelihoods](likelihoods.md) | The `Likelihood` and `Guide` protocols every package builds on, and `GaussianLikelihood` |
-| [GP](gp.md) | Kernels, sparse/variational GPs, guides, likelihoods, non-Gaussian inference strategies, pathwise samplers, Markov (Kalman) GPs, multi-output GPs |
+| [GP](gp.md) | Kernels, sparse/variational GPs, guides, likelihoods, non-Gaussian inference strategies, pathwise samplers, multi-output GPs |
+| [SSM](ssm.md) | Markov (Kalman) GPs over SDE kernels, sparse and non-Gaussian Markov GPs, the normalizing Kalman filter |
 | [NN](nn.md) | Bayesian and uncertainty-aware layers — dense variants, spectral / random-feature layers, SNGP, ensembles, heteroscedastic heads, the BNF stack |
 | [NN — Geo encoders](nn/geo_encoders.md) | Longitude/latitude, cyclic, spherical-harmonic, and Slepian input encoders |
 | [NN — Conditioning](nn/conditioning.md) | FiLM, affine conditioners, and hypernetworks for conditional neural fields |

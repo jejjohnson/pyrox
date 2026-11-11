@@ -18,9 +18,10 @@ the next person will find and reuse it.
 | Package (dist) | Import | Use it for | Depends on (internal) |
 |---|---|---|---|
 | `pyrox` | `pyrox._core`, `pyrox.inference`, `pyrox.likelihoods` | The bridge (`PyroxModule`, `pyrox_method`, `Parameterized`), ensemble MAP / VI, and the `Likelihood` / `Guide` protocols | — |
-| `pyrox-gp` | `pyrox_gp` | GP kernels (with priors), guides, likelihoods; exact, sparse, Markov, multi-output and warped GPs; non-Gaussian inference; pathwise sampling | pyrox |
+| `pyrox-gp` | `pyrox_gp` | GP kernels (with priors), guides, likelihoods; exact, sparse, multi-output and warped GPs; non-Gaussian inference; pathwise sampling | pyrox |
 | `pyrox-nn` | `pyrox_nn` (+ `pyrox_nn.api`, `pyrox_nn.preprocessing` behind `[bnf]`) | Bayesian / uncertainty-aware layers on geonnax cores, the Bayesian Neural Field estimator, last-layer Laplace | pyrox (**never** pyrox-gp) |
 | `pyrox-lgm` | `pyrox_lgm` | Latent Gaussian models in precision form: GMRF components, PC priors, `inla()` | pyrox (**never** pyrox-gp) |
+| `pyrox-ssm` | `pyrox_ssm` (+ `pyrox_ssm.flows` behind `[flows]`) | State-space models: Markov (Kalman) GPs over SDE kernels, sparse and non-Gaussian Markov GPs, the normalizing Kalman filter | pyrox (**never** pyrox-gp, pyrox-lgm or pyrox-nn) |
 
 Dependencies point one way: nothing imports upward. `pyrox-gp`, `pyrox-nn` and
 `pyrox-lgm` are siblings over `pyrox`, so `pyrox-nn` and `pyrox-lgm` never import
@@ -76,7 +77,7 @@ fails under a handler, a transform or a second instance.
 | Constrained hyperparameters with priors and per-parameter guides | `Parameterized` (`register_param`, `set_prior`, `autoguide`, `set_mode`, `get_param`) |
 | `jnp.linalg.solve` / `cho_solve` / `solve_triangular` / `slogdet` on a covariance | `gaussx.solve`, `cholesky`, `logdet`, `solve_columns`, `cholesky_logdet` on a PSD-tagged operator |
 | A Gaussian log-density, KL, whitening, conditioning | `gaussx.gaussian_log_prob`, `gaussian_kl`, `whitened_svgp_predict`, `whiten_covariance`, `conditional` |
-| A Kalman filter / RTS smoother / SDE autocovariance | `gaussx.kalman_filter`, `rts_smoother`, `sde_autocovariance`; the `MarkovGPPrior` family here |
+| A Kalman filter / RTS smoother / SDE autocovariance | `gaussx.kalman_filter`, `rts_smoother`, `sde_autocovariance`; the `MarkovGPPrior` family in `pyrox_ssm` |
 | A kernel function | `kernellib.functional`; as a module with priors, the `pyrox_gp` kernels |
 | Calling one module several times in one model (Gram + diag, several blocks) | `with pyrox._core.call_context(kernel):` (`call_contexts` for several) |
 | Resolving a kernel's priors once, for code that takes a plain kernellib kernel | `pyrox._core.freeze(kernel)` |
@@ -182,10 +183,12 @@ fails under a handler, a transform or a second instance.
 | `packages/pyrox/tests/test_core_pyrox_module.py`, `test_core_parameterized.py` | Site naming, the per-call cache, the duplicate-param guard, `Parameterized` priors / guides / rebuild errors |
 | `packages/pyrox/tests/test_pyrox.py` | `pyrox._core`'s exports and types |
 | `packages/pyrox/tests/test_capabilities.py` | `docs/capabilities.md` is current; no name bound to two objects |
-| `tests/**/test_docstrings.py` (pyrox, pyrox-gp, pyrox-nn) | No Sphinx / RST markup in source |
+| `tests/**/test_docstrings.py` (pyrox, pyrox-gp, pyrox-nn), `packages/pyrox-ssm/tests/test_ssm_docstrings.py` | No Sphinx / RST markup in source |
 | `packages/pyrox-lgm/tests/test_import_guard.py`, `packages/pyrox-nn/tests/test_nn_import_guard.py` | pyrox-lgm and pyrox-nn never import pyrox-gp |
+| `packages/pyrox-ssm/tests/test_ssm_import_guard.py` | pyrox-ssm never imports pyrox-gp, pyrox-lgm or pyrox-nn |
 | `packages/pyrox/tests/test_core_import_guard.py` | The core imports no gaussx, lineax, kernellib or geonnax |
 | `packages/pyrox-gp/tests/gp/test_nn_split_deprecations.py` | The names that moved out of pyrox-gp warn and still work |
+| `packages/pyrox-gp/tests/gp/test_moved_names.py` | The Markov-GP names that moved to pyrox-ssm raise an `ImportError` naming `pyrox_ssm` |
 | `packages/pyrox-lgm/tests/test_public_api.py`, `test_doctests.py` | lgm `__all__` names exist, no duplicates; lgm doctests run |
 | `packages/pyrox-lgm/tests/test_rinla_fixtures.py` | `inla()` against R-INLA reference fixtures (slow) |
 
@@ -299,6 +302,7 @@ that enforce them. Read it before changing that package:
 - [`packages/pyrox-gp/AGENTS.md`](packages/pyrox-gp/AGENTS.md) — kernels, guides, likelihoods, inference, the kernel context
 - [`packages/pyrox-nn/AGENTS.md`](packages/pyrox-nn/AGENTS.md) — Bayesian layers on geonnax cores, the `[bnf]` estimator
 - [`packages/pyrox-lgm/AGENTS.md`](packages/pyrox-lgm/AGENTS.md) — components, PC priors, `inla()`, R-INLA fixtures
+- [`packages/pyrox-ssm/AGENTS.md`](packages/pyrox-ssm/AGENTS.md) — Markov GPs, the Kalman-based non-Gaussian and sparse strategies, the `[flows]` NKF
 
 ## Git, commits and pull requests
 

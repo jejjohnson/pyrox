@@ -1,7 +1,7 @@
 """Sparse variational Markov-GP — inducing time points on top of an SDE prior.
 
 `SparseMarkovGPPrior` is the sparse analogue of
-`pyrox_gp.MarkovGPPrior`: it wraps an `SDEKernel` and a
+`pyrox_ssm.MarkovGPPrior`: it wraps an `SDEKernel` and a
 sorted inducing time grid ``Z`` of length ``M``, exposing the SVGP
 building blocks ``(K_{ZZ}, K_{xZ}, \\mathrm{diag}\\,K_{xx})`` derived
 from the SDE autocovariance
@@ -26,7 +26,7 @@ foundation it will build on.
 Predictions at arbitrary test times use the same dense SVGP formula via
 `SparseConditionedMarkovGP.predict`. For mean-only predictions
 on a long evaluation grid, the merged-grid Kalman trick from
-`pyrox_gp._markov` is asymptotically cheaper, but is not yet
+`pyrox_ssm._markov` is asymptotically cheaper, but is not yet
 wired in here.
 """
 
@@ -55,8 +55,8 @@ from gaussx import (
 from jaxtyping import Array, Float
 from pyrox.likelihoods import GaussianLikelihood, Guide, Likelihood
 
-from pyrox_gp._markov import _require_stationary
-from pyrox_gp._markov_sites import as_gaussx_likelihood
+from pyrox_ssm._markov import _require_stationary
+from pyrox_ssm._markov_sites import as_gaussx_likelihood
 
 
 def _psd_operator(K: Float[Array, "M M"]) -> lx.AbstractLinearOperator:
@@ -279,7 +279,7 @@ def sparse_markov_elbo(
         y: Observations of shape ``(N,)``.
         integrator: ``gaussx`` integrator for non-conjugate
             likelihoods. ``None`` is fine for
-            `pyrox_gp.GaussianLikelihood`.
+            `pyrox.likelihoods.GaussianLikelihood`.
 
     Returns:
         Scalar ELBO value (higher is better).

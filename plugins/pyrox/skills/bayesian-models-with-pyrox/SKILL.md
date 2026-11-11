@@ -44,7 +44,7 @@ a Bayesian layer, look it up:
 | An exact GP marginal likelihood or posterior | `pyrox-gp` | `GPPrior` + `gp_factor` / `gp_sample`; `GPPrior.condition(y, noise).predict(X*)` |
 | Gradient / sensitivity of a fitted GP, with uncertainty | `pyrox-gp` | `ConditionedGP.predict_gradient` (`GradientPosterior`), `predict_var_gradient`, `predict_mean_hessian` |
 | Sparse / variational GPs | `pyrox-gp` | `SparseGPPrior`, the guides (`WhitenedGuide`, `NaturalGuide`, …), `svgp_factor`, `svgp_elbo` |
-| Long time series (linear in N) | `pyrox-gp` | `MarkovGPPrior` + `markov_gp_factor`, SDE kernels (`MaternSDE`, …) |
+| Long time series (linear in N) | `pyrox-ssm` | `pyrox_ssm.MarkovGPPrior` + `markov_gp_factor`, SDE kernels (`MaternSDE`, …) |
 | Non-Gaussian likelihoods | `pyrox-gp` | the likelihoods + `LaplaceInference`, `ExpectationPropagation`, `GaussNewtonInference` |
 | Multi-output GPs, pathwise samples | `pyrox-gp` | `MultiOutputGPPrior`, `LMCKernel`, `OILMMGPPrior`; `PathwiseSampler` |
 | Bayesian NN layers | `pyrox-nn` | `DenseReparameterization`, `DenseFlipout`, `BayesianSIREN`, random-feature layers, `RandomFeatureGaussianProcess` (SNGP), `DeepVSSGP` |
@@ -184,7 +184,7 @@ true slope of 2, and the GP's guide holds `RBF.lengthscale`,
 | `-0.5 yᵀ (K + σ²I)⁻¹ y − ½ log|K + σ²I| − …` as a `numpyro.factor` | `pyrox_gp.gp_factor(name, GPPrior(kernel, X), y, noise_var)` |
 | GP predictive mean / variance by hand | `GPPrior(kernel, X).condition(y, noise_var).predict(X_star)` |
 | An SVGP ELBO, whitening, inducing-point KL | `SparseGPPrior` + a guide + `svgp_factor` / `svgp_elbo` |
-| A Kalman filter for a temporal GP | `MarkovGPPrior` + `markov_gp_factor` |
+| A Kalman filter for a temporal GP | `pyrox_ssm.MarkovGPPrior` + `markov_gp_factor` |
 | Laplace / EP for a classification GP | `LaplaceInference`, `ExpectationPropagation` with a `pyrox_gp` likelihood |
 | A Bayesian dense layer, Flipout, SIREN, random-feature GP | `pyrox_nn.DenseReparameterization`, `DenseFlipout`, `BayesianSIREN`, `RandomFeatureGaussianProcess` |
 | Spherical-harmonic features with kernel-derived weight variances on S² | `pyrox_nn.SphericalHarmonicFeatures` (isotropic `pyrox_gp` kernel; `input_unit` required for lon/lat) |

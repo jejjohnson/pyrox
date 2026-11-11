@@ -7,7 +7,7 @@ covariances. The SDE autocovariance ``H exp(F tau) P_inf H^T`` must
 reproduce the dense kernel value on the same scalar grid.
 
 Concrete classes live in :mod:`gaussx._ssm` since gaussx 0.0.11; pyrox
-re-exports them via :mod:`pyrox_gp` for backwards compatibility.
+re-exports them via :mod:`pyrox_ssm` for convenience.
 """
 
 from __future__ import annotations
@@ -16,8 +16,7 @@ import jax
 import jax.numpy as jnp
 import jax.scipy.linalg as jsl
 import pytest
-from kernellib.functional import matern_kernel
-from pyrox_gp import (
+from pyrox_ssm import (
     ConstantSDE,
     CosineSDE,
     MaternSDE,
@@ -26,6 +25,7 @@ from pyrox_gp import (
     QuasiPeriodicSDE,
     SumSDE,
 )
+from ssm_reference import matern_kernel
 
 
 # --- structural shape contract -------------------------------------------
@@ -418,7 +418,7 @@ def test_periodic_sde_closed_form_discretise_is_pure_rotation() -> None:
 
 
 def test_sum_and_product_sde_jit_compatible() -> None:
-    from pyrox_gp import SDEKernel
+    from pyrox_ssm import SDEKernel
 
     summed = SumSDE(
         (MaternSDE(variance=1.0, lengthscale=0.5, order=1), ConstantSDE(0.3))

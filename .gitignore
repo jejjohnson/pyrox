@@ -120,4 +120,4 @@ venv.bak/
 
 # Jupytext .py sources for tutorial notebooks — local-only dev artefacts.
 # The committed source of truth is the executed .ipynb (mkdocs-jupyter renders it).
-docs/notebooks/*.py
+docs/notebooks/**/*.py

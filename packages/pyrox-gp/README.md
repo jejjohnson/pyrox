@@ -2,8 +2,10 @@
 
 Gaussian process building blocks on top of
 [`pyrox`](../pyrox): kernels and kernel protocols, variational guides,
-likelihoods, exact / sparse / Markov GP models, multi-output
+likelihoods, exact / sparse GP models, multi-output
 structures, and pathwise sampling.
+
+Temporal GPs on a time grid (`MarkovGPPrior`, the SDE kernels, the Kalman-based non-Gaussian and sparse Markov strategies) live in [`pyrox-ssm`](../pyrox-ssm); importing one of those names from `pyrox_gp` raises an `ImportError` that names its `pyrox_ssm` home.
 
 ## Install
 
