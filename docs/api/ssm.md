@@ -128,6 +128,34 @@ for inducing-grid scalability, the [sparse Markov GP](#sparse-markov-gp).
 ::: pyrox_ssm.markov_gp_factor
 ::: pyrox_ssm.markov_gp_sample
 
+### Ragged sites
+
+Every method that reads observations (`filter`, `smooth`, `log_marginal`, `condition`, `condition_nongauss`, `markov_gp_factor`, each non-Gaussian strategy's `fit`, `sparse_markov_elbo` and `sparse_markov_factor`) takes an optional boolean `mask=` of the observations' shape. A masked step runs the Kalman predict only, so it adds nothing to the log marginal, and its observation is replaced before any arithmetic, so a `NaN` placeholder there reaches neither the value nor the gradient. `mask=None` is the unmasked result, bit for bit.
+
+Sites observed on different days become one vmapped factor with `pad_sites`, which pads each series after its last observation (at its median spacing, so the padded times stay strictly increasing) and returns the mask. Padding after the last observation adds predict-only steps, so each site's log marginal is unchanged:
+
+```python
+import jax
+import jax.numpy as jnp
+import numpyro
+import numpyro.distributions as dist
+import pyrox_ssm as pss
+
+t, y, mask = pss.pad_sites(times_per_site, y_per_site)           # (S, N) each
+
+def site_log_marginal(ell_s, t_s, y_s, m_s):
+    sde = pss.MaternSDE(variance=1.0, lengthscale=ell_s, order=1)
+    return pss.MarkovGPPrior(sde, t_s).log_marginal(y_s, jnp.asarray(0.01), mask=m_s)
+
+def pooled_model(t, y, mask):
+    mu = numpyro.sample("mu", dist.Normal(0.0, 1.0))
+    with numpyro.plate("site", t.shape[0]):
+        ell = numpyro.sample("lengthscale", dist.LogNormal(mu, 0.5))  # (S,)
+    numpyro.factor("y", jax.vmap(site_log_marginal)(ell, t, y, mask).sum())
+```
+
+::: pyrox_ssm.pad_sites
+
 ## Normalizing Kalman Filter
 
 `NormalizingKalmanPrior` wraps a `gaussx.LGSSM` (or `gaussx.MaskedLGSSM`)

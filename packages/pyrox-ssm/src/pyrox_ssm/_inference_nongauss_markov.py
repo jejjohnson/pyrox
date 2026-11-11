@@ -17,6 +17,11 @@ linear in ``N``, where the dense path is $O(I N^3)$.
 Predictions reuse the same Kalman trick: the merged grid
 ``sort(times \\cup t_star)`` with the test points masked produces
 self-consistent smoothed marginals at arbitrary test times.
+
+Every ``fit`` takes an optional observation ``mask``. A masked site has
+zero gradient and zero curvature, so its naturals are
+$(\\lambda_n, \\Lambda_n) = (0, 0)$ and the filter skips its update:
+masking step $k$ fits the same sites at the kept steps as dropping it.
 """
 
 from __future__ import annotations
@@ -35,13 +40,14 @@ from gaussx import (
     ep_tilted_moments,
     newton_update,
 )
-from jaxtyping import Array, Float
+from jaxtyping import Array, Bool, Float
 from pyrox.likelihoods import Likelihood
 
 from pyrox_ssm._markov import (
     _build_dt_full,
     _is_stationary,
     _kalman_filter,
+    _observation_mask,
     _require_stationary,
     _rts_smoother,
 )
@@ -101,10 +107,29 @@ def _prior_marginal_variance(prior: MarkovGPPrior) -> Float[Array, " N"]:
     return jax.vmap(lambda P: (H @ P @ H.T)[0, 0])(P_pred)
 
 
+def _mask_sites(
+    nat1: Float[Array, " N"],
+    nat2: Float[Array, " N"],
+    observed: Bool[Array, " N"],
+    precision_floor: float,
+) -> tuple[Float[Array, " N"], Float[Array, " N"]]:
+    r"""Floor the observed site precisions and zero the masked sites.
+
+    An observed site keeps $(\lambda_n, \max(\Lambda_n, \epsilon))$; a
+    masked site becomes $(0, 0)$, the site of a likelihood term that is not
+    there.
+    """
+    zero = jnp.zeros((), dtype=nat2.dtype)
+    nat1 = jnp.where(observed, nat1, zero)
+    nat2 = jnp.where(observed, jnp.maximum(nat2, precision_floor), zero)
+    return nat1, nat2
+
+
 def _markov_smoothed_posterior(
     prior: MarkovGPPrior,
     nat1: Float[Array, " N"],
     nat2: Float[Array, " N"],
+    observed: Bool[Array, " N"] | None = None,
 ) -> tuple[Float[Array, " N"], Float[Array, " N"], Float[Array, ""]]:
     r"""Smoothed marginals on the training grid given diagonal site naturals.
 
@@ -113,19 +138,22 @@ def _markov_smoothed_posterior(
     (centred on the prior mean), then runs filter + RTS smoother. Returns
     ``(f_mean, f_var, log_marg)`` over the training times where
     ``log_marg`` is the Kalman log-likelihood of the *pseudo-observations*
-    (used as a Laplace-style approximation to the true marginal).
+    (used as a Laplace-style approximation to the true marginal). A step
+    with ``observed`` ``False`` runs the predict only; its zero site is
+    replaced by a unit placeholder first, so no ``0 / 0`` is ever formed.
     """
     F, _L, H, _Qc, _P_inf = prior.sde_kernel.sde_params()
     init_cov = prior.initial_covariance()
     times = prior.times
     dt_full = _build_dt_full(times)
     A_seq, Q_seq = prior.sde_kernel.discretise_sequence(dt_full)
-    R_seq = jnp.reciprocal(nat2)
-    pseudo_targets = nat1 / nat2
+    observed = _observation_mask(None, times) if observed is None else observed
+    site_prec = jnp.where(observed, nat2, jnp.ones((), dtype=nat2.dtype))
+    R_seq = jnp.reciprocal(site_prec)
+    pseudo_targets = nat1 / site_prec
     residual = pseudo_targets - prior.mean(times)
-    mask = jnp.ones_like(times)
     m_pred, P_pred, m_filt, P_filt, log_marg = _kalman_filter(
-        F, H, init_cov, A_seq, Q_seq, residual, mask, R_seq
+        F, H, init_cov, A_seq, Q_seq, residual, observed, R_seq
     )
     m_smooth, P_smooth = _rts_smoother(m_pred, P_pred, m_filt, P_filt, A_seq)
     f_mean = (m_smooth @ H.T)[:, 0] + prior.mean(times)
@@ -161,6 +189,10 @@ class NonGaussConditionedMarkovGP(eqx.Module):
             strategy-specific).
         n_iter: Iterations used by the strategy.
         converged: Whether convergence tolerance was met.
+        mask: Optional ``(N,)`` boolean observation mask the strategy was
+            fitted with; masked sites hold zero naturals and `predict`
+            leaves them out of the update. ``None`` means every site is
+            observed.
     """
 
     prior: MarkovGPPrior
@@ -172,6 +204,7 @@ class NonGaussConditionedMarkovGP(eqx.Module):
     log_marginal_approx: Float[Array, ""]
     n_iter: int = eqx.field(static=True)
     converged: bool = eqx.field(static=True)
+    mask: Bool[Array, " N"] | None = None
 
     def predict(
         self,
@@ -195,10 +228,16 @@ class NonGaussConditionedMarkovGP(eqx.Module):
         order = jnp.argsort(merged, stable=True)
         merged_sorted = merged[order]
 
+        observed = _observation_mask(self.mask, times)
         is_obs = jnp.concatenate(
-            [jnp.ones(N, dtype=times.dtype), jnp.zeros(M, dtype=times.dtype)]
+            [observed.astype(times.dtype), jnp.zeros(M, dtype=times.dtype)]
         )[order]
-        pseudo_targets = self.site_nat1 / self.site_nat2
+        # A masked training site holds Λ = 0; a unit placeholder keeps
+        # λ / Λ and 1 / Λ finite, and the filter skips that step anyway.
+        site_prec = jnp.where(
+            observed, self.site_nat2, jnp.ones((), dtype=self.site_nat2.dtype)
+        )
+        pseudo_targets = self.site_nat1 / site_prec
         residual_full = jnp.concatenate(
             [
                 pseudo_targets - self.prior.mean(times),
@@ -208,7 +247,7 @@ class NonGaussConditionedMarkovGP(eqx.Module):
         # ``R_seq`` for masked steps is irrelevant (the update is
         # skipped) but must be finite to avoid NaN propagation through
         # the filter; use 1.0 as a safe placeholder.
-        R_train = jnp.reciprocal(self.site_nat2)
+        R_train = jnp.reciprocal(site_prec)
         R_full = jnp.concatenate([R_train, jnp.ones(M, dtype=self.y.dtype)])[order]
 
         dt_full = _build_dt_full(merged_sorted)
@@ -259,13 +298,41 @@ class LaplaceMarkovInference(eqx.Module):
         prior: MarkovGPPrior,
         likelihood: Likelihood,
         y: Float[Array, " N"],
+        *,
+        mask: Bool[Array, " N"] | None = None,
     ) -> NonGaussConditionedMarkovGP:
-        site_lik = as_gaussx_likelihood(likelihood, y)
+        r"""Fit the sites by Newton steps on the smoothed posterior mean.
+
+        Args:
+            prior: The `pyrox_ssm.MarkovGPPrior` over the observation times.
+            likelihood: Any scalar-latent `pyrox.likelihoods.Likelihood`.
+            y: Observations of shape ``(N,)``; masked entries may be ``NaN``.
+            mask: Optional ``(N,)`` boolean mask, ``True`` where observed. A
+                masked site contributes $g_n = h_n = 0$, so its naturals are
+                $(\lambda_n, \Lambda_n) = (0, 0)$ and the filter skips it.
+
+        Returns:
+            The `NonGaussConditionedMarkovGP` with the fitted sites.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> from pyrox_gp import BernoulliLikelihood
+            >>> from pyrox_ssm import MaternSDE, MarkovGPPrior
+            >>> from pyrox_ssm import LaplaceMarkovInference
+            >>> prior = MarkovGPPrior(MaternSDE(1.0, 0.5, order=1), jnp.arange(4.0))
+            >>> y = jnp.array([1.0, 0.0, jnp.nan, 1.0])
+            >>> mask = jnp.array([True, True, False, True])
+            >>> strategy = LaplaceMarkovInference()
+            >>> cond = strategy.fit(prior, BernoulliLikelihood(), y, mask=mask)
+        """
+        site_lik = as_gaussx_likelihood(likelihood, y, mask=mask)
+        observed = _observation_mask(mask, prior.times)
 
         N = prior.times.shape[0]
         prior_mean = prior.mean(prior.times)
         nat1 = jnp.asarray(prior_mean) * self.precision_floor
         nat2 = jnp.full((N,), self.precision_floor, dtype=prior_mean.dtype)
+        nat1, nat2 = _mask_sites(nat1, nat2, observed, self.precision_floor)
         f = jnp.asarray(prior_mean)
 
         converged = False
@@ -277,9 +344,11 @@ class LaplaceMarkovInference(eqx.Module):
                 nat1, nat2, new_nat1, Lam, lr=self.damping
             )
             assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
-            nat2 = jnp.maximum(nat2, self.precision_floor)
-            f_new, _, _ = _markov_smoothed_posterior(prior, nat1, nat2)
-            delta = jnp.max(jnp.abs(f_new - f))
+            nat1, nat2 = _mask_sites(nat1, nat2, observed, self.precision_floor)
+            f_new, _, _ = _markov_smoothed_posterior(prior, nat1, nat2, observed)
+            # Converge on the observed steps only: a masked step's mean is
+            # an interpolation that dropping the step would not compute.
+            delta = jnp.max(jnp.where(observed, jnp.abs(f_new - f), 0.0))
             f = f_new
             n_iter = it + 1
             if delta < self.tol:
@@ -289,16 +358,21 @@ class LaplaceMarkovInference(eqx.Module):
         # Final site naturals at convergence.
         g, h = site_lik.site_derivatives(f)
         nat1, Lam = newton_update(f, g, h, precision_floor=self.precision_floor)
-        nat2 = jnp.maximum(Lam, self.precision_floor)
-        q_mean, q_var, log_marg = _markov_smoothed_posterior(prior, nat1, nat2)
+        nat1, nat2 = _mask_sites(nat1, Lam, observed, self.precision_floor)
+        q_mean, q_var, log_marg = _markov_smoothed_posterior(
+            prior, nat1, nat2, observed
+        )
         # Add the data-fit term ``log p(y | hat f)`` and subtract the
         # pseudo-data fit so the reported scalar is the standard Laplace
         # log-marginal approximation rather than the Kalman pseudo-data
-        # likelihood.
+        # likelihood. Both sum over the observed sites only.
         ll_data = site_lik.log_prob(q_mean)
-        pseudo_targets = nat1 / nat2
-        ll_pseudo = -0.5 * jnp.sum(jnp.log(2.0 * jnp.pi / nat2)) - 0.5 * jnp.sum(
-            nat2 * (q_mean - pseudo_targets) ** 2
+        site_prec = jnp.where(observed, nat2, jnp.ones((), dtype=nat2.dtype))
+        pseudo_targets = nat1 / site_prec
+        ll_pseudo = -0.5 * jnp.sum(
+            jnp.where(observed, jnp.log(2.0 * jnp.pi / site_prec), 0.0)
+        ) - 0.5 * jnp.sum(
+            jnp.where(observed, site_prec * (q_mean - pseudo_targets) ** 2, 0.0)
         )
         log_marg_corrected = log_marg + ll_data - ll_pseudo
 
@@ -312,6 +386,7 @@ class LaplaceMarkovInference(eqx.Module):
             log_marginal_approx=log_marg_corrected,
             n_iter=n_iter,
             converged=converged,
+            mask=None if mask is None else observed,
         )
 
 
@@ -344,14 +419,40 @@ class GaussNewtonMarkovInference(eqx.Module):
         prior: MarkovGPPrior,
         likelihood: Likelihood,
         y: Float[Array, " N"],
+        *,
+        mask: Bool[Array, " N"] | None = None,
     ) -> NonGaussConditionedMarkovGP:
+        r"""Fit the sites by Gauss-Newton steps, as `LaplaceMarkovInference`.
+
+        Args:
+            prior: The `pyrox_ssm.MarkovGPPrior` over the observation times.
+            likelihood: Any scalar-latent `pyrox.likelihoods.Likelihood`.
+            y: Observations of shape ``(N,)``; masked entries may be ``NaN``.
+            mask: Optional ``(N,)`` boolean mask, ``True`` where observed. A
+                masked site contributes $g_n = h_n = 0$, so its naturals are
+                $(\lambda_n, \Lambda_n) = (0, 0)$ and the filter skips it.
+
+        Returns:
+            The `NonGaussConditionedMarkovGP` with the fitted sites.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> from pyrox_gp import BernoulliLikelihood
+            >>> from pyrox_ssm import MaternSDE, MarkovGPPrior
+            >>> from pyrox_ssm import GaussNewtonMarkovInference
+            >>> prior = MarkovGPPrior(MaternSDE(1.0, 0.5, order=1), jnp.arange(4.0))
+            >>> y = jnp.array([1.0, 0.0, jnp.nan, 1.0])
+            >>> mask = jnp.array([True, True, False, True])
+            >>> strategy = GaussNewtonMarkovInference()
+            >>> cond = strategy.fit(prior, BernoulliLikelihood(), y, mask=mask)
+        """
         inner = LaplaceMarkovInference(
             max_iter=self.max_iter,
             tol=self.tol,
             damping=self.damping,
             precision_floor=self.precision_floor,
         )
-        return inner.fit(prior, likelihood, y)
+        return inner.fit(prior, likelihood, y, mask=mask)
 
 
 # --- Posterior Linearization --------------------------------------------
@@ -431,13 +532,41 @@ class PosteriorLinearizationMarkov(eqx.Module):
         prior: MarkovGPPrior,
         likelihood: Likelihood,
         y: Float[Array, " N"],
+        *,
+        mask: Bool[Array, " N"] | None = None,
     ) -> NonGaussConditionedMarkovGP:
-        site_lik = as_gaussx_likelihood(likelihood, y)
+        r"""Fit the sites by posterior linearization.
+
+        Args:
+            prior: The `pyrox_ssm.MarkovGPPrior` over the observation times.
+            likelihood: Any scalar-latent `pyrox.likelihoods.Likelihood`.
+            y: Observations of shape ``(N,)``; masked entries may be ``NaN``.
+            mask: Optional ``(N,)`` boolean mask, ``True`` where observed. A
+                masked site contributes $g_n = h_n = 0$, so its naturals are
+                $(\lambda_n, \Lambda_n) = (0, 0)$ and the filter skips it.
+
+        Returns:
+            The `NonGaussConditionedMarkovGP` with the fitted sites.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> from pyrox_gp import BernoulliLikelihood
+            >>> from pyrox_ssm import MaternSDE, MarkovGPPrior
+            >>> from pyrox_ssm import PosteriorLinearizationMarkov
+            >>> prior = MarkovGPPrior(MaternSDE(1.0, 0.5, order=1), jnp.arange(4.0))
+            >>> y = jnp.array([1.0, 0.0, jnp.nan, 1.0])
+            >>> mask = jnp.array([True, True, False, True])
+            >>> strategy = PosteriorLinearizationMarkov()
+            >>> cond = strategy.fit(prior, BernoulliLikelihood(), y, mask=mask)
+        """
+        site_lik = as_gaussx_likelihood(likelihood, y, mask=mask)
+        observed = _observation_mask(mask, prior.times)
 
         N = prior.times.shape[0]
         prior_mean = prior.mean(prior.times)
         nat1 = jnp.zeros(N, dtype=prior_mean.dtype)
         nat2 = jnp.full((N,), self.precision_floor, dtype=prior_mean.dtype)
+        nat1, nat2 = _mask_sites(nat1, nat2, observed, self.precision_floor)
         q_mean = jnp.asarray(prior_mean)
         # Seed cavity computation with the prior marginal variance ``H P_inf H^T``
         # so the first cavity precision ``1/q_var - nat2`` is on the correct
@@ -465,17 +594,19 @@ class PosteriorLinearizationMarkov(eqx.Module):
                 nat1, nat2, new_nat1, new_prec, lr=self.damping
             )
             assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
-            nat2 = jnp.maximum(nat2, self.precision_floor)
+            nat1, nat2 = _mask_sites(nat1, nat2, observed, self.precision_floor)
 
-            q_mean_new, q_var, _ = _markov_smoothed_posterior(prior, nat1, nat2)
-            delta = jnp.max(jnp.abs(q_mean_new - q_mean))
+            q_mean_new, q_var, _ = _markov_smoothed_posterior(
+                prior, nat1, nat2, observed
+            )
+            delta = jnp.max(jnp.where(observed, jnp.abs(q_mean_new - q_mean), 0.0))
             q_mean = q_mean_new
             n_iter = it + 1
             if delta < self.tol:
                 converged = True
                 break
 
-        _, _, log_marg = _markov_smoothed_posterior(prior, nat1, nat2)
+        _, _, log_marg = _markov_smoothed_posterior(prior, nat1, nat2, observed)
 
         return NonGaussConditionedMarkovGP(
             prior=prior,
@@ -487,6 +618,7 @@ class PosteriorLinearizationMarkov(eqx.Module):
             log_marginal_approx=log_marg,
             n_iter=n_iter,
             converged=converged,
+            mask=None if mask is None else observed,
         )
 
 
@@ -534,13 +666,41 @@ class ExpectationPropagationMarkov(eqx.Module):
         prior: MarkovGPPrior,
         likelihood: Likelihood,
         y: Float[Array, " N"],
+        *,
+        mask: Bool[Array, " N"] | None = None,
     ) -> NonGaussConditionedMarkovGP:
-        site_lik = as_gaussx_likelihood(likelihood, y)
+        r"""Fit the sites by parallel expectation propagation.
+
+        Args:
+            prior: The `pyrox_ssm.MarkovGPPrior` over the observation times.
+            likelihood: Any scalar-latent `pyrox.likelihoods.Likelihood`.
+            y: Observations of shape ``(N,)``; masked entries may be ``NaN``.
+            mask: Optional ``(N,)`` boolean mask, ``True`` where observed. A
+                masked site contributes $g_n = h_n = 0$, so its naturals are
+                $(\lambda_n, \Lambda_n) = (0, 0)$ and the filter skips it.
+
+        Returns:
+            The `NonGaussConditionedMarkovGP` with the fitted sites.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> from pyrox_gp import BernoulliLikelihood
+            >>> from pyrox_ssm import MaternSDE, MarkovGPPrior
+            >>> from pyrox_ssm import ExpectationPropagationMarkov
+            >>> prior = MarkovGPPrior(MaternSDE(1.0, 0.5, order=1), jnp.arange(4.0))
+            >>> y = jnp.array([1.0, 0.0, jnp.nan, 1.0])
+            >>> mask = jnp.array([True, True, False, True])
+            >>> strategy = ExpectationPropagationMarkov()
+            >>> cond = strategy.fit(prior, BernoulliLikelihood(), y, mask=mask)
+        """
+        site_lik = as_gaussx_likelihood(likelihood, y, mask=mask)
+        observed = _observation_mask(mask, prior.times)
 
         N = prior.times.shape[0]
         prior_mean = prior.mean(prior.times)
         nat1 = jnp.zeros(N, dtype=prior_mean.dtype)
         nat2 = jnp.full((N,), self.precision_floor, dtype=prior_mean.dtype)
+        nat1, nat2 = _mask_sites(nat1, nat2, observed, self.precision_floor)
         q_mean = jnp.asarray(prior_mean)
         # Seed cavity computation with the prior marginal variance ``H P_inf H^T``
         # so the first cavity precision ``1/q_var - nat2`` is on the correct
@@ -581,17 +741,22 @@ class ExpectationPropagationMarkov(eqx.Module):
                 nat1, nat2, new_nat1, new_prec, lr=self.damping
             )
             assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
-            nat2 = jnp.maximum(nat2, self.precision_floor)
+            # A masked site's log density is zero, so its tilted moments are
+            # its cavity's and the site it would get is (0, 0) up to rounding;
+            # _mask_sites makes that exact.
+            nat1, nat2 = _mask_sites(nat1, nat2, observed, self.precision_floor)
 
-            q_mean_new, q_var, _ = _markov_smoothed_posterior(prior, nat1, nat2)
-            delta = jnp.max(jnp.abs(q_mean_new - q_mean))
+            q_mean_new, q_var, _ = _markov_smoothed_posterior(
+                prior, nat1, nat2, observed
+            )
+            delta = jnp.max(jnp.where(observed, jnp.abs(q_mean_new - q_mean), 0.0))
             q_mean = q_mean_new
             n_iter = it + 1
             if delta < self.tol:
                 converged = True
                 break
 
-        _, _, log_marg = _markov_smoothed_posterior(prior, nat1, nat2)
+        _, _, log_marg = _markov_smoothed_posterior(prior, nat1, nat2, observed)
 
         return NonGaussConditionedMarkovGP(
             prior=prior,
@@ -603,4 +768,5 @@ class ExpectationPropagationMarkov(eqx.Module):
             log_marginal_approx=log_marg,
             n_iter=n_iter,
             converged=converged,
+            mask=None if mask is None else observed,
         )

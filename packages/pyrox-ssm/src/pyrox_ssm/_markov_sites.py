@@ -30,7 +30,7 @@ import jax
 import jax.numpy as jnp
 import lineax as lx
 from gaussx import AbstractIntegrator, CallableLikelihood, GaussHermiteIntegrator
-from jaxtyping import Array, Float, PyTree
+from jaxtyping import Array, Bool, Float, PyTree
 from pyrox.likelihoods import Likelihood, likelihood_accepts_inputs
 
 
@@ -90,10 +90,31 @@ class _SiteLogDensity(eqx.Module):
         return self.likelihood.log_prob(f_i[None], site[None])
 
 
+class _MaskedSiteLogDensity(eqx.Module):
+    r"""A site log density that is zero at masked sites, $o_i\,\ell(f_i, d_i)$.
+
+    Each site's data is ``(d_i, o_i)``; a masked site ($o_i$ ``False``)
+    returns zero, so its gradient and curvature in $f_i$ are zero too.
+
+    Attributes:
+        site_log_density: The unmasked per-site log density.
+    """
+
+    site_log_density: _SiteLogDensity
+
+    def __call__(self, f_i: Float[Array, ""], site: PyTree) -> Float[Array, ""]:
+        data, observed = site
+        # oᵢ ℓ(fᵢ, dᵢ)
+        value = self.site_log_density(f_i, data)
+        return jnp.where(observed, value, jnp.zeros((), dtype=value.dtype))
+
+
 def as_gaussx_likelihood(
     lik: Likelihood,
     y: Float[Array, " N"],
     X: Float[Array, "N D"] | None = None,
+    *,
+    mask: Bool[Array, " N"] | None = None,
 ) -> CallableLikelihood:
     r"""Per-site view of a pyrox likelihood, as a `gaussx.CallableLikelihood`.
 
@@ -106,12 +127,17 @@ def as_gaussx_likelihood(
 
     ``X`` is passed only to a likelihood whose ``log_prob`` takes it
     (`pyrox.likelihoods.likelihood_accepts_inputs`); otherwise each site's
-    data is $y_i$ alone.
+    data is $y_i$ alone. With a mask $o$, site $i$'s term is
+    $o_i\,\ell(f_i, d_i)$, so a masked site has $g_i = h_i = 0$.
 
     Args:
         lik: A scalar-latent pyrox likelihood.
-        y: The observations, one per site.
+        y: The observations, one per site. Masked entries may be ``NaN``:
+            they are replaced by the first observed value before ``lik``
+            sees them (zero can lie outside a likelihood's support), so no
+            ``NaN`` reaches a derivative.
         X: The inputs, one row per site, for an input-dependent likelihood.
+        mask: Optional boolean mask, ``True`` where a site is observed.
 
     Returns:
         The likelihood as a sum of per-site log densities, with
@@ -131,9 +157,16 @@ def as_gaussx_likelihood(
         ([0.5, -0.5], [-0.25, -0.25])
     """
     _check_scalar_latent(lik)
-    if X is not None and likelihood_accepts_inputs(lik):
-        return CallableLikelihood(_SiteLogDensity(lik, with_inputs=True), (y, X))
-    return CallableLikelihood(_SiteLogDensity(lik, with_inputs=False), y)
+    with_inputs = X is not None and likelihood_accepts_inputs(lik)
+    site_log_density = _SiteLogDensity(lik, with_inputs=with_inputs)
+    if mask is None:
+        return CallableLikelihood(site_log_density, (y, X) if with_inputs else y)
+    observed = jnp.asarray(mask).astype(bool)
+    # The first observed value is in the likelihood's support; a masked entry
+    # only needs ℓ to be finite there, since oᵢ = 0 discards it.
+    y = jnp.where(observed, y, y[jnp.argmax(observed)])
+    data = (y, X) if with_inputs else y
+    return CallableLikelihood(_MaskedSiteLogDensity(site_log_density), (data, observed))
 
 
 def _cavity_site_derivatives(
