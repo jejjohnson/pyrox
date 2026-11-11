@@ -17,7 +17,7 @@ the next person will find and reuse it.
 
 | Package (dist) | Import | Use it for | Depends on (internal) |
 |---|---|---|---|
-| `pyrox` | `pyrox._core`, `pyrox.inference` | The bridge (`PyroxModule`, `pyrox_method`, `Parameterized`) and ensemble MAP / VI | — |
+| `pyrox` | `pyrox._core`, `pyrox.inference`, `pyrox.likelihoods` | The bridge (`PyroxModule`, `pyrox_method`, `Parameterized`), ensemble MAP / VI, and the `Likelihood` / `Guide` protocols | — |
 | `pyrox-gp` | `pyrox_gp` | GP kernels (with priors), guides, likelihoods; exact, sparse, Markov, multi-output and warped GPs; non-Gaussian inference; pathwise sampling | pyrox |
 | `pyrox-nn` | `pyrox_nn` (+ `pyrox_nn.api`, `pyrox_nn.preprocessing` behind `[bnf]`) | Bayesian / uncertainty-aware layers on geonnax cores, the Bayesian Neural Field estimator, last-layer Laplace | pyrox (**never** pyrox-gp) |
 | `pyrox-lgm` | `pyrox_lgm` | Latent Gaussian models in precision form: GMRF components, PC priors, `inla()` | pyrox (**never** pyrox-gp) |
@@ -27,8 +27,10 @@ Dependencies point one way: nothing imports upward. `pyrox-gp`, `pyrox-nn` and
 `pyrox-gp` (`test_import_guard.py` in pyrox-lgm, `test_nn_import_guard.py` in
 pyrox-nn); a caller may still pass a
 `pyrox_gp` kernel to a `pyrox_nn` layer, and tests may import both.
-`pyrox` exports only `__version__`, `_core` and `inference`: the bridge's
-public home is `pyrox._core` despite the underscore. The core never imports
+`pyrox` exports only `__version__`, `_core`, `inference` and `likelihoods`: the
+bridge's public home is `pyrox._core` despite the underscore, and
+`pyrox.likelihoods` holds the `Likelihood` and `Guide` protocols (and
+`GaussianLikelihood`), which pyrox-gp re-exports. The core never imports
 gaussx, lineax, kernellib or geonnax (`packages/pyrox/tests/test_core_import_guard.py`).
 
 ## What pyrox is built on

@@ -51,7 +51,7 @@ from flowjax.bijections import AbstractBijection
 from gaussx import LGSSM, MaskedLGSSM
 from jaxtyping import Array, Bool, Float
 
-from pyrox_gp._warped import _pushforward_moments
+from pyrox_gp._markov_sites import _pushforward_moments
 
 
 def _require_flows() -> ModuleType:

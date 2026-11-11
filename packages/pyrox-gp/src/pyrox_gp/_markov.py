@@ -33,11 +33,10 @@ import jax
 import jax.numpy as jnp
 import lineax as lx
 import numpyro
-from gaussx import FilterState
+from gaussx import FilterState, SDEKernel
 from jaxtyping import Array, Float
 from numpyro import distributions as dist
-
-from pyrox_gp._protocols import Likelihood, SDEKernel
+from pyrox.likelihoods import Likelihood
 
 
 if TYPE_CHECKING:

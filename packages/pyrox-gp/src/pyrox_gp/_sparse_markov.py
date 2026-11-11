@@ -44,17 +44,19 @@ from gaussx import (
     AbstractIntegrator,
     AbstractSolverStrategy,
     DenseSolver,
+    GaussianState,
     MultivariateNormal,
+    SDEKernel,
+    expected_log_likelihood,
     gaussian_log_prob,
     sde_autocovariance,
     symmetrize,
 )
 from jaxtyping import Array, Float
+from pyrox.likelihoods import GaussianLikelihood, Guide, Likelihood
 
-from pyrox_gp._inference import _ell_numerical
-from pyrox_gp._likelihoods import GaussianLikelihood
 from pyrox_gp._markov import _require_stationary
-from pyrox_gp._protocols import Guide, Likelihood, SDEKernel
+from pyrox_gp._markov_sites import as_gaussx_likelihood
 
 
 def _psd_operator(K: Float[Array, "M M"]) -> lx.AbstractLinearOperator:
@@ -309,7 +311,11 @@ def sparse_markov_elbo(
             "(e.g. gaussx.GaussHermiteIntegrator). "
             "Pass integrator=GaussHermiteIntegrator(order=20)."
         )
-    ell = _ell_numerical(likelihood, y, f_loc, f_var, integrator)
+    # q(fₙ) = 𝒩(mₙ, vₙ) at each time, independent across sites for the ELL
+    state = GaussianState(f_loc, lx.DiagonalLinearOperator(f_var))
+    # ∑ₙ 𝔼_q[log p(yₙ ∣ fₙ)]
+    site_lik = as_gaussx_likelihood(likelihood, y)
+    ell = expected_log_likelihood(site_lik, state, integrator)
     return ell - kl
 
 

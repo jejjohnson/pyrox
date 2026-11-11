@@ -12,7 +12,7 @@ private `_*.py` modules, grouped by concept in `docs/capabilities.md`):
 
 | Concept | Module | Exemplar |
 |---|---|---|
-| Protocols | `_protocols.py` (`Kernel` = `kernellib.AbstractKernel`, `Guide`, `Likelihood`; `SDEKernel` from gaussx) | — |
+| Protocols | `_protocols.py` (`Kernel` = `kernellib.AbstractKernel`; `Guide`, `Likelihood` re-exported from `pyrox.likelihoods`; `SDEKernel` from gaussx) | — |
 | Kernels | `_kernels.py` (`_ParameterizedKernel(Parameterized, Kernel)`) | `RBF`; `Matern` for a static structural field |
 | Exact GP | `_models.py` (`GPPrior`, `ConditionedGP`, `gp_factor`, `gp_sample`) | — |
 | Guides | `_guides.py` | `FullRankGuide`, `WhitenedGuide`, `NaturalGuide` |
@@ -20,7 +20,7 @@ private `_*.py` modules, grouped by concept in `docs/capabilities.md`):
 | SVGP inference | `_inference.py` (`svgp_elbo`, `svgp_factor`, `ConjugateVI`) | — |
 | Non-Gaussian inference | `_inference_nongauss.py`, `_inference_nongauss_markov.py` | `LaplaceInference` |
 | Sparse / inducing | `_sparse.py`, `_inducing.py`, `_inducing_init.py`, `_sparse_markov.py`, `_preconditioned.py` | `FourierInducingFeatures` |
-| Markov / state space | `_markov.py`, `_markov_flow.py` | `MarkovGPPrior` |
+| Markov / state space | `_markov.py`, `_markov_flow.py`, `_markov_sites.py` (private: the gaussx per-site adapter the Markov modules use instead of the rest of pyrox-gp) | `MarkovGPPrior` |
 | Multi-output | `_multi_output.py`, `_multi_output_models.py` | `ICMKernel`, `MultiOutputGPPrior` |
 | Latent factor | `_latent_factor.py`, `_latent_factor_models.py`, `_latent_init.py` | — |
 | Pathwise | `_pathwise.py` | `PathwiseSampler` |
