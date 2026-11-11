@@ -14,7 +14,7 @@ honestly: what ran, what passed, what was skipped and why.
 uv run --group lint ruff check .          # entire repo, incl. every package's tests/ and scripts/
 uv run --group lint ruff format --check .
 make typecheck                            # ty on all four packages
-uv run pytest -m "not slow"               # what CI runs, with the 80 % coverage gate
+uv run pytest -m "not slow"               # the whole fast tier, with the 80 % coverage gate (CI runs it per package)
 ```
 
 While iterating, run the touched package's tests with `--no-cov` (a subset

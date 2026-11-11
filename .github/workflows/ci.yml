@@ -9,33 +9,156 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels the run for its previous commit; runs on
+# main are never cancelled, so every merged commit is tested.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Decide which packages' tests to run, and on which Python versions.
+  #
+  # On main every package runs on 3.12 and 3.13. On a pull request only the
+  # packages its changes can affect run, on 3.13:
+  #   - the core (packages/pyrox) or shared config (pyproject.toml, uv.lock,
+  #     conftest.py, this workflow) runs every package;
+  #   - pyrox-gp also runs pyrox-nn, whose tests import pyrox_gp;
+  #   - any package change, scripts/, plugins/ or docs/capabilities.md runs the
+  #     core suite too, because its capability index, dependency rules and
+  #     plugin-skill checks scan every package;
+  #   - other docs and notebooks run no tests.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      any: ${{ steps.select.outputs.any }}
+    steps:
+      - name: Classify changed paths
+        id: filter
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            shared:
+              - pyproject.toml
+              - uv.lock
+              - conftest.py
+              - .python-version
+              - .github/workflows/ci.yml
+            core:
+              - packages/pyrox/**
+            core_checks:
+              - scripts/**
+              - plugins/**
+              - docs/capabilities.md
+            gp:
+              - packages/pyrox-gp/**
+            nn:
+              - packages/pyrox-nn/**
+            lgm:
+              - packages/pyrox-lgm/**
+            ssm:
+              - packages/pyrox-ssm/**
+      - name: Select packages and Python versions
+        id: select
+        env:
+          EVENT: ${{ github.event_name }}
+          SHARED: ${{ steps.filter.outputs.shared }}
+          CORE: ${{ steps.filter.outputs.core }}
+          CORE_CHECKS: ${{ steps.filter.outputs.core_checks }}
+          GP: ${{ steps.filter.outputs.gp }}
+          NN: ${{ steps.filter.outputs.nn }}
+          LGM: ${{ steps.filter.outputs.lgm }}
+          SSM: ${{ steps.filter.outputs.ssm }}
+        run: |
+          all="pyrox pyrox-gp pyrox-nn pyrox-lgm pyrox-ssm"
+          if [[ "$EVENT" != "pull_request" ]]; then
+            packages="$all"
+            pythons="3.12 3.13"
+          elif [[ "$SHARED" == "true" || "$CORE" == "true" ]]; then
+            packages="$all"
+            pythons="3.13"
+          else
+            packages=""
+            [[ "$GP" == "true" ]] && packages+=" pyrox-gp pyrox-nn"
+            [[ "$NN" == "true" ]] && packages+=" pyrox-nn"
+            [[ "$LGM" == "true" ]] && packages+=" pyrox-lgm"
+            [[ "$SSM" == "true" ]] && packages+=" pyrox-ssm"
+            if [[ -n "$packages" || "$CORE_CHECKS" == "true" ]]; then
+              packages="pyrox $packages"
+            fi
+            pythons="3.13"
+          fi
+          matrix=$(jq -cn --arg pkgs "$packages" --arg pys "$pythons" '
+            ($pkgs | split(" ") | map(select(length > 0)) | unique) as $p
+            | ($pys | split(" ")) as $v
+            | {include: [$p[] as $pkg | $v[] as $py | {package: $pkg, python: $py}]}')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          if [[ $(jq '.include | length' <<< "$matrix") -gt 0 ]]; then
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "any=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Selected: $matrix"
+
+  # One job per package and Python version, in parallel. Each job measures and
+  # gates the coverage of its own package's source.
   test:
+    name: test (${{ matrix.package }}, ${{ matrix.python }})
+    needs: changes
+    if: needs.changes.outputs.any == 'true'
     runs-on: ubuntu-latest
     strategy:
-      matrix:
-        python-version: ["3.12", "3.13"]
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.changes.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: ${{ matrix.python }}
       - name: Install dependencies
         run: uv sync --group dev
       - name: Run tests with coverage
-        run: uv run pytest -v -m "not slow"
+        run: |
+          uv run pytest -v -m "not slow" -o addopts="" \
+            --cov="packages/${{ matrix.package }}/src" \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml \
+            --cov-fail-under=80 \
+            "packages/${{ matrix.package }}/tests"
       - name: Upload coverage report
-        if: matrix.python-version == '3.12'
+        if: matrix.python == '3.13'
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-report
+          name: coverage-${{ matrix.package }}
           path: coverage.xml
       - name: Upload coverage to Codecov
-        if: matrix.python-version == '3.12'
+        if: matrix.python == '3.13'
         uses: codecov/codecov-action@v7
         with:
           files: ./coverage.xml
+          flags: ${{ matrix.package }}
           fail_ci_if_error: false
+
+  # One stable check that summarises the matrix: it passes when every selected
+  # test job passed, or when the change needed no tests.
+  tests-passed:
+    name: Tests passed
+    if: always()
+    needs: [changes, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the test jobs
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          TEST: ${{ needs.test.result }}
+        run: |
+          echo "changes: $CHANGES, test: $TEST"
+          [[ "$CHANGES" == "success" ]] || exit 1
+          [[ "$TEST" == "success" || "$TEST" == "skipped" ]] || exit 1
 
   build:
     runs-on: ubuntu-latest
