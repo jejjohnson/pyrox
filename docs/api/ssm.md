@@ -186,6 +186,29 @@ def pooled_model(t, y, mask):
 
 ::: pyrox_ssm.pad_sites
 
+### A shared GP plus one GP per site
+
+When the sites share a regional signal, `y_s(t) = g(t) + h_s(t) + eps_s(t)` with one shared GP `g` and an independent GP `h_s` per site is one linear-Gaussian SSM on the merged grid of all site times: `SharedPlusSiteMarkovGP.from_sites` merges the ragged series (`NaN` and a `(T, S)` mask where a site was not observed), `as_lgssm` builds the block-diagonal transitions and the observation rows `H[s] = (H_g, 0, …, H_h at block s, …, 0)`, `log_marginal` is the exact log marginal of the observed pairs and `decompose` splits the smoothed means into `E[g | y]` and `E[h_s | y]`. The site kernel's hyperparameters are pooled (scalar leaves) or per site (leaves with a leading axis of length `S`), and each pass costs `O(T D^3)` with `D = d_g + S d_h`, so it suits a few dozen sites:
+
+```python
+import jax.numpy as jnp
+import numpyro
+import numpyro.distributions as dist
+import pyrox_ssm as pss
+
+shared = pss.MaternSDE(variance=1.0, lengthscale=30.0, order=1)
+site = pss.MaternSDE(variance=jnp.full(S, 0.3), lengthscale=5.0, order=1)  # per-site variance
+model, y_grid = pss.SharedPlusSiteMarkovGP.from_sites(shared, site, times_per_site, y_per_site)
+
+def regional_model(y_grid):
+    noise_var = numpyro.sample("noise_var", dist.LogNormal(-3.0, 1.0))
+    numpyro.factor("y", model.log_marginal(y_grid, noise_var))
+
+g_mean, h_mean = model.decompose(y_grid, jnp.asarray(0.05))         # (T,), (T, S)
+```
+
+::: pyrox_ssm.SharedPlusSiteMarkovGP
+
 ## Normalizing Kalman Filter
 
 `NormalizingKalmanPrior` wraps a `gaussx.LGSSM` (or `gaussx.MaskedLGSSM`)

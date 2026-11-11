@@ -17,6 +17,8 @@ the package whose inference recurses in time. ``pyrox_ssm`` never imports
   and `markov_laplace_factor`, the approximate evidence as a NumPyro factor.
 * Ragged sites: `pad_sites` pads per-site series to one shape and returns
   the observation mask every Markov entry point takes.
+* Shared plus per-site GPs: `SharedPlusSiteMarkovGP` builds a shared GP and
+  one GP per site as one linear-Gaussian SSM on the merged time grid.
 * The gaussx SDE kernels (`MaternSDE`, `SumSDE`, …) and the `SDEKernel`
   protocol, re-exported for convenience.
 
@@ -39,6 +41,7 @@ from gaussx import (
     SumSDE,
 )
 
+from pyrox_ssm._hierarchical import SharedPlusSiteMarkovGP
 from pyrox_ssm._inference_nongauss_markov import (
     ExpectationPropagationMarkov,
     GaussNewtonMarkovInference,
@@ -88,6 +91,7 @@ __all__ = [
     "QuasiPeriodicSDE",
     "SDEKernel",
     "SDEParams",
+    "SharedPlusSiteMarkovGP",
     "SparseConditionedMarkovGP",
     "SparseMarkovGPPrior",
     "SumSDE",
