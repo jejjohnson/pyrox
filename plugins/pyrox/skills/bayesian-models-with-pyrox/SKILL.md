@@ -44,7 +44,7 @@ a Bayesian layer, look it up:
 | An exact GP marginal likelihood or posterior | `pyrox-gp` | `GPPrior` + `gp_factor` / `gp_sample`; `GPPrior.condition(y, noise).predict(X*)` |
 | Gradient / sensitivity of a fitted GP, with uncertainty | `pyrox-gp` | `ConditionedGP.predict_gradient` (`GradientPosterior`), `predict_var_gradient`, `predict_mean_hessian` |
 | Sparse / variational GPs | `pyrox-gp` | `SparseGPPrior`, the guides (`WhitenedGuide`, `NaturalGuide`, …), `svgp_factor`, `svgp_elbo` |
-| Long time series (linear in N) | `pyrox-ssm` | `pyrox_ssm.MarkovGPPrior` + `markov_gp_factor`, SDE kernels (`MaternSDE`, …) |
+| Long time series (linear in N) | `pyrox-ssm` | `pyrox_ssm.MarkovGPPrior` + `markov_gp_factor`, SDE kernels (`MaternSDE`, …); `mask=` skips steps and `pad_sites` pads ragged per-site series |
 | Non-Gaussian likelihoods | `pyrox-gp` | the likelihoods + `LaplaceInference`, `ExpectationPropagation`, `GaussNewtonInference` |
 | Multi-output GPs, pathwise samples | `pyrox-gp` | `MultiOutputGPPrior`, `LMCKernel`, `OILMMGPPrior`; `PathwiseSampler` |
 | Bayesian NN layers | `pyrox-nn` | `DenseReparameterization`, `DenseFlipout`, `BayesianSIREN`, random-feature layers, `RandomFeatureGaussianProcess` (SNGP), `DeepVSSGP` |

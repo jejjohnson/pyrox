@@ -34,7 +34,7 @@ import jax.numpy as jnp
 import lineax as lx
 import numpyro
 from gaussx import FilterState, SDEKernel
-from jaxtyping import Array, Float
+from jaxtyping import Array, Bool, Float
 from numpyro import distributions as dist
 from pyrox.likelihoods import Likelihood
 
@@ -51,6 +51,8 @@ class _NonGaussMarkovStrategy(Protocol):
         prior: MarkovGPPrior,
         likelihood: Likelihood,
         y: Float[Array, " N"],
+        *,
+        mask: Bool[Array, " N"] | None = None,
     ) -> NonGaussConditionedMarkovGP: ...
 
 
@@ -195,6 +197,45 @@ def _kernel_initial_covariance(
     return initial_covariance()
 
 
+def _observation_mask(
+    mask: Bool[Array, " N"] | None, times: Float[Array, " N"]
+) -> Bool[Array, " N"]:
+    """The per-step observation mask, all ``True`` when ``mask`` is ``None``.
+
+    Args:
+        mask: ``True`` where a step is observed, or ``None`` for every step.
+        times: The grid the mask is laid over, which sets its shape.
+
+    Returns:
+        A boolean mask shaped like ``times``.
+
+    Raises:
+        ValueError: If ``mask`` is not shaped like ``times``.
+    """
+    if mask is None:
+        return jnp.ones(times.shape, dtype=bool)
+    mask = jnp.asarray(mask).astype(bool)
+    if mask.shape != times.shape:
+        raise ValueError(
+            f"mask has shape {tuple(mask.shape)!r}, but the observations are "
+            f"laid over times of shape {tuple(times.shape)!r}; the mask marks "
+            "which steps are observed, so the two must match."
+        )
+    return mask
+
+
+def _sanitise(
+    y: Float[Array, " N"], mask: Bool[Array, " N"] | None
+) -> Float[Array, " N"]:
+    """Zero the masked entries of ``y``.
+
+    A ``NaN`` placeholder there then never reaches a value or a gradient.
+    """
+    if mask is None:
+        return y
+    return jnp.where(_observation_mask(mask, y), y, jnp.zeros((), dtype=y.dtype))
+
+
 def _build_dt_full(times: Float[Array, " N"]) -> Float[Array, " N"]:
     """Pad ``diff(times)`` with a leading zero so step 0 is the prior."""
     dt = jnp.diff(times)
@@ -239,6 +280,13 @@ class MarkovGPPrior(eqx.Module):
             overflow their quadrature under an exponential-link likelihood
             — as a stationary kernel with an equally large variance does.
 
+    Every method that reads observations (`filter`, `smooth`,
+    `log_marginal`, `condition`, `condition_nongauss`) takes an optional
+    ``mask`` of shape ``(N,)``. A masked step runs the Kalman predict only,
+    so it adds nothing to the log marginal, and its observation is replaced
+    by zero before any arithmetic, so a ``NaN`` placeholder there is safe.
+    `pyrox_ssm.pad_sites` builds such masks for ragged per-site series.
+
     Examples:
         >>> import jax.numpy as jnp
         >>> from pyrox_ssm import MaternSDE, MarkovGPPrior
@@ -247,6 +295,8 @@ class MarkovGPPrior(eqx.Module):
         >>> prior = MarkovGPPrior(sde, times)
         >>> y = jnp.sin(times) + 0.05 * jnp.cos(3.0 * times)
         >>> log_marg = prior.log_marginal(y, jnp.asarray(0.01))
+        >>> mask = jnp.arange(50) % 5 != 0  # every fifth step unobserved
+        >>> log_marg_masked = prior.log_marginal(y, jnp.asarray(0.01), mask=mask)
 
     Notes:
         The solver-strategy plumbing used by `pyrox_gp.GPPrior` does
@@ -336,6 +386,8 @@ class MarkovGPPrior(eqx.Module):
         self,
         y: Float[Array, " N"],
         noise_var: Float[Array, ""],
+        *,
+        mask: Bool[Array, " N"] | None = None,
     ) -> tuple[
         Float[Array, "N d"],
         Float[Array, "N d d"],
@@ -343,51 +395,128 @@ class MarkovGPPrior(eqx.Module):
         Float[Array, "N d d"],
         Float[Array, ""],
     ]:
-        """Run the forward Kalman filter on the training grid.
+        r"""Run the forward Kalman filter on the training grid.
+
+        With $o_k \in \{0, 1\}$ the mask, an observed step ($o_k = 1$)
+        runs the usual update and a masked step ($o_k = 0$) runs the
+        predict only,
+
+        $$
+        \mu_k^+ = \mu_k^-, \qquad P_k^+ = P_k^-, \qquad
+        \log p(y \mid \theta)
+          = \sum_k o_k \log \mathcal{N}(y_k;\, H \mu_k^-,\, H P_k^- H^\top + R).
+        $$
+
+        Args:
+            y: Observations of shape ``(N,)``. Masked entries are replaced
+                by zero before the residual, so they may be ``NaN``.
+            noise_var: Observation noise variance $\sigma_n^2$.
+            mask: Optional ``(N,)`` boolean mask, ``True`` where a step is
+                observed. ``None`` observes every step.
 
         Returns:
             Tuple ``(m_pred, P_pred, m_filt, P_filt, log_marginal)`` where
             each ``*_pred`` / ``*_filt`` is shaped ``(N, d)`` or
             ``(N, d, d)`` and ``log_marginal`` is the scalar log-likelihood
-            ``log p(y | theta)``.
+            ``log p(y | theta)`` of the observed steps.
+
+        Raises:
+            ValueError: If ``mask`` is not shaped like ``times``.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> from pyrox_ssm import MaternSDE, MarkovGPPrior
+            >>> prior = MarkovGPPrior(MaternSDE(1.0, 0.5, order=1), jnp.arange(4.0))
+            >>> y = jnp.array([0.1, jnp.nan, 0.3, 0.2])
+            >>> mask = jnp.array([True, False, True, True])
+            >>> *_, log_marg = prior.filter(y, jnp.asarray(0.1), mask=mask)
         """
         F, _L, H, _Qc, _P_inf = self.sde_kernel.sde_params()
         init_cov = self.initial_covariance()
         dt_full = _build_dt_full(self.times)
         A_seq, Q_seq = self.sde_kernel.discretise_sequence(dt_full)
-        residual = self._residual(y)
-        mask = jnp.ones_like(self.times)
+        residual = self._residual(_sanitise(y, mask))
+        observed = _observation_mask(mask, self.times)
         R_seq = jnp.broadcast_to(self._R(noise_var), self.times.shape)
-        return _kalman_filter(F, H, init_cov, A_seq, Q_seq, residual, mask, R_seq)
+        return _kalman_filter(F, H, init_cov, A_seq, Q_seq, residual, observed, R_seq)
 
     def log_marginal(
         self,
         y: Float[Array, " N"],
         noise_var: Float[Array, ""],
+        *,
+        mask: Bool[Array, " N"] | None = None,
     ) -> Float[Array, ""]:
-        r"""Marginal log-likelihood ``log p(y | theta)`` via Kalman filtering."""
-        *_, log_marg = self.filter(y, noise_var)
+        r"""Marginal log-likelihood ``log p(y | theta)`` via Kalman filtering.
+
+        A masked step contributes nothing,
+
+        $$
+        \log p(y \mid \theta)
+          = \sum_k o_k \log \mathcal{N}(y_k;\, H \mu_k^-,\, H P_k^- H^\top + R),
+        $$
+
+        so padding a series after its last observation and masking the
+        padded steps leaves the result unchanged.
+
+        Args:
+            y: Observations of shape ``(N,)``; masked entries may be ``NaN``.
+            noise_var: Observation noise variance $\sigma_n^2$.
+            mask: Optional ``(N,)`` boolean mask, ``True`` where observed.
+
+        Returns:
+            The scalar log marginal of the observed steps.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> from pyrox_ssm import MaternSDE, MarkovGPPrior
+            >>> prior = MarkovGPPrior(MaternSDE(1.0, 0.5, order=1), jnp.arange(4.0))
+            >>> y = jnp.array([0.1, 0.4, 0.3, jnp.nan])
+            >>> mask = jnp.array([True, True, True, False])
+            >>> log_marg = prior.log_marginal(y, jnp.asarray(0.1), mask=mask)
+        """
+        *_, log_marg = self.filter(y, noise_var, mask=mask)
         return log_marg
 
     def smooth(
         self,
         y: Float[Array, " N"],
         noise_var: Float[Array, ""],
+        *,
+        mask: Bool[Array, " N"] | None = None,
     ) -> tuple[Float[Array, "N d"], Float[Array, "N d d"], Float[Array, ""]]:
-        """Run filter + RTS smoother on the training grid.
+        r"""Run filter + RTS smoother on the training grid.
 
-        Returns ``(m_smooth, P_smooth, log_marginal)`` over the training
-        times.
+        Masked steps run the predict only (see `filter`), so their smoothed
+        moments are interpolations from the observed neighbours.
+
+        Args:
+            y: Observations of shape ``(N,)``; masked entries may be ``NaN``.
+            noise_var: Observation noise variance $\sigma_n^2$.
+            mask: Optional ``(N,)`` boolean mask, ``True`` where observed.
+
+        Returns:
+            ``(m_smooth, P_smooth, log_marginal)`` over the training times,
+            shaped ``(N, d)``, ``(N, d, d)`` and ``()``.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> from pyrox_ssm import MaternSDE, MarkovGPPrior
+            >>> prior = MarkovGPPrior(MaternSDE(1.0, 0.5, order=1), jnp.arange(4.0))
+            >>> mask = jnp.array([True, False, True, True])
+            >>> m, P, _ = prior.smooth(jnp.ones(4), jnp.asarray(0.1), mask=mask)
+            >>> m.shape, P.shape
+            ((4, 2), (4, 2, 2))
         """
         F, _L, H, _Qc, _P_inf = self.sde_kernel.sde_params()
         init_cov = self.initial_covariance()
         dt_full = _build_dt_full(self.times)
         A_seq, Q_seq = self.sde_kernel.discretise_sequence(dt_full)
-        residual = self._residual(y)
-        mask = jnp.ones_like(self.times)
+        residual = self._residual(_sanitise(y, mask))
+        observed = _observation_mask(mask, self.times)
         R_seq = jnp.broadcast_to(self._R(noise_var), self.times.shape)
         m_pred, P_pred, m_filt, P_filt, log_marg = _kalman_filter(
-            F, H, init_cov, A_seq, Q_seq, residual, mask, R_seq
+            F, H, init_cov, A_seq, Q_seq, residual, observed, R_seq
         )
         m_smooth, P_smooth = _rts_smoother(m_pred, P_pred, m_filt, P_filt, A_seq)
         return m_smooth, P_smooth, log_marg
@@ -396,16 +525,39 @@ class MarkovGPPrior(eqx.Module):
         self,
         y: Float[Array, " N"],
         noise_var: Float[Array, ""],
+        *,
+        mask: Bool[Array, " N"] | None = None,
     ) -> ConditionedMarkovGP:
-        """Condition on Gaussian-likelihood observations via filter + smoother."""
-        m_smooth, P_smooth, log_marg = self.smooth(y, noise_var)
+        """Condition on Gaussian-likelihood observations via filter + smoother.
+
+        Args:
+            y: Observations of shape ``(N,)``; masked entries may be ``NaN``.
+            noise_var: Observation noise variance.
+            mask: Optional ``(N,)`` boolean mask, ``True`` where observed. The
+                conditioned GP keeps it, so `ConditionedMarkovGP.predict`
+                treats the masked steps as unobserved too.
+
+        Returns:
+            The `ConditionedMarkovGP`, holding ``y`` with its masked entries
+            set to zero.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> from pyrox_ssm import MaternSDE, MarkovGPPrior
+            >>> prior = MarkovGPPrior(MaternSDE(1.0, 0.5, order=1), jnp.arange(4.0))
+            >>> mask = jnp.array([True, False, True, True])
+            >>> cond = prior.condition(jnp.ones(4), jnp.asarray(0.1), mask=mask)
+            >>> mean, var = cond.predict(jnp.array([1.0, 5.0]))
+        """
+        m_smooth, P_smooth, log_marg = self.smooth(y, noise_var, mask=mask)
         return ConditionedMarkovGP(
             prior=self,
-            y=y,
+            y=_sanitise(y, mask),
             noise_var=jnp.asarray(noise_var),
             smoothed_means=m_smooth,
             smoothed_covs=P_smooth,
             log_marginal=log_marg,
+            mask=None if mask is None else _observation_mask(mask, self.times),
         )
 
     def condition_nongauss(
@@ -414,6 +566,7 @@ class MarkovGPPrior(eqx.Module):
         y: Float[Array, " N"],
         *,
         strategy: _NonGaussMarkovStrategy,
+        mask: Bool[Array, " N"] | None = None,
     ) -> NonGaussConditionedMarkovGP:
         """Condition on a non-Gaussian likelihood via a site-based strategy.
 
@@ -427,8 +580,35 @@ class MarkovGPPrior(eqx.Module):
         `pyrox_ssm.NonGaussConditionedMarkovGP` with the same
         ``predict`` API as the Gaussian-likelihood
         `ConditionedMarkovGP`.
+
+        Args:
+            likelihood: Any scalar-latent `pyrox.likelihoods.Likelihood`.
+            y: Observations of shape ``(N,)``; masked entries may be ``NaN``.
+            strategy: The site-based strategy that fits the sites.
+            mask: Optional ``(N,)`` boolean mask, ``True`` where observed. A
+                masked site has zero gradient and curvature, so its site
+                precision is zero and the filter skips its update. Passed
+                to ``strategy.fit`` only when given, so a strategy without
+                a ``mask`` keyword still works unmasked.
+
+        Returns:
+            The `pyrox_ssm.NonGaussConditionedMarkovGP` from the strategy.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> from pyrox_gp import BernoulliLikelihood
+            >>> from pyrox_ssm import LaplaceMarkovInference, MaternSDE, MarkovGPPrior
+            >>> prior = MarkovGPPrior(MaternSDE(1.0, 0.5, order=1), jnp.arange(4.0))
+            >>> y = jnp.array([1.0, 0.0, jnp.nan, 1.0])
+            >>> cond = prior.condition_nongauss(
+            ...     BernoulliLikelihood(), y,
+            ...     strategy=LaplaceMarkovInference(),
+            ...     mask=jnp.array([True, True, False, True]),
+            ... )
         """
-        return strategy.fit(self, likelihood, y)
+        if mask is None:
+            return strategy.fit(self, likelihood, y)
+        return strategy.fit(self, likelihood, y, mask=mask)
 
     def log_prob(self, f: Float[Array, " N"]) -> Float[Array, ""]:
         r"""Log density of an exact-state path $f(t_n) = H x_n$ under the prior.
@@ -499,6 +679,9 @@ class ConditionedMarkovGP(eqx.Module):
         smoothed_covs: ``(N, d, d)`` smoothed state covariances at training
             times.
         log_marginal: Scalar $\\log p(y \\mid \\theta)$.
+        mask: Optional ``(N,)`` boolean observation mask from
+            `MarkovGPPrior.condition`; `predict` leaves the masked steps
+            out of the update. ``None`` means every step is observed.
     """
 
     prior: MarkovGPPrior
@@ -507,6 +690,7 @@ class ConditionedMarkovGP(eqx.Module):
     smoothed_means: Float[Array, "N d"]
     smoothed_covs: Float[Array, "N d d"]
     log_marginal: Float[Array, ""]
+    mask: Bool[Array, " N"] | None = None
 
     def predict(
         self,
@@ -535,9 +719,12 @@ class ConditionedMarkovGP(eqx.Module):
         order = jnp.argsort(merged, stable=True)
         merged_sorted = merged[order]
 
-        is_obs = jnp.concatenate(
-            [jnp.ones(N, dtype=times.dtype), jnp.zeros(M, dtype=times.dtype)]
-        )[order]
+        observed = (
+            jnp.ones(N, dtype=times.dtype)
+            if self.mask is None
+            else self.mask.astype(times.dtype)
+        )
+        is_obs = jnp.concatenate([observed, jnp.zeros(M, dtype=times.dtype)])[order]
         residual_full = jnp.concatenate(
             [self.y - self.prior.mean(times), jnp.zeros(M, dtype=self.y.dtype)]
         )[order]
@@ -567,15 +754,48 @@ def markov_gp_factor(
     prior: MarkovGPPrior,
     y: Float[Array, " N"],
     noise_var: Float[Array, ""],
+    *,
+    mask: Bool[Array, " N"] | None = None,
 ) -> None:
-    """Register the collapsed Markov-GP marginal log-likelihood with NumPyro.
+    r"""Register the collapsed Markov-GP marginal log-likelihood with NumPyro.
 
     Computes ``log p(y | times, theta)`` via Kalman filtering and adds it as
     ``numpyro.factor(name, ...)``. Use this inside a NumPyro model for
     Gaussian-likelihood temporal GP regression — the latent function is
-    marginalized analytically.
+    marginalized analytically. With a mask, only the observed steps score,
+
+    $$
+    \log p(y \mid \theta)
+      = \sum_k o_k \log \mathcal{N}(y_k;\, H \mu_k^-,\, H P_k^- H^\top + R).
+    $$
+
+    Args:
+        name: The factor site name.
+        prior: The `MarkovGPPrior` over the observation times.
+        y: Observations of shape ``(N,)``; masked entries may be ``NaN``.
+        noise_var: Observation noise variance.
+        mask: Optional ``(N,)`` boolean mask, ``True`` where observed.
+
+    Examples:
+        One factor per site over padded ragged series:
+
+        >>> import jax
+        >>> import jax.numpy as jnp
+        >>> import numpyro
+        >>> import numpyro.distributions as dist
+        >>> import pyrox_ssm as pss
+        >>> t, y, mask = pss.pad_sites(
+        ...     [jnp.arange(5.0), jnp.arange(3.0)], [jnp.ones(5), jnp.zeros(3)]
+        ... )
+        >>> def model():
+        ...     with numpyro.plate("site", 2):
+        ...         ell = numpyro.sample("lengthscale", dist.LogNormal(0.0, 1.0))
+        ...     def site(ell_s, t_s, y_s, m_s):
+        ...         prior = pss.MarkovGPPrior(pss.MaternSDE(1.0, ell_s, order=1), t_s)
+        ...         return prior.log_marginal(y_s, jnp.asarray(0.1), mask=m_s)
+        ...     numpyro.factor("y", jax.vmap(site)(ell, t, y, mask).sum())
     """
-    numpyro.factor(name, prior.log_marginal(y, noise_var))
+    numpyro.factor(name, prior.log_marginal(y, noise_var, mask=mask))
 
 
 def markov_gp_sample(

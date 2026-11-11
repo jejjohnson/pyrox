@@ -52,10 +52,10 @@ from gaussx import (
     sde_autocovariance,
     symmetrize,
 )
-from jaxtyping import Array, Float
+from jaxtyping import Array, Bool, Float
 from pyrox.likelihoods import GaussianLikelihood, Guide, Likelihood
 
-from pyrox_ssm._markov import _require_stationary
+from pyrox_ssm._markov import _observation_mask, _require_stationary
 from pyrox_ssm._markov_sites import as_gaussx_likelihood
 
 
@@ -250,6 +250,7 @@ def sparse_markov_elbo(
     y: Float[Array, " N"],
     *,
     integrator: AbstractIntegrator | None = None,
+    mask: Bool[Array, " N"] | None = None,
 ) -> Float[Array, ""]:
     r"""Sparse variational ELBO for `SparseMarkovGPPrior`.
 
@@ -266,6 +267,10 @@ def sparse_markov_elbo(
                 - \mathrm{KL}[q(u) \\| p(u)].
     $$
 
+    With an observation mask $o_n \in \{0, 1\}$ only the observed points
+    score, $\sum_n o_n\, \mathbb{E}_{q(f_n)}[\log p(y_n \mid f_n)]$; the
+    KL term is unchanged.
+
     Unlike `pyrox_gp.svgp_elbo`, ``times`` stays as a 1-D vector
     of shape ``(N,)`` — the SDE-pair autocov works on raw 1-D times and
     has no need for a feature dimension.
@@ -280,13 +285,28 @@ def sparse_markov_elbo(
         integrator: ``gaussx`` integrator for non-conjugate
             likelihoods. ``None`` is fine for
             `pyrox.likelihoods.GaussianLikelihood`.
+        mask: Optional ``(N,)`` boolean mask, ``True`` where a point is
+            observed. Masked entries of ``y`` may be ``NaN``; they are
+            replaced before any arithmetic.
 
     Returns:
         Scalar ELBO value (higher is better).
 
     Raises:
         ValueError: If a non-conjugate likelihood is used without an
-            integrator.
+            integrator, or if ``mask`` is not shaped like ``y``.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> from pyrox.likelihoods import GaussianLikelihood
+        >>> from pyrox_gp import FullRankGuide
+        >>> from pyrox_ssm import MaternSDE, SparseMarkovGPPrior, sparse_markov_elbo
+        >>> prior = SparseMarkovGPPrior(MaternSDE(1.0, 0.5, order=1), jnp.arange(3.0))
+        >>> times = jnp.linspace(0.0, 2.0, 6)
+        >>> y = jnp.array([0.1, jnp.nan, 0.3, 0.2, 0.0, 0.4])
+        >>> mask = ~jnp.isnan(y)
+        >>> guide, lik = FullRankGuide.init(3), GaussianLikelihood(0.1)
+        >>> elbo = sparse_markov_elbo(prior, guide, lik, times, y, mask=mask)
     """
     from gaussx import variational_elbo_gaussian
 
@@ -297,13 +317,31 @@ def sparse_markov_elbo(
     kl = guide.kl_divergence(K_zz_op)  # ty: ignore[unresolved-attribute]
 
     if isinstance(likelihood, GaussianLikelihood):
-        return variational_elbo_gaussian(
-            y,
-            f_loc,
-            f_var,
-            likelihood.noise_var,  # ty: ignore[invalid-argument-type]
-            kl,
-        )
+        if mask is None:
+            return variational_elbo_gaussian(
+                y,
+                f_loc,
+                f_var,
+                likelihood.noise_var,  # ty: ignore[invalid-argument-type]
+                kl,
+            )
+        observed = _observation_mask(mask, jnp.asarray(y))
+        y_obs = jnp.where(observed, y, jnp.zeros((), dtype=f_loc.dtype))
+        no_kl = jnp.zeros((), dtype=f_loc.dtype)
+
+        def point_ell(y_n, m_n, v_n):
+            # 𝔼_q[log 𝒩(yₙ; fₙ, σ²)] for one point: the ELBO of a single site
+            return variational_elbo_gaussian(
+                y_n[None],
+                m_n[None],
+                v_n[None],
+                likelihood.noise_var,  # ty: ignore[invalid-argument-type]
+                no_kl,
+            )
+
+        # ∑ₙ oₙ 𝔼_q[log 𝒩(yₙ; fₙ, σ²)]
+        ell_points = jax.vmap(point_ell)(y_obs, f_loc, f_var)
+        return jnp.sum(jnp.where(observed, ell_points, 0.0)) - kl
 
     if integrator is None:
         raise ValueError(
@@ -313,8 +351,10 @@ def sparse_markov_elbo(
         )
     # q(fₙ) = 𝒩(mₙ, vₙ) at each time, independent across sites for the ELL
     state = GaussianState(f_loc, lx.DiagonalLinearOperator(f_var))
-    # ∑ₙ 𝔼_q[log p(yₙ ∣ fₙ)]
-    site_lik = as_gaussx_likelihood(likelihood, y)
+    # ∑ₙ oₙ 𝔼_q[log p(yₙ ∣ fₙ)]
+    if mask is not None:
+        _observation_mask(mask, jnp.asarray(y))  # shape check
+    site_lik = as_gaussx_likelihood(likelihood, y, mask=mask)
     ell = expected_log_likelihood(site_lik, state, integrator)
     return ell - kl
 
@@ -328,9 +368,45 @@ def sparse_markov_factor(
     y: Float[Array, " N"],
     *,
     integrator: AbstractIntegrator | None = None,
+    mask: Bool[Array, " N"] | None = None,
 ) -> None:
-    """Register `sparse_markov_elbo` as a NumPyro factor site."""
+    r"""Register `sparse_markov_elbo` as a NumPyro factor site.
+
+    With a mask, only the observed points score:
+
+    $$
+    \mathcal{L} = \sum_n o_n\, \mathbb{E}_{q(f_n)}[\log p(y_n \mid f_n)]
+                - \mathrm{KL}[q(u) \| p(u)].
+    $$
+
+    Args:
+        name: The factor site name.
+        prior: `SparseMarkovGPPrior` over an SDE kernel and inducing grid.
+        guide: Variational guide over inducing values.
+        likelihood: Observation model.
+        times: Training times of shape ``(N,)``.
+        y: Observations of shape ``(N,)``; masked entries may be ``NaN``.
+        integrator: ``gaussx`` integrator for non-conjugate likelihoods.
+        mask: Optional ``(N,)`` boolean mask, ``True`` where observed.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> from numpyro import handlers
+        >>> from pyrox.likelihoods import GaussianLikelihood
+        >>> from pyrox_gp import FullRankGuide
+        >>> from pyrox_ssm import MaternSDE, SparseMarkovGPPrior, sparse_markov_factor
+        >>> prior = SparseMarkovGPPrior(MaternSDE(1.0, 0.5, order=1), jnp.arange(3.0))
+        >>> times, y = jnp.linspace(0.0, 2.0, 6), jnp.ones(6)
+        >>> mask = jnp.array([True, True, False, True, True, True])
+        >>> with handlers.trace() as tr:
+        ...     sparse_markov_factor(
+        ...         "elbo", prior, FullRankGuide.init(3), GaussianLikelihood(0.1),
+        ...         times, y, mask=mask,
+        ...     )
+    """
     numpyro.factor(
         name,
-        sparse_markov_elbo(prior, guide, likelihood, times, y, integrator=integrator),
+        sparse_markov_elbo(
+            prior, guide, likelihood, times, y, integrator=integrator, mask=mask
+        ),
     )
