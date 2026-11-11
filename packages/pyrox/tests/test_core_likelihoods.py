@@ -1,4 +1,4 @@
-"""``pyrox.likelihoods``: the observation-model and guide protocols (#361)."""
+"""``pyrox.likelihoods``: the observation-model and guide protocols."""
 
 from __future__ import annotations
 

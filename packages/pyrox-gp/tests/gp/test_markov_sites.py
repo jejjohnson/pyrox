@@ -1,6 +1,6 @@
-"""The Markov track's per-site numerics on gaussx, and its import boundary (#361).
+"""The Markov track's per-site numerics on gaussx, and its import boundary.
 
-The four Markov modules move to pyrox-ssm in #363, which may import only the
+The four Markov modules are moving to pyrox-ssm, which may import only the
 pyrox core and gaussx. Here: an AST scan that they (and `_markov_sites`, which
 moves with them) import nothing else from pyrox-gp, and the equivalence of
 the gaussx adapter with the pyrox-gp helpers it replaced. Every equivalence is
@@ -43,7 +43,7 @@ from pyrox_gp._warped import _pushforward_moments as _warped_pushforward_moments
 
 
 SRC = Path(pyrox_gp.__file__).parent
-# The modules #363 moves to pyrox-ssm, and the helpers that move with them.
+# The modules that move to pyrox-ssm, and the helpers that move with them.
 MARKOV_MODULES = (
     "_markov",
     "_sparse_markov",
