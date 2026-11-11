@@ -44,21 +44,6 @@ accept any ``gaussx.AbstractSolverStrategy``; the default is
 ``gaussx.DenseSolver()``.
 """
 
-# State-space (SDE) kernels live in `gaussx._ssm` since gaussx
-# 0.0.11; re-export the public names here so ``pyrox_gp.MaternSDE`` etc.
-# keep resolving for downstream callers.
-from gaussx import (
-    ConstantSDE,
-    CosineSDE,
-    IntegratedWienerSDE,
-    MaternSDE,
-    PeriodicSDE,
-    ProductSDE,
-    QuasiPeriodicSDE,
-    SDEParams,
-    SumSDE,
-)
-
 from pyrox_gp._guides import (
     DeltaGuide,
     FullRankGuide,
@@ -88,13 +73,6 @@ from pyrox_gp._inference_nongauss import (
     NonGaussConditionedGP,
     PosteriorLinearization,
     QuasiNewtonInference,
-)
-from pyrox_gp._inference_nongauss_markov import (
-    ExpectationPropagationMarkov,
-    GaussNewtonMarkovInference,
-    LaplaceMarkovInference,
-    NonGaussConditionedMarkovGP,
-    PosteriorLinearizationMarkov,
 )
 from pyrox_gp._kernels import (
     RBF,
@@ -132,16 +110,6 @@ from pyrox_gp._likelihoods import (
     SoftmaxLikelihood,
     StudentTLikelihood,
 )
-from pyrox_gp._markov import (
-    ConditionedMarkovGP,
-    MarkovGPPrior,
-    markov_gp_factor,
-    markov_gp_sample,
-)
-from pyrox_gp._markov_flow import (
-    NormalizingKalmanPrior,
-    normalizing_kalman_factor,
-)
 from pyrox_gp._models import (
     ConditionedGP,
     GPPrior,
@@ -176,15 +144,8 @@ from pyrox_gp._protocols import (
     Guide,
     Kernel,
     Likelihood,
-    SDEKernel,
 )
 from pyrox_gp._sparse import SparseGPPrior
-from pyrox_gp._sparse_markov import (
-    SparseConditionedMarkovGP,
-    SparseMarkovGPPrior,
-    sparse_markov_elbo,
-    sparse_markov_factor,
-)
 from pyrox_gp._warped import (
     WarpedGaussianLikelihood,
     warped_predictive_moments,
@@ -193,47 +154,83 @@ from pyrox_gp._warped import (
 
 __version__ = "0.2.0"  # x-release-please-version
 
+# The Markov-GP track and the SDE kernels moved to pyrox-ssm with no
+# deprecation window: pyrox-gp cannot re-export from a sibling package.
+_MOVED_TO_SSM = frozenset(
+    {
+        "ConditionedMarkovGP",
+        "ConstantSDE",
+        "CosineSDE",
+        "ExpectationPropagationMarkov",
+        "GaussNewtonMarkovInference",
+        "IntegratedWienerSDE",
+        "LaplaceMarkovInference",
+        "MarkovGPPrior",
+        "MaternSDE",
+        "NonGaussConditionedMarkovGP",
+        "NormalizingKalmanPrior",
+        "PeriodicSDE",
+        "PosteriorLinearizationMarkov",
+        "ProductSDE",
+        "QuasiPeriodicSDE",
+        "SDEKernel",
+        "SDEParams",
+        "SparseConditionedMarkovGP",
+        "SparseMarkovGPPrior",
+        "SumSDE",
+        "markov_gp_factor",
+        "markov_gp_sample",
+        "normalizing_kalman_factor",
+        "sparse_markov_elbo",
+        "sparse_markov_factor",
+    }
+)
+_SSM_FLOWS = frozenset({"NormalizingKalmanPrior", "normalizing_kalman_factor"})
+
+
+def __getattr__(name: str):
+    """Raise an `ImportError` naming the pyrox-ssm home of a moved name."""
+    if name in _MOVED_TO_SSM:
+        module = "pyrox_ssm.flows" if name in _SSM_FLOWS else "pyrox_ssm"
+        raise ImportError(
+            f"pyrox_gp.{name} moved to pyrox-ssm; install pyrox-ssm and use "
+            f"`from {module} import {name}`."
+        )
+    raise AttributeError(f"module 'pyrox_gp' has no attribute {name!r}")
+
+
 __all__ = [
     "RBF",
     "BernoulliLikelihood",
     "ConditionedGP",
     "ConditionedLatentFactorGP",
-    "ConditionedMarkovGP",
     "ConditionedOILMMGP",
     "ConjugateVI",
     "Constant",
-    "ConstantSDE",
     "Cosine",
-    "CosineSDE",
     "DecoupledInducingFeatures",
     "DecoupledPathwiseSampler",
     "DeltaGuide",
     "DistLikelihood",
     "ExpectationPropagation",
-    "ExpectationPropagationMarkov",
     "FourierInducingFeatures",
     "FullRankGuide",
     "GPPrior",
     "GaussNewtonInference",
-    "GaussNewtonMarkovInference",
     "GaussianLikelihood",
     "GradientPosterior",
     "Guide",
     "HeteroscedasticGaussianLikelihood",
     "ICMKernel",
     "InducingFeatures",
-    "IntegratedWienerSDE",
     "Kernel",
     "LMCKernel",
     "LaplaceInference",
-    "LaplaceMarkovInference",
     "LaplacianInducingFeatures",
     "LatentFactorGPPrior",
     "Likelihood",
     "Linear",
-    "MarkovGPPrior",
     "Matern",
-    "MaternSDE",
     "MeanFieldGuide",
     "MultiOutputConditionedGP",
     "MultiOutputGPPrior",
@@ -241,33 +238,22 @@ __all__ = [
     "MultiOutputSparseGPPrior",
     "NaturalGuide",
     "NonGaussConditionedGP",
-    "NonGaussConditionedMarkovGP",
-    "NormalizingKalmanPrior",
     "OILMMGPPrior",
     "OILMMKernel",
     "PathwiseFunction",
     "PathwiseSampler",
     "Periodic",
-    "PeriodicSDE",
     "PoissonLikelihood",
     "Polynomial",
     "PosteriorLinearization",
-    "PosteriorLinearizationMarkov",
-    "ProductSDE",
     "QuasiNewtonInference",
-    "QuasiPeriodicSDE",
     "RationalQuadratic",
-    "SDEKernel",
-    "SDEParams",
     "SharedInducingPoints",
     "SlepianInducingFeatures",
     "SoftmaxLikelihood",
-    "SparseConditionedMarkovGP",
     "SparseGPPrior",
-    "SparseMarkovGPPrior",
     "SphericalHarmonicInducingFeatures",
     "StudentTLikelihood",
-    "SumSDE",
     "WarpedGaussianLikelihood",
     "White",
     "WhitenedGuide",
@@ -283,15 +269,10 @@ __all__ = [
     "lfr_factor",
     "lfr_model",
     "lfr_predictive_moments",
-    "markov_gp_factor",
-    "markov_gp_sample",
     "mo_gp_factor",
     "mo_svgp_elbo",
     "mo_svgp_factor",
-    "normalizing_kalman_factor",
     "preconditioned_cg_solver",
-    "sparse_markov_elbo",
-    "sparse_markov_factor",
     "svgp_elbo",
     "svgp_factor",
     "warp_to_base",

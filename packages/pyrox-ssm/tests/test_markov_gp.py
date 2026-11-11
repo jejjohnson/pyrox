@@ -9,15 +9,15 @@ posterior variance, all to numerical precision.
 from __future__ import annotations
 
 import equinox as eqx
+import gaussx
 import jax
 import jax.numpy as jnp
 import jax.scipy.linalg as jsl
 import numpyro
 import pytest
 from gaussx import SDEParams
-from kernellib.functional import matern_kernel
 from numpyro.infer.util import log_density
-from pyrox_gp import (
+from pyrox_ssm import (
     ConditionedMarkovGP,
     IntegratedWienerSDE,
     MarkovGPPrior,
@@ -26,6 +26,7 @@ from pyrox_gp import (
     markov_gp_factor,
     markov_gp_sample,
 )
+from ssm_reference import matern_kernel
 
 
 jax.config.update("jax_enable_x64", True)
@@ -169,6 +170,29 @@ def test_predict_off_grid_matches_dense(order: int, nu: float) -> None:
     assert jnp.allclose(v_kf, v_dense, atol=1e-7)
 
 
+@pytest.mark.parametrize("order", [0, 1, 2])
+def test_kalman_and_rts_match_the_sde_autocovariance_gram(order: int) -> None:
+    """Kᵢⱼ = H exp(F_c |tᵢ − tⱼ|) Σ∞ Hᵀ, the Gram of the SDE's own autocovariance."""
+    sigma2, ell, noise_var = 0.7, 0.4, jnp.asarray(0.05)
+    times = jnp.array([0.0, 0.13, 0.55, 1.2, 1.9, 2.5, 3.7, 4.2])
+    y = jnp.sin(2.0 * times) + 0.1 * jax.random.normal(jax.random.PRNGKey(0), (8,))
+    sde = MaternSDE(variance=sigma2, lengthscale=ell, order=order)
+    prior = MarkovGPPrior(sde, times)
+
+    K = gaussx.sde_autocovariance(sde, times[:, None] - times[None, :])
+    m_dense, v_dense = _dense_predict(K, K, jnp.diag(K), y, noise_var)
+    m_kf, v_kf = prior.condition(y, noise_var).predict(times)
+
+    # Same model, two factorisations: float64 round-off only.
+    assert jnp.allclose(
+        prior.log_marginal(y, noise_var),
+        _dense_log_marginal(K, y, noise_var),
+        rtol=1e-10,
+    )
+    assert jnp.allclose(m_kf, m_dense, rtol=1e-10, atol=1e-12)
+    assert jnp.allclose(v_kf, v_dense, rtol=1e-10, atol=1e-12)
+
+
 # --- filter / smooth consistency -----------------------------------------
 
 
@@ -297,7 +321,7 @@ def test_filter_stays_finite_when_masked_step_has_degenerate_S() -> None:
     computed ``K_full = ... / S`` and ``log(S)`` unconditionally, so a
     degenerate ``S`` produced ``inf``/``NaN`` that survived ``0 *`` masking.
     """
-    from pyrox_gp._markov import _kalman_filter
+    from pyrox_ssm._markov import _kalman_filter
 
     d = 2
     F = jnp.zeros((d, d))

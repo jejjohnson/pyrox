@@ -51,7 +51,7 @@ has the same list grouped by module, plus gaussx, kernellib and geonnax.
    - kernel formulas with hand-written hyperpriors → the `pyrox_gp` kernels
      (+ `set_prior` / `autoguide`);
    - an SVGP ELBO, a Kalman-filter GP, Laplace / EP loops →
-     `SparseGPPrior` + `svgp_factor`, `MarkovGPPrior` + `markov_gp_factor`,
+     `SparseGPPrior` + `svgp_factor`, `pyrox_ssm.MarkovGPPrior` + `markov_gp_factor`,
      `LaplaceInference` / `ExpectationPropagation`;
    - a Bayesian dense / Flipout / SIREN / random-feature / SNGP layer →
      `pyrox_nn`;

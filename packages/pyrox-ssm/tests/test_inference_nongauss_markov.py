@@ -5,9 +5,10 @@ Coverage strategy:
 * shape / finiteness / convergence on a small Bernoulli time-series
   problem, for each of Laplace, GN, PL, EP.
 * equivalence at the smoothed posterior: Markov-Laplace on a sorted
-  1-D grid using a Matern-1/2 SDE kernel matches dense Laplace on the
-  same kernel/data within tolerance — the SDE representation is exact,
-  so the two paths must agree.
+  1-D grid using a Matern-1/2 SDE kernel matches a dense Newton-iteration
+  Laplace on the closed-form Gram within tolerance — the SDE
+  representation is exact, so the two paths must agree. PL and EP are
+  checked against their dense fixed point on the closed-form Gram.
 * prediction at test times: shapes, finiteness, non-negative variance.
 * `condition_nongauss` convenience method round-trips correctly.
 """
@@ -20,25 +21,18 @@ import gaussx
 import jax
 import jax.numpy as jnp
 import pytest
-from pyrox_gp import (
-    BernoulliLikelihood,
-    ExpectationPropagation,
+from pyrox_ssm import (
     ExpectationPropagationMarkov,
     GaussNewtonMarkovInference,
-    GPPrior,
     IntegratedWienerSDE,
-    LaplaceInference,
     LaplaceMarkovInference,
     MarkovGPPrior,
-    Matern,
     MaternSDE,
     NonGaussConditionedMarkovGP,
-    PosteriorLinearization,
     PosteriorLinearizationMarkov,
 )
-from pyrox_gp._inference import _per_site_expectation
-from pyrox_gp._inference_nongauss import _log_prob_per_point_factory
-from pyrox_gp._inference_nongauss_markov import _prior_marginal_variance
+from pyrox_ssm._inference_nongauss_markov import _prior_marginal_variance
+from ssm_reference import BernoulliLikelihood, matern_kernel, site_expectation
 
 
 def _make_bernoulli_timeseries(N: int = 16):
@@ -122,16 +116,20 @@ def test_markov_laplace_matches_dense_laplace_on_matern12() -> None:
         markov_prior, BernoulliLikelihood(), y
     )
 
-    from pyrox_gp import Matern
+    # Dense Laplace by Newton's method on the closed-form Matern-1/2 Gram:
+    # f ← (K⁻¹ + W)⁻¹ (W f + ∇ log p(y | f)), W = σ(f)(1 − σ(f)).
+    K = matern_kernel(times[:, None], times[:, None], 1.0, 0.6, nu=0.5)
+    K_inv = jnp.linalg.inv(K)
+    f = jnp.zeros_like(times)
+    for _ in range(30):
+        p = jax.nn.sigmoid(f)
+        W = p * (1.0 - p)
+        f = jnp.linalg.solve(K_inv + jnp.diag(W), W * f + (y - p))
+    p = jax.nn.sigmoid(f)
+    dense_var = jnp.diag(jnp.linalg.inv(K_inv + jnp.diag(p * (1.0 - p))))
 
-    dense_kernel = Matern(init_lengthscale=0.6, init_variance=1.0, nu=0.5)
-    dense_prior = GPPrior(kernel=dense_kernel, X=times[:, None])
-    dense_cond = LaplaceInference(max_iter=30, tol=1e-7).fit(
-        dense_prior, BernoulliLikelihood(), y
-    )
-
-    assert jnp.allclose(markov_cond.q_mean, dense_cond.q_mean, atol=1e-3)
-    assert jnp.allclose(markov_cond.q_var, dense_cond.q_var, atol=1e-3)
+    assert jnp.allclose(markov_cond.q_mean, f, atol=1e-3)
+    assert jnp.allclose(markov_cond.q_var, dense_var, atol=1e-3)
 
 
 @pytest.mark.slow
@@ -292,8 +290,7 @@ def test_posterior_linearization_cavity_expectations_match_the_old_grid() -> Non
     """The grid the integrator replaced, built by hand as the reference."""
     _, _, y = _make_bernoulli_timeseries(8)
     likelihood = BernoulliLikelihood()
-    log_prob = _log_prob_per_point_factory(likelihood)
-    lp = lambda f_n, y_n: log_prob(f_n[None], y_n[None])[0]
+    lp = lambda f_n, y_n: likelihood.log_prob(f_n[None], y_n[None])
     grad_lp = jax.grad(lp)
     mean = jnp.linspace(-1.0, 1.0, y.shape[0])
     var = jnp.linspace(0.2, 1.5, y.shape[0])
@@ -301,7 +298,7 @@ def test_posterior_linearization_cavity_expectations_match_the_old_grid() -> Non
     grid = mean[None] + jnp.sqrt(var)[None] * points[:, 0][:, None]
     per_node = jax.vmap(jax.vmap(grad_lp, in_axes=(0, 0)), in_axes=(0, None))(grid, y)
     expected = (weights / jnp.sqrt(2.0 * jnp.pi))[None] @ per_node
-    got = _per_site_expectation(
+    got = site_expectation(
         gaussx.GaussHermiteIntegrator(order=20), grad_lp, mean, var, y
     )
     assert jnp.allclose(got, expected[0], rtol=1e-12, atol=1e-12)
@@ -321,39 +318,65 @@ def test_posterior_linearization_converges_with_an_unscented_rule() -> None:
     assert jnp.max(jnp.abs(unscented.q_mean - hermite.q_mean)) < 0.1
 
 
-@pytest.mark.parametrize(
-    "strategy", [ExpectationPropagation, ExpectationPropagationMarkov]
-)
-def test_expectation_propagation_rejects_other_rules(strategy) -> None:
+def test_expectation_propagation_rejects_other_rules() -> None:
     with pytest.raises(TypeError, match="GaussHermiteIntegrator"):
-        strategy(integrator=gaussx.UnscentedIntegrator())
+        ExpectationPropagationMarkov(integrator=gaussx.UnscentedIntegrator())
+
+
+def _pl_sites(cav_mean, cav_var, y):
+    """PL's target sites: the cavity-averaged Newton step, by hand."""
+    lp = lambda f_n, y_n: BernoulliLikelihood().log_prob(f_n[None], y_n[None])
+    rule = gaussx.GaussHermiteIntegrator(order=20)
+    g = site_expectation(rule, jax.grad(lp), cav_mean, cav_var, y)
+    h = site_expectation(rule, jax.grad(jax.grad(lp)), cav_mean, cav_var, y)
+    # λ = ḡ − h̄ m_c,  Λ = −h̄
+    return g - h * cav_mean, -h
+
+
+def _ep_sites(cav_mean, cav_var, y):
+    """EP's target sites: tilted moments minus the cavity, by hand."""
+    points, weights = gaussx.gauss_hermite_points(20, dim=1)
+    weights = weights / jnp.sqrt(2.0 * jnp.pi)
+    f = cav_mean[None] + jnp.sqrt(cav_var)[None] * points[:, 0][:, None]
+    # p(yₙ | f) at every node, for a logit link
+    lik = jnp.exp(y[None] * f - jnp.logaddexp(0.0, f))
+    Z = weights @ lik
+    m_t = (weights @ (lik * f)) / Z
+    v_t = (weights @ (lik * f**2)) / Z - m_t**2
+    return m_t / v_t - cav_mean / cav_var, 1.0 / v_t - 1.0 / cav_var
 
 
 @pytest.mark.parametrize(
-    "dense, markov",
+    ("markov", "target_sites"),
     [
-        (PosteriorLinearization, PosteriorLinearizationMarkov),
-        (ExpectationPropagation, ExpectationPropagationMarkov),
+        (PosteriorLinearizationMarkov, _pl_sites),
+        (ExpectationPropagationMarkov, _ep_sites),
     ],
 )
-def test_dense_and_markov_strategies_agree_on_matern32(dense, markov) -> None:
-    """The SDE is exact for this kernel, so only the tol separates them."""
+def test_markov_strategies_reach_the_dense_fixed_point_on_matern32(
+    markov, target_sites
+) -> None:
+    """The SDE is exact for this kernel, so the dense algebra on the closed-form
+    Gram must reproduce the Markov posterior and leave its sites unchanged."""
     times = jnp.linspace(0.0, 3.0, 10)
     y = (jnp.sin(2.0 * times) > 0.0).astype(jnp.float64)
-    tol = 1e-9
-    kwargs = {"max_iter": 400, "tol": tol}
-    dense_prior = GPPrior(
-        kernel=Matern(init_variance=1.0, init_lengthscale=0.7, nu=1.5),
-        X=times[:, None],
-        jitter=1e-10,
+    fit = markov(max_iter=400, tol=1e-9).fit(
+        MarkovGPPrior(MaternSDE(variance=1.0, lengthscale=0.7, order=1), times),
+        BernoulliLikelihood(),
+        y,
     )
-    markov_prior = MarkovGPPrior(
-        MaternSDE(variance=1.0, lengthscale=0.7, order=1), times
-    )
-    likelihood = BernoulliLikelihood()
-    dense_fit = dense(**kwargs).fit(dense_prior, likelihood, y)
-    markov_fit = markov(**kwargs).fit(markov_prior, likelihood, y)
-    assert dense_fit.converged
-    assert markov_fit.converged
-    # 1e-5 is well above the tol and the 1e-10 jitter's effect on this 10-point Gram.
-    assert jnp.max(jnp.abs(dense_fit.q_mean - markov_fit.q_mean)) < 1e-5
+    assert fit.converged
+    # Dense posterior from the fitted sites: Σ = (K⁻¹ + diag Λ)⁻¹, m = Σ λ.
+    K = matern_kernel(times[:, None], times[:, None], 1.0, 0.7, nu=1.5)
+    cov = jnp.linalg.inv(jnp.linalg.inv(K) + jnp.diag(fit.site_nat2))
+    mean, var = cov @ fit.site_nat1, jnp.diag(cov)
+    # The Kalman smoother and the dense solve agree to round-off.
+    assert jnp.allclose(fit.q_mean, mean, rtol=1e-8, atol=1e-10)
+    assert jnp.allclose(fit.q_var, var, rtol=1e-8, atol=1e-10)
+    # Cavities from the dense marginals; at the fixed point the update returns
+    # the same sites. 1e-5 is well above the 1e-9 tol on the posterior mean.
+    cav_var = 1.0 / (1.0 / var - fit.site_nat2)
+    cav_mean = cav_var * (mean / var - fit.site_nat1)
+    nat1, nat2 = target_sites(cav_mean, cav_var, y)
+    assert jnp.max(jnp.abs(nat1 - fit.site_nat1)) < 1e-5
+    assert jnp.max(jnp.abs(nat2 - fit.site_nat2)) < 1e-5

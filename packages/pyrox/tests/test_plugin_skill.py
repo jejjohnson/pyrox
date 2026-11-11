@@ -27,7 +27,7 @@ if not SKILL.is_file():
     pytest.skip("the plugin is not present", allow_module_level=True)
 
 _NAME = re.compile(
-    r"\b(pyrox_gp|pyrox_nn|pyrox_lgm|pyrox\.inference|pyrox\._core)\.([A-Za-z_]\w*)"
+    r"\b(pyrox_gp|pyrox_nn|pyrox_lgm|pyrox_ssm|pyrox\.inference|pyrox\._core)\.([A-Za-z_]\w*)"
 )
 _BLOCKS = re.compile(r"```python\n(.*?)```", re.S)
 

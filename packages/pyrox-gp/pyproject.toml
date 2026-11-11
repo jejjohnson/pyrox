@@ -1,7 +1,7 @@
 [project]
 name = "pyrox-gp"
 version = "0.2.0"
-description = "Gaussian process building blocks on top of pyrox: kernels, guides, likelihoods, Markov/sparse GPs, and pathwise sampling."
+description = "Gaussian process building blocks on top of pyrox: kernels, guides, likelihoods, sparse GPs, and pathwise sampling."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
 ]
@@ -46,8 +46,7 @@ colab = [
     "pandas>=3.0.3",
 ]
 # `pip install pyrox-gp[flows]` enables the flow-facing helpers
-# (`latent_total_correlation`, warped model surfaces, and the
-# `NormalizingKalmanPrior` observation warp). Pulls scikit-learn /
+# (`latent_total_correlation` and the warped model surfaces). Pulls scikit-learn /
 # diffrax / matfree transitively, hence an extra rather than a hard
 # dependency. Pinned by commit, matching geonnax.
 flows = [

@@ -41,10 +41,10 @@ Each one installs on its own and pulls in what it needs.
 | | Package | Import | What it holds |
 |---|---|---|---|
 | <img src="docs/assets/icon.svg" width="28" alt=""> | [`pyrox`](packages/pyrox) | `pyrox` | The Equinox ↔ NumPyro bridge (`PyroxModule`, `Parameterized`, `pyrox_method`) and ensemble MAP / VI inference |
-| <img src="docs/assets/icon-gp.svg" width="28" alt=""> | [`pyrox-gp`](packages/pyrox-gp) | `pyrox_gp` | Kernels, guides and likelihoods; exact, sparse, Markov and multi-output GPs; pathwise sampling |
+| <img src="docs/assets/icon-gp.svg" width="28" alt=""> | [`pyrox-gp`](packages/pyrox-gp) | `pyrox_gp` | Kernels, guides and likelihoods; exact, sparse and multi-output GPs; pathwise sampling |
 | <img src="docs/assets/icon-nn.svg" width="28" alt=""> | [`pyrox-nn`](packages/pyrox-nn) | `pyrox_nn` | Bayesian dense layers, SIREN and MFN, SNGP, deep VSSGP, and the Bayesian Neural Field estimator |
 | <img src="docs/assets/icon-lgm.svg" width="28" alt=""> | [`pyrox-lgm`](packages/pyrox-lgm) | `pyrox_lgm` | Latent Gaussian models in precision form: GMRF components, PC priors and `inla()` |
-|  | [`pyrox-ssm`](packages/pyrox-ssm) | `pyrox_ssm` | State-space models as NumPyro models: the package whose inference recurses in time (scaffold) |
+|  | [`pyrox-ssm`](packages/pyrox-ssm) | `pyrox_ssm` | State-space models as NumPyro models, whose inference recurses in time: Markov (Kalman) GPs, SDE kernels, sparse and non-Gaussian Markov GPs |
 
 <p align="center">
   <picture>
@@ -405,7 +405,7 @@ pyrox-gp priors can be built to look like the field being modelled: here the ker
 <table>
   <tr>
     <td width="33%"><a href="https://jejjohnson.github.io/pyrox/notebooks/gp_pathwise/"><img src="docs/images/readme/pathwise_samples.png" alt="32 pathwise posterior samples of an exact GP against the analytic mean and two-sigma band"></a><br><b>Pathwise posterior samples</b><br><code>pyrox-gp</code></td>
-    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/notebooks/markov_gp_kalman/"><img src="docs/images/readme/markov_vs_dense.png" alt="Wall-clock of the log marginal likelihood: the Kalman path grows linearly in N, the dense Cholesky cubically"></a><br><b>Markov GP: linear in N, not cubic</b><br><code>pyrox-gp</code></td>
+    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/notebooks/ssm/markov_gp_kalman/"><img src="docs/images/readme/markov_vs_dense.png" alt="Wall-clock of the log marginal likelihood: the Kalman path grows linearly in N, the dense Cholesky cubically"></a><br><b>Markov GP: linear in N, not cubic</b><br><code>pyrox-ssm</code></td>
     <td width="33%"><a href="https://jejjohnson.github.io/pyrox/notebooks/multioutput_gp/"><img src="docs/images/readme/multioutput_gap.png" alt="A multi-output GP reconstructs a held-out gap in one output from a fully observed, correlated output"></a><br><b>Multi-output GP fills a gap</b><br><code>pyrox-gp</code></td>
   </tr>
   <tr>

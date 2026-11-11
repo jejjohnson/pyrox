@@ -190,3 +190,10 @@ def test_predict_jit_compatible_via_partial_eval() -> None:
     m, v = go(X_star)
     assert jnp.all(jnp.isfinite(m))
     assert jnp.all(jnp.isfinite(v))
+
+
+def test_expectation_propagation_rejects_other_rules() -> None:
+    import gaussx
+
+    with pytest.raises(TypeError, match="GaussHermiteIntegrator"):
+        ExpectationPropagation(integrator=gaussx.UnscentedIntegrator())

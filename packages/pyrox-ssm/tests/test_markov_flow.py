@@ -35,7 +35,7 @@ import pytest
 from gaussx import LGSSM, MaskedLGSSM
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
-from pyrox_gp import NormalizingKalmanPrior, normalizing_kalman_factor
+from pyrox_ssm.flows import NormalizingKalmanPrior, normalizing_kalman_factor
 
 
 T, M = 8, 2
@@ -364,7 +364,7 @@ def test_unwarped_path_works_without_gauss_flows(monkeypatch):
     fits normally; only passing a warp raises with the install hint.
 
     Runs on the base install too: the warp used for the raise check is a
-    plain flowjax ``Affine`` (flowjax is a hard dependency), and
+    plain flowjax ``Affine`` (flowjax comes with ``pyrox_ssm.flows``), and
     ``gauss_flows`` is blocked via ``sys.modules`` either way.
     """
     from flowjax.bijections import Affine
@@ -383,7 +383,7 @@ def test_unwarped_path_works_without_gauss_flows(monkeypatch):
     assert mean.shape == (T + 2, M)
     assert jnp.all(jnp.isfinite(mean)) and jnp.all(jnp.isfinite(var))
 
-    with pytest.raises(ImportError, match=r"pyrox-gp\[flows\]"):
+    with pytest.raises(ImportError, match=r"pyrox-ssm\[flows\]"):
         NormalizingKalmanPrior(base, warp=warp)
 
 

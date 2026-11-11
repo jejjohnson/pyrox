@@ -48,7 +48,7 @@ plugins:
             signature_crossrefs: true
             merge_init_into_class: false
             filters: ["!^_"]
-            # The GP API re-exports several gaussx symbols (SDEKernel,
+            # The SSM API re-exports several gaussx symbols (SDEKernel,
             # MaternSDE, ConstantSDE, …) and ``pyrox_nn`` re-exports
             # deterministic NN primitives from geonnax (SIREN, MFN,
             # conditioners, encoders, etc.). griffe must preload both
@@ -100,9 +100,10 @@ nav:
       - "Conditional Neural Fields — FiLM, Hypernetworks, NIF": notebooks/conditioning.ipynb
       - "Spatiotemporal Preprocessing — Geo, Time, Pandas": notebooks/spatiotemporal_preprocessing.ipynb
       - "Multi-Output Gaussian Processes — LMC, ICM, OILMM": notebooks/multioutput_gp.ipynb
-      - "Markov Gaussian Processes — Matern Kernels in State-Space Form": notebooks/markov_gp_sde_kernels.ipynb
-      - "Markov Gaussian Processes — Kalman Filtering and RTS Smoothing": notebooks/markov_gp_kalman.ipynb
       - "MCMC with INLA — A Parameter Outside the Latent Gaussian Model": notebooks/lgm_mcmc_inla.ipynb
+      - "State-space models (pyrox-ssm)":
+          - "Markov Gaussian Processes — Matern Kernels in State-Space Form": notebooks/ssm/markov_gp_sde_kernels.ipynb
+          - "Markov Gaussian Processes — Kalman Filtering and RTS Smoothing": notebooks/ssm/markov_gp_kalman.ipynb
   - Explainers:
       - "Averaging kernel vs KISS-GP": explainers/averaging_kernel_kiss_gp.md
   - Contributing: contributing.md

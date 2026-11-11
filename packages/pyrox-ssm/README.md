@@ -8,7 +8,24 @@ This package imports nothing from pyrox-gp, pyrox-lgm or pyrox-nn.
 
 ## What's inside
 
-Nothing yet: this is the installable, tested scaffold, and `pyrox_ssm.__all__` is empty.
+- **Markov GPs**: `MarkovGPPrior`, `ConditionedMarkovGP`, `markov_gp_factor`, `markov_gp_sample`. Any SDE kernel over a sorted time grid; the Kalman filter gives the log marginal likelihood and the RTS smoother the posterior, both in O(N d³).
+- **Sparse Markov GPs**: `SparseMarkovGPPrior`, `SparseConditionedMarkovGP`, `sparse_markov_elbo`, `sparse_markov_factor`.
+- **Non-Gaussian likelihoods**: `LaplaceMarkovInference`, `GaussNewtonMarkovInference`, `PosteriorLinearizationMarkov`, `ExpectationPropagationMarkov`, each returning a `NonGaussConditionedMarkovGP`.
+- **SDE kernels**, re-exported from gaussx: `MaternSDE`, `SumSDE`, `ProductSDE`, `PeriodicSDE`, `QuasiPeriodicSDE`, `CosineSDE`, `ConstantSDE`, `IntegratedWienerSDE`, `SDEKernel`, `SDEParams`.
+- **Normalizing Kalman filter** (`[flows]` extra): `pyrox_ssm.flows.NormalizingKalmanPrior`, `normalizing_kalman_factor`.
+
+These names moved here from pyrox-gp unchanged; `from pyrox_gp import MarkovGPPrior` now raises an `ImportError` naming `pyrox_ssm`. Likelihoods and guides come from `pyrox.likelihoods` or pyrox-gp.
+
+```python
+import jax.numpy as jnp
+from pyrox_ssm import MarkovGPPrior, MaternSDE
+
+times = jnp.linspace(0.0, 10.0, 200)
+y = jnp.sin(times)
+prior = MarkovGPPrior(MaternSDE(variance=1.0, lengthscale=0.5, order=1), times)
+log_marginal = prior.log_marginal(y, jnp.asarray(0.01))
+mean, var = prior.condition(y, jnp.asarray(0.01)).predict(times)
+```
 
 ## Install
 
