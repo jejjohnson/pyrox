@@ -304,6 +304,44 @@ def _solve_sites(
     return sol.value, sol.stats["num_steps"], sol.result == optx.RESULTS.successful
 
 
+def _site_corrected_log_marginal(
+    log_marg: Float[Array, ""],
+    q_mean: Float[Array, " N"],
+    nat1: Float[Array, " N"],
+    nat2: Float[Array, " N"],
+    site_lik: CallableLikelihood,
+    observed: Bool[Array, " N"],
+) -> Float[Array, ""]:
+    r"""Turn the pseudo-observation Kalman marginal into an evidence estimate.
+
+    With Gaussian sites $\mathcal{N}(\tilde y_n \mid f_n, \Lambda_n^{-1})$,
+    $\tilde y_n = \lambda_n / \Lambda_n$, the Kalman filter returns
+    $\log \mathcal{N}(\tilde{\mathbf{y}} \mid \boldsymbol{\mu}, K + \Lambda^{-1})$,
+    the marginal of the pseudo-data rather than of $\mathbf{y}$. Swapping
+    the pseudo-data fit for the data fit at the posterior mean $m$,
+
+    $$
+    \log p(\mathbf{y}) \approx
+      \log \mathcal{N}(\tilde{\mathbf{y}} \mid \boldsymbol{\mu}, K + \Lambda^{-1})
+      + \sum_n o_n \log p(y_n \mid m_n)
+      - \sum_n o_n \log \mathcal{N}(\tilde y_n \mid m_n, \Lambda_n^{-1}),
+    $$
+
+    gives the Laplace-style approximation every strategy reports, as the
+    dense strategies in pyrox-gp do. Both sums run over the observed sites
+    $o_n = 1$ only.
+    """
+    ll_data = site_lik.log_prob(q_mean)
+    site_prec = jnp.where(observed, nat2, jnp.ones((), dtype=nat2.dtype))
+    pseudo_targets = nat1 / site_prec
+    ll_pseudo = -0.5 * jnp.sum(
+        jnp.where(observed, jnp.log(2.0 * jnp.pi / site_prec), 0.0)
+    ) - 0.5 * jnp.sum(
+        jnp.where(observed, site_prec * (q_mean - pseudo_targets) ** 2, 0.0)
+    )
+    return log_marg + ll_data - ll_pseudo
+
+
 # --- result type ---------------------------------------------------------
 
 
@@ -326,9 +364,10 @@ class NonGaussConditionedMarkovGP(eqx.Module):
             (positive).
         q_mean: Posterior mean over training latents.
         q_var: Marginal posterior variance per training point.
-        log_marginal_approx: Approximate log marginal likelihood (the
-            scalar each strategy reports — interpretation is
-            strategy-specific).
+        log_marginal_approx: Approximate log marginal likelihood
+            $\\log p(y)$: the Kalman marginal of the fitted Gaussian sites with
+            the pseudo-data fit swapped for the data fit at the posterior
+            mean, the same Laplace-style correction for every strategy.
         n_iter: Iterations used by the strategy, a ``()`` integer array (a
             traced value under `jax.jit`).
         converged: Whether the strategy's ``tol`` was met within ``max_iter``
@@ -552,19 +591,9 @@ class LaplaceMarkovInference(eqx.Module):
         q_mean, q_var, log_marg = _markov_smoothed_posterior(
             prior, nat1, nat2, observed
         )
-        # Add the data-fit term ``log p(y | hat f)`` and subtract the
-        # pseudo-data fit so the reported scalar is the standard Laplace
-        # log-marginal approximation rather than the Kalman pseudo-data
-        # likelihood. Both sum over the observed sites only.
-        ll_data = site_lik.log_prob(q_mean)
-        site_prec = jnp.where(observed, nat2, jnp.ones((), dtype=nat2.dtype))
-        pseudo_targets = nat1 / site_prec
-        ll_pseudo = -0.5 * jnp.sum(
-            jnp.where(observed, jnp.log(2.0 * jnp.pi / site_prec), 0.0)
-        ) - 0.5 * jnp.sum(
-            jnp.where(observed, site_prec * (q_mean - pseudo_targets) ** 2, 0.0)
+        log_marg_corrected = _site_corrected_log_marginal(
+            log_marg, q_mean, nat1, nat2, site_lik, observed
         )
-        log_marg_corrected = log_marg + ll_data - ll_pseudo
 
         return NonGaussConditionedMarkovGP(
             prior=prior,
@@ -737,6 +766,9 @@ def _fit_cavity_sites(
     )
     nat1, nat2 = sites
     q_mean, q_var, log_marg = _markov_smoothed_posterior(prior, nat1, nat2, observed)
+    log_marg_corrected = _site_corrected_log_marginal(
+        log_marg, q_mean, nat1, nat2, site_lik, observed
+    )
 
     return NonGaussConditionedMarkovGP(
         prior=prior,
@@ -745,7 +777,7 @@ def _fit_cavity_sites(
         site_nat2=nat2,
         q_mean=q_mean,
         q_var=q_var,
-        log_marginal_approx=log_marg,
+        log_marginal_approx=log_marg_corrected,
         n_iter=n_steps + first,
         converged=converged,
         mask=None if mask is None else observed,
