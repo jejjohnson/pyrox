@@ -76,6 +76,36 @@ starts from the block-diagonal of its components' initial covariances.
 ::: pyrox_ssm.ProductSDE
 ::: pyrox_ssm.QuasiPeriodicSDE
 
+## Linear-Gaussian state-space models
+
+`LinearGaussianSSMPrior` is the general Gaussian state-space model, given directly by its transitions `A_k`, observation matrices `H_k`, process and observation noise covariances `Q_k` and `R_k`, an initial state `N(m_0, P_0)` and an optional known observation offset `b_k`, so that `x_k = A_k x_{k-1} + eta_k` and `y_k = H_k x_k + b_k + eps_k` for `k = 1, …, T`. Use it when the dynamics are known as matrices rather than as a GP kernel: a local-level model, a multi-output state, a discretised physical model whose matrices carry priors. It follows the `gaussx.kalman_filter` convention of predicting before every update, so `y[0]` is scored against `A_1 x_0`; set `transition[0] = I` and `process_noise[0] = 0` to observe the initial state itself.
+
+Observations are `(T, M)` (a flat `(T,)` series is accepted when `M = 1`), and every method takes a `mask=` either per step, `(T,)`, or per entry, `(T, M)`; a masked entry is marginalised out exactly and may hold `NaN`. `log_marginal`, `smooth` and `condition` give the prediction-error log marginal and the RTS-smoothed state moments, and `lgssm_factor` adds the log marginal to a NumPyro model:
+
+```python
+import jax.numpy as jnp
+import numpyro
+import numpyro.distributions as dist
+import pyrox_ssm as pss
+
+def local_level(y, mask):
+    T = y.shape[0]
+    q = numpyro.sample("q", dist.LogNormal(-2.0, 1.0))
+    r = numpyro.sample("r", dist.LogNormal(-1.0, 1.0))
+    prior = pss.LinearGaussianSSMPrior(
+        transition=jnp.ones((T, 1, 1)), obs_model=jnp.eye(1),
+        process_noise=q * jnp.ones((T, 1, 1)), obs_noise=r * jnp.eye(1),
+        init_mean=jnp.zeros(1), init_cov=10.0 * jnp.eye(1),
+    )
+    pss.lgssm_factor("y", prior, y, mask=mask)
+```
+
+`MarkovGPPrior` is its kernel-built special case: [`as_lgssm(noise_var)`][pyrox_ssm.MarkovGPPrior.as_lgssm] returns the kernel's discretised transitions over the time grid (with a leading zero step, so `A_1 = I` and `Q_1 = 0`), `H`, `R_k = noise_var + obs_noise_floor`, `m_0 = 0`, `P_0 = initial_covariance()` and the offset `b_k = mean_fn(t_k)`. `MarkovGPPrior`'s filtering and smoothing run through this model, so the two agree bit for bit.
+
+::: pyrox_ssm.LinearGaussianSSMPrior
+::: pyrox_ssm.ConditionedLinearGaussianSSM
+::: pyrox_ssm.lgssm_factor
+
 ## Markov GP — Kalman / RTS workflow
 
 `MarkovGPPrior` consumes any [`SDEKernel`][pyrox_ssm.SDEKernel] over a sorted

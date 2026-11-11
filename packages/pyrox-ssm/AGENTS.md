@@ -8,6 +8,7 @@ One facade, `pyrox_ssm` (`__init__.py` re-exports; implementation in private `_*
 
 | Concept | Module | Names |
 |---|---|---|
+| Linear-Gaussian SSM (the one `gaussx.kalman_filter` call site of the core package) | `_lgssm.py` | `LinearGaussianSSMPrior`, `ConditionedLinearGaussianSSM`, `lgssm_factor` |
 | Markov GP (Kalman filter, RTS smoother) | `_markov.py` | `MarkovGPPrior`, `ConditionedMarkovGP`, `markov_gp_factor`, `markov_gp_sample` |
 | Sparse Markov GP | `_sparse_markov.py` | `SparseMarkovGPPrior`, `SparseConditionedMarkovGP`, `sparse_markov_elbo`, `sparse_markov_factor` |
 | Non-Gaussian likelihoods | `_inference_nongauss_markov.py` | `LaplaceMarkovInference`, `GaussNewtonMarkovInference`, `PosteriorLinearizationMarkov`, `ExpectationPropagationMarkov`, `NonGaussConditionedMarkovGP` |
