@@ -37,9 +37,11 @@ $$
     \\frac{\\partial T_\\alpha}{\\partial \\theta}\\Big|_{s^\\star},
 $$
 
-which costs one linear solve however many iterations ran. Damping does not move
-the fixed point, so the gradient does not depend on $\\alpha$ either. It is the
-gradient at a fixed point only when the loop converged: check ``converged``.
+which costs one linear solve however many iterations ran; the default solves
+it matrix-free with GMRES, from Jacobian-vector products of the step. Damping
+does not move the fixed point, so the gradient does not depend on $\\alpha$
+either. It is the gradient at a fixed point only when the loop converged: check
+``converged``.
 """
 
 from __future__ import annotations
@@ -190,15 +192,20 @@ _Sites = tuple[Float[Array, " N"], Float[Array, " N"]]
 
 
 class _NonFiniteSafeSolver(lx.AbstractLinearSolver):
-    r"""A linear solver that returns zeros instead of raising on non-finite input.
+    r"""A linear solver for the implicit adjoint that never raises mid-sampler.
 
-    The implicit adjoint solves $(I - \partial T / \partial s)^\top v = c$ at
-    the fixed point. Where the forward fit is already non-finite (an SDE
-    discretisation that overflows at an extreme lengthscale, say) every lineax
-    solver raises, which ends a NUTS chain whose step-size search only probed
-    there. Returning zeros instead leaves the value non-finite, so NUTS rejects
-    the point as it would any other. A finite system is solved, and reported,
-    exactly as ``solver`` does.
+    The implicit adjoint solves $(I - \partial T_\alpha / \partial s)^\top v = c$
+    at the fixed point. lineax raises whenever a solve fails, which ends a NUTS
+    chain at the first point that fails. Two failures are therefore turned into
+    values here:
+
+    * Where the forward fit is already non-finite (an SDE discretisation that
+      overflows at an extreme lengthscale, say) the solution is zero, so the
+      value stays non-finite and NUTS rejects the point as it would any other.
+    * An iterative solve that stops at ``max_steps`` or stagnates keeps its last
+      iterate, as the forward loop keeps its last sites with ``throw=False``.
+
+    Every other result is reported exactly as ``solver`` reports it.
 
     Attributes:
         solver: The solver used for finite systems.
@@ -218,7 +225,10 @@ class _NonFiniteSafeSolver(lx.AbstractLinearSolver):
         solution = jtu.tree_map(
             lambda x: jnp.where(broken, jnp.zeros_like(x), x), solution
         )
-        result = lx.RESULTS.where(broken, lx.RESULTS.successful, result)
+        stopped = (result == lx.RESULTS.max_steps_reached) | (
+            result == lx.RESULTS.stagnation
+        )
+        result = lx.RESULTS.where(broken | stopped, lx.RESULTS.successful, result)
         return solution, result, stats
 
     def transpose(self, state, options):
@@ -231,10 +241,14 @@ class _NonFiniteSafeSolver(lx.AbstractLinearSolver):
         return self.solver.assume_full_rank()
 
 
-# The default adjoint: optimistix's implicit adjoint, with its default linear
-# solver wrapped so that a non-finite fit gives a non-finite value, not an error.
+# The default adjoint: optimistix's implicit adjoint with a matrix-free solve.
+# I - dT/ds is not symmetric, so GMRES, which needs only products with the
+# operator (JVPs of the step, and VJPs for its transpose in reverse mode): no
+# (2N, 2N) Jacobian is formed, and each product costs one Kalman smoother pass.
 _IMPLICIT_ADJOINT = optx.ImplicitAdjoint(
-    linear_solver=_NonFiniteSafeSolver(lx.AutoLinearSolver(well_posed=None))
+    linear_solver=_NonFiniteSafeSolver(
+        lx.GMRES(rtol=1e-10, atol=1e-10, restart=20, max_steps=50)
+    )
 )
 
 
@@ -432,10 +446,14 @@ class LaplaceMarkovInference(eqx.Module):
             ``1e-6``.
         adjoint: How gradients pass through the loop. Default an
             ``optimistix.ImplicitAdjoint``, the implicit function theorem at the
-            fixed point, whose linear solve forms the ``(2N, 2N)`` Jacobian of
-            the step and returns zeros rather than raising when the fit is
-            already non-finite; ``optimistix.RecursiveCheckpointAdjoint()``
-            differentiates through the iterations instead.
+            fixed point, solved matrix-free by ``lineax.GMRES`` (``rtol`` and
+            ``atol`` ``1e-10``) from products with the step's Jacobian, so a
+            gradient costs a few Kalman passes and $O(N)$ memory; a fit that is
+            already non-finite gets a non-finite gradient rather than an error.
+            For small $N$, ``optimistix.ImplicitAdjoint()`` solves the dense
+            ``(2N, 2N)`` Jacobian by LU instead, and
+            ``optimistix.RecursiveCheckpointAdjoint()`` differentiates through
+            the iterations.
     """
 
     max_iter: int = eqx.field(static=True, default=20)

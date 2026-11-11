@@ -149,8 +149,10 @@ fails under a handler, a transform or a second instance.
 
 - **Pure and explicit.** Arrays and modules in, arrays and modules out; keys
   are explicit (`jr.key`, split before reuse); no Python control flow on
-  traced values (the eager `fit` loops of the non-Gaussian inference
-  strategies are the documented exception).
+  traced values (the eager `fit` loops of the dense non-Gaussian inference
+  strategies in `pyrox_gp._inference_nongauss` are the documented exception;
+  the Markov strategies in `pyrox_ssm` run on `optimistix.fixed_point` and
+  trace).
 - **Linear algebra through gaussx.** Wrap Grams as PSD-tagged lineax
   operators and call gaussx; respect the model's `solver=`. A few modules
   still hand-roll `cho_solve` / `solve_triangular`
