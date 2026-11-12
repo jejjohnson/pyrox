@@ -173,6 +173,8 @@ def test_rejects_eps_of_the_wrong_shape() -> None:
     prior = MarkovGPPrior(MaternSDE(1.0, 0.5, order=1), TIMES)
     with pytest.raises(ValueError, match="eps must have shape"):
         markov_gp_from_innovations(prior, jnp.zeros((TIMES.shape[0], 3)))
+    with pytest.raises(ValueError, match="eps must have shape"):
+        markov_gp_from_innovations(prior, jnp.zeros((2 * TIMES.shape[0],)))
 
 
 def test_rejects_an_unknown_square_root() -> None:
@@ -209,7 +211,15 @@ def test_vmap_over_sites_matches_a_loop() -> None:
     np.testing.assert_allclose(batched, looped, rtol=1e-12)
 
 
-# --- NumPyro sites ----------------------------------------------------------
+def test_leading_batch_dimensions_give_one_path_each() -> None:
+    prior = MarkovGPPrior(MaternSDE(1.0, 0.5, order=1), TIMES)
+    eps = jr.normal(jr.key(8), (2, 3, TIMES.shape[0], 2))
+    batched = markov_gp_from_innovations(prior, eps)
+    assert batched.shape == (2, 3, TIMES.shape[0])
+    looped = jnp.stack(
+        [jnp.stack([markov_gp_from_innovations(prior, e) for e in row]) for row in eps]
+    )
+    np.testing.assert_allclose(batched, looped, rtol=1e-14)
 
 
 def _bernoulli_series(n):
@@ -239,6 +249,23 @@ def test_sample_registers_one_eps_site_and_a_deterministic_path() -> None:
     assert trace["f"]["type"] == "deterministic"
     prior = MarkovGPPrior(MaternSDE(1.0, trace["lengthscale"]["value"], order=1), times)
     expected = markov_gp_from_innovations(prior, eps_site["value"])
+    np.testing.assert_allclose(trace["f"]["value"], expected, rtol=1e-14)
+
+
+def test_sample_under_a_plate_gives_one_independent_path_per_index() -> None:
+    times, _ = _bernoulli_series(12)
+    prior = MarkovGPPrior(MaternSDE(1.0, 0.5, order=1), times)
+
+    def model():
+        with numpyro.plate("series", 3):
+            return markov_gp_innovations_sample("f", prior)
+
+    trace = handlers.trace(handlers.seed(model, 0)).get_trace()
+    eps = trace["f_eps"]["value"]
+    assert eps.shape == (3, 12, 2)
+    assert trace["f_eps"]["fn"].batch_shape == (3,)
+    assert trace["f"]["value"].shape == (3, 12)
+    expected = jnp.stack([markov_gp_from_innovations(prior, e) for e in eps])
     np.testing.assert_allclose(trace["f"]["value"], expected, rtol=1e-14)
 
 
