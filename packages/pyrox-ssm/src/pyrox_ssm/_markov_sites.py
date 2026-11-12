@@ -40,6 +40,7 @@ from pyrox.likelihoods import (
     AbstractObservation,
     DistLikelihood,
     Likelihood,
+    _observation_site_log_prob,
     likelihood_accepts_inputs,
 )
 
@@ -104,10 +105,9 @@ class _ObservationSiteLogDensity(eqx.Module):
     r"""One site's $\ell(f_i, d_i)$ from the gaussx likelihood an observation builds.
 
     Site $i$'s data is $(y_i, \mathrm{data}_i)$, where $\mathrm{data}_i$ is
-    its slice of the ``data`` mapping (``{"X": X}`` or empty); every leaf gets
-    back a leading axis of length one, so `build` sees one site. A copy of
-    `pyrox_gp._likelihoods._site_log_prob`: hyperparameters are fields of the
-    observation model, so ``theta`` is empty.
+    its slice of the ``data`` mapping (``{"X": X}`` or empty), evaluated by
+    `pyrox.likelihoods._observation_site_log_prob`, the adapter pyrox-gp's
+    inference shares.
 
     Attributes:
         observation: The observation model.
@@ -117,11 +117,8 @@ class _ObservationSiteLogDensity(eqx.Module):
 
     def __call__(self, f_i: Float[Array, ""], site: PyTree) -> Float[Array, ""]:
         y_i, data_i = site
-        # dᵢ with a leading site axis of length one
-        one_site = jax.tree.map(lambda leaf: jnp.asarray(leaf)[None], data_i)
         # ℓ(fᵢ, (yᵢ, dᵢ)) = build(yᵢ, ∅, dᵢ).log_prob(fᵢ)
-        site_lik = self.observation.build(jnp.asarray(y_i)[None], {}, one_site)
-        return site_lik.log_prob(f_i[None])
+        return _observation_site_log_prob(self.observation, f_i, y_i, data_i)
 
 
 class _MaskedSiteLogDensity(eqx.Module):

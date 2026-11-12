@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 import numpyro.distributions as nd
 from jaxtyping import Array, ArrayLike, Float, PyTree
@@ -515,6 +516,44 @@ class DistLikelihood(AbstractObservation, Likelihood):
         r"""$\sum_i \log p(y_i \mid f_i)$, with the inputs in ``data["X"]``."""
         data = {} if X is None else {"X": X}
         return self.site_log_prob(y, f, {}, data).sum()
+
+
+def _observation_site_log_prob(
+    observation: AbstractObservation,
+    f_i: Float[Array, ""],
+    y_i: Array,
+    data_i: Mapping[str, ArrayLike],
+    *,
+    build: Callable[[Array, dict[str, Array], Mapping[str, ArrayLike]], Any]
+    | None = None,
+) -> Float[Array, ""]:
+    r"""$\log p(y_i \mid f_i)$ at one site, from the likelihood an observation builds.
+
+    The one per-site adapter pyrox-gp's inference and pyrox-ssm's Markov
+    strategies share. ``data_i`` is the site's slice of ``data`` (every leaf
+    without its site axis); each leaf gets back a leading axis of length one,
+    so `build` sees one site. Hyperparameters are fields of the observation
+    model, so ``theta`` is empty. The built object only needs a
+    ``log_prob(f)``; the core imports no gaussx, so a package that must wrap
+    `build`'s result first passes its own ``build`` (default
+    ``observation.build``).
+
+    Args:
+        observation: The observation model.
+        f_i: The site's latent value.
+        y_i: The site's observation.
+        data_i: The site's slice of the ``data`` mapping.
+        build: Replaces ``observation.build``, with its signature.
+
+    Returns:
+        The site's log density, a scalar.
+    """
+    build = observation.build if build is None else build
+    # dᵢ with a leading site axis of length one
+    one_site = jax.tree.map(lambda leaf: jnp.asarray(leaf)[None], data_i)
+    # log p(yᵢ ∣ fᵢ) = build(yᵢ, ∅, dᵢ).log_prob(fᵢ)
+    site = build(jnp.asarray(y_i)[None], {}, one_site)
+    return site.log_prob(jnp.asarray(f_i)[None])
 
 
 def likelihood_accepts_inputs(lik: Likelihood) -> bool:
