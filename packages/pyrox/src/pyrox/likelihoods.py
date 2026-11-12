@@ -5,7 +5,10 @@ variational posterior $q(f)$; every likelihood and guide in pyrox-gp (and in
 any package built on the core) subclasses one of them. `GaussianLikelihood`
 is the one concrete observation model here, because the closed-form paths of
 several packages dispatch on it. `likelihood_accepts_inputs` tells whether a
-likelihood takes the optional inputs ``X``.
+likelihood takes the optional inputs ``X``. `AbstractObservation` is the
+observation-model base that declares its own hyperparameters and builds a
+gaussx likelihood holding the data; pyrox-lgm's observation models subclass
+it.
 
 The module carries no linear algebra and imports no gaussx: the numerical
 work on a likelihood (expectations, per-site derivatives) happens in the
@@ -16,12 +19,14 @@ from __future__ import annotations
 
 import inspect
 from abc import abstractmethod
+from collections.abc import Mapping
 from typing import Any
 
 import equinox as eqx
 import jax.numpy as jnp
 import numpyro.distributions as nd
-from jaxtyping import Array, Float
+from jaxtyping import Array, ArrayLike, Float
+from numpyro.distributions.transforms import Transform
 
 
 class Guide(eqx.Module):
@@ -144,6 +149,136 @@ class GaussianLikelihood(Likelihood):
         return nd.Normal(f, jnp.sqrt(self.noise_var)).log_prob(y).sum()
 
 
+class AbstractObservation(eqx.Module):
+    r"""Observation model $p(y \mid \eta, \theta)$ with its own hyperparameters.
+
+    An observation model declares its hyperparameters $\theta$ (`theta_spec`)
+    and builds, for data ``y`` at a given $\theta$, the gaussx likelihood
+    that inference runs on (`build`). Per-site data other than ``y``
+    (offsets, trial counts, inputs) passes through ``data``. The per-site
+    methods (`site_distribution`, `site_log_prob`, `site_cdf`) evaluate
+    $p(y_i \mid \eta_i, \theta)$ directly, for diagnostics. pyrox-lgm's
+    observation models (`pyrox_lgm.Gaussian`, `pyrox_lgm.Poisson`, …)
+    subclass it, and `pyrox_lgm.AbstractObservation` is this class.
+
+    The linear predictor ``eta`` has shape ``(N,)`` when `latent_dim` is 1
+    (the default) and ``(N, latent_dim)`` otherwise: one row of latents per
+    site, as for a softmax over $K$ classes (``latent_dim = K``) or a
+    heteroscedastic Gaussian (``latent_dim = 2``). A subclass changes it by
+    overriding the property, or with a static field that has a default
+    (``latent_dim: int = eqx.field(static=True, default=2)``).
+
+    The class registers no NumPyro sites, and the core imports no gaussx:
+    `build` is annotated ``Any``, and a subclass returns a
+    `gaussx.AbstractLikelihood`.
+
+    Attributes:
+        name: Prefix of the hyperparameter names, which join $\theta$ as
+            ``f"{name}.{key}"`` (pyrox-lgm uses ``"lik"``).
+
+    Examples:
+        A heteroscedastic Gaussian with two latents per site, the mean and
+        the noise scale before a softplus (gaussx's likelihood takes the two
+        latent columns concatenated, ``eta.T.reshape(-1)``):
+
+        >>> import equinox as eqx
+        >>> import jax
+        >>> import jax.numpy as jnp
+        >>> import numpyro.distributions as dist
+        >>> from pyrox.likelihoods import AbstractObservation
+        >>> class Heteroscedastic(AbstractObservation):
+        ...     name: str = eqx.field(static=True, default="lik")
+        ...     @property
+        ...     def latent_dim(self):
+        ...         return 2
+        ...     def build(self, y, theta, data):
+        ...         import gaussx as gx
+        ...         return gx.HeteroscedasticGaussianLikelihood(y)
+        ...     def site_distribution(self, eta, theta, data):
+        ...         return dist.Normal(eta[:, 0], jax.nn.softplus(eta[:, 1]))
+        >>> obs = Heteroscedastic()
+        >>> eta = jnp.zeros((3, obs.latent_dim))
+        >>> obs.site_log_prob(jnp.zeros(3), eta, {}, {}).shape
+        (3,)
+    """
+
+    name: eqx.AbstractVar[str]
+
+    @property
+    def latent_dim(self) -> int:
+        """Latents per site: the trailing size of ``eta``; 1 by default."""
+        return 1
+
+    def theta_spec(self) -> dict[str, tuple[nd.Distribution, Transform]]:
+        """Hyperparameters of the likelihood; none by default.
+
+        Returns:
+            ``{key: (prior, transform)}``, where ``transform`` maps the
+            unconstrained value to the prior's support.
+        """
+        return {}
+
+    @abstractmethod
+    def build(
+        self, y: Array, theta: dict[str, Array], data: Mapping[str, ArrayLike]
+    ) -> Any:
+        """The gaussx likelihood holding ``y`` at hyperparameters ``theta``.
+
+        Args:
+            y: Observations, ``(N,)``.
+            theta: Hyperparameters, keyed as in `theta_spec`.
+            data: Per-site data other than ``y`` (offsets, trial counts,
+                inputs).
+
+        Returns:
+            A `gaussx.AbstractLikelihood` over the ``N`` sites (annotated
+            ``Any``, because the core imports no gaussx).
+        """
+
+    def site_distribution(
+        self,
+        eta: Float[Array, " N"] | Float[Array, "N L"],
+        theta: dict[str, Array],
+        data: Mapping[str, ArrayLike],
+    ) -> nd.Distribution:
+        """``p(y_i | eta_i)`` per site as a NumPyro distribution (batched in eta).
+
+        ``eta`` is ``(N,)`` for one latent per site and ``(N, latent_dim)``
+        otherwise. Diagnostics may evaluate it on quadrature nodes, so for
+        one latent ``eta`` may carry trailing axes after the sites'
+        (broadcast per-site data against them). Only diagnostics need it
+        (`pyrox_lgm.diagnostics`), so an observation model that does not
+        define it still fits.
+
+        Raises:
+            NotImplementedError: Unless a subclass defines it.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} defines no site_distribution, which the "
+            "diagnostics need"
+        )
+
+    def site_log_prob(
+        self,
+        y: Array,
+        eta: Float[Array, " N"] | Float[Array, "N L"],
+        theta: dict[str, Array],
+        data: Mapping[str, ArrayLike],
+    ) -> Array:
+        """``log p(y_i | eta_i)`` per site, from `site_distribution`."""
+        return jnp.asarray(self.site_distribution(eta, theta, data).log_prob(y))
+
+    def site_cdf(
+        self,
+        y: Array,
+        eta: Float[Array, " N"] | Float[Array, "N L"],
+        theta: dict[str, Array],
+        data: Mapping[str, ArrayLike],
+    ) -> Array:
+        """``P(Y_i <= y_i | eta_i)`` per site, from `site_distribution`."""
+        return jnp.asarray(self.site_distribution(eta, theta, data).cdf(y))
+
+
 def likelihood_accepts_inputs(lik: Likelihood) -> bool:
     """Whether ``lik.log_prob`` takes the optional trailing ``X``.
 
@@ -187,6 +322,7 @@ def likelihood_accepts_inputs(lik: Likelihood) -> bool:
 
 
 __all__ = [
+    "AbstractObservation",
     "GaussianLikelihood",
     "Guide",
     "Likelihood",

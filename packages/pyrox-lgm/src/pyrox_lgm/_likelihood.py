@@ -4,13 +4,11 @@ Each wraps a gaussx likelihood and declares its own hyperparameters, which
 join $\\theta$ under the names ``f"{name}.{k}"`` (``"lik.prec"`` for the
 Gaussian noise precision). Exposures and offsets go in ``data["offset"]``
 (the log exposure for a Poisson model), trial counts in
-``data["n_trials"]``.
+``data["n_trials"]``. Their base, `AbstractObservation`, lives in the pyrox
+core (`pyrox.likelihoods`) and is re-exported here.
 """
 
 from __future__ import annotations
-
-import abc
-from collections.abc import Mapping
 
 import equinox as eqx
 import gaussx as gx
@@ -20,51 +18,10 @@ import numpyro.distributions as dist
 from jax.scipy.special import betainc, gammaincc
 from jaxtyping import Array, ArrayLike
 from numpyro.distributions.transforms import Transform
+from pyrox.likelihoods import AbstractObservation
 
 from pyrox_lgm._components._base import default_transform
 from pyrox_lgm._priors import PCPrecision
-
-
-class AbstractObservation(eqx.Module):
-    """``y | eta`` for an LGM, with its own hyperparameters."""
-
-    name: eqx.AbstractVar[str]
-
-    def theta_spec(self) -> dict[str, tuple[dist.Distribution, Transform]]:
-        """Hyperparameters of the likelihood; none by default."""
-        return {}
-
-    @abc.abstractmethod
-    def build(
-        self, y: Array, theta: dict[str, Array], data: Mapping[str, ArrayLike]
-    ) -> gx.AbstractLikelihood:
-        """The gaussx likelihood holding ``y`` at hyperparameters ``theta``."""
-
-    def site_distribution(
-        self, eta: Array, theta: dict[str, Array], data: Mapping[str, ArrayLike]
-    ) -> dist.Distribution:
-        """``p(y_i | eta_i)`` per site as a NumPyro distribution (batched in eta).
-
-        The diagnostics evaluate it on quadrature nodes, so ``eta`` may carry
-        trailing axes after the sites' (broadcast per-site data with
-        `_per_site`). Only `pyrox_lgm.diagnostics` needs it, so a custom
-        observation model that does not define it still fits.
-
-        Raises:
-            NotImplementedError: Unless a subclass defines it.
-        """
-        raise NotImplementedError(
-            f"{type(self).__name__} defines no site_distribution, which the "
-            "diagnostics need"
-        )
-
-    def site_log_prob(self, y, eta, theta, data) -> Array:
-        """``log p(y_i | eta_i)`` per site."""
-        return jnp.asarray(self.site_distribution(eta, theta, data).log_prob(y))
-
-    def site_cdf(self, y, eta, theta, data) -> Array:
-        """``P(Y_i <= y_i | eta_i)`` per site."""
-        return jnp.asarray(self.site_distribution(eta, theta, data).cdf(y))
 
 
 class Gaussian(AbstractObservation):
