@@ -122,6 +122,24 @@ def test_the_dist_fn_attribute_warns_and_gives_the_one_argument_link():
     assert jnp.allclose(dist_fn(F).log_prob(Y_COUNT), expected, rtol=RTOL, atol=0.0)
 
 
+@pytest.mark.parametrize("keyword", [False, True], ids=["positional", "dist_fn"])
+def test_an_old_link_with_optional_arguments_keeps_its_defaults(keyword):
+    def link(f, df=3.0, scale=0.5):
+        return nd.StudentT(df=df, loc=f, scale=scale)
+
+    if keyword:
+        with pytest.warns(DeprecationWarning, match="make_dist"):
+            lik = DistLikelihood(dist_fn=link)
+    else:
+        lik = DistLikelihood(link)
+    y = F + 0.1
+    expected = nd.StudentT(df=3.0, loc=F, scale=0.5).log_prob(y).sum()
+    assert jnp.allclose(lik.log_prob(F, y), expected, rtol=RTOL, atol=0.0)
+    assert jnp.allclose(
+        _callable_log_prob(lik.build(y, {}, {}), F), expected, rtol=RTOL, atol=0.0
+    )
+
+
 def test_dist_fn_and_make_dist_together_raise():
     with pytest.raises(TypeError, match="not both"):
         DistLikelihood(_zip, dist_fn=lambda f: nd.Poisson(jnp.exp(f)))

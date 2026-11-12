@@ -291,6 +291,11 @@ class AbstractObservation(eqx.Module):
 def _takes_latent_only(fn: Callable[..., nd.Distribution]) -> bool:
     """Whether ``fn`` is the old one-argument link ``f -> Distribution``.
 
+    A callable with exactly one required positional parameter is the old
+    link, even when it also takes optional ones (``lambda f, df=3.0: ...``),
+    so its defaults are kept; ``make_dist``'s ``theta`` and ``data_i`` are
+    required parameters.
+
     Raises:
         TypeError: If ``fn`` takes neither one nor three positional arguments.
     """
@@ -298,6 +303,15 @@ def _takes_latent_only(fn: Callable[..., nd.Distribution]) -> bool:
         signature = inspect.signature(fn)
     except (TypeError, ValueError):  # unintrospectable callable: trust it
         return False
+    positional = [
+        p
+        for p in signature.parameters.values()
+        if p.kind
+        in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    required = [p for p in positional if p.default is inspect.Parameter.empty]
+    if len(required) == 1:
+        return True
     try:
         signature.bind(None, None, None)
     except TypeError:
@@ -391,9 +405,11 @@ class DistLikelihood(AbstractObservation, Likelihood):
     gaussx likelihood. The class registers no NumPyro sites.
 
     The old one-argument link ``DistLikelihood(lambda f: dist.Bernoulli(logits=f))``
-    still works: a callable that takes one positional argument is wrapped to
-    ignore ``theta`` and ``data_i``. ``DistLikelihood(dist_fn=...)`` warns
-    and does the same.
+    still works: a callable with exactly one required positional argument is
+    wrapped to ignore ``theta`` and ``data_i``, keeping the defaults of any
+    optional ones (``lambda f, df=3.0: ...``), so a ``make_dist`` must take
+    ``theta`` and ``data_i`` without defaults. ``DistLikelihood(dist_fn=...)``
+    warns and always does the same.
 
     !!! warning "The callable cannot carry trainable parameters"
         ``make_dist`` is a **static** field, so anything it closes over is
@@ -460,11 +476,12 @@ class DistLikelihood(AbstractObservation, Likelihood):
                 # equinox's metaclass calls __init__; point at the caller
                 skip_file_prefixes=(str(Path(eqx.__file__).parent),),
             )
-            make_dist = dist_fn
+            # dist_fn was always the one-argument link f -> Distribution
+            make_dist = _LatentOnly(dist_fn)
         if make_dist is None:
             msg = "DistLikelihood needs make_dist(eta_i, theta, data_i)"
             raise TypeError(msg)
-        if _takes_latent_only(make_dist):
+        if not isinstance(make_dist, _LatentOnly) and _takes_latent_only(make_dist):
             make_dist = _LatentOnly(make_dist)
         self.make_dist = make_dist
         self.theta = {key: jnp.asarray(value) for key, value in (theta or {}).items()}
