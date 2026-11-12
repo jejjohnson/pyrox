@@ -21,6 +21,7 @@ members = ["packages/*"]
 # override keeps one gaussx and one geonnax for every member. Move it in step with pyrox-gp's gaussx and geonnax sources, and with the
 # override snippet users copy from README.md (Installation).
 # argminax v0.0.6 (pyrox-nn, pyrox-lgm) pins gaussx v0.6.13 by URL; the same override replaces it.
+# filterax v0.0.8 (pyrox-ssm's ensemble extra) pins gaussx v0.6.9 by URL; the same override replaces it.
 # functax is pinned here at the tag pyrox-gp, pyrox-nn and pyrox-lgm declare, so one
 # functax serves every member once an upstream (kernellib, geonnax) pins its own.
 override-dependencies = [
@@ -54,7 +55,8 @@ dev = [
     "pyrox-gp",
     "pyrox-nn",
     "pyrox-lgm",
-    "pyrox-ssm",
+    # With the ensemble extra, so pyrox_ssm.ensemble's tests run in CI.
+    "pyrox-ssm[ensemble]",
     # Optional-extra backends exercised by the test suites.
     "optax>=0.2.8",
     "pandas>=3.0.3",

@@ -28,7 +28,8 @@ the package whose inference recurses in time. ``pyrox_ssm`` never imports
   protocol, re-exported for convenience.
 
 The normalizing Kalman filter lives in `pyrox_ssm.flows`, behind the
-``flows`` extra.
+``flows`` extra, and the ensemble Kalman log likelihood of a filterax run,
+`ensemble_factor`, in `pyrox_ssm.ensemble`, behind the ``ensemble`` extra.
 """
 
 # State-space (SDE) kernels live in gaussx; re-export them so a Markov GP
