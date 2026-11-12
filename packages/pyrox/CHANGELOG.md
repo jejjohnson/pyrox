@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0](https://github.com/jejjohnson/pyrox/compare/pyrox-v0.2.1...pyrox-v0.3.0) (2026-11-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* these names are removed from pyrox_gp and importing them raises ImportError; import them from pyrox_ssm instead (`from pyrox_ssm import MarkovGPPrior`): MarkovGPPrior, ConditionedMarkovGP, markov_gp_factor, markov_gp_sample, SparseMarkovGPPrior, SparseConditionedMarkovGP, sparse_markov_elbo, sparse_markov_factor, LaplaceMarkovInference, GaussNewtonMarkovInference, PosteriorLinearizationMarkov, ExpectationPropagationMarkov, NonGaussConditionedMarkovGP, SDEKernel, SDEParams, MaternSDE, ConstantSDE, CosineSDE, PeriodicSDE, ProductSDE, QuasiPeriodicSDE, SumSDE, IntegratedWienerSDE. NormalizingKalmanPrior and normalizing_kalman_factor move to pyrox_ssm.flows (`from pyrox_ssm.flows import NormalizingKalmanPrior`, with the pyrox-ssm[flows] extra).
+
+### Features
+
+* **ssm:** add ensemble_factor over filterax.differentiable_assimilate, behind [ensemble] ([#407](https://github.com/jejjohnson/pyrox/issues/407)) ([06f64d3](https://github.com/jejjohnson/pyrox/commit/06f64d3871270718684601a969537721984ffed7))
+
+
+### Code Refactoring
+
+* move the Markov-GP track from pyrox-gp to pyrox-ssm ([#383](https://github.com/jejjohnson/pyrox/issues/383)) ([4b57f2f](https://github.com/jejjohnson/pyrox/commit/4b57f2f512c5bb70d7320d27db242a63b9c7d043))
+
 ## [0.2.1](https://github.com/jejjohnson/pyrox/compare/pyrox-v0.2.0...pyrox-v0.2.1) (2026-11-10)
 
 
