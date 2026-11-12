@@ -470,6 +470,24 @@ class DistLikelihood(AbstractObservation, Likelihood):
         self.theta = {key: jnp.asarray(value) for key, value in (theta or {}).items()}
         self.name = name
 
+    @property
+    def dist_fn(self) -> Callable[[Array], nd.Distribution]:
+        """Deprecated: the one-argument link ``f -> Distribution``; use ``make_dist``.
+
+        The old one-argument callable when one was passed, else ``make_dist``
+        at the ``theta`` field with empty ``data``.
+        """
+        warnings.warn(
+            "DistLikelihood.dist_fn is deprecated; use make_dist(eta_i, theta, "
+            "data_i), or keep the one-argument callable you passed in.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if isinstance(self.make_dist, _LatentOnly):
+            return self.make_dist.dist_fn
+        make_dist, theta = self.make_dist, self.theta
+        return lambda f: make_dist(f, theta, {})
+
     def _theta(self, theta: Mapping[str, Array]) -> dict[str, Array]:
         """The ``theta`` field, updated by the caller's ``theta``."""
         return {**self.theta, **theta}

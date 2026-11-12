@@ -109,6 +109,19 @@ def test_the_dist_fn_keyword_warns_and_still_works():
     assert jnp.allclose(lik.log_prob(F, Y_COUNT), expected, rtol=RTOL, atol=0.0)
 
 
+def test_the_dist_fn_attribute_warns_and_gives_the_one_argument_link():
+    link = lambda f: nd.Poisson(jnp.exp(f))
+    lik = DistLikelihood(link)
+    with pytest.warns(DeprecationWarning, match="make_dist"):
+        assert lik.dist_fn is link
+    # A three-argument make_dist reads the theta field, with empty data.
+    zip_lik = DistLikelihood(_zip, {"pi": 0.3})
+    with pytest.warns(DeprecationWarning, match="make_dist"):
+        dist_fn = zip_lik.dist_fn
+    expected = _zip(F, zip_lik.theta, {}).log_prob(Y_COUNT)
+    assert jnp.allclose(dist_fn(F).log_prob(Y_COUNT), expected, rtol=RTOL, atol=0.0)
+
+
 def test_dist_fn_and_make_dist_together_raise():
     with pytest.raises(TypeError, match="not both"):
         DistLikelihood(_zip, dist_fn=lambda f: nd.Poisson(jnp.exp(f)))
