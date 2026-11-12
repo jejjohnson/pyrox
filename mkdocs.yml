@@ -102,6 +102,7 @@ nav:
       - "Multi-Output Gaussian Processes — LMC, ICM, OILMM": notebooks/multioutput_gp.ipynb
       - "MCMC with INLA — A Parameter Outside the Latent Gaussian Model": notebooks/lgm_mcmc_inla.ipynb
       - "State-space models (pyrox-ssm)":
+          - "Example 1: One Site — NUTS, SVI and Prediction Through the Gaps": notebooks/ssm/ssm_one_site.ipynb
           - "Markov Gaussian Processes — Matern Kernels in State-Space Form": notebooks/ssm/markov_gp_sde_kernels.ipynb
           - "Markov Gaussian Processes — Kalman Filtering and RTS Smoothing": notebooks/ssm/markov_gp_kalman.ipynb
           - "Non-Gaussian Markov GP Inference — Laplace, Gauss–Newton, Posterior Linearisation and EP": notebooks/ssm/markov_gp_nongauss.ipynb
