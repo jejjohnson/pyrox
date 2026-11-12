@@ -47,9 +47,17 @@ The Markov / state-space track (`MarkovGPPrior`, the SDE kernels, the Markov non
   *, …)`; take `solver: AbstractSolverStrategy | None` and resolve it with
   `_resolve_solver`; do the linear algebra with gaussx
   (`gaussian_kl`, `whitened_svgp_predict`, `safe_cholesky`).
-- **Likelihoods** subclass `Likelihood` (`log_prob(f, y, X=None)` summed over
-  points); multi-latent ones declare `latent_dim` as a static field;
-  trainable parts are child modules. Only `GaussianLikelihood` gets the
+- **Likelihoods** of a family gaussx has subclass `_likelihoods._GPObservation`
+  (a `pyrox.likelihoods.AbstractObservation` and a `Likelihood`): `build(y,
+  theta, data)` returns the gaussx likelihood, inputs arrive in
+  `data["X"]`, and the base gives `log_prob(f, y, X=None)` summed over points.
+  Multi-latent ones set `latent_dim` (a property or a defaulted static field)
+  and map their `(N, latent_dim)` latents to gaussx's layout in
+  `_gaussx_latents`. Any other likelihood subclasses `Likelihood`. The
+  inference code calls `build` on one site (`_site_log_prob`) for an
+  `AbstractObservation` and `log_prob` otherwise; trainable parts are child
+  modules. Only `GaussianLikelihood` (dispatched on the core
+  `pyrox.likelihoods.GaussianLikelihood`, which it subclasses) gets the
   closed-form ELBO paths.
 - **Inducing features** satisfy the `InducingFeatures` protocol
   (`num_features`, `K_uu(kernel, *, jitter)`, `k_ux(x, kernel)`); `K_uu`

@@ -35,9 +35,10 @@ from gaussx import (
 )
 from jaxtyping import Array, Float, PyTree
 from pyrox._core import call_context
+from pyrox.likelihoods import AbstractObservation, GaussianLikelihood
 
 from pyrox_gp._guides import NaturalGuide
-from pyrox_gp._likelihoods import GaussianLikelihood
+from pyrox_gp._likelihoods import _site_log_prob
 from pyrox_gp._protocols import Guide, Likelihood, likelihood_accepts_inputs
 from pyrox_gp._sparse import SparseGPPrior
 
@@ -100,6 +101,11 @@ def _per_site_expectation(
     )
 
 
+def _input_data(X: Float[Array, "N D"] | None) -> dict[str, Array]:
+    """The ``data`` an observation model's `build` reads its inputs from."""
+    return {} if X is None else {"X": X}
+
+
 def _ell_numerical(
     lik: Likelihood,
     y: Float[Array, " N"],
@@ -113,16 +119,27 @@ def _ell_numerical(
     Integrates $\mathbb{E}_{q(f_n)}[\log p(y_n \mid f_n)]$
     for each data point via the gaussx integrator, then sums.
 
-    ``X`` is consumed only by likelihoods whose parameters depend on the
-    input (see `pyrox_gp.WarpedGaussianLikelihood` with a conditional
-    warp); scalar observation models ignore it.
-
-    A `Likelihood` written against the pre-gh-204 ``log_prob(f, y)``
+    An observation model (`pyrox.likelihoods.AbstractObservation`, such as
+    `pyrox_gp.BernoulliLikelihood`) is integrated through the one-site gaussx
+    likelihood it builds, with ``X`` in ``data["X"]`` (`_site_log_prob`).
+    Any other `Likelihood` goes through ``log_prob``: ``X`` is consumed only
+    by likelihoods whose parameters depend on the input (see
+    `pyrox_gp.WarpedGaussianLikelihood` with a conditional warp), and a
+    `Likelihood` written against the pre-gh-204 ``log_prob(f, y)``
     signature is never handed the third argument -- it could not consume
     it, and passing it would raise ``TypeError`` at the first quadrature
     evaluation.
     """
-    if X is not None and likelihood_accepts_inputs(lik):
+    if isinstance(lik, AbstractObservation):
+        observation = lik
+        expectations = _per_site_expectation(
+            integrator,
+            lambda f_n, site: _site_log_prob(observation, f_n, site[0], site[1]),
+            f_loc,
+            f_var,
+            (y, _input_data(X)),
+        )
+    elif X is not None and likelihood_accepts_inputs(lik):
         expectations = _per_site_expectation(
             integrator,
             lambda f_n, site: lik.log_prob(f_n[None], site[0][None], site[1]),
@@ -336,7 +353,7 @@ class ConjugateVI:
         f_loc, f_var = guide.predict(K_xz, K_zz_op, K_xx_diag)
         f_loc = f_loc + prior.mean(X)
 
-        grad1, grad2 = self._site_gradients(likelihood, y, f_loc, f_var)
+        grad1, grad2 = self._site_gradients(likelihood, y, f_loc, f_var, X)
 
         # B = K_zz^{-1} K_zx via gaussx.solve_matrix: one Cholesky
         # factorization shared across the matrix RHS for dense PSD
@@ -373,6 +390,7 @@ class ConjugateVI:
         y: Float[Array, " N"],
         f_loc: Float[Array, " N"],
         f_var: Float[Array, " N"],
+        X: Float[Array, "N D"] | None = None,
     ) -> tuple[Float[Array, " N"], Float[Array, " N"]]:
         r"""Per-point ELL gradients w.r.t. the marginal mean.
 
@@ -383,7 +401,9 @@ class ConjugateVI:
 
         For `GaussianLikelihood` these are analytical. For
         non-conjugate likelihoods they are computed via JAX autodiff
-        through the per-point ELL.
+        through the per-point ELL: an observation model's from the one-site
+        gaussx likelihood it builds (``X`` in ``data["X"]``), any other
+        `Likelihood`'s from ``log_prob`` without ``X``.
         """
         if isinstance(likelihood, GaussianLikelihood):
             noise_var = likelihood.noise_var
@@ -397,24 +417,37 @@ class ConjugateVI:
                 "CVI. Pass integrator=GaussHermiteIntegrator(order=20)."
             )
 
+        lik = likelihood
+        if isinstance(lik, AbstractObservation):
+            observation = lik
+            sites: PyTree = (y, _input_data(X))
+
+            def site_log_prob(f_n: Float[Array, ""], site: PyTree) -> Float[Array, ""]:
+                return _site_log_prob(observation, f_n, site[0], site[1])
+
+        else:
+            sites = y
+
+            def site_log_prob(f_n: Float[Array, ""], site: PyTree) -> Float[Array, ""]:
+                return lik.log_prob(f_n[None], site[None])
+
         def _per_point_ell(
             mu_n: Float[Array, ""],
             var_n: Float[Array, ""],
-            y_n: Float[Array, ""],
+            y_n: PyTree,
         ) -> Float[Array, ""]:
             return _site_expectation(
                 self.integrator,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
-                lambda f_n, y: lik.log_prob(f_n[None], y[None]),
+                site_log_prob,
                 mu_n,
                 var_n,
                 y_n,
             )
 
-        lik = likelihood
         grad1 = jax.vmap(jax.grad(lambda mu, v, yn: _per_point_ell(mu, v, yn)))(
-            f_loc, f_var, y
+            f_loc, f_var, sites
         )
         grad2 = jax.vmap(
             jax.grad(jax.grad(lambda mu, v, yn: _per_point_ell(mu, v, yn)))
-        )(f_loc, f_var, y)
+        )(f_loc, f_var, sites)
         return grad1, grad2

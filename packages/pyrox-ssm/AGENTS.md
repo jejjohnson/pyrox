@@ -22,9 +22,9 @@ One facade, `pyrox_ssm` (`__init__.py` re-exports; implementation in private `_*
 
 ## Contracts
 
-- **Never import pyrox-gp, pyrox-lgm or pyrox-nn** (`tests/test_ssm_import_guard.py`: an AST scan plus a subprocess import check). Shared code lives in `pyrox` or gaussx. Likelihoods are any `pyrox.likelihoods.Likelihood` and the sparse guides any `pyrox.likelihoods.Guide` with `predict(K_xz, K_zz_op, K_xx_diag)` and `kl_divergence(prior_cov_op)`, so callers pass pyrox-gp's likelihoods and guides unchanged.
+- **Never import pyrox-gp, pyrox-lgm or pyrox-nn** (`tests/test_ssm_import_guard.py`: an AST scan plus a subprocess import check). Shared code lives in `pyrox` or gaussx. Likelihoods are any `pyrox.likelihoods.Likelihood` or `pyrox.likelihoods.AbstractObservation` and the sparse guides any `pyrox.likelihoods.Guide` with `predict(K_xz, K_zz_op, K_xx_diag)` and `kl_divergence(prior_cov_op)`, so callers pass pyrox-gp's likelihoods and guides unchanged.
 - **Linear algebra goes through gaussx** (`kalman_filter`, `rts_smoother`, Gaussian densities); never `jnp.linalg` on a covariance.
-- **Per-site likelihood numerics** go through `_markov_sites.as_gaussx_likelihood` and gaussx (`site_derivatives`, `expected_log_likelihood`); a check pyrox-gp also needs is copied into `_markov_sites.py`, never imported.
+- **Per-site likelihood numerics** go through `_markov_sites.as_gaussx_likelihood` and gaussx (`site_derivatives`, `expected_log_likelihood`): it calls `build` on one site for an `AbstractObservation` and `log_prob` on one point for any other `Likelihood`; a check pyrox-gp also needs is copied into `_markov_sites.py`, never imported.
 - **`pyrox_ssm.flows` needs the `[flows]` extra**: importing it needs `flowjax`, and a non-`None` warp needs `gauss_flows` (imported lazily by `_require_flows`). `pyrox_ssm` itself never imports `flows`.
 - **`pyrox_ssm.ensemble` needs the `[ensemble]` extra** (filterax). It is the only module that imports filterax, and `pyrox_ssm` itself never imports it, so `import pyrox_ssm` works without filterax (`tests/test_ssm_import_guard.py`). The root `dev` group installs `pyrox-ssm[ensemble]`, so its tests run in CI.
 

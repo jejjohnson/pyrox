@@ -66,9 +66,9 @@ from gaussx import (
 )
 from jaxtyping import Array, Float
 from pyrox._core import call_contexts
+from pyrox.likelihoods import GaussianLikelihood
 
 from pyrox_gp._inference import _ell_numerical
-from pyrox_gp._likelihoods import GaussianLikelihood
 from pyrox_gp._models import ConditionedGP, GPPrior
 from pyrox_gp._multi_output import (
     ICMKernel,

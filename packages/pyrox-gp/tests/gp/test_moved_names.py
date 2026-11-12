@@ -75,6 +75,12 @@ def test_the_moved_modules_are_gone(module) -> None:
         importlib.import_module(f"pyrox_gp.{module}")
 
 
-@pytest.mark.parametrize("name", ["Likelihood", "Guide", "GaussianLikelihood"])
+@pytest.mark.parametrize("name", ["Likelihood", "Guide"])
 def test_pyrox_gp_reexports_the_core_object(name) -> None:
     assert getattr(pyrox_gp, name) is getattr(pyrox.likelihoods, name)
+
+
+def test_pyrox_gp_gaussian_likelihood_subclasses_the_core_one() -> None:
+    # pyrox-gp's builds a gaussx likelihood (gh-375), which the core cannot
+    # import; subclassing keeps every dispatch on the core class.
+    assert issubclass(pyrox_gp.GaussianLikelihood, pyrox.likelihoods.GaussianLikelihood)
