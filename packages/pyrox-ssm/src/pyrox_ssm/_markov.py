@@ -889,11 +889,11 @@ def _covariance_root(
 
 def markov_gp_from_innovations(
     prior: MarkovGPPrior,
-    eps: Float[Array, "N d"],
+    eps: Float[Array, "*batch N d"],
     *,
     sqrt: _SqrtMethod = "cholesky",
     jitter: float = 1e-10,
-) -> Float[Array, " N"]:
+) -> Float[Array, "*batch N"]:
     r"""Latent path of a Markov GP from whitened innovations, in linear time.
 
     With $\Delta t_k = t_k - t_{k-1}$ and $(A_k, Q_k)$ the kernel's
@@ -945,21 +945,24 @@ def markov_gp_from_innovations(
 
     Args:
         prior: The `MarkovGPPrior` over the $N$ sorted times.
-        eps: Standard normal innovations of shape ``(N, d)``, one row per
-            time, with $d$ = ``prior.state_dim``. Batch over several paths
-            with `jax.vmap`.
+        eps: Standard normal innovations of shape ``(*batch, N, d)``, one
+            row per time, with $d$ = ``prior.state_dim``. Leading batch
+            dimensions (a ``numpyro.plate``, several paths) give one
+            independent path each; the covariance roots are taken once and
+            shared.
         sqrt: How the covariance square roots are taken, ``"cholesky"`` or
             ``"eigh"``.
         jitter: The diagonal $\beta$ added before the Cholesky factor.
 
     Returns:
-        The path $f(t_1), \dots, f(t_N)$, shape ``(N,)``, mean included.
+        The path $f(t_1), \dots, f(t_N)$, shape ``(*batch, N)``, mean
+        included.
 
     Raises:
-        ValueError: If ``eps`` is not ``(N, d)`` or ``sqrt`` is unknown.
+        ValueError: If the trailing shape of ``eps`` is not ``(N, d)`` or
+            ``sqrt`` is unknown.
 
     Examples:
-        >>> import jax
         >>> import jax.numpy as jnp
         >>> import jax.random as jr
         >>> import pyrox_ssm as pss
@@ -970,9 +973,7 @@ def markov_gp_from_innovations(
         >>> f.shape
         (500,)
         >>> eps_batch = jr.normal(jr.key(1), (8, 500, prior.state_dim))
-        >>> paths = jax.vmap(pss.markov_gp_from_innovations, in_axes=(None, 0))(
-        ...     prior, eps_batch
-        ... )
+        >>> paths = pss.markov_gp_from_innovations(prior, eps_batch)
         >>> paths.shape
         (8, 500)
     """
@@ -980,11 +981,13 @@ def markov_gp_from_innovations(
         raise ValueError(f"sqrt must be one of {_SQRT_METHODS!r}, got {sqrt!r}")
     n, d = prior.times.shape[0], prior.state_dim
     eps = jnp.asarray(eps)
-    if eps.shape != (n, d):
+    if eps.ndim < 2 or eps.shape[-2:] != (n, d):
         raise ValueError(
-            f"eps must have shape ({n}, {d}), one row of {d} innovations per "
-            f"time for a state dimension of {d}, got {tuple(eps.shape)!r}"
+            f"eps must have shape (*batch, {n}, {d}), one row of {d} "
+            f"innovations per time for a state dimension of {d}, got "
+            f"{tuple(eps.shape)!r}"
         )
+    batch_shape = eps.shape[:-2]
     _F, _L, H, _Qc, _P_inf = prior.sde_kernel.sde_params()
     # The leading zero step gives A_1 = I, so starting from x_0 = 0 and
     # replacing Q_1 = 0 by P_0 makes the first step draw x_1 = L_0 eps_1.
@@ -1004,9 +1007,15 @@ def markov_gp_from_innovations(
         return x, x
 
     x_init = jnp.zeros((d,), dtype=jnp.result_type(L_seq, eps))
-    _, x_seq = jax.lax.scan(step, x_init, (A_seq, L_seq, eps))
-    # f(tₖ) = H xₖ + μ(tₖ)
-    f = einx.dot("n d, o d -> n o", x_seq, H)[:, 0]
+
+    def path(e: Float[Array, "N d"]) -> Float[Array, " N"]:
+        _, x_seq = jax.lax.scan(step, x_init, (A_seq, L_seq, e))
+        # f(tₖ) = H xₖ
+        return einx.dot("n d, o d -> n o", x_seq, H)[:, 0]
+
+    # One scan per leading batch index, sharing A_seq and L_seq.
+    f = jax.vmap(path)(eps.reshape((-1, n, d))).reshape((*batch_shape, n))
+    # f(tₖ) += μ(tₖ)
     return f + prior.mean(prior.times)
 
 
@@ -1054,7 +1063,9 @@ def markov_gp_innovations_sample(
         jitter: The diagonal added before the Cholesky factor.
 
     Returns:
-        The path $f(t_1), \dots, f(t_N)$, shape ``(N,)``.
+        The path $f(t_1), \dots, f(t_N)$, shape ``(N,)``, or
+        ``(*batch, N)`` under enclosing ``numpyro.plate`` contexts, one
+        independent path per plate index.
 
     Examples:
         A Bernoulli series with a latent Matérn-3/2 path:
@@ -1084,5 +1095,6 @@ def markov_gp_innovations_sample(
     eps = numpyro.sample(
         f"{name}_eps", dist.Normal(zero, 1.0).expand([n, d]).to_event(2)
     )
+    # Enclosing plates prepend batch dimensions to eps; the path keeps them.
     f = markov_gp_from_innovations(prior, jnp.asarray(eps), sqrt=sqrt, jitter=jitter)
     return numpyro.deterministic(name, f)  # ty: ignore[invalid-return-type]
