@@ -71,6 +71,7 @@ compose it; if it is almost here, extend it where it lives. Regenerate with
 | Name | Kind | What it does |
 |---|---|---|
 | `AbstractObservation` | class | Observation model $p(y \mid \eta, \theta)$ with its own hyperparameters. |
+| `DistLikelihood` | class | Observation model over any NumPyro distribution, $p(y_i \mid \eta_i, \theta)$. |
 | `GaussianLikelihood` | class | Gaussian observation model $p(y \mid f) = N(y \mid f, \sigma^2)$. |
 | `Guide` | class | Abstract base for variational posterior families. |
 | `Likelihood` | class | Abstract base for observation models. |
@@ -173,7 +174,6 @@ compose it; if it is almost here, extend it where it lives. Regenerate with
 | Name | Kind | What it does |
 |---|---|---|
 | `BernoulliLikelihood` | class | Binary classification likelihood with logit link, over `gaussx.BernoulliLikelihood`. |
-| `DistLikelihood` | class | Generic likelihood wrapping any ``numpyro.distributions.Distribution``. |
 | `GaussianLikelihood` | class | Gaussian observation model $p(y \mid f) = N(y \mid f, \sigma^2)$, over `gaussx.GaussianLikelihood`. |
 | `HeteroscedasticGaussianLikelihood` | class | Gaussian regression with input-dependent noise, over `gaussx.HeteroscedasticGaussianLikelihood`. |
 | `PoissonLikelihood` | class | Count likelihood with log link, over `gaussx.PoissonLikelihood`. |

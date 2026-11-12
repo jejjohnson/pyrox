@@ -18,6 +18,7 @@ def test_likelihoods_is_a_public_namespace_of_the_core():
     assert "likelihoods" in pyrox.__all__
     assert set(pyrox.likelihoods.__all__) == {
         "AbstractObservation",
+        "DistLikelihood",
         "GaussianLikelihood",
         "Guide",
         "Likelihood",

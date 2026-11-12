@@ -56,7 +56,7 @@ def test_gaussian_log_prob_dtype_preserved():
 def test_dist_bernoulli_log_prob_matches_numpyro():
     f = jnp.array([0.5, -0.5, 1.0])
     y = jnp.array([1.0, 0.0, 1.0])
-    lik = DistLikelihood(dist_fn=lambda f: nd.Bernoulli(logits=f))
+    lik = DistLikelihood(lambda f: nd.Bernoulli(logits=f))
     ref = nd.Bernoulli(logits=f).log_prob(y).sum()
     assert jnp.allclose(lik.log_prob(f, y), ref, atol=1e-5)
 
@@ -64,7 +64,7 @@ def test_dist_bernoulli_log_prob_matches_numpyro():
 def test_dist_poisson_log_prob_matches_numpyro():
     f = jnp.array([0.5, 1.0, -0.5])
     y = jnp.array([1, 3, 0], dtype=jnp.int32)
-    lik = DistLikelihood(dist_fn=lambda f: nd.Poisson(rate=jnp.exp(f)))
+    lik = DistLikelihood(lambda f: nd.Poisson(rate=jnp.exp(f)))
     ref = nd.Poisson(rate=jnp.exp(f)).log_prob(y).sum()
     assert jnp.allclose(lik.log_prob(f, y), ref, atol=1e-5)
 
@@ -72,13 +72,13 @@ def test_dist_poisson_log_prob_matches_numpyro():
 def test_dist_student_t_log_prob_matches_numpyro():
     f = jnp.array([0.0, 1.0, -1.0])
     y = jnp.array([0.1, 0.9, -1.2])
-    lik = DistLikelihood(dist_fn=lambda f: nd.StudentT(df=3.0, loc=f, scale=0.5))
+    lik = DistLikelihood(lambda f: nd.StudentT(df=3.0, loc=f, scale=0.5))
     ref = nd.StudentT(df=3.0, loc=f, scale=0.5).log_prob(y).sum()
     assert jnp.allclose(lik.log_prob(f, y), ref, atol=1e-5)
 
 
 def test_dist_likelihood_is_a_pyrox_likelihood():
-    lik = DistLikelihood(dist_fn=lambda f: nd.Normal(f, 1.0))
+    lik = DistLikelihood(lambda f: nd.Normal(f, 1.0))
     assert isinstance(lik, Likelihood)
 
 
@@ -87,7 +87,7 @@ def test_gaussian_likelihood_is_a_pyrox_likelihood():
     assert isinstance(lik, Likelihood)
 
 
-# --- DistLikelihood static dist_fn trap -----------------------------------
+# --- DistLikelihood static make_dist trap ---------------------------------
 
 
 class _Warp(eqx.Module):
@@ -110,17 +110,17 @@ class _WarpedNormalLikelihood(Likelihood):
         return nd.Normal(self.warp(f), 0.5).log_prob(y).sum()
 
 
-def test_dist_fn_is_static_and_freezes_closures():
-    """``dist_fn`` closures are invisible to ``eqx.filter_grad``.
+def test_make_dist_is_static_and_freezes_closures():
+    """``make_dist`` closures are invisible to ``eqx.filter_grad``.
 
     Pins the trap documented in the ``DistLikelihood`` class-docstring
-    warning: ``dist_fn`` is a static field, so parameters the callable
+    warning: ``make_dist`` is a static field, so parameters the callable
     closes over never appear in the gradient pytree and silently never
     train. This test documents the behaviour; it does not assert it is
     fixed.
     """
     warp = _Warp(a=jnp.asarray(1.3))
-    lik = DistLikelihood(dist_fn=lambda f: nd.Normal(warp(f), 0.5))
+    lik = DistLikelihood(lambda f: nd.Normal(warp(f), 0.5))
     f = jnp.array([0.0, 1.0, -1.0])
     y = jnp.array([0.1, 0.9, -1.2])
     grad = eqx.filter_grad(lambda lik_: -lik_.log_prob(f, y))(lik)
