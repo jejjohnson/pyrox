@@ -53,7 +53,10 @@ The Markov / state-space track (`MarkovGPPrior`, the SDE kernels, the Markov non
   `data["X"]`, and the base gives `log_prob(f, y, X=None)` summed over points.
   Multi-latent ones set `latent_dim` (a property or a defaulted static field)
   and map their `(N, latent_dim)` latents to gaussx's layout in
-  `_gaussx_latents`. Any other likelihood subclasses `Likelihood`. The
+  `_gaussx_latents`. `DistLikelihood` is the core
+  `pyrox.likelihoods.DistLikelihood`: its `build` returns the arguments of
+  `gaussx.CallableLikelihood`, which `_likelihoods._gaussx_likelihood` wraps.
+  Any other likelihood subclasses `Likelihood`. The
   inference code calls `build` on one site (`_site_log_prob`) for an
   `AbstractObservation` and `log_prob` otherwise; trainable parts are child
   modules. Only `GaussianLikelihood` (dispatched on the core

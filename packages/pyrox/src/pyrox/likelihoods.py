@@ -8,7 +8,9 @@ several packages dispatch on it. `likelihood_accepts_inputs` tells whether a
 likelihood takes the optional inputs ``X``. `AbstractObservation` is the
 observation-model base that declares its own hyperparameters and builds a
 gaussx likelihood holding the data; pyrox-lgm's observation models subclass
-it.
+it. `DistLikelihood` is an observation model over any NumPyro distribution:
+its `build` returns the per-site log density and data that
+`gaussx.CallableLikelihood` takes, which the gaussx-backed packages wrap.
 
 The module carries no linear algebra and imports no gaussx: the numerical
 work on a likelihood (expectations, per-site derivatives) happens in the
@@ -18,14 +20,16 @@ packages that use it.
 from __future__ import annotations
 
 import inspect
+import warnings
 from abc import abstractmethod
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 import equinox as eqx
 import jax.numpy as jnp
 import numpyro.distributions as nd
-from jaxtyping import Array, ArrayLike, Float
+from jaxtyping import Array, ArrayLike, Float, PyTree
 from numpyro.distributions.transforms import Transform
 
 
@@ -170,7 +174,9 @@ class AbstractObservation(eqx.Module):
 
     The class registers no NumPyro sites, and the core imports no gaussx:
     `build` is annotated ``Any``, and a subclass returns a
-    `gaussx.AbstractLikelihood`.
+    `gaussx.AbstractLikelihood`. The one exception is the core's own
+    `DistLikelihood`, whose `build` returns the two arguments of
+    `gaussx.CallableLikelihood` for the gaussx-backed packages to wrap.
 
     Attributes:
         name: Prefix of the hyperparameter names, which join $\theta$ as
@@ -232,7 +238,9 @@ class AbstractObservation(eqx.Module):
 
         Returns:
             A `gaussx.AbstractLikelihood` over the ``N`` sites (annotated
-            ``Any``, because the core imports no gaussx).
+            ``Any``, because the core imports no gaussx); for
+            `DistLikelihood`, the ``(log_density, data)`` pair that
+            `gaussx.CallableLikelihood` takes.
         """
 
     def site_distribution(
@@ -279,6 +287,236 @@ class AbstractObservation(eqx.Module):
         return jnp.asarray(self.site_distribution(eta, theta, data).cdf(y))
 
 
+def _takes_latent_only(fn: Callable[..., nd.Distribution]) -> bool:
+    """Whether ``fn`` is the old one-argument link ``f -> Distribution``.
+
+    Raises:
+        TypeError: If ``fn`` takes neither one nor three positional arguments.
+    """
+    try:
+        signature = inspect.signature(fn)
+    except (TypeError, ValueError):  # unintrospectable callable: trust it
+        return False
+    try:
+        signature.bind(None, None, None)
+    except TypeError:
+        pass
+    else:
+        return False
+    try:
+        signature.bind(None)
+    except TypeError:
+        msg = (
+            "DistLikelihood's make_dist takes (eta_i, theta, data_i) and returns "
+            f"a numpyro Distribution; {fn!r} takes neither that nor one argument"
+        )
+        raise TypeError(msg) from None
+    return True
+
+
+class _LatentOnly(eqx.Module):
+    """The old one-argument link ``f -> Distribution`` as a ``make_dist``."""
+
+    dist_fn: Callable[[Array], nd.Distribution] = eqx.field(static=True)
+
+    def __call__(
+        self, eta: Array, theta: Mapping[str, Array], data: Mapping[str, Array]
+    ) -> nd.Distribution:
+        return self.dist_fn(eta)
+
+
+class _DistSiteLogDensity(eqx.Module):
+    r"""One site's $\ell(\eta_i, d_i) = \log p(y_i \mid \eta_i, \theta, d_i)$.
+
+    An `equinox.Module` rather than a closure, so $\theta$ stays a leaf of
+    the pytree that holds it (a `gaussx.CallableLikelihood` downstream).
+    Site $i$'s data is ``{"y": y_i, "data": data_i}``.
+    """
+
+    make_dist: Callable[..., nd.Distribution] = eqx.field(static=True)
+    theta: dict[str, Array]
+
+    def __call__(self, eta_i: Float[Array, ""], site: PyTree) -> Float[Array, ""]:
+        # log p(yᵢ ∣ ηᵢ, θ, dᵢ)
+        log_prob = jnp.asarray(
+            self.make_dist(eta_i, self.theta, site["data"]).log_prob(site["y"])
+        )
+        if log_prob.shape != ():
+            msg = (
+                "DistLikelihood's make_dist must return one site's distribution "
+                "for one site's eta_i and data_i, so that log_prob(y_i) is a "
+                f"scalar; got shape {log_prob.shape}. Pass per-site arrays "
+                "through data rather than closing over them."
+            )
+            raise ValueError(msg)
+        return log_prob
+
+
+class DistLikelihood(AbstractObservation, Likelihood):
+    r"""Observation model over any NumPyro distribution, $p(y_i \mid \eta_i, \theta)$.
+
+    The user's ``make_dist(eta_i, theta, data_i)`` returns site $i$'s
+    distribution, and its ``log_prob`` is the per-site log density
+
+    $$
+    \ell(\eta_i, d_i) = \log p(y_i \mid \eta_i, \theta, \mathrm{data}_i),
+    \qquad
+    \log p(y \mid \eta) = \sum_i \ell(\eta_i, d_i),
+    $$
+
+    so a likelihood gaussx has no class for (zero-inflated Poisson, Beta, a
+    censored Gaussian) gets Laplace, EP and the Markov strategies.
+
+    The core imports no gaussx, so `build` does not return a gaussx
+    likelihood, unlike other observation models: it returns the pair
+    ``(log_density, data)`` that `gaussx.CallableLikelihood` takes, where
+    ``log_density(eta_i, d_i)`` is $\ell$ and ``data`` is
+    ``{"y": y, "data": data}``, every leaf with a leading site axis of
+    length $N$. pyrox-gp's inference and pyrox-ssm's strategies recognise a
+    `DistLikelihood` and wrap the pair as
+    ``gaussx.CallableLikelihood(*lik.build(y, theta, data))``, which gives
+    the per-site derivatives and expectations. ``log_prob(f, y, X)`` and the
+    per-site diagnostics (`site_distribution`) call ``make_dist`` on every
+    site at once, so ``make_dist`` must broadcast over a leading site axis,
+    as NumPyro distributions do; index inputs from the end
+    (``data_i["X"][..., 0]``).
+
+    The hyperparameters $\theta$ that ``make_dist`` reads are the ``theta``
+    field, updated key by key by the ``theta`` passed to `build` (pyrox-gp
+    and pyrox-ssm pass none). They are array leaves of the module, so they
+    receive gradients and may be NumPyro sample values. pyrox-gp and
+    pyrox-ssm pass the inputs as ``data_i = {"X": x_i}``. `pyrox_lgm.inla`
+    does not take a `DistLikelihood` yet: it uses what `build` returns as a
+    gaussx likelihood. The class registers no NumPyro sites.
+
+    The old one-argument link ``DistLikelihood(lambda f: dist.Bernoulli(logits=f))``
+    still works: a callable that takes one positional argument is wrapped to
+    ignore ``theta`` and ``data_i``. ``DistLikelihood(dist_fn=...)`` warns
+    and does the same.
+
+    !!! warning "The callable cannot carry trainable parameters"
+        ``make_dist`` is a **static** field, so anything it closes over is
+        invisible to ``eqx.filter_grad`` and silently never trains. Put
+        scalar hyperparameters in ``theta``; for a parameterized link (a
+        warp, a network), write a `Likelihood` subclass holding it as a
+        child module.
+
+    Attributes:
+        make_dist: ``(eta_i, theta, data_i) -> numpyro.distributions.Distribution``,
+            site $i$'s distribution of $y_i$.
+        theta: Hyperparameter values ``make_dist`` reads, as arrays.
+        name: Prefix of the hyperparameter names (``"dist"``).
+
+    Examples:
+        A zero-inflated Poisson with gate $\pi$, and the gaussx likelihood a
+        gaussx-backed package wraps it into:
+
+        >>> import gaussx as gx
+        >>> import jax.numpy as jnp
+        >>> import numpyro.distributions as dist
+        >>> from pyrox.likelihoods import DistLikelihood
+        >>> zip_lik = DistLikelihood(
+        ...     lambda eta, th, d: dist.ZeroInflatedPoisson(
+        ...         gate=th["pi"], rate=jnp.exp(eta)
+        ...     ),
+        ...     theta={"pi": 0.2},
+        ... )
+        >>> y = jnp.array([0.0, 2.0, 1.0])
+        >>> site_lik = gx.CallableLikelihood(*zip_lik.build(y, {}, {}))
+        >>> g, h = site_lik.site_derivatives(jnp.zeros(3))
+        >>> g.shape, h.shape
+        ((3,), (3,))
+
+        The old one-argument link:
+
+        >>> lik = DistLikelihood(lambda f: dist.Bernoulli(logits=f))
+        >>> float(lik.log_prob(jnp.zeros(2), jnp.array([1.0, 0.0])))
+        -1.386...
+    """
+
+    # (eta_i, theta, data_i) -> Distribution
+    make_dist: Callable[..., nd.Distribution] = eqx.field(static=True)
+    theta: dict[str, Array]
+    name: str = eqx.field(static=True)
+
+    def __init__(
+        self,
+        make_dist: Callable[..., nd.Distribution] | None = None,
+        theta: Mapping[str, ArrayLike] | None = None,
+        *,
+        name: str = "dist",
+        dist_fn: Callable[[Array], nd.Distribution] | None = None,
+    ) -> None:
+        if dist_fn is not None:
+            if make_dist is not None:
+                msg = "pass make_dist or the deprecated dist_fn, not both"
+                raise TypeError(msg)
+            warnings.warn(
+                "DistLikelihood(dist_fn=...) is deprecated; pass the callable "
+                "as make_dist: DistLikelihood(make_dist=...) or positionally.",
+                DeprecationWarning,
+                stacklevel=2,
+                # equinox's metaclass calls __init__; point at the caller
+                skip_file_prefixes=(str(Path(eqx.__file__).parent),),
+            )
+            make_dist = dist_fn
+        if make_dist is None:
+            msg = "DistLikelihood needs make_dist(eta_i, theta, data_i)"
+            raise TypeError(msg)
+        if _takes_latent_only(make_dist):
+            make_dist = _LatentOnly(make_dist)
+        self.make_dist = make_dist
+        self.theta = {key: jnp.asarray(value) for key, value in (theta or {}).items()}
+        self.name = name
+
+    def _theta(self, theta: Mapping[str, Array]) -> dict[str, Array]:
+        """The ``theta`` field, updated by the caller's ``theta``."""
+        return {**self.theta, **theta}
+
+    def build(
+        self, y: Array, theta: dict[str, Array], data: Mapping[str, ArrayLike]
+    ) -> tuple[Callable[[Float[Array, ""], PyTree], Float[Array, ""]], PyTree]:
+        r"""The per-site log density and data that `gaussx.CallableLikelihood` takes.
+
+        Args:
+            y: Observations, ``(N,)``.
+            theta: Hyperparameters, overriding the ``theta`` field key by key.
+            data: Per-site data other than ``y``, every leaf with a leading
+                site axis of length ``N``.
+
+        Returns:
+            ``(log_density, site_data)``: ``log_density(eta_i, d_i)`` is
+            $\log p(y_i \mid \eta_i, \theta, \mathrm{data}_i)$ for a scalar
+            ``eta_i`` and one site's slice ``d_i`` of
+            ``site_data = {"y": y, "data": data}``.
+        """
+        log_density = _DistSiteLogDensity(self.make_dist, self._theta(theta))
+        site_data = {
+            "y": jnp.asarray(y),
+            "data": {key: jnp.asarray(value) for key, value in data.items()},
+        }
+        return log_density, site_data
+
+    def site_distribution(
+        self,
+        eta: Float[Array, " N"],
+        theta: dict[str, Array],
+        data: Mapping[str, ArrayLike],
+    ) -> nd.Distribution:
+        """``make_dist`` on every site at once (batched in eta)."""
+        return self.make_dist(eta, self._theta(theta), data)
+
+    def log_prob(
+        self,
+        f: Float[Array, " ..."],
+        y: Float[Array, " ..."],
+        X: Float[Array, " ..."] | None = None,
+    ) -> Float[Array, ""]:
+        r"""$\sum_i \log p(y_i \mid f_i)$, with the inputs in ``data["X"]``."""
+        data = {} if X is None else {"X": X}
+        return self.site_log_prob(y, f, {}, data).sum()
+
+
 def likelihood_accepts_inputs(lik: Likelihood) -> bool:
     """Whether ``lik.log_prob`` takes the optional trailing ``X``.
 
@@ -323,6 +561,7 @@ def likelihood_accepts_inputs(lik: Likelihood) -> bool:
 
 __all__ = [
     "AbstractObservation",
+    "DistLikelihood",
     "GaussianLikelihood",
     "Guide",
     "Likelihood",

@@ -16,8 +16,9 @@ so the per-site derivatives and expectations come from gaussx
 (``site_derivatives``, `gaussx.expected_log_likelihood`). An observation
 model (`pyrox.likelihoods.AbstractObservation`, such as pyrox-gp's
 `BernoulliLikelihood`) gives $\ell$ through the one-site gaussx likelihood it
-builds; any other `pyrox.likelihoods.Likelihood` through its ``log_prob``
-on one point.
+builds; the core `pyrox.likelihoods.DistLikelihood` through the per-site log
+density its `build` returns; any other `pyrox.likelihoods.Likelihood`
+through its ``log_prob`` on one point.
 `_check_scalar_latent` and `_require_gauss_hermite` are copies of the checks
 in `pyrox_gp._inference_nongauss`, and `_pushforward_moments` a copy of the
 one in `pyrox_gp._warped` (no gaussx function computes it yet).
@@ -37,6 +38,7 @@ from gaussx import AbstractIntegrator, CallableLikelihood, GaussHermiteIntegrato
 from jaxtyping import Array, Bool, Float, PyTree
 from pyrox.likelihoods import (
     AbstractObservation,
+    DistLikelihood,
     Likelihood,
     likelihood_accepts_inputs,
 )
@@ -132,7 +134,7 @@ class _MaskedSiteLogDensity(eqx.Module):
         site_log_density: The unmasked per-site log density.
     """
 
-    site_log_density: _SiteLogDensity | _ObservationSiteLogDensity
+    site_log_density: Callable[[Float[Array, ""], PyTree], Float[Array, ""]]
 
     def __call__(self, f_i: Float[Array, ""], site: PyTree) -> Float[Array, ""]:
         data, observed = site
@@ -158,6 +160,11 @@ def as_gaussx_likelihood(
     \ell(f_i, (y_i, X_i)) = \texttt{lik.build}(y_{i:i+1}, \varnothing,
     \{X: X_{i:i+1}\}).\texttt{log\_prob}(f_{i:i+1}).
     $$
+
+    A `pyrox.likelihoods.DistLikelihood` gives it through the per-site log
+    density and data its `build` returns (the arguments of
+    `gaussx.CallableLikelihood`; the core imports no gaussx), with the
+    inputs in ``data["X"]``.
 
     Any other `pyrox.likelihoods.Likelihood` gives it through ``log_prob``,
     which is summed over points, on that point alone,
@@ -201,8 +208,17 @@ def as_gaussx_likelihood(
         ([2.0, -2.0], [-2.0, -2.0])
     """
     _check_scalar_latent(lik)
-    site_log_density: _SiteLogDensity | _ObservationSiteLogDensity
-    if isinstance(lik, AbstractObservation):
+    site_log_density: Callable[[Float[Array, ""], PyTree], Float[Array, ""]]
+    if isinstance(lik, DistLikelihood):
+        dist_lik = lik
+        inputs = {} if X is None else {"X": X}
+        site_log_density = dist_lik.build(y, {}, inputs)[0]
+
+        def site_data(y: Float[Array, " N"]) -> PyTree:
+            # {"y": y, "data": inputs}, every leaf with a leading site axis
+            return dist_lik.build(y, {}, inputs)[1]
+
+    elif isinstance(lik, AbstractObservation):
         inputs = {} if X is None else {"X": X}
         site_log_density = _ObservationSiteLogDensity(lik)
 

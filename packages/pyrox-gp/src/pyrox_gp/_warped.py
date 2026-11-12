@@ -92,7 +92,7 @@ class WarpedGaussianLikelihood(Likelihood):
     The warp is a **child module**, so its parameters are ordinary trainable
     leaves. Passing a warp through a lambda to
     [`DistLikelihood`][pyrox_gp.DistLikelihood] does *not* work: its
-    ``dist_fn`` is a static field, so the warp is silently frozen and never
+    ``make_dist`` is a static field, so the warp is silently frozen and never
     trains.
 
     The expected log-likelihood has no closed form, so

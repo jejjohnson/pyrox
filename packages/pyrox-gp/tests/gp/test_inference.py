@@ -94,7 +94,7 @@ def test_svgp_elbo_bernoulli_returns_finite_scalar():
     prior, X, _ = _toy()
     y = jnp.array([1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0])
     guide = FullRankGuide.init(num_inducing=prior.num_inducing)
-    lik = DistLikelihood(dist_fn=lambda f: nd.Bernoulli(logits=f))
+    lik = DistLikelihood(lambda f: nd.Bernoulli(logits=f))
     elbo = svgp_elbo(
         prior,
         guide,
@@ -111,7 +111,7 @@ def test_svgp_elbo_nonconjugate_requires_integrator():
     prior, X, _ = _toy()
     y = jnp.ones(10)
     guide = FullRankGuide.init(num_inducing=prior.num_inducing)
-    lik = DistLikelihood(dist_fn=lambda f: nd.Bernoulli(logits=f))
+    lik = DistLikelihood(lambda f: nd.Bernoulli(logits=f))
     with pytest.raises(ValueError, match="integrator"):
         svgp_elbo(prior, guide, lik, X, y)
 
@@ -187,7 +187,7 @@ def test_cvi_nonconjugate_requires_integrator():
     prior, X, _ = _toy()
     y = jnp.ones(10)
     guide = NaturalGuide.init(num_inducing=prior.num_inducing)
-    lik = DistLikelihood(dist_fn=lambda f: nd.Bernoulli(logits=f))
+    lik = DistLikelihood(lambda f: nd.Bernoulli(logits=f))
     cvi = ConjugateVI(damping=0.5)
     with pytest.raises(ValueError, match="integrator"):
         cvi.step(prior, guide, lik, X, y)

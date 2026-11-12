@@ -13,24 +13,24 @@ Three kinds of likelihood ship in this module:
   declare no `theta_spec` and `build` ignores ``theta``.
   `GaussianLikelihood` subclasses `pyrox.likelihoods.GaussianLikelihood`, so
   the closed-form ELBO paths that dispatch on the core class keep it.
-* **Generic wrapper** — `DistLikelihood` turns *any*
-  ``numpyro.distributions.Distribution`` into a `Likelihood` via
-  a user-supplied link function ``f -> dist``. Non-conjugate ELBO paths
-  integrate the wrapped ``log_prob`` numerically through a gaussx
-  integrator.
+* **Generic wrapper** — `DistLikelihood` is `pyrox.likelihoods.DistLikelihood`,
+  the core observation model over any ``numpyro.distributions.Distribution``
+  (``make_dist(eta_i, theta, data_i)``, or the old one-argument ``f -> dist``).
+  Its `build` returns the arguments of `gaussx.CallableLikelihood`, since the
+  core imports no gaussx; `_gaussx_likelihood` wraps them, so the inference
+  strategies take its derivatives and expectations from gaussx too.
 * `SoftmaxLikelihood` and `HeteroscedasticGaussianLikelihood` are
   multi-latent (``latent_dim > 1``); their ``log_prob`` works but the
   scalar-latent advanced inference paths reject them with a clear error.
 
 All of them satisfy the `pyrox_gp.Likelihood` protocol,
 ``log_prob(f, y, X=None) -> scalar``, summed over points; for the
-observation models it is ``build(y, {}, {"X": X}).log_prob(f)``.
+observation models over gaussx it is ``build(y, {}, {"X": X}).log_prob(f)``.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from typing import Any
+from collections.abc import Mapping
 
 import equinox as eqx
 import gaussx as gx
@@ -40,6 +40,7 @@ from jaxtyping import Array, ArrayLike, Float, Int
 from numpyro.distributions.transforms import SoftplusTransform
 from pyrox.likelihoods import (
     AbstractObservation,
+    DistLikelihood,
     GaussianLikelihood as _CoreGaussianLikelihood,
 )
 
@@ -86,6 +87,24 @@ class _GPObservation(AbstractObservation, Likelihood):
         return self.build(y_sites, {}, data).log_prob(self._gaussx_latents(f_sites))
 
 
+def _gaussx_likelihood(
+    observation: AbstractObservation,
+    y: Array,
+    theta: dict[str, Array],
+    data: Mapping[str, ArrayLike],
+) -> gx.AbstractLikelihood:
+    """The gaussx likelihood of ``observation`` holding ``y``.
+
+    `build` returns it, except for the core `DistLikelihood`, whose `build`
+    returns the ``(log_density, data)`` pair of `gaussx.CallableLikelihood`
+    (the core imports no gaussx), wrapped here.
+    """
+    built = observation.build(y, theta, data)
+    if isinstance(observation, DistLikelihood):
+        return gx.CallableLikelihood(*built)
+    return built
+
+
 def _site_log_prob(
     observation: AbstractObservation,
     f_i: Float[Array, ""],
@@ -102,63 +121,8 @@ def _site_log_prob(
     # dᵢ with a leading site axis of length one
     one_site = jax.tree.map(lambda leaf: jnp.asarray(leaf)[None], data_i)
     # log p(yᵢ ∣ fᵢ) = build(yᵢ, ∅, dᵢ).log_prob(fᵢ)
-    site = observation.build(jnp.asarray(y_i)[None], {}, one_site)
+    site = _gaussx_likelihood(observation, jnp.asarray(y_i)[None], {}, one_site)
     return site.log_prob(jnp.asarray(f_i)[None])
-
-
-class DistLikelihood(Likelihood):
-    r"""Generic likelihood wrapping any ``numpyro.distributions.Distribution``.
-
-    The user supplies a *link function* that maps the latent function
-    value ``f`` to a numpyro distribution over observations:
-
-    ```python
-    # Bernoulli with logit link
-    lik = DistLikelihood(lambda f: dist.Bernoulli(logits=f))
-
-    # Poisson with log link
-    lik = DistLikelihood(lambda f: dist.Poisson(rate=jnp.exp(f)))
-
-    # Student-t noise
-    lik = DistLikelihood(lambda f: dist.StudentT(df=3, loc=f, scale=0.5))
-    ```
-
-    !!! warning "The link function cannot carry trainable parameters"
-        ``dist_fn`` is a **static** field, so anything the callable closes
-        over is invisible to ``eqx.filter_grad``. A link function holding
-        learnable parameters will silently never train — there is no error,
-        and the loss still decreases because the kernel and guide keep
-        fitting.
-
-        ```python
-        # WRONG -- `warp` is frozen at its initial value forever
-        lik = DistLikelihood(lambda f: dist.Normal(warp(f), sigma))
-        ```
-
-        For a parameterized link, write a `Likelihood` subclass and
-        hold the parameters as child modules, so they are ordinary
-        trainable leaves.
-
-    The resulting object satisfies the `Likelihood` protocol and
-    can be passed to `svgp_elbo`. Because no closed-form expected
-    log-likelihood is available, the ELBO uses numerical integration
-    (``GaussHermiteIntegrator`` or ``MonteCarloIntegrator`` from gaussx).
-
-    Attributes:
-        dist_fn: Callable mapping ``f`` to a
-            `numpyro.distributions.Distribution`.
-    """
-
-    dist_fn: Callable[..., Any] = eqx.field(static=True)
-
-    def log_prob(
-        self,
-        f: Float[Array, " ..."],
-        y: Float[Array, " ..."],
-        X: Float[Array, " ..."] | None = None,
-    ) -> Float[Array, ""]:
-        r"""Sum of per-point log-densities under the wrapped distribution."""
-        return self.dist_fn(f).log_prob(y).sum()
 
 
 class GaussianLikelihood(_GPObservation, _CoreGaussianLikelihood):
