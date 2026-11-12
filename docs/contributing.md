@@ -6,12 +6,13 @@ This page documents the label taxonomy, epic model, and issue conventions used i
 
 ## Label Taxonomy
 
-Every issue carries exactly one `type:*`, one or more `area:*`, at most one `layer:*`, one `wave:*`, and one `priority:*`.
+Every issue carries exactly one `type:*`, one or more `area:*`, one `pkg:*` for each workspace package it touches (none for repo-wide work such as build, CI or the roadmap), at most one `layer:*`, one `wave:*`, and one `priority:*`.
 
 | Scope | Labels |
 |---|---|
 | **Type** | `type:epic-wave`, `type:epic-theme`, `type:feature`, `type:design`, `type:chore`, `type:docs`, `type:bug`, `type:research` |
 | **Area** | `area:engineering`, `area:testing`, `area:docs`, `area:code` — extend per project (e.g. `area:algorithmic`, `area:integration`) |
+| **Package** | `pkg:core` (the pyrox core), `pkg:gp`, `pkg:nn`, `pkg:lgm`, `pkg:ssm`, so the issues of one package can be searched with `label:pkg:ssm` |
 | **Layer** | `layer:0-primitives`, `layer:1-components`, `layer:2-models` — only if the project has a formal layer stack |
 | **Wave** | `wave:0`, `wave:1`, `wave:2`, … — release-scoped phases (add `wave:N-<slug>` variants for descriptive labels) |
 | **Priority** | `priority:p0` (blocker), `priority:p1` (high), `priority:p2` (normal) |

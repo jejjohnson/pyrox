@@ -2,7 +2,7 @@
 #
 # Bootstrap the standard label taxonomy for this template.
 #
-# Creates labels for: type / area / layer / wave / priority.
+# Creates labels for: type / area / pkg / layer / wave / priority.
 # Idempotent — uses `gh label create --force` so re-runs are safe.
 #
 # Usage:
@@ -52,6 +52,13 @@ create "area:docs"        "1d76db" "Docs + notebooks"
 create "area:code"        "c2e0c6" "Source-code changes (catch-all fallback)"
 # Edit / extend for your project. Common domain-specific areas:
 #   area:algorithmic, area:integration, area:performance, area:security
+
+echo "Creating pkg:* labels (one per workspace package)..."
+create "pkg:core" "5319e7" "pyrox core: the bridge, pyrox.inference, pyrox.likelihoods"
+create "pkg:gp"   "1d76db" "pyrox-gp package"
+create "pkg:nn"   "fbca04" "pyrox-nn package"
+create "pkg:lgm"  "0e8a16" "pyrox-lgm package"
+create "pkg:ssm"  "d93f0b" "pyrox-ssm package"
 
 echo "Creating Dependabot / misc labels..."
 create "dependencies" "ededed" "Pull requests that update a dependency file"
