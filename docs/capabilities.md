@@ -70,6 +70,7 @@ compose it; if it is almost here, extend it where it lives. Regenerate with
 
 | Name | Kind | What it does |
 |---|---|---|
+| `AbstractObservation` | class | Observation model $p(y \mid \eta, \theta)$ with its own hyperparameters. |
 | `GaussianLikelihood` | class | Gaussian observation model $p(y \mid f) = N(y \mid f, \sigma^2)$. |
 | `Guide` | class | Abstract base for variational posterior families. |
 | `Likelihood` | class | Abstract base for observation models. |
@@ -498,7 +499,6 @@ compose it; if it is almost here, extend it where it lives. Regenerate with
 
 | Name | Kind | What it does |
 |---|---|---|
-| `AbstractObservation` | class | ``y \| eta`` for an LGM, with its own hyperparameters. |
 | `Bernoulli` | class | ``y ~ Bernoulli(sigmoid(eta))``, ``y`` in ``{0, 1}``. |
 | `Binomial` | class | ``y ~ Binomial(n, sigmoid(eta))`` with ``n = data["n_trials"]``. |
 | `Gaussian` | class | ``y ~ N(eta, 1/prec)``; ``prec`` under ``PCPrecision(1, 0.01)``. |

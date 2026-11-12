@@ -8,6 +8,12 @@ The `pyrox.likelihoods` module holds the protocols that every observation model 
 
 ::: pyrox.likelihoods.Guide
 
+## Observation models
+
+`AbstractObservation` is the base of an observation model that declares its own hyperparameters and builds a gaussx likelihood holding the data; `latent_dim` (1 by default) is the number of latents per site. `pyrox_lgm` re-exports it, so `pyrox_lgm.AbstractObservation is pyrox.likelihoods.AbstractObservation`.
+
+::: pyrox.likelihoods.AbstractObservation
+
 ## Gaussian observations
 
 ::: pyrox.likelihoods.GaussianLikelihood

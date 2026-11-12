@@ -12,7 +12,7 @@ One facade, `pyrox_lgm`:
 |---|---|
 | Components | `_components/` — `_temporal.py` (`IID`, `RW1`, `RW2`, `AR1`), `_areal.py` (`Besag`, `BYM2`, `CAR`, `Leroux`), `_spde.py` (`SPDE`), `_generic.py` (`Generic`), `_combinators.py` (`Kronecker`, `Replicate`), `_base.py` (`AbstractComponent`) |
 | Priors | `_priors/_pc.py` — `PCPrecision`, `PCAR1Rho`, `PCBYM2Phi`, `PCMatern`, `StructureSpectrum` |
-| Observations | `_likelihood.py` — `AbstractObservation`, `Gaussian`, `Poisson`, `Bernoulli`, `Binomial`, `NegativeBinomial` |
+| Observations | `_likelihood.py` — `Gaussian`, `Poisson`, `Bernoulli`, `Binomial`, `NegativeBinomial`, over `AbstractObservation`, which lives in the core (`pyrox.likelihoods`) and is re-exported here |
 | Model and fitting | `_model.py` (`LGM`, `FixedEffects`), `_formula.py` (`f`), `_assembly.py`, `_inla.py` (`inla`), `_result.py` (`INLAResult`, `Summary`), `_diagnostics.py`, `_numpyro.py` |
 
 ## Contracts
