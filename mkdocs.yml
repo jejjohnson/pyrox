@@ -108,6 +108,7 @@ nav:
           - "Example 3b: A Spatial Field, Per-Facility Paths and Poisson Counts, with NUTS and SVI": notebooks/ssm/ssm_spatial_hierarchical.ipynb
           - "Example 4: A Non-Gaussian Likelihood, Collapsed (Route A) and Latent (Route B), with a Cross-Check": notebooks/ssm/ssm_nongauss.ipynb
           - "Example 5: An Ensemble Kalman Likelihood (5a) and an Ensemble of Variational Fits (5b)": notebooks/ssm/ssm_ensemble.ipynb
+          - "Example 6: A Nonlinear State-Space Model with nonlinear_ssm_factor": notebooks/ssm/ssm_nonlinear.ipynb
           - "Markov Gaussian Processes — Matern Kernels in State-Space Form": notebooks/ssm/markov_gp_sde_kernels.ipynb
           - "Markov Gaussian Processes — Kalman Filtering and RTS Smoothing": notebooks/ssm/markov_gp_kalman.ipynb
           - "Non-Gaussian Markov GP Inference — Laplace, Gauss–Newton, Posterior Linearisation and EP": notebooks/ssm/markov_gp_nongauss.ipynb
