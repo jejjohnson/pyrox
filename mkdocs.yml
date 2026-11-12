@@ -104,6 +104,7 @@ nav:
       - "State-space models (pyrox-ssm)":
           - "Example 1: One Site — NUTS, SVI and Prediction Through the Gaps": notebooks/ssm/ssm_one_site.ipynb
           - "Example 2: Many Sites, Pooled Hyperparameters over Ragged Records": notebooks/ssm/ssm_hierarchical_sites.ipynb
+          - "Example 3: A Regional Signal Plus a Local Signal per Site": notebooks/ssm/ssm_shared_plus_site.ipynb
           - "Markov Gaussian Processes — Matern Kernels in State-Space Form": notebooks/ssm/markov_gp_sde_kernels.ipynb
           - "Markov Gaussian Processes — Kalman Filtering and RTS Smoothing": notebooks/ssm/markov_gp_kalman.ipynb
           - "Non-Gaussian Markov GP Inference — Laplace, Gauss–Newton, Posterior Linearisation and EP": notebooks/ssm/markov_gp_nongauss.ipynb
