@@ -21,7 +21,7 @@ the next person will find and reuse it.
 | `pyrox-gp` | `pyrox_gp` | GP kernels (with priors), guides, likelihoods; exact, sparse, multi-output and warped GPs; non-Gaussian inference; pathwise sampling | pyrox |
 | `pyrox-nn` | `pyrox_nn` (+ `pyrox_nn.api`, `pyrox_nn.preprocessing` behind `[bnf]`) | Bayesian / uncertainty-aware layers on geonnax cores, the Bayesian Neural Field estimator, last-layer Laplace | pyrox (**never** pyrox-gp) |
 | `pyrox-lgm` | `pyrox_lgm` | Latent Gaussian models in precision form: GMRF components, PC priors, `inla()` | pyrox (**never** pyrox-gp) |
-| `pyrox-ssm` | `pyrox_ssm` (+ `pyrox_ssm.flows` behind `[flows]`) | State-space models: Markov (Kalman) GPs over SDE kernels, sparse and non-Gaussian Markov GPs, the normalizing Kalman filter | pyrox (**never** pyrox-gp, pyrox-lgm or pyrox-nn) |
+| `pyrox-ssm` | `pyrox_ssm` (+ `pyrox_ssm.flows` behind `[flows]`, `pyrox_ssm.ensemble` behind `[ensemble]`) | State-space models: Markov (Kalman) GPs over SDE kernels, sparse and non-Gaussian Markov GPs, the normalizing Kalman filter | pyrox (**never** pyrox-gp, pyrox-lgm or pyrox-nn) |
 
 Dependencies point one way: nothing imports upward. `pyrox-gp`, `pyrox-nn` and
 `pyrox-lgm` are siblings over `pyrox`, so `pyrox-nn` and `pyrox-lgm` never import

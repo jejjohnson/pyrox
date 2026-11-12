@@ -287,6 +287,14 @@ def nkf_model(y, warp=None, mask=None):
 ::: pyrox_ssm.flows.NormalizingKalmanPrior
 ::: pyrox_ssm.flows.normalizing_kalman_factor
 
+## Ensemble Kalman log likelihood
+
+`ensemble_factor` adds the ensemble Kalman log likelihood of a filterax assimilation run (`filterax.differentiable_assimilate`) to a NumPyro model, for models whose state is too large for a moment filter. The initial ensemble is data, drawn once outside the model, and only deterministic square-root filters are accepted, so the log density is deterministic and smooth in the parameters. It is biased, the bias shrinking as the ensemble grows, so report the ensemble size with any result. Fit it with SVI or MAP by default, with NUTS for a small set of parameters, and with filterax's ensemble Kalman inversion when the model cannot be differentiated.
+
+`pyrox_ssm.ensemble` needs the `ensemble` extra (`pip install 'pyrox-ssm[ensemble]'`), which installs filterax.
+
+::: pyrox_ssm.ensemble.ensemble_factor
+
 ## Non-Gaussian inference (Markov)
 
 The Markov-aware counterparts of pyrox-gp's site-based strategies

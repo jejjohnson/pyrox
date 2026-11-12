@@ -47,7 +47,7 @@ PACKAGES: dict[str, list[str]] = {
     "pyrox-gp": ["pyrox_gp"],
     "pyrox-nn": ["pyrox_nn", "pyrox_nn.api", "pyrox_nn.preprocessing"],
     "pyrox-lgm": ["pyrox_lgm"],
-    "pyrox-ssm": ["pyrox_ssm", "pyrox_ssm.flows"],
+    "pyrox-ssm": ["pyrox_ssm", "pyrox_ssm.flows", "pyrox_ssm.ensemble"],
 }
 
 UPSTREAM: dict[str, list[str]] = {

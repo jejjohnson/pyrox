@@ -4,7 +4,7 @@ State-space models as NumPyro models: temporal GPs and Gaussian state-space mode
 
 ## Public layout
 
-One facade, `pyrox_ssm` (`__init__.py` re-exports; implementation in private `_*.py` modules), plus `pyrox_ssm.flows` behind the `[flows]` extra. The Markov-GP track moved here from pyrox-gp with every name and signature unchanged; the old `pyrox_gp` names raise an `ImportError` naming their `pyrox_ssm` home.
+One facade, `pyrox_ssm` (`__init__.py` re-exports; implementation in private `_*.py` modules), plus `pyrox_ssm.flows` behind the `[flows]` extra and `pyrox_ssm.ensemble` behind the `[ensemble]` extra. The Markov-GP track moved here from pyrox-gp with every name and signature unchanged; the old `pyrox_gp` names raise an `ImportError` naming their `pyrox_ssm` home.
 
 | Concept | Module | Names |
 |---|---|---|
@@ -17,6 +17,7 @@ One facade, `pyrox_ssm` (`__init__.py` re-exports; implementation in private `_*
 | Shared GP plus one GP per site on a merged grid (block-diagonal LGSSM) | `_hierarchical.py` | `SharedPlusSiteMarkovGP` |
 | Per-site numerics (private) | `_markov_sites.py` | `as_gaussx_likelihood`, `_cavity_site_derivatives`, `_check_scalar_latent`, `_require_gauss_hermite`, `_pushforward_moments` |
 | Normalizing Kalman filter (`[flows]`) | `flows/_markov_flow.py` | `pyrox_ssm.flows.NormalizingKalmanPrior`, `normalizing_kalman_factor` |
+| Ensemble Kalman log likelihood of a filterax run (`[ensemble]`) | `ensemble.py` | `pyrox_ssm.ensemble.ensemble_factor` |
 | SDE kernels (re-exported from gaussx) | `__init__.py` | `SDEKernel`, `SDEParams`, `MaternSDE`, `SumSDE`, `ProductSDE`, … |
 
 ## Contracts
@@ -25,6 +26,7 @@ One facade, `pyrox_ssm` (`__init__.py` re-exports; implementation in private `_*
 - **Linear algebra goes through gaussx** (`kalman_filter`, `rts_smoother`, Gaussian densities); never `jnp.linalg` on a covariance.
 - **Per-site likelihood numerics** go through `_markov_sites.as_gaussx_likelihood` and gaussx (`site_derivatives`, `expected_log_likelihood`); a check pyrox-gp also needs is copied into `_markov_sites.py`, never imported.
 - **`pyrox_ssm.flows` needs the `[flows]` extra**: importing it needs `flowjax`, and a non-`None` warp needs `gauss_flows` (imported lazily by `_require_flows`). `pyrox_ssm` itself never imports `flows`.
+- **`pyrox_ssm.ensemble` needs the `[ensemble]` extra** (filterax). It is the only module that imports filterax, and `pyrox_ssm` itself never imports it, so `import pyrox_ssm` works without filterax (`tests/test_ssm_import_guard.py`). The root `dev` group installs `pyrox-ssm[ensemble]`, so its tests run in CI.
 
 ## Docs and tests
 

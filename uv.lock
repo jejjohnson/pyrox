@@ -604,6 +604,22 @@ wheels = [
 ]
 
 [[package]]
+name = "filterax"
+version = "0.0.8"
+source = { git = "https://github.com/jejjohnson/filterax?rev=v0.0.8#bd580761f908fea35f7e6b797aa43838a12a2919" }
+dependencies = [
+    { name = "einops" },
+    { name = "einx" },
+    { name = "equinox" },
+    { name = "gaussx" },
+    { name = "jax" },
+    { name = "jaxlib" },
+    { name = "jaxtyping" },
+    { name = "lineax" },
+    { name = "optax" },
+]
+
+[[package]]
 name = "flowjax"
 version = "19.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2177,7 +2193,7 @@ dev = [
     { name = "pyrox-gp" },
     { name = "pyrox-lgm" },
     { name = "pyrox-nn" },
-    { name = "pyrox-ssm" },
+    { name = "pyrox-ssm", extra = ["ensemble"] },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "xarray" },
@@ -2216,7 +2232,7 @@ dev = [
     { name = "pyrox-gp", editable = "packages/pyrox-gp" },
     { name = "pyrox-lgm", editable = "packages/pyrox-lgm" },
     { name = "pyrox-nn", editable = "packages/pyrox-nn" },
-    { name = "pyrox-ssm", editable = "packages/pyrox-ssm" },
+    { name = "pyrox-ssm", extras = ["ensemble"], editable = "packages/pyrox-ssm" },
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
     { name = "xarray", specifier = ">=2025.1" },
@@ -2311,6 +2327,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+ensemble = [
+    { name = "filterax" },
+]
 flows = [
     { name = "flowjax" },
     { name = "gauss-flows" },
@@ -2320,6 +2339,7 @@ flows = [
 requires-dist = [
     { name = "einx", specifier = ">=0.4.3" },
     { name = "equinox", specifier = ">=0.13.8" },
+    { name = "filterax", marker = "extra == 'ensemble'", git = "https://github.com/jejjohnson/filterax?rev=v0.0.8" },
     { name = "flowjax", marker = "extra == 'flows'", specifier = ">=0.9" },
     { name = "gauss-flows", marker = "extra == 'flows'", git = "https://github.com/jejjohnson/gauss_flows.git?rev=bdb23f076ebaaf1ba042aa52ea593487cef3204e" },
     { name = "gaussx", extras = ["numpyro"], git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.15" },
@@ -2328,7 +2348,7 @@ requires-dist = [
     { name = "optimistix", specifier = ">=0.1.0" },
     { name = "pyrox", editable = "packages/pyrox" },
 ]
-provides-extras = ["flows"]
+provides-extras = ["flows", "ensemble"]
 
 [[package]]
 name = "pytest"
