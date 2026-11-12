@@ -34,13 +34,13 @@ from typing import Any
 
 import equinox as eqx
 import gaussx as gx
-import jax
 import jax.numpy as jnp
 from jaxtyping import Array, ArrayLike, Float, Int
 from numpyro.distributions.transforms import SoftplusTransform
 from pyrox.likelihoods import (
     AbstractObservation,
     GaussianLikelihood as _CoreGaussianLikelihood,
+    _observation_site_log_prob,
 )
 
 from pyrox_gp._protocols import Likelihood
@@ -94,16 +94,10 @@ def _site_log_prob(
 ) -> Float[Array, ""]:
     r"""$\log p(y_i \mid f_i)$ at one site, from the gaussx likelihood `build` gives.
 
-    ``data_i`` is the site's slice of ``data`` (every leaf without its site
-    axis); each leaf gets back a leading axis of length one, so `build` sees
-    one site. Hyperparameters are fields of pyrox-gp's observation models, so
-    ``theta`` is empty.
+    `pyrox.likelihoods._observation_site_log_prob`, the adapter pyrox-ssm
+    shares.
     """
-    # dᵢ with a leading site axis of length one
-    one_site = jax.tree.map(lambda leaf: jnp.asarray(leaf)[None], data_i)
-    # log p(yᵢ ∣ fᵢ) = build(yᵢ, ∅, dᵢ).log_prob(fᵢ)
-    site = observation.build(jnp.asarray(y_i)[None], {}, one_site)
-    return site.log_prob(jnp.asarray(f_i)[None])
+    return _observation_site_log_prob(observation, f_i, y_i, data_i)
 
 
 class DistLikelihood(Likelihood):
