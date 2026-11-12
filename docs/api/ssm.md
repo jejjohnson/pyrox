@@ -158,6 +158,25 @@ for inducing-grid scalability, the [sparse Markov GP](#sparse-markov-gp).
 ::: pyrox_ssm.markov_gp_factor
 ::: pyrox_ssm.markov_gp_sample
 
+### Latent paths from whitened innovations
+
+When the latent path has to be sampled, as under a Bernoulli or Poisson likelihood with NUTS or SVI, `markov_gp_sample` builds the dense `N × N` Gram and pays an `O(N^3)` Cholesky per evaluation. `markov_gp_innovations_sample` samples standard normal innovations `eps` of shape `(N, d)` as the one site `f"{name}_eps"` instead and records the path `f`, built by `markov_gp_from_innovations` with a scan over the kernel's discretisation, as the deterministic site `name`. That costs `O(N d^3)`, works for non-stationary kernels such as `IntegratedWienerSDE`, and is the whitened, non-centred parameterisation NUTS prefers. Keep `markov_gp_sample` for short series of a stationary kernel. The `sqrt=` option chooses the square roots of the process noise: `"cholesky"` (the default, with a small jitter) or `"eigh"`, which also handles a process noise that is only positive semi-definite, as at closely spaced times.
+
+```python
+import numpyro
+import numpyro.distributions as dist
+import pyrox_ssm as pss
+
+def bernoulli_model(times, y):
+    ell = numpyro.sample("lengthscale", dist.LogNormal(0.0, 1.0))
+    prior = pss.MarkovGPPrior(pss.MaternSDE(1.0, ell, order=1), times)
+    f = pss.markov_gp_innovations_sample("f", prior)               # (N,)
+    numpyro.sample("y", dist.Bernoulli(logits=f), obs=y)
+```
+
+::: pyrox_ssm.markov_gp_from_innovations
+::: pyrox_ssm.markov_gp_innovations_sample
+
 ### Ragged sites
 
 Every method that reads observations (`filter`, `smooth`, `log_marginal`, `condition`, `condition_nongauss`, `markov_gp_factor`, each non-Gaussian strategy's `fit`, `sparse_markov_elbo` and `sparse_markov_factor`) takes an optional boolean `mask=` of the observations' shape. A masked step runs the Kalman predict only, so it adds nothing to the log marginal, and its observation is replaced before any arithmetic, so a `NaN` placeholder there reaches neither the value nor the gradient. `mask=None` is the unmasked result, bit for bit.
