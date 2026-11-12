@@ -30,8 +30,9 @@ pyrox-nn); a caller may still pass a
 `pyrox_gp` kernel to a `pyrox_nn` layer, and tests may import both.
 `pyrox` exports only `__version__`, `_core`, `inference` and `likelihoods`: the
 bridge's public home is `pyrox._core` despite the underscore, and
-`pyrox.likelihoods` holds the `Likelihood` and `Guide` protocols (and
-`GaussianLikelihood`), which pyrox-gp re-exports. The core never imports
+`pyrox.likelihoods` holds the `Likelihood` and `Guide` protocols, which
+pyrox-gp re-exports, and `GaussianLikelihood`, which pyrox-gp's
+`GaussianLikelihood` subclasses. The core never imports
 gaussx, lineax, kernellib or geonnax (`packages/pyrox/tests/test_core_import_guard.py`).
 
 ## What pyrox is built on

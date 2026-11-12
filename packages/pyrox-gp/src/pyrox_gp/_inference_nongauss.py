@@ -56,10 +56,12 @@ from gaussx import (
     safe_cholesky,
     symmetrize,
 )
-from jaxtyping import Array, Float
+from jaxtyping import Array, Float, PyTree
 from pyrox._core import call_context
+from pyrox.likelihoods import AbstractObservation
 
 from pyrox_gp._inference import _per_site_expectation
+from pyrox_gp._likelihoods import _site_log_prob
 from pyrox_gp._protocols import Likelihood
 
 
@@ -230,22 +232,27 @@ def _posterior_from_diag_sites(
     return q_mean, q_var
 
 
+def _one_site(site: PyTree) -> PyTree:
+    """One site's data with a leading site axis of length one on every leaf."""
+    return jax.tree.map(lambda leaf: leaf[None], site)
+
+
 def _per_point_grad_hess(
-    log_prob_per_point: Callable[
-        [Float[Array, " N"], Float[Array, " N"]], Float[Array, " N"]
-    ],
+    log_prob_per_point: Callable[[Float[Array, " N"], PyTree], Float[Array, " N"]],
     f: Float[Array, " N"],
-    y: Float[Array, " N"],
+    y: PyTree,
 ) -> tuple[Float[Array, " N"], Float[Array, " N"]]:
     r"""Per-point ``g_n = d log p_n / df_n`` and ``h_n = d^2 log p_n / df_n^2``.
 
     ``log_prob_per_point`` must be vectorized over ``f`` and return one
     log-density per observation (no sum). For scalar likelihoods the
     Hessian is diagonal in ``f`` so per-point second derivatives suffice.
+    ``y`` is the per-site data of `_site_data`, a leading site axis on
+    every leaf.
     """
 
-    def per_n(f_n: Float[Array, ""], y_n: Float[Array, ""]) -> Float[Array, ""]:
-        return log_prob_per_point(f_n[None], y_n[None])[0]
+    def per_n(f_n: Float[Array, ""], y_n: PyTree) -> Float[Array, ""]:
+        return log_prob_per_point(f_n[None], _one_site(y_n))[0]
 
     g = jax.vmap(jax.grad(per_n))(f, y)
     h = jax.vmap(jax.grad(jax.grad(per_n)))(f, y)
@@ -271,11 +278,9 @@ def _psd_safe_cholesky(M: Float[Array, "N N"]) -> Float[Array, "N N"]:
 
 
 def _laplace_log_marginal(
-    log_prob_per_point: Callable[
-        [Float[Array, " N"], Float[Array, " N"]], Float[Array, " N"]
-    ],
+    log_prob_per_point: Callable[[Float[Array, " N"], PyTree], Float[Array, " N"]],
     f: Float[Array, " N"],
-    y: Float[Array, " N"],
+    y: PyTree,
     prior_mean: Float[Array, " N"],
     K: Float[Array, "N N"],
     Lam: Float[Array, " N"],
@@ -303,21 +308,45 @@ def _laplace_log_marginal(
     return ll - quad - 0.5 * cholesky_logdet(L_B)
 
 
+def _site_data(
+    lik: Likelihood, y: Float[Array, " N"], X: Float[Array, "N D"]
+) -> PyTree:
+    """The per-site data `_log_prob_per_point_factory`'s function reads.
+
+    ``(y, {"X": X})`` for an observation model, whose `build` reads its
+    inputs from ``data["X"]``; ``y`` alone for any other `Likelihood`,
+    whose ``log_prob`` these strategies never hand ``X``.
+    """
+    if isinstance(lik, AbstractObservation):
+        return (y, {"X": X})
+    return y
+
+
 def _log_prob_per_point_factory(
     lik: Likelihood,
-) -> Callable[[Float[Array, " N"], Float[Array, " N"]], Float[Array, " N"]]:
-    """Wrap ``lik.log_prob`` so it returns per-point log-densities.
+) -> Callable[[Float[Array, " N"], PyTree], Float[Array, " N"]]:
+    """Wrap the likelihood so it returns per-point log-densities.
 
     pyrox's ``Likelihood.log_prob`` is summed over points by convention.
     For per-site curvature we need the unsummed per-point quantity,
-    which we compute via ``vmap`` over the scalar log-density.
+    which we compute via ``vmap`` over the scalar log-density. An
+    observation model's comes from the one-site gaussx likelihood it
+    builds (`_site_log_prob`), on the per-site data of `_site_data`.
     """
+    if isinstance(lik, AbstractObservation):
+        observation = lik
 
-    def per_one(f_n: Float[Array, ""], y_n: Float[Array, ""]) -> Float[Array, ""]:
-        return lik.log_prob(f_n[None], y_n[None])
+        def per_one(f_n: Float[Array, ""], site: PyTree) -> Float[Array, ""]:
+            y_n, data_n = site
+            return _site_log_prob(observation, f_n, y_n, data_n)
 
-    def per_point(f: Float[Array, " N"], y: Float[Array, " N"]) -> Float[Array, " N"]:
-        return jax.vmap(per_one)(f, y)
+    else:
+
+        def per_one(f_n: Float[Array, ""], site: PyTree) -> Float[Array, ""]:
+            return lik.log_prob(f_n[None], site[None])
+
+    def per_point(f: Float[Array, " N"], sites: PyTree) -> Float[Array, " N"]:
+        return jax.vmap(per_one)(f, sites)
 
     return per_point
 
@@ -368,12 +397,13 @@ class LaplaceInference(eqx.Module):
         K = _prior_K(prior)
         prior_mean = prior.mean(prior.X)
         log_prob_per_point = _log_prob_per_point_factory(likelihood)
+        sites = _site_data(likelihood, y, prior.X)
 
         f = jnp.asarray(prior_mean)
         converged = False
         n_iter = 0
         for it in range(self.max_iter):
-            g, h = _per_point_grad_hess(log_prob_per_point, f, y)
+            g, h = _per_point_grad_hess(log_prob_per_point, f, sites)
             # Site precision Λ = -h (positive for log-concave likelihoods).
             nat1, Lam = newton_update(f, g, h, precision_floor=self.precision_floor)
             f_newton, _ = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
@@ -386,11 +416,13 @@ class LaplaceInference(eqx.Module):
                 break
 
         # Final site naturals at convergence.
-        g, h = _per_point_grad_hess(log_prob_per_point, f, y)
+        g, h = _per_point_grad_hess(log_prob_per_point, f, sites)
         nat1, Lam = newton_update(f, g, h, precision_floor=self.precision_floor)
         q_mean, q_var = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
 
-        log_marg = _laplace_log_marginal(log_prob_per_point, f, y, prior_mean, K, Lam)
+        log_marg = _laplace_log_marginal(
+            log_prob_per_point, f, sites, prior_mean, K, Lam
+        )
 
         return NonGaussConditionedGP(
             prior=prior,
@@ -448,12 +480,13 @@ class GaussNewtonInference(eqx.Module):
         K = _prior_K(prior)
         prior_mean = prior.mean(prior.X)
         log_prob_per_point = _log_prob_per_point_factory(likelihood)
+        sites = _site_data(likelihood, y, prior.X)
 
         f = jnp.asarray(prior_mean)
         converged = False
         n_iter = 0
         for it in range(self.max_iter):
-            g, h = _per_point_grad_hess(log_prob_per_point, f, y)
+            g, h = _per_point_grad_hess(log_prob_per_point, f, sites)
             # PSD curvature: clip the negative Hessian to a strictly
             # positive floor so the Newton step is always well-defined
             # even when ``-h`` goes negative (StudentT tails).
@@ -467,11 +500,13 @@ class GaussNewtonInference(eqx.Module):
                 converged = True
                 break
 
-        g, h = _per_point_grad_hess(log_prob_per_point, f, y)
+        g, h = _per_point_grad_hess(log_prob_per_point, f, sites)
         nat1, Lam = newton_update(f, g, h, precision_floor=self.precision_floor)
         q_mean, q_var = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
 
-        log_marg = _laplace_log_marginal(log_prob_per_point, f, y, prior_mean, K, Lam)
+        log_marg = _laplace_log_marginal(
+            log_prob_per_point, f, sites, prior_mean, K, Lam
+        )
 
         return NonGaussConditionedGP(
             prior=prior,
@@ -530,6 +565,7 @@ class PosteriorLinearization(eqx.Module):
         K = _prior_K(prior)
         prior_mean = prior.mean(prior.X)
         log_prob_per_point = _log_prob_per_point_factory(likelihood)
+        sites = _site_data(likelihood, y, prior.X)
 
         N = K.shape[0]
         # Initialize sites at zero — posterior == prior.
@@ -538,12 +574,14 @@ class PosteriorLinearization(eqx.Module):
         q_mean = jnp.asarray(prior_mean)
         q_var = jnp.diag(K)
 
-        def grad_at(f_n: Float[Array, ""], y_n: Float[Array, ""]) -> Float[Array, ""]:
-            return jax.grad(lambda f: log_prob_per_point(f[None], y_n[None])[0])(f_n)
+        def grad_at(f_n: Float[Array, ""], y_n: PyTree) -> Float[Array, ""]:
+            return jax.grad(lambda f: log_prob_per_point(f[None], _one_site(y_n))[0])(
+                f_n
+            )
 
-        def hess_at(f_n: Float[Array, ""], y_n: Float[Array, ""]) -> Float[Array, ""]:
+        def hess_at(f_n: Float[Array, ""], y_n: PyTree) -> Float[Array, ""]:
             return jax.grad(
-                jax.grad(lambda f: log_prob_per_point(f[None], y_n[None])[0])
+                jax.grad(lambda f: log_prob_per_point(f[None], _one_site(y_n))[0])
             )(f_n)
 
         converged = False
@@ -559,10 +597,10 @@ class PosteriorLinearization(eqx.Module):
             # site gets its own 1-D ``GaussianState`` and the integrator
             # returns the propagated mean per site.
             E_grad = _per_site_expectation(
-                self.integrator, grad_at, cav_mean, cav_var, y
+                self.integrator, grad_at, cav_mean, cav_var, sites
             )
             E_hess = _per_site_expectation(
-                self.integrator, hess_at, cav_mean, cav_var, y
+                self.integrator, hess_at, cav_mean, cav_var, sites
             )
 
             # Site update via BLR (diag): nat1_new = grad - H mu, nat2_new = -H,
@@ -589,7 +627,7 @@ class PosteriorLinearization(eqx.Module):
         # guaranteed PL-consistent — strategies expose their own marginal
         # when the user needs strategy-specific values).
         log_marg = _laplace_log_marginal(
-            log_prob_per_point, q_mean, y, prior_mean, K, nat2
+            log_prob_per_point, q_mean, sites, prior_mean, K, nat2
         )
 
         return NonGaussConditionedGP(
@@ -671,6 +709,7 @@ class ExpectationPropagation(eqx.Module):
         K = _prior_K(prior)
         prior_mean = prior.mean(prior.X)
         log_prob_per_point = _log_prob_per_point_factory(likelihood)
+        sites = _site_data(likelihood, y, prior.X)
 
         N = K.shape[0]
         nat1 = jnp.zeros(N, dtype=K.dtype)
@@ -678,15 +717,15 @@ class ExpectationPropagation(eqx.Module):
         q_mean = jnp.asarray(prior_mean)
         q_var = jnp.diag(K)
 
-        def lp(f_n: Float[Array, ""], y_n: Float[Array, ""]) -> Float[Array, ""]:
-            return log_prob_per_point(f_n[None], y_n[None])[0]
+        def lp(f_n: Float[Array, ""], y_n: PyTree) -> Float[Array, ""]:
+            return log_prob_per_point(f_n[None], _one_site(y_n))[0]
 
         order = _require_gauss_hermite(self.integrator).order
 
         def _per_site_tilted(
             m_n: Float[Array, ""],
             v_n: Float[Array, ""],
-            y_n: Float[Array, ""],
+            y_n: PyTree,
         ) -> tuple[Float[Array, ""], Float[Array, ""]]:
             return ep_tilted_moments(lambda f: lp(f, y_n), m_n, v_n, order=order)
 
@@ -702,7 +741,9 @@ class ExpectationPropagation(eqx.Module):
             # gaussx API expects a ``log_lik_fn(f)`` with the per-site
             # target baked in, so ``_per_site_tilted`` closes over
             # ``y_n`` and ``vmap`` recovers the ``(N,)`` shape contract.
-            tilted_mean, tilted_var = jax.vmap(_per_site_tilted)(cav_mean, cav_var, y)
+            tilted_mean, tilted_var = jax.vmap(_per_site_tilted)(
+                cav_mean, cav_var, sites
+            )
 
             # New site naturals from matched moments minus the cavity.
             new_prec = jnp.reciprocal(tilted_var) - jnp.reciprocal(cav_var)
@@ -724,7 +765,7 @@ class ExpectationPropagation(eqx.Module):
 
         # Approximate marginal via Laplace identity at the EP mean.
         log_marg = _laplace_log_marginal(
-            log_prob_per_point, q_mean, y, prior_mean, K, nat2
+            log_prob_per_point, q_mean, sites, prior_mean, K, nat2
         )
 
         return NonGaussConditionedGP(
@@ -781,10 +822,11 @@ class QuasiNewtonInference(eqx.Module):
         K = _prior_K(prior)
         prior_mean = prior.mean(prior.X)
         log_prob_per_point = _log_prob_per_point_factory(likelihood)
+        sites = _site_data(likelihood, y, prior.X)
         L_K = _psd_safe_cholesky(K)
 
         def neg_log_post(f: Float[Array, " N"]) -> Float[Array, ""]:
-            ll = log_prob_per_point(f, y).sum()
+            ll = log_prob_per_point(f, sites).sum()
             r = f - prior_mean
             alpha = jax.scipy.linalg.cho_solve((L_K, True), r)
             return -(ll - 0.5 * jnp.dot(r, alpha))
@@ -810,12 +852,12 @@ class QuasiNewtonInference(eqx.Module):
         # generic ``Array`` to a typed JAX array so downstream typing
         # narrows correctly.
         f_opt = jnp.asarray(f)
-        g, h = _per_point_grad_hess(log_prob_per_point, f_opt, y)
+        g, h = _per_point_grad_hess(log_prob_per_point, f_opt, sites)
         nat1, Lam = newton_update(f_opt, g, h, precision_floor=self.precision_floor)
         q_mean, q_var = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
 
         log_marg = _laplace_log_marginal(
-            log_prob_per_point, f_opt, y, prior_mean, K, Lam
+            log_prob_per_point, f_opt, sites, prior_mean, K, Lam
         )
 
         return NonGaussConditionedGP(

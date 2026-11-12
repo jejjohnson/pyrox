@@ -4,8 +4,8 @@ The Markov modules (`pyrox_ssm._markov`, `_sparse_markov`,
 `_inference_nongauss_markov`, `flows._markov_flow`) import their per-site
 numerics from here, so pyrox-ssm depends only on the pyrox core and gaussx.
 
-`as_gaussx_likelihood` views a pyrox `Likelihood` (summed over points) as a
-`gaussx.CallableLikelihood` (one log density per site),
+`as_gaussx_likelihood` views a likelihood as a `gaussx.CallableLikelihood`
+(one log density per site),
 
 $$
 \ell(f_i, d_i) = \log p(y_i \mid f_i, X_i), \qquad
@@ -13,7 +13,11 @@ $$
 $$
 
 so the per-site derivatives and expectations come from gaussx
-(``site_derivatives``, `gaussx.expected_log_likelihood`).
+(``site_derivatives``, `gaussx.expected_log_likelihood`). An observation
+model (`pyrox.likelihoods.AbstractObservation`, such as pyrox-gp's
+`BernoulliLikelihood`) gives $\ell$ through the one-site gaussx likelihood it
+builds; any other `pyrox.likelihoods.Likelihood` through its ``log_prob``
+on one point.
 `_check_scalar_latent` and `_require_gauss_hermite` are copies of the checks
 in `pyrox_gp._inference_nongauss`, and `_pushforward_moments` a copy of the
 one in `pyrox_gp._warped` (no gaussx function computes it yet).
@@ -31,7 +35,11 @@ import jax.numpy as jnp
 import lineax as lx
 from gaussx import AbstractIntegrator, CallableLikelihood, GaussHermiteIntegrator
 from jaxtyping import Array, Bool, Float, PyTree
-from pyrox.likelihoods import Likelihood, likelihood_accepts_inputs
+from pyrox.likelihoods import (
+    AbstractObservation,
+    Likelihood,
+    likelihood_accepts_inputs,
+)
 
 
 def _check_scalar_latent(lik: Likelihood) -> None:
@@ -90,6 +98,30 @@ class _SiteLogDensity(eqx.Module):
         return self.likelihood.log_prob(f_i[None], site[None])
 
 
+class _ObservationSiteLogDensity(eqx.Module):
+    r"""One site's $\ell(f_i, d_i)$ from the gaussx likelihood an observation builds.
+
+    Site $i$'s data is $(y_i, \mathrm{data}_i)$, where $\mathrm{data}_i$ is
+    its slice of the ``data`` mapping (``{"X": X}`` or empty); every leaf gets
+    back a leading axis of length one, so `build` sees one site. A copy of
+    `pyrox_gp._likelihoods._site_log_prob`: hyperparameters are fields of the
+    observation model, so ``theta`` is empty.
+
+    Attributes:
+        observation: The observation model.
+    """
+
+    observation: AbstractObservation
+
+    def __call__(self, f_i: Float[Array, ""], site: PyTree) -> Float[Array, ""]:
+        y_i, data_i = site
+        # dᵢ with a leading site axis of length one
+        one_site = jax.tree.map(lambda leaf: jnp.asarray(leaf)[None], data_i)
+        # ℓ(fᵢ, (yᵢ, dᵢ)) = build(yᵢ, ∅, dᵢ).log_prob(fᵢ)
+        site_lik = self.observation.build(jnp.asarray(y_i)[None], {}, one_site)
+        return site_lik.log_prob(f_i[None])
+
+
 class _MaskedSiteLogDensity(eqx.Module):
     r"""A site log density that is zero at masked sites, $o_i\,\ell(f_i, d_i)$.
 
@@ -100,7 +132,7 @@ class _MaskedSiteLogDensity(eqx.Module):
         site_log_density: The unmasked per-site log density.
     """
 
-    site_log_density: _SiteLogDensity
+    site_log_density: _SiteLogDensity | _ObservationSiteLogDensity
 
     def __call__(self, f_i: Float[Array, ""], site: PyTree) -> Float[Array, ""]:
         data, observed = site
@@ -118,11 +150,20 @@ def as_gaussx_likelihood(
 ) -> CallableLikelihood:
     r"""Per-site view of a pyrox likelihood, as a `gaussx.CallableLikelihood`.
 
-    pyrox's ``log_prob`` is summed over points, so site $i$'s term is the
-    likelihood on that point alone,
+    An observation model (`pyrox.likelihoods.AbstractObservation`) gives
+    site $i$'s term through the gaussx likelihood it builds on that site
+    alone, with the inputs in ``data["X"]``,
 
     $$
-    \ell(f_i, (y_i, X_i)) = \texttt{lik.log\_prob}(f_{i:i+1}, y_{i:i+1}, X_i).
+    \ell(f_i, (y_i, X_i)) = \texttt{lik.build}(y_{i:i+1}, \varnothing,
+    \{X: X_{i:i+1}\}).\texttt{log\_prob}(f_{i:i+1}).
+    $$
+
+    Any other `pyrox.likelihoods.Likelihood` gives it through ``log_prob``,
+    which is summed over points, on that point alone,
+
+    $$
+    \ell(f_i, (y_i, X_i)) = \texttt{lik.log\_prob}(f_{i:i+1}, y_{i:i+1}, X_i);
     $$
 
     ``X`` is passed only to a likelihood whose ``log_prob`` takes it
@@ -131,7 +172,7 @@ def as_gaussx_likelihood(
     $o_i\,\ell(f_i, d_i)$, so a masked site has $g_i = h_i = 0$.
 
     Args:
-        lik: A scalar-latent pyrox likelihood.
+        lik: A scalar-latent observation model or pyrox likelihood.
         y: The observations, one per site. Masked entries may be ``NaN``:
             they are replaced by the first observed value before ``lik``
             sees them (zero can lie outside a likelihood's support), so no
@@ -160,16 +201,30 @@ def as_gaussx_likelihood(
         ([2.0, -2.0], [-2.0, -2.0])
     """
     _check_scalar_latent(lik)
-    with_inputs = X is not None and likelihood_accepts_inputs(lik)
-    site_log_density = _SiteLogDensity(lik, with_inputs=with_inputs)
+    site_log_density: _SiteLogDensity | _ObservationSiteLogDensity
+    if isinstance(lik, AbstractObservation):
+        inputs = {} if X is None else {"X": X}
+        site_log_density = _ObservationSiteLogDensity(lik)
+
+        def site_data(y: Float[Array, " N"]) -> PyTree:
+            return (y, inputs)
+
+    else:
+        with_inputs = X is not None and likelihood_accepts_inputs(lik)
+        site_log_density = _SiteLogDensity(lik, with_inputs=with_inputs)
+
+        def site_data(y: Float[Array, " N"]) -> PyTree:
+            return (y, X) if with_inputs else y
+
     if mask is None:
-        return CallableLikelihood(site_log_density, (y, X) if with_inputs else y)
+        return CallableLikelihood(site_log_density, site_data(y))
     observed = jnp.asarray(mask).astype(bool)
     # The first observed value is in the likelihood's support; a masked entry
     # only needs ℓ to be finite there, since oᵢ = 0 discards it.
     y = jnp.where(observed, y, y[jnp.argmax(observed)])
-    data = (y, X) if with_inputs else y
-    return CallableLikelihood(_MaskedSiteLogDensity(site_log_density), (data, observed))
+    return CallableLikelihood(
+        _MaskedSiteLogDensity(site_log_density), (site_data(y), observed)
+    )
 
 
 def _cavity_site_derivatives(
