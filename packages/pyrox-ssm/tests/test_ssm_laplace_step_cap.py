@@ -133,3 +133,10 @@ def test_a_deterministic_initial_level_keeps_the_fit_finite() -> None:
     assert bool(fit.converged)
     assert jnp.all(jnp.isfinite(fit.q_mean))
     assert jnp.isfinite(fit.log_marginal_approx)
+
+
+def test_positional_arguments_keep_their_meaning() -> None:
+    """max_step comes after the fields that existed before it."""
+    strategy = LaplaceMarkovInference(50, 1e-6, 1.0, 1e-5)
+    assert strategy.precision_floor == 1e-5
+    assert strategy.max_step == 1.0

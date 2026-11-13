@@ -522,9 +522,10 @@ class LaplaceMarkovInference(eqx.Module):
     max_iter: int = eqx.field(static=True, default=50)
     tol: float = eqx.field(static=True, default=1e-6)
     damping: float = eqx.field(static=True, default=1.0)
-    max_step: float | None = eqx.field(static=True, default=1.0)
     precision_floor: float = eqx.field(static=True, default=1e-6)
     adjoint: optx.AbstractAdjoint = _IMPLICIT_ADJOINT
+    # last, so the earlier fields keep their positions
+    max_step: float | None = eqx.field(static=True, default=1.0)
 
     def _newton_sites(
         self,
