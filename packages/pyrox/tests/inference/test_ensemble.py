@@ -483,6 +483,38 @@ def test_ensemble_vi_starts_match_a_fresh_guide(linear_problem):
     assert jnp.array_equal(init(reused), init(AutoNormal(_vi_model)))
 
 
+def test_ensemble_vi_reuses_an_autoguide_list(linear_problem):
+    """Each part of an AutoGuideList caches its own prototype; all are reset."""
+    from numpyro.infer.autoguide import AutoDelta, AutoGuideList
+
+    p = linear_problem
+    guide = AutoGuideList(_vi_model)
+    guide.append(AutoNormal(numpyro.handlers.block(_vi_model, hide=["b"])))
+    guide.append(AutoDelta(numpyro.handlers.block(_vi_model, expose=["b"])))
+    runner = EnsembleVI(
+        model_fn=_vi_model,
+        guide_fn=guide,
+        optimizer=numpyro.optim.Adam(1e-2),
+        ensemble_size=3,
+    )
+    result = runner.run(jr.PRNGKey(0), 5, p["X"], p["y"])
+    assert result.losses.shape == (3, 5)
+    runner.init(jr.PRNGKey(1), p["X"], p["y"])
+
+
+def test_ensemble_vi_run_accepts_svi_run_options(linear_problem):
+    """SVI.run's own options reach run and are kept away from the model."""
+    p = linear_problem
+    runner = EnsembleVI(
+        model_fn=_vi_model,
+        guide_fn=AutoNormal(_vi_model),
+        optimizer=numpyro.optim.Adam(1e-2),
+        ensemble_size=2,
+    )
+    result = runner.run(jr.PRNGKey(0), 5, p["X"], p["y"], stable_update=True)
+    assert result.losses.shape == (2, 5)
+
+
 def _vi_three_arg_model(x, offset, y=None):
     """A model whose data are three positional arguments."""
     w = numpyro.sample("w", dist.Normal(jnp.zeros(5), 1.0).to_event(1))

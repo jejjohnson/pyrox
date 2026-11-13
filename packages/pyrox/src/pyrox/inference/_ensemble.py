@@ -223,6 +223,26 @@ def ensemble_step(
 # ============================================================================
 
 
+# Keyword options numpyro's SVI.run consumes itself; SVI.init would pass them
+# on to the model and guide.
+_SVI_RUN_ONLY = ("stable_update", "forward_mode_differentiation", "init_state")
+
+
+def _autoguides(guide: Any) -> list[Any]:
+    """The autoguide ``guide`` and every autoguide nested in it.
+
+    An ``AutoGuideList`` keeps its parts in ``_guides``, and each part caches
+    its own prototype; anything without a ``prototype_trace`` is not an
+    autoguide and caches nothing.
+    """
+    if not hasattr(guide, "prototype_trace"):
+        return []
+    found = [guide]
+    for part in getattr(guide, "_guides", ()):
+        found.extend(_autoguides(part))
+    return found
+
+
 class EnsembleMAP(eqx.Module):
     r"""NumPyro-like ensemble MAP/MLE runner.
 
@@ -461,10 +481,10 @@ class EnsembleVI(eqx.Module):
         result on itself, including each site's starting value. Each member
         must draw its own start, so the cache is cleared before the member
         ``vmap`` and the guide sets itself up inside it from the member keys.
-        Guides that are not autoguides cache nothing and are left alone.
+        Every autoguide nested in an ``AutoGuideList`` is cleared too. Guides
+        that are not autoguides cache nothing and are left alone.
         """
-        guide: Any = self.guide_fn
-        if hasattr(guide, "prototype_trace"):
+        for guide in _autoguides(self.guide_fn):
             guide.prototype_trace = None
 
     def _settle_guide(
@@ -475,12 +495,15 @@ class EnsembleVI(eqx.Module):
         Set up inside ``jax.vmap``, the cache holds the vmap's tracers, and any
         later use of the same guide object (another ``init``, a plain ``SVI``,
         ``guide.median``) would raise ``UnexpectedTracerError``. One eager
-        ``svi.init`` replaces it with concrete values.
+        ``svi.init`` replaces it with concrete values. ``kwargs`` may hold
+        ``SVI.run``'s own options, which are not passed to ``init``.
         """
-        guide: Any = self.guide_fn
-        if hasattr(guide, "prototype_trace"):
-            guide.prototype_trace = None
-            svi.init(key, *args, **kwargs)
+        guides = _autoguides(self.guide_fn)
+        if guides:
+            for guide in guides:
+                guide.prototype_trace = None
+            init_kwargs = {k: v for k, v in kwargs.items() if k not in _SVI_RUN_ONLY}
+            svi.init(key, *args, **init_kwargs)
 
     def init(self, seed: PRNGKeyArray, *args: Any, **kwargs: Any) -> Any:
         """Initialize the ensemble of SVI states."""
