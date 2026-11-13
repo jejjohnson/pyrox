@@ -33,6 +33,7 @@ from jax.scipy.stats import multivariate_normal
 from numpyro import handlers
 from numpyro.infer import MCMC, NUTS
 from pyrox_ssm import (
+    IntegratedWienerSDE,
     MarkovGPPrior,
     MaternSDE,
     SharedPlusSiteMarkovGP,
@@ -422,6 +423,24 @@ def test_predict_jits_given_a_precomputed_grid():
     want = grid.condition(y_grid, NOISE).predict(t_star)
     for g, w in zip(got, want, strict=True):
         np.testing.assert_allclose(g, w, rtol=1e-12, atol=1e-14)
+
+
+def test_predict_rejects_a_backcast_with_a_non_stationary_kernel():
+    """The prior of an integrated Wiener process starts at the first grid time."""
+    times, ys = _dataset(jr.key(13))
+    # an explicit P_0: gaussx's default initial covariance fails under jax.jit
+    wiener = IntegratedWienerSDE(
+        diffusion=jnp.asarray(0.5), order=1, P_0=4.0 * jnp.eye(2)
+    )
+    model, y_grid = SharedPlusSiteMarkovGP.from_sites(wiener, POOLED_SITE, times, ys)
+    cond = model.condition(y_grid, NOISE)
+    inside = jnp.array([model.times[0], model.times[3] + 0.5, N_DAYS + 2.0])
+    g_mean, *_ = cond.predict(inside)
+    assert jnp.all(jnp.isfinite(g_mean))
+    with pytest.raises(Exception, match="cannot backcast"):
+        cond.predict(jnp.array([model.times[0] - 1.0]))
+    with pytest.raises(Exception, match="cannot backcast"):
+        jax.jit(lambda t: cond.predict(t))(jnp.array([model.times[0] - 1.0]))
 
 
 def test_condition_checks_shapes():

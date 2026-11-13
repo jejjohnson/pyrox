@@ -32,7 +32,11 @@ from gaussx import SDEKernel
 from jaxtyping import Array, ArrayLike, Bool, Float
 
 from pyrox_ssm._lgssm import LinearGaussianSSMPrior
-from pyrox_ssm._markov import _build_dt_full, _kernel_initial_covariance
+from pyrox_ssm._markov import (
+    _build_dt_full,
+    _is_stationary,
+    _kernel_initial_covariance,
+)
 
 
 def _site_axes(site: SDEKernel, n_sites: int) -> SDEKernel:
@@ -672,6 +676,13 @@ class ConditionedSharedPlusSiteMarkovGP(eqx.Module):
         the method traces, so it runs under `jax.jit` given a model built
         with the constructor.
 
+        With a stationary kernel a test time before the grid is a backcast
+        from the stationary prior. A non-stationary kernel, such as
+        `pyrox_ssm.IntegratedWienerSDE`, starts its prior covariance at the
+        first grid time, so a test time before it would move that start and
+        change the posterior at the observed times; ``predict`` raises
+        instead. Build the model on a grid that starts early enough.
+
         Args:
             t_star: Test times, ``(M,)``.
 
@@ -679,6 +690,12 @@ class ConditionedSharedPlusSiteMarkovGP(eqx.Module):
             ``(g_mean, h_mean, g_var, h_var)`` at ``t_star``: the shared
             signal's mean and variance, ``(M,)`` each, and each site's,
             ``(M, S)`` each.
+
+        Raises:
+            ValueError: If ``t_star`` is not 1-D.
+            EquinoxRuntimeError: If a kernel is non-stationary and a test
+                time is before the first grid time (checked at run time, so
+                also under `jax.jit`).
 
         Examples:
             >>> import jax.numpy as jnp
@@ -698,6 +715,14 @@ class ConditionedSharedPlusSiteMarkovGP(eqx.Module):
         t_star = jnp.asarray(t_star, dtype=times.dtype)
         if t_star.ndim != 1:
             raise ValueError(f"t_star must be 1-D, got shape {tuple(t_star.shape)!r}")
+        if not (_is_stationary(model.shared) and _is_stationary(model.site)):
+            t_star = eqx.error_if(
+                t_star,
+                jnp.any(t_star < times[0]),
+                "predict cannot backcast before the first grid time with a "
+                "non-stationary kernel: its prior covariance starts there. "
+                "Build the model on a grid that starts earlier.",
+            )
         n_steps, n_test, n_sites = times.shape[0], t_star.shape[0], model.n_sites
         # Stable sort: a test time equal to a grid time sorts after it, so it
         # sees that step's update.
