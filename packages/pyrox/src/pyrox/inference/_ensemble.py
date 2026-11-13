@@ -88,10 +88,16 @@ class EnsembleResult(NamedTuple):
     Attributes:
         params: Final stacked parameters with leading ``(E,)`` axis.
         losses: ``(E, num_epochs)`` per-step loss history.
+        init_params: Each member's starting parameters, stacked like
+            ``params``, so the modes the fits reach can be related to where
+            they started. For `EnsembleVI` these are the constrained guide
+            parameters, as ``SVI.get_params`` returns them. ``None`` when a
+            result is built without them.
     """
 
     params: PyTree
     losses: Float[Array, "E T"]
+    init_params: PyTree | None = None
 
 
 def ensemble_init(
@@ -354,8 +360,9 @@ class EnsembleMAP(eqx.Module):
             batch_size: Optional mini-batch size. ``None`` ⇒ full-batch.
 
         Returns:
-            `EnsembleResult` with stacked final params + loss
-            history of shape ``(E, num_epochs)``.
+            `EnsembleResult` with stacked final params, loss
+            history of shape ``(E, num_epochs)`` and each member's
+            starting params.
         """
         n = y.shape[0]
         # Clamp batch_size to n so that batch_size > n falls back cleanly
@@ -403,7 +410,11 @@ class EnsembleMAP(eqx.Module):
         )
         final_params = eqx.combine(arrays_final, static)
         # losses is (T, E) from scan; transpose to (E, T) per the public contract.
-        return EnsembleResult(params=final_params, losses=einx.id("t e -> e t", losses))
+        return EnsembleResult(
+            params=final_params,
+            losses=einx.id("t e -> e t", losses),
+            init_params=state.params,
+        )
 
 
 class EnsembleVI(eqx.Module):
@@ -505,7 +516,14 @@ class EnsembleVI(eqx.Module):
         *args: Any,
         **kwargs: Any,
     ) -> EnsembleResult:
-        """Fit the ensemble end-to-end via vmapped ``svi.run``."""
+        """Fit the ensemble end-to-end via vmapped ``svi.run``.
+
+        Returns:
+            `EnsembleResult` with the stacked final guide parameters, the
+            ``(E, num_epochs)`` loss history and each member's starting guide
+            parameters, the same as ``svi.get_params`` of `init` with this
+            ``seed``.
+        """
         svi = self._build_svi()
         keys = jr.split(seed, self.ensemble_size)
         self._reset_guide()
@@ -513,13 +531,18 @@ class EnsembleVI(eqx.Module):
         @jax.vmap
         def _run_one(
             k: PRNGKeyArray,
-        ) -> tuple[PyTree, Float[Array, " T"]]:
-            r = svi.run(k, num_epochs, *args, progress_bar=False, **kwargs)
-            return r.params, r.losses
+        ) -> tuple[PyTree, PyTree, Float[Array, " T"]]:
+            # svi.run would call svi.init(k, ...) itself; calling it here
+            # gives the same state and keeps the starting parameters.
+            state = svi.init(k, *args, **kwargs)
+            r = svi.run(
+                k, num_epochs, *args, progress_bar=False, init_state=state, **kwargs
+            )
+            return svi.get_params(state), r.params, r.losses
 
-        params, losses = _run_one(keys)
+        init_params, params, losses = _run_one(keys)
         self._settle_guide(svi, keys[0], *args, **kwargs)
-        return EnsembleResult(params=params, losses=losses)
+        return EnsembleResult(params=params, losses=losses, init_params=init_params)
 
 
 class _TemperedTraceELBO:

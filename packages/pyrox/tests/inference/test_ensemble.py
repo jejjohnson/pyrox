@@ -504,6 +504,42 @@ def test_ensemble_vi_accepts_any_data_tuple(linear_problem):
     assert params["w_auto_loc"].shape == (2, 5)
 
 
+def test_ensemble_vi_run_returns_member_starts(linear_problem):
+    """`init_params` equals the guide parameters of `init` with the same seed."""
+    p = linear_problem
+    guide = AutoNormal(_vi_model)
+    runner = EnsembleVI(
+        model_fn=_vi_model,
+        guide_fn=guide,
+        optimizer=numpyro.optim.Adam(1e-2),
+        ensemble_size=4,
+    )
+    result = runner.run(jr.PRNGKey(0), 20, p["X"], p["y"])
+    state = runner.init(jr.PRNGKey(0), p["X"], p["y"])
+    svi = runner._build_svi()
+    svi.init(jr.PRNGKey(0), p["X"], p["y"])  # SVI.get_params needs an init first
+    expected = jax.vmap(svi.get_params)(state)
+    assert result.init_params is not None
+    for name, value in expected.items():
+        assert jnp.array_equal(result.init_params[name], value)
+    # The fits moved away from their starts.
+    assert not jnp.allclose(result.params["w_auto_loc"], expected["w_auto_loc"])
+
+
+def test_ensemble_map_run_returns_member_starts(linear_problem):
+    """`init_params` equals `init`'s params for the run's init key."""
+    p = linear_problem
+    runner = EnsembleMAP(
+        log_joint=p["log_joint"],
+        init_fn=p["init_fn"],
+        optimizer=optax.adam(5e-3),
+        ensemble_size=4,
+    )
+    result = runner.run(jr.PRNGKey(0), 20, p["X"], p["y"])
+    init_key, _ = jr.split(jr.PRNGKey(0))
+    assert jnp.array_equal(result.init_params, runner.init(init_key).params)
+
+
 def _vi_plate_model(x, y=None):
     """Same linear model but with the obs likelihood inside a plate.
 
