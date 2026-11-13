@@ -893,9 +893,17 @@ def _covariance_root(
     `gaussx.sqrt`, exact for a singular $\Sigma$ and with finite gradients
     at repeated eigenvalues.
     """
-    op = lx.MatrixLinearOperator(cov, lx.positive_semidefinite_tag)
     if sqrt == "cholesky":
-        return gaussx.cholesky(gaussx.add_jitter(op, jitter)).as_matrix()
+        # Σ + βI added to the matrix, not with gaussx.add_jitter: under pmap
+        # (NumPyro's parallel chains) the jitter diagonal add_jitter builds
+        # carries a sharding the covariance operator's structure lacks, and
+        # lineax rejects the sum as incompatible.
+        eye = jnp.eye(cov.shape[-1], dtype=cov.dtype)
+        jittered = lx.MatrixLinearOperator(
+            cov + jitter * eye, lx.positive_semidefinite_tag
+        )
+        return gaussx.cholesky(jittered).as_matrix()
+    op = lx.MatrixLinearOperator(cov, lx.positive_semidefinite_tag)
     return gaussx.sqrt(op).as_matrix()
 
 
