@@ -239,7 +239,10 @@ THETA = jnp.asarray([1.3, 0.7])
     ],
 )
 def test_the_log_marginal_jits_with_a_traced_converged_flag(strategy) -> None:
+    traces = []
+
     def evidence(theta):
+        traces.append(1)  # runs only while jit traces the function
         fit = _fit(theta, strategy)
         # Inside jit the flags are tracers, not Python values.
         assert isinstance(fit.converged, jax.core.Tracer)
@@ -254,9 +257,11 @@ def test_the_log_marginal_jits_with_a_traced_converged_flag(strategy) -> None:
     assert int(n_iter) == int(eager.n_iter)
     # jit and eager run the same ops, fused differently.
     assert jnp.allclose(value, eager.log_marginal_approx, rtol=1e-12, atol=0.0)
-    # A second call with the same shapes reuses the compiled loop.
+    # A second call with the same shapes reuses the compiled loop: it does not
+    # trace again. (Counting traces, not jit's C++ cache entries, which live in
+    # a cache shared by every jitted function in the session.)
     jitted(THETA * 1.1)
-    assert jitted._cache_size() == 1
+    assert len(traces) == 1
 
 
 def test_converged_is_false_when_max_iter_runs_out() -> None:
