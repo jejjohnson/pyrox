@@ -468,19 +468,43 @@ class LaplaceMarkovInference(eqx.Module):
     $$
 
     with the site precision $\Lambda = -h$ clipped to ``precision_floor``.
+
+    The step size $\alpha$ is ``damping`` times a cap on how far one step may
+    move the posterior mean. With $f^N$ the posterior mean
+    under the full Newton sites $T(s)$ and $\sigma_n$ the prior's marginal
+    standard deviation at $t_n$,
+
+    $$
+    \alpha = \alpha_d \min(1,\, \delta / \max_n |f^N_n - \hat f_n| / \sigma_n),
+    $$
+
+    with $\alpha_d$ = ``damping`` and $\delta$ = ``max_step``.
+    A full Newton step on a Bernoulli likelihood at a large prior variance
+    overshoots and cycles without converging, however many iterations it is
+    given; the cap shortens those steps and keeps the full step wherever it
+    is short, so convergence near the mode stays quadratic. Any
+    $\alpha > 0$ leaves the fixed point, and so the fit and its implicit
+    gradient, unchanged. The cap costs one more filter and smoother pass per
+    iteration (and, for a non-stationary kernel, one pass per fit for
+    $\sigma_n$); ``max_step=None`` turns it off and takes the full step.
     The loop is `optimistix.fixed_point`, so a fit traces under `jax.jit` and
     differentiates through ``adjoint`` (see the module notes).
 
     Attributes:
-        max_iter: Newton iterations. Default ``20``.
+        max_iter: Newton iterations. Default ``50``; a capped fit usually
+            converges in under 20.
         tol: Convergence tolerance: the loop stops at the first iteration
             where every site natural $\lambda_n$, $\Lambda_n$ changed by less
             than ``0.1 * tol * (1 + |new value|)``, which leaves the posterior
             marginals within about ``tol`` of the fixed point. Default
             ``1e-6``.
-        damping: Step-size $\alpha$ in (0, 1] applied to each Newton update.
-            Default ``1.0`` (full Newton step). Drop below 1 for
-            non-log-concave likelihoods.
+        damping: Factor $\alpha_d$ in (0, 1] on every Newton
+            step, on top of ``max_step``. Default ``1.0``. With the cap on it
+            is rarely needed, and it slows every iteration, not only the
+            long steps.
+        max_step: The largest change one step may make to the posterior
+            mean, $\delta$, in prior standard deviations $\sigma_n$. Default
+            ``1.0``. ``None`` takes the full Newton step.
         precision_floor: Lower bound on the diagonal precision. Default
             ``1e-6``.
         adjoint: How gradients pass through the loop. Default an
@@ -495,9 +519,10 @@ class LaplaceMarkovInference(eqx.Module):
             the iterations.
     """
 
-    max_iter: int = eqx.field(static=True, default=20)
+    max_iter: int = eqx.field(static=True, default=50)
     tol: float = eqx.field(static=True, default=1e-6)
     damping: float = eqx.field(static=True, default=1.0)
+    max_step: float | None = eqx.field(static=True, default=1.0)
     precision_floor: float = eqx.field(static=True, default=1e-6)
     adjoint: optx.AbstractAdjoint = _IMPLICIT_ADJOINT
 
@@ -512,15 +537,37 @@ class LaplaceMarkovInference(eqx.Module):
         nat1, Lam = newton_update(f, g, h, precision_floor=self.precision_floor)
         return _mask_sites(nat1, Lam, observed, self.precision_floor)
 
+    def _step_cap(
+        self,
+        prior: MarkovGPPrior,
+        prior_sd: Float[Array, " N"] | None,
+        f: Float[Array, " N"],
+        new_nat1: Float[Array, " N"],
+        new_nat2: Float[Array, " N"],
+        observed: Bool[Array, " N"],
+    ) -> Float[Array, ""] | float:
+        r"""The step cap $\min(1, \delta / \max_n |f^N_n - \hat f_n| / \sigma_n)$.
+
+        A step size only, so it is ``stop_gradient``-ed: at the fixed point the
+        step is zero whatever its size, and the gradient does not depend on it.
+        """
+        if self.max_step is None or prior_sd is None:
+            return 1.0
+        f_newton, _, _ = _markov_smoothed_posterior(prior, new_nat1, new_nat2, observed)
+        jump = jnp.max(jnp.abs(f_newton - f) / prior_sd)
+        tiny = jnp.finfo(jump.dtype).tiny
+        cap = jnp.minimum(1.0, self.max_step / jnp.maximum(jump, tiny))
+        return jax.lax.stop_gradient(cap)
+
     def _step(self, sites: _Sites, args: PyTree) -> _Sites:
-        r"""One damped Newton step on the sites, $T_\alpha(s)$."""
-        prior, site_lik, observed = args
+        r"""One damped, capped Newton step on the sites, $T_\alpha(s)$."""
+        prior, site_lik, observed, prior_sd = args
         nat1, nat2 = sites
         f, _, _ = _markov_smoothed_posterior(prior, nat1, nat2, observed)
         new_nat1, new_nat2 = self._newton_sites(f, site_lik, observed)
-        nat1, nat2 = damped_natural_update(
-            nat1, nat2, new_nat1, new_nat2, lr=self.damping
-        )
+        cap = self._step_cap(prior, prior_sd, f, new_nat1, new_nat2, observed)
+        lr = self.damping * cap
+        nat1, nat2 = damped_natural_update(nat1, nat2, new_nat1, new_nat2, lr=lr)
         assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
         return _mask_sites(nat1, nat2, observed, self.precision_floor)
 
@@ -575,11 +622,15 @@ class LaplaceMarkovInference(eqx.Module):
         nat1 = jnp.asarray(prior_mean) * self.precision_floor
         nat2 = jnp.full((N,), self.precision_floor, dtype=prior_mean.dtype)
         sites = _mask_sites(nat1, nat2, observed, self.precision_floor)
+        # σ_n, once per fit: the step cap's scale
+        prior_sd = (
+            None if self.max_step is None else jnp.sqrt(_prior_marginal_variance(prior))
+        )
 
         sites, n_iter, converged = _solve_sites(
             self._step,
             sites,
-            (prior, site_lik, observed),
+            (prior, site_lik, observed, prior_sd),
             tol=self.tol,
             max_steps=self.max_iter,
             adjoint=self.adjoint,
