@@ -483,6 +483,38 @@ def test_ensemble_vi_starts_match_a_fresh_guide(linear_problem):
     assert jnp.array_equal(init(reused), init(AutoNormal(_vi_model)))
 
 
+def test_ensemble_vi_reuses_an_autoguide_list(linear_problem):
+    """Each part of an AutoGuideList caches its own prototype; all are reset."""
+    from numpyro.infer.autoguide import AutoDelta, AutoGuideList
+
+    p = linear_problem
+    guide = AutoGuideList(_vi_model)
+    guide.append(AutoNormal(numpyro.handlers.block(_vi_model, hide=["b"])))
+    guide.append(AutoDelta(numpyro.handlers.block(_vi_model, expose=["b"])))
+    runner = EnsembleVI(
+        model_fn=_vi_model,
+        guide_fn=guide,
+        optimizer=numpyro.optim.Adam(1e-2),
+        ensemble_size=3,
+    )
+    result = runner.run(jr.PRNGKey(0), 5, p["X"], p["y"])
+    assert result.losses.shape == (3, 5)
+    runner.init(jr.PRNGKey(1), p["X"], p["y"])
+
+
+def test_ensemble_vi_run_accepts_svi_run_options(linear_problem):
+    """SVI.run's own options reach run and are kept away from the model."""
+    p = linear_problem
+    runner = EnsembleVI(
+        model_fn=_vi_model,
+        guide_fn=AutoNormal(_vi_model),
+        optimizer=numpyro.optim.Adam(1e-2),
+        ensemble_size=2,
+    )
+    result = runner.run(jr.PRNGKey(0), 5, p["X"], p["y"], stable_update=True)
+    assert result.losses.shape == (2, 5)
+
+
 def _vi_three_arg_model(x, offset, y=None):
     """A model whose data are three positional arguments."""
     w = numpyro.sample("w", dist.Normal(jnp.zeros(5), 1.0).to_event(1))
@@ -504,40 +536,37 @@ def test_ensemble_vi_accepts_any_data_tuple(linear_problem):
     assert params["w_auto_loc"].shape == (2, 5)
 
 
-def test_ensemble_vi_run_returns_member_starts(linear_problem):
-    """`init_params` equals the guide parameters of `init` with the same seed."""
+def test_ensemble_vi_initial_params_are_where_run_starts(linear_problem):
+    """With a zero learning rate, run ends where initial_params says it starts."""
     p = linear_problem
-    guide = AutoNormal(_vi_model)
     runner = EnsembleVI(
         model_fn=_vi_model,
-        guide_fn=guide,
-        optimizer=numpyro.optim.Adam(1e-2),
+        guide_fn=AutoNormal(_vi_model),
+        optimizer=numpyro.optim.Adam(0.0),
         ensemble_size=4,
     )
-    result = runner.run(jr.PRNGKey(0), 20, p["X"], p["y"])
-    state = runner.init(jr.PRNGKey(0), p["X"], p["y"])
-    svi = runner._build_svi()
-    svi.init(jr.PRNGKey(0), p["X"], p["y"])  # SVI.get_params needs an init first
-    expected = jax.vmap(svi.get_params)(state)
-    assert result.init_params is not None
-    for name, value in expected.items():
-        assert jnp.array_equal(result.init_params[name], value)
-    # The fits moved away from their starts.
-    assert not jnp.allclose(result.params["w_auto_loc"], expected["w_auto_loc"])
+    starts = runner.initial_params(jr.PRNGKey(0), p["X"], p["y"])
+    params, losses = runner.run(jr.PRNGKey(0), 3, p["X"], p["y"])  # still a 2-tuple
+    assert losses.shape == (4, 3)
+    assert set(starts) == set(params)
+    for name, value in starts.items():
+        assert value.shape[0] == 4
+        assert jnp.allclose(params[name], value, rtol=1e-12)
+    # one start per member
+    assert jnp.unique(starts["b_auto_loc"]).shape == (4,)
 
 
-def test_ensemble_map_run_returns_member_starts(linear_problem):
-    """`init_params` equals `init`'s params for the run's init key."""
+def test_ensemble_map_initial_params_are_where_run_starts(linear_problem):
     p = linear_problem
     runner = EnsembleMAP(
         log_joint=p["log_joint"],
         init_fn=p["init_fn"],
-        optimizer=optax.adam(5e-3),
+        optimizer=optax.sgd(0.0),
         ensemble_size=4,
     )
-    result = runner.run(jr.PRNGKey(0), 20, p["X"], p["y"])
-    init_key, _ = jr.split(jr.PRNGKey(0))
-    assert jnp.array_equal(result.init_params, runner.init(init_key).params)
+    starts = runner.initial_params(jr.PRNGKey(0))
+    params, _ = runner.run(jr.PRNGKey(0), 3, p["X"], p["y"])
+    assert jnp.array_equal(params, starts)
 
 
 def _vi_plate_model(x, y=None):

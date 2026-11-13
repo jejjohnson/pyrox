@@ -88,16 +88,10 @@ class EnsembleResult(NamedTuple):
     Attributes:
         params: Final stacked parameters with leading ``(E,)`` axis.
         losses: ``(E, num_epochs)`` per-step loss history.
-        init_params: Each member's starting parameters, stacked like
-            ``params``, so the modes the fits reach can be related to where
-            they started. For `EnsembleVI` these are the constrained guide
-            parameters, as ``SVI.get_params`` returns them. ``None`` when a
-            result is built without them.
     """
 
     params: PyTree
     losses: Float[Array, "E T"]
-    init_params: PyTree | None = None
 
 
 def ensemble_init(
@@ -229,6 +223,26 @@ def ensemble_step(
 # ============================================================================
 
 
+# Keyword options numpyro's SVI.run consumes itself; SVI.init would pass them
+# on to the model and guide.
+_SVI_RUN_ONLY = ("stable_update", "forward_mode_differentiation", "init_state")
+
+
+def _autoguides(guide: Any) -> list[Any]:
+    """The autoguide ``guide`` and every autoguide nested in it.
+
+    An ``AutoGuideList`` keeps its parts in ``_guides``, and each part caches
+    its own prototype; anything without a ``prototype_trace`` is not an
+    autoguide and caches nothing.
+    """
+    if not hasattr(guide, "prototype_trace"):
+        return []
+    found = [guide]
+    for part in getattr(guide, "_guides", ()):
+        found.extend(_autoguides(part))
+    return found
+
+
 class EnsembleMAP(eqx.Module):
     r"""NumPyro-like ensemble MAP/MLE runner.
 
@@ -309,6 +323,23 @@ class EnsembleMAP(eqx.Module):
             seed=seed,
         )
 
+    def initial_params(self, seed: PRNGKeyArray) -> PyTree:
+        """Each member's starting parameters for ``run(seed, ...)``.
+
+        `run` splits ``seed`` into an init key and a mini-batch key; this
+        returns the stacked parameters `init` gives for that init key, so the
+        modes the fits reach can be related to where they started.
+
+        Args:
+            seed: The seed passed to `run`.
+
+        Returns:
+            Stacked parameters with a leading ``(E,)`` axis, as in
+            `EnsembleResult.params`.
+        """
+        init_key, _ = jr.split(seed)
+        return self.init(init_key).params
+
     def update(
         self,
         state: EnsembleState,
@@ -360,9 +391,8 @@ class EnsembleMAP(eqx.Module):
             batch_size: Optional mini-batch size. ``None`` ⇒ full-batch.
 
         Returns:
-            `EnsembleResult` with stacked final params, loss
-            history of shape ``(E, num_epochs)`` and each member's
-            starting params.
+            `EnsembleResult` with stacked final params + loss
+            history of shape ``(E, num_epochs)``.
         """
         n = y.shape[0]
         # Clamp batch_size to n so that batch_size > n falls back cleanly
@@ -410,11 +440,7 @@ class EnsembleMAP(eqx.Module):
         )
         final_params = eqx.combine(arrays_final, static)
         # losses is (T, E) from scan; transpose to (E, T) per the public contract.
-        return EnsembleResult(
-            params=final_params,
-            losses=einx.id("t e -> e t", losses),
-            init_params=state.params,
-        )
+        return EnsembleResult(params=final_params, losses=einx.id("t e -> e t", losses))
 
 
 class EnsembleVI(eqx.Module):
@@ -472,10 +498,10 @@ class EnsembleVI(eqx.Module):
         result on itself, including each site's starting value. Each member
         must draw its own start, so the cache is cleared before the member
         ``vmap`` and the guide sets itself up inside it from the member keys.
-        Guides that are not autoguides cache nothing and are left alone.
+        Every autoguide nested in an ``AutoGuideList`` is cleared too. Guides
+        that are not autoguides cache nothing and are left alone.
         """
-        guide: Any = self.guide_fn
-        if hasattr(guide, "prototype_trace"):
+        for guide in _autoguides(self.guide_fn):
             guide.prototype_trace = None
 
     def _settle_guide(
@@ -486,12 +512,15 @@ class EnsembleVI(eqx.Module):
         Set up inside ``jax.vmap``, the cache holds the vmap's tracers, and any
         later use of the same guide object (another ``init``, a plain ``SVI``,
         ``guide.median``) would raise ``UnexpectedTracerError``. One eager
-        ``svi.init`` replaces it with concrete values.
+        ``svi.init`` replaces it with concrete values. ``kwargs`` may hold
+        ``SVI.run``'s own options, which are not passed to ``init``.
         """
-        guide: Any = self.guide_fn
-        if hasattr(guide, "prototype_trace"):
-            guide.prototype_trace = None
-            svi.init(key, *args, **kwargs)
+        guides = _autoguides(self.guide_fn)
+        if guides:
+            for guide in guides:
+                guide.prototype_trace = None
+            init_kwargs = {k: v for k, v in kwargs.items() if k not in _SVI_RUN_ONLY}
+            svi.init(key, *args, **init_kwargs)
 
     def init(self, seed: PRNGKeyArray, *args: Any, **kwargs: Any) -> Any:
         """Initialize the ensemble of SVI states."""
@@ -501,6 +530,35 @@ class EnsembleVI(eqx.Module):
         state = jax.vmap(lambda k: svi.init(k, *args, **kwargs))(keys)
         self._settle_guide(svi, keys[0], *args, **kwargs)
         return state
+
+    def initial_params(self, seed: PRNGKeyArray, *args: Any, **kwargs: Any) -> PyTree:
+        """Each member's starting guide parameters for ``run(seed, ...)``.
+
+        `run` initialises member $e$ from the $e$-th of
+        ``jr.split(seed, ensemble_size)``, as `init` does; this returns those
+        states' parameters, constrained as ``SVI.get_params`` returns them, so
+        the modes the fits reach can be related to where they started. It
+        saves building them by hand, where ``SVI.get_params`` fails on an SVI
+        object that has not been initialised.
+
+        Args:
+            seed: The seed passed to `run`.
+            *args: The model's data arguments, as passed to `run`.
+            **kwargs: Keyword arguments as passed to `run`; ``SVI.run``'s own
+                options are ignored.
+
+        Returns:
+            The stacked guide parameters with a leading ``(E,)`` axis, as in
+            `EnsembleResult.params`.
+        """
+        svi = self._build_svi()
+        keys = jr.split(seed, self.ensemble_size)
+        init_kwargs = {k: v for k, v in kwargs.items() if k not in _SVI_RUN_ONLY}
+        self._reset_guide()
+        state = jax.vmap(lambda k: svi.init(k, *args, **init_kwargs))(keys)
+        # also leaves svi's constrain_fn concrete, which get_params needs
+        self._settle_guide(svi, keys[0], *args, **init_kwargs)
+        return jax.vmap(svi.get_params)(state)
 
     def update(
         self, state: Any, *args: Any, **kwargs: Any
@@ -516,14 +574,7 @@ class EnsembleVI(eqx.Module):
         *args: Any,
         **kwargs: Any,
     ) -> EnsembleResult:
-        """Fit the ensemble end-to-end via vmapped ``svi.run``.
-
-        Returns:
-            `EnsembleResult` with the stacked final guide parameters, the
-            ``(E, num_epochs)`` loss history and each member's starting guide
-            parameters, the same as ``svi.get_params`` of `init` with this
-            ``seed``.
-        """
+        """Fit the ensemble end-to-end via vmapped ``svi.run``."""
         svi = self._build_svi()
         keys = jr.split(seed, self.ensemble_size)
         self._reset_guide()
@@ -531,18 +582,13 @@ class EnsembleVI(eqx.Module):
         @jax.vmap
         def _run_one(
             k: PRNGKeyArray,
-        ) -> tuple[PyTree, PyTree, Float[Array, " T"]]:
-            # svi.run would call svi.init(k, ...) itself; calling it here
-            # gives the same state and keeps the starting parameters.
-            state = svi.init(k, *args, **kwargs)
-            r = svi.run(
-                k, num_epochs, *args, progress_bar=False, init_state=state, **kwargs
-            )
-            return svi.get_params(state), r.params, r.losses
+        ) -> tuple[PyTree, Float[Array, " T"]]:
+            r = svi.run(k, num_epochs, *args, progress_bar=False, **kwargs)
+            return r.params, r.losses
 
-        init_params, params, losses = _run_one(keys)
+        params, losses = _run_one(keys)
         self._settle_guide(svi, keys[0], *args, **kwargs)
-        return EnsembleResult(params=params, losses=losses, init_params=init_params)
+        return EnsembleResult(params=params, losses=losses)
 
 
 class _TemperedTraceELBO:
