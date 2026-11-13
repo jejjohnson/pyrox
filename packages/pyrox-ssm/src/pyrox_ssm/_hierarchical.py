@@ -183,6 +183,15 @@ class SharedPlusSiteMarkovGP(eqx.Module):
     `pyrox_ssm.ConstantSDE` term in the site kernel instead integrates an
     unknown level out.
 
+    To predict at times no site observed (a gap, a forecast), condition once
+    and call ``predict``: ``model.condition(y, noise_var).predict(t_star)``
+    adds the test times to the grid as unobserved rows. `from_sites` takes
+    the union of the site times with ``jnp.unique``, so it needs concrete
+    times and runs outside `jax.jit`. A model rebuilt from sampled kernels
+    inside `jax.jit` or a NumPyro model under NUTS uses the constructor with
+    a grid and mask computed once outside, for example the ``times`` and
+    ``mask`` of one `from_sites` call made before sampling.
+
     The model registers no NumPyro sites; wrap `log_marginal` in
     ``numpyro.factor`` (or pass `as_lgssm` to `pyrox_ssm.lgssm_factor`).
     Shapes are checked at construction, and concrete ``times`` must be
@@ -583,3 +592,129 @@ class SharedPlusSiteMarkovGP(eqx.Module):
         # V[h_s] = H_h,s P̂_{h_s h_s} H_h,sᵀ
         h_var = einx.dot("t i j s, s i, s j -> t s", site_cov, H_h, H_h)
         return g_mean, h_mean, g_var, h_var
+
+    def condition(
+        self,
+        y: Float[Array, "T S"],
+        noise_var: Float[Array, ""] | Float[Array, " S"],
+    ) -> ConditionedSharedPlusSiteMarkovGP:
+        r"""Condition on the observations, to predict $g$ and $h_s$ at any times.
+
+        Args:
+            y: Observations on the grid, ``(T, S)``; unobserved entries may be
+                ``NaN``.
+            noise_var: Observation noise variance, scalar or ``(S,)``.
+
+        Returns:
+            A `ConditionedSharedPlusSiteMarkovGP`, whose ``predict(t_star)``
+            gives the posterior marginals of the shared and site signals.
+
+        Raises:
+            ValueError: If ``y`` is not ``(T, S)`` or ``noise_var`` is neither
+                a scalar nor ``(S,)``.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> import pyrox_ssm as pss
+            >>> kernel = pss.MaternSDE(variance=1.0, lengthscale=1.0, order=0)
+            >>> mask = jnp.array([[True, False], [True, True]])
+            >>> times = jnp.arange(2.0)
+            >>> model = pss.SharedPlusSiteMarkovGP(kernel, kernel, times, mask)
+            >>> y = jnp.array([[0.3, jnp.nan], [0.1, -0.2]])
+            >>> cond = model.condition(y, jnp.asarray(0.1))
+            >>> g_mean, h_mean, g_var, h_var = cond.predict(jnp.array([0.5, 3.0]))
+        """
+        y = jnp.asarray(y)
+        if y.shape != self.mask.shape:
+            raise ValueError(
+                f"y must have the mask's shape {tuple(self.mask.shape)!r}, got "
+                f"{tuple(y.shape)!r}"
+            )
+        noise_var = jnp.asarray(noise_var)
+        self._noise_vector(noise_var)  # validates the shape
+        return ConditionedSharedPlusSiteMarkovGP(self, y, noise_var)
+
+
+class ConditionedSharedPlusSiteMarkovGP(eqx.Module):
+    r"""A `SharedPlusSiteMarkovGP` conditioned on its observations.
+
+    Returned by `SharedPlusSiteMarkovGP.condition`. `predict` gives the
+    posterior marginals of the shared signal $g$ and of each site's signal
+    $h_s$ at any times: observed days, gaps no site observed, and forecasts
+    or backcasts beyond the grid.
+
+    Attributes:
+        model: The conditioned `SharedPlusSiteMarkovGP`.
+        y: Observations on the model's grid, ``(T, S)``; unobserved entries
+            may be ``NaN``.
+        noise_var: Observation noise variance, scalar or ``(S,)``.
+    """
+
+    model: SharedPlusSiteMarkovGP
+    y: Float[Array, "T S"]
+    noise_var: Float[Array, ""] | Float[Array, " S"]
+
+    def predict(
+        self, t_star: Float[Array, " M"]
+    ) -> tuple[
+        Float[Array, " M"], Float[Array, "M S"], Float[Array, " M"], Float[Array, "M S"]
+    ]:
+        r"""Posterior marginals of $g$ and every $h_s$ at the test times.
+
+        The test times join the grid as rows with no observed site, the
+        sorted union $t_{1:T} \cup t^*_{1:M}$, and one filter and smoother
+        pass over that grid gives `SharedPlusSiteMarkovGP.decompose`'s means
+        and variances at every row; the test rows are read off. An
+        unobserved row runs the Kalman predict only, so the log marginal and
+        the posterior at the observed rows are unchanged, and a test time
+        equal to a grid time sees that time's observations. Cost is
+        $O((T + M) D^3)$. The test times need not be sorted or distinct, and
+        the method traces, so it runs under `jax.jit` given a model built
+        with the constructor.
+
+        Args:
+            t_star: Test times, ``(M,)``.
+
+        Returns:
+            ``(g_mean, h_mean, g_var, h_var)`` at ``t_star``: the shared
+            signal's mean and variance, ``(M,)`` each, and each site's,
+            ``(M, S)`` each.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> import pyrox_ssm as pss
+            >>> kernel = pss.MaternSDE(variance=1.0, lengthscale=1.0, order=0)
+            >>> mask = jnp.array([[True, False], [True, True]])
+            >>> times = jnp.arange(2.0)
+            >>> model = pss.SharedPlusSiteMarkovGP(kernel, kernel, times, mask)
+            >>> y = jnp.array([[0.3, jnp.nan], [0.1, -0.2]])
+            >>> cond = model.condition(y, jnp.asarray(0.1))
+            >>> g_mean, h_mean, g_var, h_var = cond.predict(jnp.array([0.5, 3.0]))
+            >>> g_mean.shape, h_mean.shape
+            ((2,), (2, 2))
+        """
+        model = self.model
+        times = model.times
+        t_star = jnp.asarray(t_star, dtype=times.dtype)
+        if t_star.ndim != 1:
+            raise ValueError(f"t_star must be 1-D, got shape {tuple(t_star.shape)!r}")
+        n_steps, n_test, n_sites = times.shape[0], t_star.shape[0], model.n_sites
+        # Stable sort: a test time equal to a grid time sorts after it, so it
+        # sees that step's update.
+        order = jnp.argsort(jnp.concatenate([times, t_star]), stable=True)
+        merged_times = jnp.concatenate([times, t_star])[order]
+        no_obs = jnp.zeros((n_test, n_sites), dtype=bool)
+        merged_mask = jnp.concatenate([model.mask, no_obs])[order]
+        merged_y = jnp.concatenate(
+            [self.y, jnp.zeros((n_test, n_sites), dtype=self.y.dtype)]
+        )[order]
+        # tree_at skips __init__, whose strictly-increasing check a test time
+        # equal to a grid time would fail; a zero step is A = I, Q = 0.
+        merged = eqx.tree_at(
+            lambda m: (m.times, m.mask), model, (merged_times, merged_mask)
+        )
+        g_mean, h_mean, g_var, h_var = merged.decompose(
+            merged_y, self.noise_var, return_var=True
+        )
+        test_rows = jnp.argsort(order, stable=True)[n_steps:]
+        return g_mean[test_rows], h_mean[test_rows], g_var[test_rows], h_var[test_rows]
