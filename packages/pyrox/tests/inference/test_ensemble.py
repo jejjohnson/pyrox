@@ -515,6 +515,26 @@ def test_ensemble_vi_run_accepts_svi_run_options(linear_problem):
     assert result.losses.shape == (2, 5)
 
 
+def _vi_model_with_a_flag(x, y=None, *, stable_update):
+    """A model keyword that shares its name with an SVI.run option."""
+    w = numpyro.sample("w", dist.Normal(jnp.zeros(5), 1.0).to_event(1))
+    scale = 0.5 if stable_update else 1.0
+    numpyro.sample("y", dist.Normal(x @ w, scale), obs=y)
+
+
+def test_ensemble_vi_init_passes_every_model_keyword(linear_problem):
+    """On the init path a keyword named like an SVI.run option is the model's."""
+    p = linear_problem
+    runner = EnsembleVI(
+        model_fn=_vi_model_with_a_flag,
+        guide_fn=AutoNormal(_vi_model_with_a_flag),
+        optimizer=numpyro.optim.Adam(1e-2),
+        ensemble_size=2,
+    )
+    state = runner.init(jr.PRNGKey(0), p["X"], p["y"], stable_update=True)
+    assert state.optim_state[1].packed_state[0][0].shape[0] == 2
+
+
 def _vi_three_arg_model(x, offset, y=None):
     """A model whose data are three positional arguments."""
     w = numpyro.sample("w", dist.Normal(jnp.zeros(5), 1.0).to_event(1))
