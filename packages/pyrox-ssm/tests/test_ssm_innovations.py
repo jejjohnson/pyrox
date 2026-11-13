@@ -315,7 +315,7 @@ def test_nuts_on_a_2000_point_bernoulli_series() -> None:
 
 @pytest.mark.parametrize("sqrt", ["cholesky", "eigh"])
 def test_innovations_path_runs_under_pmap(sqrt) -> None:
-    """Parallel chains pmap the model; one device is enough to reproduce #420."""
+    """Parallel chains pmap the model; one device is enough to show the bug."""
     times = jnp.linspace(0.0, 5.0, 12)
     prior = MarkovGPPrior(MaternSDE(1.0, 0.7, order=1), times)
     eps = jr.normal(jr.key(0), (1, 12, 2))
