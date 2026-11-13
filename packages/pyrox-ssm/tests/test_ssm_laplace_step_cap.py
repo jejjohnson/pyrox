@@ -1,4 +1,4 @@
-"""`LaplaceMarkovInference`'s step cap (#421).
+"""`LaplaceMarkovInference`'s step cap.
 
 A full Newton step on a Bernoulli likelihood at a large prior variance
 overshoots and cycles: the toy wet-day record below, a Matérn-3/2 latent on a
