@@ -223,7 +223,19 @@ def pooled_model(t, y, mask):
     numpyro.factor("y", jax.vmap(site_log_marginal)(ell, t, y, mask).sum())
 ```
 
+`markov_gp_sites_factor` writes that factor in one call. It takes one kernel whose array leaves carry the leading site axis (a scalar leaf is shared by every site), the `(S, N)` arrays from `pad_sites`, and a shared or per-site noise variance:
+
+```python
+def pooled_model(t, y, mask):
+    mu = numpyro.sample("mu", dist.Normal(0.0, 1.0))
+    with numpyro.plate("site", t.shape[0]):
+        ell = numpyro.sample("lengthscale", dist.LogNormal(mu, 0.5))  # (S,)
+    kernel = pss.MaternSDE(variance=1.0, lengthscale=ell, order=1)
+    pss.markov_gp_sites_factor("y", kernel, t, y, jnp.asarray(0.01), mask=mask)
+```
+
 ::: pyrox_ssm.pad_sites
+::: pyrox_ssm.markov_gp_sites_factor
 
 ### A shared GP plus one GP per site
 
