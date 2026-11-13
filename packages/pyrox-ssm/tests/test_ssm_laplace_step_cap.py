@@ -116,3 +116,20 @@ def test_the_cap_converges_a_student_t_fit_on_data_far_from_the_prior_mean() -> 
     )
     assert bool(capped.converged)
     assert not bool(full.converged)
+
+
+def test_a_deterministic_initial_level_keeps_the_fit_finite() -> None:
+    """σ_n = 0 at a time with a known level: that time is left out of the cap."""
+    from pyrox_ssm import IntegratedWienerSDE
+
+    times = jnp.arange(30.0)
+    y = (jnp.sin(times / 4.0) > 0).astype(jnp.float64)
+    prior = MarkovGPPrior(
+        IntegratedWienerSDE(jnp.asarray(0.05), order=1),
+        times,
+        init_cov=jnp.diag(jnp.array([0.0, 1.0])),
+    )
+    fit = LaplaceMarkovInference().fit(prior, BernoulliLikelihood(), y)
+    assert bool(fit.converged)
+    assert jnp.all(jnp.isfinite(fit.q_mean))
+    assert jnp.isfinite(fit.log_marginal_approx)

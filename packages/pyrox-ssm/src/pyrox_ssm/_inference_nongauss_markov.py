@@ -554,7 +554,11 @@ class LaplaceMarkovInference(eqx.Module):
         if self.max_step is None or prior_sd is None:
             return 1.0
         f_newton, _, _ = _markov_smoothed_posterior(prior, new_nat1, new_nat2, observed)
-        jump = jnp.max(jnp.abs(f_newton - f) / prior_sd)
+        # A time with σ_n = 0 has a known latent, which no step moves (0 / 0
+        # otherwise); it is left out of the cap.
+        known = prior_sd <= 0.0
+        safe_sd = jnp.where(known, jnp.ones((), dtype=prior_sd.dtype), prior_sd)
+        jump = jnp.max(jnp.where(known, 0.0, jnp.abs(f_newton - f) / safe_sd))
         tiny = jnp.finfo(jump.dtype).tiny
         cap = jnp.minimum(1.0, self.max_step / jnp.maximum(jump, tiny))
         return jax.lax.stop_gradient(cap)
