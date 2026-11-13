@@ -234,8 +234,16 @@ def pooled_model(t, y, mask):
     pss.markov_gp_sites_factor("y", kernel, t, y, jnp.asarray(0.01), mask=mask)
 ```
 
+Per-site hyperparameters drawn around a population value with an unknown spread give NUTS a funnel when the spread is small. `noncentred_log_normal` samples a standard normal `f"{name}_z"` per site under the plate and records `exp(loc + scale * z)` as the deterministic site `name`:
+
+```python
+with numpyro.plate("site", t.shape[0]):
+    ell = pss.noncentred_log_normal("lengthscale", ell_loc, ell_scale)  # (S,)
+```
+
 ::: pyrox_ssm.pad_sites
 ::: pyrox_ssm.markov_gp_sites_factor
+::: pyrox_ssm.noncentred_log_normal
 
 ### A shared GP plus one GP per site
 
