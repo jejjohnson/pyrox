@@ -170,6 +170,40 @@ def test_predict_off_grid_matches_dense(order: int, nu: float) -> None:
     assert jnp.allclose(v_kf, v_dense, atol=1e-7)
 
 
+def test_predict_include_noise_adds_the_observation_variance() -> None:
+    """``include_noise=True`` returns the latent variance plus ``noise_var``."""
+    times = jnp.array([0.0, 0.4, 1.1, 1.8, 2.7, 3.6])
+    t_star = jnp.array([-0.2, 0.5, 2.0, 4.5])
+    y = jnp.sin(times)
+    prior = MarkovGPPrior(MaternSDE(variance=0.8, lengthscale=0.3, order=1), times)
+    cond = prior.condition(y, jnp.asarray(0.02))
+    m_f, v_f = cond.predict(t_star)
+    m_y, v_y = cond.predict(t_star, include_noise=True)
+    assert jnp.array_equal(m_y, m_f)
+    assert jnp.allclose(v_y, v_f + 0.02, rtol=1e-14)
+
+
+def test_predict_include_noise_matches_the_dense_predictive_of_y() -> None:
+    """Against the dense GP predictive of a new observation, k_** − k K⁻¹ kᵀ + σ²."""
+    sigma2, ell, noise_var = 0.8, 0.3, 0.02
+    times = jnp.array([0.0, 0.4, 1.1, 1.8, 2.7, 3.6])
+    t_star = jnp.array([-0.2, 0.5, 1.5, 2.0, 4.5])
+    y = jnp.sin(times)
+    prior = MarkovGPPrior(MaternSDE(variance=sigma2, lengthscale=ell, order=1), times)
+    _, v_kf = prior.condition(y, jnp.asarray(noise_var)).predict(
+        t_star, include_noise=True
+    )
+
+    X, X_star = times[:, None], t_star[:, None]
+    K = matern_kernel(X, X, jnp.asarray(sigma2), jnp.asarray(ell), nu=1.5)
+    K_cross = matern_kernel(X_star, X, jnp.asarray(sigma2), jnp.asarray(ell), nu=1.5)
+    K_test_diag = jnp.diag(
+        matern_kernel(X_star, X_star, jnp.asarray(sigma2), jnp.asarray(ell), nu=1.5)
+    )
+    _, v_dense = _dense_predict(K, K_cross, K_test_diag, y, jnp.asarray(noise_var))
+    assert jnp.allclose(v_kf, v_dense + noise_var, rtol=1e-10)
+
+
 @pytest.mark.parametrize("order", [0, 1, 2])
 def test_kalman_and_rts_match_the_sde_autocovariance_gram(order: int) -> None:
     """Kᵢⱼ = H exp(F_c |tᵢ − tⱼ|) Σ∞ Hᵀ, the Gram of the SDE's own autocovariance."""

@@ -741,8 +741,18 @@ class ConditionedMarkovGP(eqx.Module):
     def predict(
         self,
         t_star: Float[Array, " M"],
+        *,
+        include_noise: bool = False,
     ) -> tuple[Float[Array, " M"], Float[Array, " M"]]:
         r"""Predictive marginals ``(mean, var)`` at arbitrary test times.
+
+        With ``include_noise=False`` (the default) ``var`` is the variance of
+        the latent signal, $\sigma_*^2$. With ``include_noise=True`` it is the
+        variance of a new observation at each test time,
+        $\sigma_*^2 + R$, where $R$ = ``noise_var + obs_noise_floor`` is the
+        observation variance the posterior was conditioned on. Use it for the
+        band a withheld observation should fall in. The mean is the same
+        either way.
 
         Implementation: re-run the filter+smoother over the merged grid
         ``sort(times \\cup t_star)`` with the test points masked out of the
@@ -792,6 +802,8 @@ class ConditionedMarkovGP(eqx.Module):
         means = (m_test_state @ H.T)[:, 0] + self.prior.mean(t_star)
         # var = H P H^T per test point — vmap over axis 0
         vars_ = jax.vmap(lambda P: (H @ P @ H.T)[0, 0])(P_test_state)
+        if include_noise:
+            vars_ = vars_ + self.prior._R(self.noise_var)
         return means, vars_
 
 
