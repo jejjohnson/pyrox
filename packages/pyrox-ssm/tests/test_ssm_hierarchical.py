@@ -260,6 +260,92 @@ def test_decompose_matches_smoother_and_dense(site, noise):
         np.testing.assert_allclose(h_mean[:, s], want, rtol=1e-10, atol=1e-12)
 
 
+@pytest.mark.parametrize(
+    ("site", "noise"),
+    [(POOLED_SITE, NOISE), (PER_SITE, NOISE_PER_SITE)],
+    ids=["pooled", "per-site-noise"],
+)
+def test_decompose_variances_match_the_dense_conditional(site, noise):
+    """V[g | y] and V[h_s | y] against the dense joint Gaussian."""
+    times, ys = _dataset(jr.key(6), site, noise)
+    model, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, site, times, ys)
+    g_mean, h_mean, g_var, h_var = model.decompose(y_grid, noise, return_var=True)
+    g_mean_0, h_mean_0 = model.decompose(y_grid, noise)
+    np.testing.assert_array_equal(g_mean, g_mean_0)
+    np.testing.assert_array_equal(h_mean, h_mean_0)
+    assert g_var.shape == g_mean.shape and h_var.shape == h_mean.shape
+
+    t_obs, s_obs, _ = _observed_pairs(model, y_grid)
+    K = _dense_cov(SHARED, site, t_obs, s_obs, noise, N_SITES)
+    grid, obs = model.times[:, None], t_obs[:, None]
+    # V[g(t)] = k_g(t, t) − K_g(t, o) K⁻¹ K_g(o, t)
+    K_g = matern_kernel(grid, obs, SHARED.variance, SHARED.lengthscale, nu=SHARED_NU)
+    want_g = SHARED.variance - jnp.sum(K_g * jnp.linalg.solve(K, K_g.T).T, axis=1)
+    np.testing.assert_allclose(g_var, want_g, rtol=1e-10, atol=1e-12)
+    var_h, ell_h = _site_params(site, N_SITES)
+    for s in range(N_SITES):
+        # site s's latent covaries only with site s's observations
+        K_h = matern_kernel(grid, obs, var_h[s], ell_h[s], nu=SITE_NU)
+        K_h = jnp.where(s_obs[None, :] == s, K_h, 0.0)
+        want_h = var_h[s] - jnp.sum(K_h * jnp.linalg.solve(K, K_h.T).T, axis=1)
+        np.testing.assert_allclose(h_var[:, s], want_h, rtol=1e-10, atol=1e-12)
+
+
+def _climatology(level):
+    """A per-site mean: a level per site plus a shared seasonal cycle."""
+
+    def mean_fn(t):
+        return level[None, :] + 0.5 * jnp.sin(2.0 * jnp.pi * t / 7.0)[:, None]
+
+    return mean_fn
+
+
+def test_mean_fn_equals_the_anomaly_model():
+    """log p(y | μ) equals the log marginal of y − μ, and decompose agrees."""
+    times, ys = _dataset(jr.key(7))
+    level = jnp.array([1.0, -2.0, 0.5])
+    mean_fn = _climatology(level)
+    ys_raw = [
+        y + mean_fn(t)[:, s] for s, (t, y) in enumerate(zip(times, ys, strict=True))
+    ]
+    model, y_raw = SharedPlusSiteMarkovGP.from_sites(
+        SHARED, POOLED_SITE, times, ys_raw, mean_fn=mean_fn
+    )
+    anomaly_model, y_anom = SharedPlusSiteMarkovGP.from_sites(
+        SHARED, POOLED_SITE, times, ys
+    )
+    np.testing.assert_allclose(
+        model.log_marginal(y_raw, NOISE),
+        anomaly_model.log_marginal(y_anom, NOISE),
+        rtol=1e-12,
+    )
+    for got, want in zip(
+        model.decompose(y_raw, NOISE, return_var=True),
+        anomaly_model.decompose(y_anom, NOISE, return_var=True),
+        strict=True,
+    ):
+        np.testing.assert_allclose(got, want, rtol=1e-10, atol=1e-12)
+
+
+def test_gradients_flow_to_the_mean_parameters():
+    times, ys = _dataset(jr.key(8))
+    model, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, POOLED_SITE, times, ys)
+
+    def with_mean(level):
+        with_mu = SharedPlusSiteMarkovGP(
+            model.shared, model.site, model.times, model.mask, _climatology(level)
+        )
+        return with_mu.log_marginal(y_grid, NOISE)
+
+    def by_hand(level):
+        return model.log_marginal(y_grid - _climatology(level)(model.times), NOISE)
+
+    level = jnp.array([0.3, -0.1, 0.2])
+    grad = jax.grad(with_mean)(level)
+    assert jnp.all(jnp.isfinite(grad)) and jnp.any(grad != 0.0)
+    np.testing.assert_allclose(grad, jax.grad(by_hand)(level), rtol=1e-12)
+
+
 # --- from_sites ----------------------------------------------------------
 
 

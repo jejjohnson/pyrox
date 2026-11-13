@@ -123,13 +123,14 @@ class SharedPlusSiteMarkovGP(eqx.Module):
     Site $s = 1, \dots, S$ is observed on its own days as
 
     $$
-    y_s(t) = g(t) + h_s(t) + \varepsilon_s(t), \qquad
+    y_s(t) = \mu_s(t) + g(t) + h_s(t) + \varepsilon_s(t), \qquad
     g \sim \mathcal{GP}(0, k_g), \quad
     h_s \sim \mathcal{GP}(0, k_{h,s}), \quad
     \varepsilon_s(t) \sim \mathcal{N}(0, \sigma_{n,s}^2),
     $$
 
-    with $g$, $h_1, \dots, h_S$ independent. Every kernel is an SDE kernel
+    with $g$, $h_1, \dots, h_S$ independent and $\mu_s$ an optional known
+    per-site mean (``mean_fn``, zero by default). Every kernel is an SDE kernel
     with state $x_g \in \mathbb{R}^{d_g}$ or $x_{h,s} \in \mathbb{R}^{d_h}$,
     and the joint state on the merged grid $t_1 < \dots < t_T$ stacks them,
 
@@ -174,6 +175,14 @@ class SharedPlusSiteMarkovGP(eqx.Module):
     filter (filterax) keeps that correlation at the price of Monte Carlo
     error in the covariances.
 
+    The per-site mean $\mu_s(t)$ (a station climatology, an offset) enters
+    `as_lgssm` as the observation offset, so it shifts the observations and
+    leaves every covariance unchanged: the log marginal is that of the
+    anomalies $y - \mu$, and gradients flow to whatever parameters
+    ``mean_fn`` closes over. That is a fixed shift, given its parameters; a
+    `pyrox_ssm.ConstantSDE` term in the site kernel instead integrates an
+    unknown level out.
+
     The model registers no NumPyro sites; wrap `log_marginal` in
     ``numpyro.factor`` (or pass `as_lgssm` to `pyrox_ssm.lgssm_factor`).
     Shapes are checked at construction, and concrete ``times`` must be
@@ -187,6 +196,9 @@ class SharedPlusSiteMarkovGP(eqx.Module):
         times: Merged, strictly increasing grid, shaped ``(T,)``.
         mask: Boolean ``(T, S)`` mask, ``True`` where site $s$ was observed
             at ``times[k]``.
+        mean_fn: Optional callable mapping times ``(T,)`` to the per-site
+            means $\mu_s(t_k)$, ``(T, S)``. ``None`` (the default) is the
+            zero mean.
 
     Examples:
         Three sites on ragged days, a per-site variance and a pooled
@@ -224,6 +236,7 @@ class SharedPlusSiteMarkovGP(eqx.Module):
     site: SDEKernel
     times: Float[Array, " T"]
     mask: Bool[Array, "T S"]
+    mean_fn: Callable[[Float[Array, " T"]], Float[Array, "T S"]] | None = None
 
     def __init__(
         self,
@@ -231,6 +244,7 @@ class SharedPlusSiteMarkovGP(eqx.Module):
         site: SDEKernel,
         times: Float[Array, " T"],
         mask: Bool[Array, "T S"],
+        mean_fn: Callable[[Float[Array, " T"]], Float[Array, "T S"]] | None = None,
     ) -> None:
         times_arr = jnp.asarray(times, dtype=jnp.result_type(times, 0.0))
         if times_arr.ndim != 1:
@@ -255,6 +269,7 @@ class SharedPlusSiteMarkovGP(eqx.Module):
         self.site = site
         self.times = times_arr
         self.mask = mask_arr
+        self.mean_fn = mean_fn
 
     @property
     def n_sites(self) -> int:
@@ -273,6 +288,7 @@ class SharedPlusSiteMarkovGP(eqx.Module):
         site: SDEKernel,
         times_per_site: Sequence[Float[Array, " N_s"]],
         y_per_site: Sequence[Float[Array, " N_s"]],
+        mean_fn: Callable[[Float[Array, " T"]], Float[Array, "T S"]] | None = None,
     ) -> tuple[SharedPlusSiteMarkovGP, Float[Array, "T S"]]:
         r"""Merge ragged site series onto one grid and build the model.
 
@@ -292,6 +308,7 @@ class SharedPlusSiteMarkovGP(eqx.Module):
             times_per_site: One strictly increasing ``(N_s,)`` array of
                 observation times per site.
             y_per_site: One ``(N_s,)`` array of observations per site.
+            mean_fn: Optional per-site mean, as in the class.
 
         Returns:
             ``(model, y_grid)``: the model over the merged ``(T,)`` grid with
@@ -351,7 +368,7 @@ class SharedPlusSiteMarkovGP(eqx.Module):
             rows = jnp.searchsorted(times, t_s)
             y_grid = y_grid.at[rows, s].set(y_s)
             mask = mask.at[rows, s].set(True)
-        return cls(shared, site, times, mask), y_grid
+        return cls(shared, site, times, mask, mean_fn), y_grid
 
     def _noise_vector(
         self, noise_var: Float[Array, ""] | Float[Array, " S"]
@@ -386,7 +403,9 @@ class SharedPlusSiteMarkovGP(eqx.Module):
         ``initial_covariance()`` ($P_\infty$ for a stationary kernel), the
         time-invariant observation matrix is the ``(S, D)`` stack of rows
         $H[s] = (H_g, 0, \dots, H_h \text{ at block } s, \dots, 0)$ and
-        $R = \mathrm{diag}(\sigma_{n,1}^2, \dots, \sigma_{n,S}^2)$.
+        $R = \mathrm{diag}(\sigma_{n,1}^2, \dots, \sigma_{n,S}^2)$. With a
+        ``mean_fn``, its ``(T, S)`` values on the grid are the observation
+        offset $b_k$.
 
         Args:
             noise_var: Observation noise variance, a scalar shared by every
@@ -398,7 +417,8 @@ class SharedPlusSiteMarkovGP(eqx.Module):
             ``mask=self.mask``.
 
         Raises:
-            ValueError: If ``noise_var`` is neither a scalar nor ``(S,)``.
+            ValueError: If ``noise_var`` is neither a scalar nor ``(S,)``, or
+                if ``mean_fn`` does not return ``(T, S)``.
 
         Examples:
             >>> import jax.numpy as jnp
@@ -429,6 +449,7 @@ class SharedPlusSiteMarkovGP(eqx.Module):
 
         noise = self._noise_vector(noise_var).astype(dtype)
         init_cov = _stack_block_diag(P_g.astype(dtype), P_h.astype(dtype))
+        offset = None if self.mean_fn is None else self.mean_fn(self.times)
         return LinearGaussianSSMPrior(
             transition=_stack_block_diag(A_g.astype(dtype), A_h.astype(dtype)),
             obs_model=_shared_plus_site_rows(H_g[0], H_h[:, 0]).astype(dtype),
@@ -436,6 +457,7 @@ class SharedPlusSiteMarkovGP(eqx.Module):
             obs_noise=jnp.diag(noise),
             init_mean=jnp.zeros(init_cov.shape[0], dtype=dtype),
             init_cov=init_cov,
+            obs_offset=offset,
         )
 
     def log_marginal(
@@ -478,8 +500,18 @@ class SharedPlusSiteMarkovGP(eqx.Module):
         self,
         y: Float[Array, "T S"],
         noise_var: Float[Array, ""] | Float[Array, " S"],
-    ) -> tuple[Float[Array, " T"], Float[Array, "T S"]]:
-        r"""Posterior means of the shared and the site GPs on the grid.
+        *,
+        return_var: bool = False,
+    ) -> (
+        tuple[Float[Array, " T"], Float[Array, "T S"]]
+        | tuple[
+            Float[Array, " T"],
+            Float[Array, "T S"],
+            Float[Array, " T"],
+            Float[Array, "T S"],
+        ]
+    ):
+        r"""Posterior means, and optionally variances, of the shared and site GPs.
 
         Runs the Kalman filter and RTS smoother on `as_lgssm` and reads the
         blocks of the smoothed state mean $\hat{x}_k = \mathbb{E}[x_k \mid y]$,
@@ -489,21 +521,33 @@ class SharedPlusSiteMarkovGP(eqx.Module):
         \mathbb{E}[h_s(t_k) \mid y] = H_h \hat{x}_{h,s,k},
         $$
 
-        so the two sum to the smoothed mean of site $s$,
-        $\mathbb{E}[g(t_k) + h_s(t_k) \mid y] = H[s] \hat{x}_k$. The
-        posterior covariances are on ``as_lgssm(noise_var).smooth(y,
-        mask=self.mask)``. The RTS smoother solves against the predicted
-        state covariance, so a kernel of exactly zero variance (a singular
-        block) gives ``NaN`` here; `log_marginal` is unaffected.
+        so the two sum to the posterior mean of site $s$'s signal,
+        $\mathbb{E}[g(t_k) + h_s(t_k) \mid y] = H[s] \hat{x}_k$. With
+        ``return_var=True`` the marginal variances come from the same
+        smoothed state covariance $\hat{P}_k$,
+
+        $$
+        \mathbb{V}[g(t_k) \mid y] = H_g \hat{P}_{gg,k} H_g^\top, \qquad
+        \mathbb{V}[h_s(t_k) \mid y] = H_h \hat{P}_{h_s h_s,k} H_h^\top .
+        $$
+
+        The two parts are correlated a posteriori (one observation informs
+        both), so their variances do not add to the variance of
+        $g + h_s$, $H[s] \hat{P}_k H[s]^\top$. The RTS smoother solves
+        against the predicted state covariance, so a kernel of exactly zero
+        variance (a singular block) gives ``NaN`` here; `log_marginal` is unaffected.
 
         Args:
             y: Observations, shaped ``(T, S)``; unobserved entries may be
                 ``NaN``.
             noise_var: Observation noise variance, scalar or ``(S,)``.
+            return_var: Also return the marginal variances.
 
         Returns:
             ``(g_mean, h_mean)``: $\mathbb{E}[g \mid y]$ on the grid,
-            ``(T,)``, and $\mathbb{E}[h_s \mid y]$, ``(T, S)``.
+            ``(T,)``, and $\mathbb{E}[h_s \mid y]$, ``(T, S)``. With
+            ``return_var=True``, ``(g_mean, h_mean, g_var, h_var)``, the
+            variances shaped like the means.
 
         Examples:
             >>> import jax.numpy as jnp
@@ -518,13 +562,24 @@ class SharedPlusSiteMarkovGP(eqx.Module):
             ((2,), (2, 2))
         """
         lgssm = self.as_lgssm(noise_var)
-        means, _covs, _ = lgssm.smooth(y, mask=self.mask)
+        means, covs, _ = lgssm.smooth(y, mask=self.mask)
         d_g, d_h = self.shared.state_dim, self.site.state_dim
+        n_steps, n_sites = means.shape[0], self.n_sites
         H = lgssm.obs_model
         # H[s] = (H_g, 0, …, H_h at block s, …, 0): read each block separately
-        g_mean = einx.dot("t i, i -> t", means[:, :d_g], H[0, :d_g])
-        site_means = means[:, d_g:].reshape(means.shape[0], self.n_sites, d_h)
-        H_h = H[:, d_g:].reshape(self.n_sites, self.n_sites, d_h)
+        H_g = H[0, :d_g]
+        g_mean = einx.dot("t i, i -> t", means[:, :d_g], H_g)
+        site_means = means[:, d_g:].reshape(n_steps, n_sites, d_h)
+        H_h = H[:, d_g:].reshape(n_sites, n_sites, d_h)
         H_h = jnp.diagonal(H_h, axis1=0, axis2=1).T  # (S, d_h), row s = H_h,s
         h_mean = einx.dot("t s i, s i -> t s", site_means, H_h)
-        return g_mean, h_mean
+        if not return_var:
+            return g_mean, h_mean
+        # V[g] = H_g P̂_gg H_gᵀ
+        g_var = einx.dot("t i j, i, j -> t", covs[:, :d_g, :d_g], H_g, H_g)
+        # the (d_h, d_h) diagonal block of each site: P̂_{h_s h_s}
+        site_cov = covs[:, d_g:, d_g:].reshape(n_steps, n_sites, d_h, n_sites, d_h)
+        site_cov = jnp.diagonal(site_cov, axis1=1, axis2=3)  # (T, d_h, d_h, S)
+        # V[h_s] = H_h,s P̂_{h_s h_s} H_h,sᵀ
+        h_var = einx.dot("t i j s, s i, s j -> t s", site_cov, H_h, H_h)
+        return g_mean, h_mean, g_var, h_var

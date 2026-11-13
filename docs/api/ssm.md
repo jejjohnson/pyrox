@@ -258,6 +258,8 @@ def regional_model(y_grid):
 g_mean, h_mean = model.decompose(y_grid, jnp.asarray(0.05))         # (T,), (T, S)
 ```
 
+`decompose(..., return_var=True)` also returns the marginal variances `V[g | y]` and `V[h_s | y]` from the same smoother pass. The two parts are correlated a posteriori, so their variances do not add to that of `g + h_s`. A known per-site mean, such as a station climatology, goes in as `mean_fn`, a callable from the `(T,)` grid to `(T, S)` means. It is the observation offset of `as_lgssm`, so the model fits raw readings and its log marginal equals that of the anomalies `y - mean`. A `ConstantSDE` term in the site kernel instead integrates an unknown level out.
+
 ::: pyrox_ssm.SharedPlusSiteMarkovGP
 
 ## Normalizing Kalman Filter
