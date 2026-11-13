@@ -49,13 +49,14 @@ plugins:
             merge_init_into_class: false
             filters: ["!^_"]
             # The SSM API re-exports several gaussx symbols (SDEKernel,
-            # MaternSDE, ConstantSDE, …) and ``pyrox_nn`` re-exports
+            # MaternSDE, ConstantSDE, …), and ``pyrox_nn`` re-exports
             # deterministic NN primitives from geonnax (SIREN, MFN,
-            # conditioners, encoders, etc.). griffe must preload both
-            # external packages to resolve those aliases; without this
-            # the render path raises AliasResolutionError and the deploy
-            # fails.
-            preload_modules: [gaussx, geonnax]
+            # conditioners, encoders, etc.) and feature bases from functax
+            # (fourier_features, seasonal_features, seasonal_frequencies).
+            # griffe must preload these external packages to resolve those
+            # aliases; without this the render path raises
+            # AliasResolutionError and the deploy fails.
+            preload_modules: [gaussx, geonnax, functax]
   - mkdocs-jupyter:
       execute: false
       ignore_h1_titles: true
