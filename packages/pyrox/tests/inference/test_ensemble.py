@@ -428,6 +428,82 @@ def test_ensemble_vi_class_run(linear_problem):
     assert result.losses.shape == (4, 200)
 
 
+def _member_starts(state):
+    """Each member's starting value of the first packed parameter, ``(E, -1)``."""
+    first = state.optim_state[1].packed_state[0][0]
+    return first.reshape(first.shape[0], -1)
+
+
+def test_ensemble_vi_guide_reusable_after_run(linear_problem):
+    """An AutoNormal used by ensemble_vi can be reused by EnsembleVI.init."""
+    p = linear_problem
+    guide = AutoNormal(_vi_model)
+    ensemble_vi(
+        _vi_model,
+        guide,
+        ensemble_size=4,
+        num_epochs=5,
+        data=(p["X"], p["y"]),
+        seed=jr.PRNGKey(0),
+    )
+    runner = EnsembleVI(
+        model_fn=_vi_model,
+        guide_fn=guide,
+        optimizer=numpyro.optim.Adam(1e-2),
+        ensemble_size=4,
+    )
+    state = runner.init(jr.PRNGKey(1), p["X"], p["y"])
+    # The reused guide still gives each member its own start.
+    starts = _member_starts(state)
+    assert jnp.unique(starts[:, 0]).shape == (4,)
+    # And it stays usable outside the ensemble.
+    guide.median(
+        {
+            k: v[0]
+            for k, v in runner.run(jr.PRNGKey(2), 5, p["X"], p["y"]).params.items()
+        }
+    )
+
+
+def test_ensemble_vi_starts_match_a_fresh_guide(linear_problem):
+    """Reusing a guide gives the same member starts as a fresh guide."""
+    p = linear_problem
+
+    def init(guide):
+        runner = EnsembleVI(
+            model_fn=_vi_model,
+            guide_fn=guide,
+            optimizer=numpyro.optim.Adam(1e-2),
+            ensemble_size=4,
+        )
+        return _member_starts(runner.init(jr.PRNGKey(3), p["X"], p["y"]))
+
+    reused = AutoNormal(_vi_model)
+    init(reused)
+    assert jnp.array_equal(init(reused), init(AutoNormal(_vi_model)))
+
+
+def _vi_three_arg_model(x, offset, y=None):
+    """A model whose data are three positional arguments."""
+    w = numpyro.sample("w", dist.Normal(jnp.zeros(5), 1.0).to_event(1))
+    numpyro.sample("y", dist.Normal(x @ w + offset, 0.5), obs=y)
+
+
+def test_ensemble_vi_accepts_any_data_tuple(linear_problem):
+    """`data` is splatted into the model, so three arguments work."""
+    p = linear_problem
+    params, losses = ensemble_vi(
+        _vi_three_arg_model,
+        AutoNormal(_vi_three_arg_model),
+        ensemble_size=2,
+        num_epochs=10,
+        data=(p["X"], jnp.asarray(0.3), p["y"]),
+        seed=jr.PRNGKey(0),
+    )
+    assert losses.shape == (2, 10)
+    assert params["w_auto_loc"].shape == (2, 5)
+
+
 def _vi_plate_model(x, y=None):
     """Same linear model but with the obs likelihood inside a plate.
 
