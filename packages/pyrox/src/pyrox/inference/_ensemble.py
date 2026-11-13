@@ -495,15 +495,14 @@ class EnsembleVI(eqx.Module):
         Set up inside ``jax.vmap``, the cache holds the vmap's tracers, and any
         later use of the same guide object (another ``init``, a plain ``SVI``,
         ``guide.median``) would raise ``UnexpectedTracerError``. One eager
-        ``svi.init`` replaces it with concrete values. ``kwargs`` may hold
-        ``SVI.run``'s own options, which are not passed to ``init``.
+        ``svi.init`` replaces it with concrete values. ``kwargs`` are the
+        model's keyword arguments, passed to ``svi.init`` as they are.
         """
         guides = _autoguides(self.guide_fn)
         if guides:
             for guide in guides:
                 guide.prototype_trace = None
-            init_kwargs = {k: v for k, v in kwargs.items() if k not in _SVI_RUN_ONLY}
-            svi.init(key, *args, **init_kwargs)
+            svi.init(key, *args, **kwargs)
 
     def init(self, seed: PRNGKeyArray, *args: Any, **kwargs: Any) -> Any:
         """Initialize the ensemble of SVI states."""
@@ -541,7 +540,9 @@ class EnsembleVI(eqx.Module):
             return r.params, r.losses
 
         params, losses = _run_one(keys)
-        self._settle_guide(svi, keys[0], *args, **kwargs)
+        # SVI.run's own options are not model arguments, so init must not get them
+        model_kwargs = {k: v for k, v in kwargs.items() if k not in _SVI_RUN_ONLY}
+        self._settle_guide(svi, keys[0], *args, **model_kwargs)
         return EnsembleResult(params=params, losses=losses)
 
 
