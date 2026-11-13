@@ -5,16 +5,22 @@ Markov-GP factor per site under `jax.vmap`, which needs every site on a grid
 of the same length $N$. `pad_sites` pads each site's series after its last
 observation and returns the mask that the `pyrox_ssm.MarkovGPPrior` methods
 take, so the padded steps run the Kalman predict only and the log marginal of
-every site is unchanged.
+every site is unchanged. `markov_gp_sites_factor` then scores all the padded
+sites as one factor.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 import jax
 import jax.numpy as jnp
+import numpyro
+from gaussx import SDEKernel
 from jaxtyping import Array, Bool, Float
+
+from pyrox_ssm._hierarchical import _site_axes
+from pyrox_ssm._markov import MarkovGPPrior
 
 
 def pad_sites(
@@ -159,3 +165,115 @@ def pad_sites(
         y_rows.append(jnp.concatenate([y_s, jnp.zeros(n - n_s, dtype=y_dtype)]))
         mask_rows.append(jnp.concatenate([m_s, jnp.zeros(n - n_s, dtype=bool)]))
     return jnp.stack(t_rows), jnp.stack(y_rows), jnp.stack(mask_rows)
+
+
+def markov_gp_sites_factor(
+    name: str,
+    sde_kernel: SDEKernel,
+    times: Float[Array, "S N"],
+    y: Float[Array, "S N"],
+    noise_var: Float[Array, ""] | Float[Array, " S"],
+    *,
+    mask: Bool[Array, "S N"] | None = None,
+    mean_fn: Callable[[Float[Array, " N"]], Float[Array, " N"]] | None = None,
+    obs_noise_floor: float = 0.0,
+) -> None:
+    r"""Register the summed Markov-GP log marginal of ``S`` sites as one factor.
+
+    The multi-site form of `markov_gp_factor`, for the ``(S, N)`` padded
+    times, observations and mask that `pyrox_ssm.pad_sites` returns. Site
+    $s$ has its own kernel $\theta_s$ and noise variance $\sigma_s^2$, and the
+    sites are independent given them, so the factor is
+
+    $$
+    \log p(Y \mid \theta) = \sum_{s=1}^{S} \log p(y_s \mid \theta_s, \sigma_s^2),
+    $$
+
+    each term the masked Kalman log marginal of `MarkovGPPrior.log_marginal`.
+    It replaces the hand-written ``jax.vmap`` over sites shown in
+    `markov_gp_factor`'s example, and is one ``numpyro.factor`` site, so it
+    composes with NUTS and SVI as that pattern does.
+
+    One kernel per site is one kernel whose array leaves carry a leading
+    ``(S,)`` axis, such as ``MaternSDE(variance, lengthscale, order=1)`` with
+    ``(S,)`` arrays sampled under a ``numpyro.plate`` over sites. A 0-d leaf
+    (a Python float or a scalar array) is shared by every site.
+
+    Args:
+        name: The factor site name.
+        sde_kernel: An `SDEKernel` whose non-scalar array leaves have a
+            leading site axis of length ``S``.
+        times: ``(S, N)`` strictly increasing times per row.
+        y: ``(S, N)`` observations; masked entries may be ``NaN``.
+        noise_var: Observation noise variance, shared ``()`` or per site
+            ``(S,)``.
+        mask: Optional ``(S, N)`` boolean mask, ``True`` where observed.
+        mean_fn: Optional mean function shared by every site, as in
+            `MarkovGPPrior`.
+        obs_noise_floor: Extra observation variance, as in `MarkovGPPrior`.
+
+    Raises:
+        ValueError: If ``times``, ``y`` or ``mask`` is not ``(S, N)``, or if a
+            non-scalar kernel leaf or ``noise_var`` has a leading axis whose
+            length is not ``S``.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> import numpyro
+        >>> import numpyro.distributions as dist
+        >>> import pyrox_ssm as pss
+        >>> t, y, mask = pss.pad_sites(
+        ...     [jnp.arange(5.0), jnp.arange(3.0)], [jnp.ones(5), jnp.zeros(3)]
+        ... )
+        >>> def model():
+        ...     with numpyro.plate("site", 2):
+        ...         ell = numpyro.sample("lengthscale", dist.LogNormal(0.0, 1.0))
+        ...     kernel = pss.MaternSDE(1.0, ell, order=1)
+        ...     noise = jnp.asarray(0.1)
+        ...     pss.markov_gp_sites_factor("y", kernel, t, y, noise, mask=mask)
+    """
+    times = jnp.asarray(times)
+    if times.ndim != 2:
+        raise ValueError(
+            f"times must be (S, N), one row per site, got shape {tuple(times.shape)!r}."
+        )
+    n_sites = times.shape[0]
+    y = jnp.asarray(y)
+    if y.shape != times.shape:
+        raise ValueError(
+            f"y has shape {tuple(y.shape)!r} but times has {tuple(times.shape)!r}."
+        )
+    if mask is not None and jnp.shape(mask) != times.shape:
+        raise ValueError(
+            f"mask has shape {tuple(jnp.shape(mask))!r} but times has "
+            f"{tuple(times.shape)!r}."
+        )
+
+    kernel_axes = _site_axes(sde_kernel, n_sites)
+    noise_var = jnp.asarray(noise_var)
+    if noise_var.ndim not in (0, 1) or (
+        noise_var.ndim == 1 and noise_var.shape[0] != n_sites
+    ):
+        raise ValueError(
+            f"noise_var must be () or (S,)=({n_sites},), got shape "
+            f"{tuple(noise_var.shape)!r}."
+        )
+    noise_axis = None if noise_var.ndim == 0 else 0
+
+    def _site(
+        kernel_s: SDEKernel,
+        t_s: Float[Array, " N"],
+        y_s: Float[Array, " N"],
+        m_s: Bool[Array, " N"] | None,
+        noise_s: Float[Array, ""],
+    ) -> Float[Array, ""]:
+        prior = MarkovGPPrior(
+            kernel_s, t_s, mean_fn=mean_fn, obs_noise_floor=obs_noise_floor
+        )
+        return prior.log_marginal(y_s, noise_s, mask=m_s)
+
+    mask_axis = None if mask is None else 0
+    log_marginals = jax.vmap(_site, in_axes=(kernel_axes, 0, 0, mask_axis, noise_axis))(
+        sde_kernel, times, y, mask, noise_var
+    )
+    numpyro.factor(name, jnp.sum(log_marginals))
