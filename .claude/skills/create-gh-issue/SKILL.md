@@ -99,7 +99,7 @@ Fill in sections according to the template's intent. **Minimum required sections
 
 ### Step 4 — Pick labels
 
-Every issue carries exactly one `type:*`, one or more `area:*`, at most one `layer:*`, one `wave:*`, and one `priority:*`. Common combinations (add the `priority:*` and `wave:*` that fit):
+Every issue carries exactly one `type:*`, one or more `area:*`, one `pkg:*` for each workspace package it touches, at most one `layer:*`, one `wave:*`, and one `priority:*`. Common combinations (add the `pkg:*`, `priority:*` and `wave:*` that fit):
 
 | Work type | Labels |
 |---|---|
@@ -112,7 +112,9 @@ Every issue carries exactly one `type:*`, one or more `area:*`, at most one `lay
 | Research / survey | `type:research`, `area:code` (or the relevant area) |
 | Engineering / CI / packaging | `type:chore`, `area:engineering`, `wave:0` |
 
-The labels come from `.github/scripts/create-labels.sh` (`make gh-labels`): `type:*`, `area:{engineering,testing,docs,code}`, `layer:{0-primitives,1-components,2-models}`, `wave:0`…`wave:4`, `priority:{p0,p1,p2}`. Check `docs/contributing.md` for the current waves and milestones before picking; `gh label list` shows what exists.
+The package is the title's scope: `ssm(markov): …` takes `pkg:ssm`, `refactor(core): …` takes `pkg:core`, and an issue that changes several packages takes one label each; repo-wide issues (build, CI, the roadmap) take none.
+
+The labels come from `.github/scripts/create-labels.sh` (`make gh-labels`): `type:*`, `area:{engineering,testing,docs,code}`, `pkg:{core,gp,nn,lgm,ssm}`, `layer:{0-primitives,1-components,2-models}`, `wave:0`…`wave:4`, `priority:{p0,p1,p2}`. Check `docs/contributing.md` for the current waves and milestones before picking; `gh label list` shows what exists.
 
 ### Step 5 — Create the issue
 
@@ -124,7 +126,7 @@ Write the drafted body to a temporary file, then:
 gh issue create \
   --title "feat(nn): Bayesian conv layer" \
   --body-file /tmp/issue-body.md \
-  --label "type:feature,area:code,layer:1-components,wave:1,priority:p1" \
+  --label "type:feature,area:code,pkg:nn,layer:1-components,wave:1,priority:p1" \
   --milestone "v0.2-<slug>"
 ```
 
