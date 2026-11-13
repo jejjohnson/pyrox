@@ -556,6 +556,39 @@ def test_ensemble_vi_accepts_any_data_tuple(linear_problem):
     assert params["w_auto_loc"].shape == (2, 5)
 
 
+def test_ensemble_vi_initial_params_are_where_run_starts(linear_problem):
+    """With a zero learning rate, run ends where initial_params says it starts."""
+    p = linear_problem
+    runner = EnsembleVI(
+        model_fn=_vi_model,
+        guide_fn=AutoNormal(_vi_model),
+        optimizer=numpyro.optim.Adam(0.0),
+        ensemble_size=4,
+    )
+    starts = runner.initial_params(jr.PRNGKey(0), p["X"], p["y"])
+    params, losses = runner.run(jr.PRNGKey(0), 3, p["X"], p["y"])  # still a 2-tuple
+    assert losses.shape == (4, 3)
+    assert set(starts) == set(params)
+    for name, value in starts.items():
+        assert value.shape[0] == 4
+        assert jnp.allclose(params[name], value, rtol=1e-12)
+    # one start per member
+    assert jnp.unique(starts["b_auto_loc"]).shape == (4,)
+
+
+def test_ensemble_map_initial_params_are_where_run_starts(linear_problem):
+    p = linear_problem
+    runner = EnsembleMAP(
+        log_joint=p["log_joint"],
+        init_fn=p["init_fn"],
+        optimizer=optax.sgd(0.0),
+        ensemble_size=4,
+    )
+    starts = runner.initial_params(jr.PRNGKey(0))
+    params, _ = runner.run(jr.PRNGKey(0), 3, p["X"], p["y"])
+    assert jnp.array_equal(params, starts)
+
+
 def _vi_plate_model(x, y=None):
     """Same linear model but with the obs likelihood inside a plate.
 

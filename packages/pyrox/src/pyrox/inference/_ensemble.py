@@ -323,6 +323,23 @@ class EnsembleMAP(eqx.Module):
             seed=seed,
         )
 
+    def initial_params(self, seed: PRNGKeyArray) -> PyTree:
+        """Each member's starting parameters for ``run(seed, ...)``.
+
+        `run` splits ``seed`` into an init key and a mini-batch key; this
+        returns the stacked parameters `init` gives for that init key, so the
+        modes the fits reach can be related to where they started.
+
+        Args:
+            seed: The seed passed to `run`.
+
+        Returns:
+            Stacked parameters with a leading ``(E,)`` axis, as in
+            `EnsembleResult.params`.
+        """
+        init_key, _ = jr.split(seed)
+        return self.init(init_key).params
+
     def update(
         self,
         state: EnsembleState,
@@ -512,6 +529,35 @@ class EnsembleVI(eqx.Module):
         state = jax.vmap(lambda k: svi.init(k, *args, **kwargs))(keys)
         self._settle_guide(svi, keys[0], *args, **kwargs)
         return state
+
+    def initial_params(self, seed: PRNGKeyArray, *args: Any, **kwargs: Any) -> PyTree:
+        """Each member's starting guide parameters for ``run(seed, ...)``.
+
+        `run` initialises member $e$ from the $e$-th of
+        ``jr.split(seed, ensemble_size)``, as `init` does; this returns those
+        states' parameters, constrained as ``SVI.get_params`` returns them, so
+        the modes the fits reach can be related to where they started. It
+        saves building them by hand, where ``SVI.get_params`` fails on an SVI
+        object that has not been initialised.
+
+        Args:
+            seed: The seed passed to `run`.
+            *args: The model's data arguments, as passed to `run`.
+            **kwargs: Keyword arguments as passed to `run`; ``SVI.run``'s own
+                options are ignored.
+
+        Returns:
+            The stacked guide parameters with a leading ``(E,)`` axis, as in
+            `EnsembleResult.params`.
+        """
+        svi = self._build_svi()
+        keys = jr.split(seed, self.ensemble_size)
+        init_kwargs = {k: v for k, v in kwargs.items() if k not in _SVI_RUN_ONLY}
+        self._reset_guide()
+        state = jax.vmap(lambda k: svi.init(k, *args, **init_kwargs))(keys)
+        # also leaves svi's constrain_fn concrete, which get_params needs
+        self._settle_guide(svi, keys[0], *args, **init_kwargs)
+        return jax.vmap(svi.get_params)(state)
 
     def update(
         self, state: Any, *args: Any, **kwargs: Any
