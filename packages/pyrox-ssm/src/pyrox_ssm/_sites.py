@@ -21,6 +21,7 @@ def pad_sites(
     times: Sequence[Float[Array, " N_s"]],
     ys: Sequence[Float[Array, " N_s"]],
     *,
+    masks: Sequence[Bool[Array, " N_s"]] | None = None,
     length: int | None = None,
 ) -> tuple[Float[Array, "S N"], Float[Array, "S N"], Bool[Array, "S N"]]:
     r"""Pad ragged site series to ``(S, N)`` with strictly increasing padded times.
@@ -48,22 +49,32 @@ def pad_sites(
     monotonicity check and the kernel discretisation are unchanged. Padded
     entries of ``y`` are zero.
 
+    Missing steps inside a record are masked the same way, so a record on a
+    regular grid with gaps can be passed as it is: a step is masked where
+    ``masks`` is ``False`` or, by default, where ``y`` is ``NaN``. A masked
+    step runs the predict step only, as a padded one does, so the site's log
+    marginal equals that of the same site with those steps dropped. Masked
+    entries of ``y`` are zero, as padded ones are.
+
     Args:
         times: One strictly increasing ``(N_s,)`` array of observation times
             per site.
         ys: One ``(N_s,)`` array of observations per site, matching
-            ``times``.
+            ``times``. ``NaN`` marks a missing step when ``masks`` is not
+            given.
+        masks: Optional ``(N_s,)`` boolean array per site, ``True`` where the
+            step is observed. Defaults to ``~jnp.isnan(y)`` per site.
         length: Padded length $N$. Defaults to the longest site,
             $\max_s N_s$.
 
     Returns:
         Tuple ``(t, y, mask)``, each of shape ``(S, N)``: the padded times,
-        the padded observations and a boolean mask that is ``True`` at the
-        $N_s$ observed steps of each row.
+        the padded observations and a boolean mask that is ``True`` at each
+        row's observed steps: its first $N_s$ steps less any masked ones.
 
     Raises:
-        ValueError: If no site is given, if ``times`` and ``ys`` differ in
-            length or shape, if a site is not a non-empty 1-D series, if a
+        ValueError: If no site is given, if ``times``, ``ys`` and ``masks``
+            differ in length or shape, if a site is not a non-empty 1-D series, if a
             site's (concrete) times are not strictly increasing, or if
             ``length`` is shorter than the longest site.
 
@@ -91,10 +102,16 @@ def pad_sites(
         )
     if len(times) == 0:
         raise ValueError("pad_sites needs at least one site.")
+    if masks is not None and len(masks) != len(times):
+        raise ValueError(
+            f"masks has {len(masks)} sites but times has {len(times)}; pass "
+            "one mask per site."
+        )
     t_dtype = jnp.result_type(*times, 0.0)
     y_dtype = jnp.result_type(*ys)
     sites = []
-    for s, (t_s, y_s) in enumerate(zip(times, ys, strict=True)):
+    site_masks = [None] * len(times) if masks is None else list(masks)
+    for s, (t_s, y_s, m_s) in enumerate(zip(times, ys, site_masks, strict=True)):
         t_s = jnp.asarray(t_s, dtype=t_dtype)
         y_s = jnp.asarray(y_s, dtype=y_dtype)
         if t_s.ndim != 1 or t_s.shape[0] == 0:
@@ -107,6 +124,12 @@ def pad_sites(
                 f"site {s}: ys has shape {tuple(y_s.shape)!r} but times has "
                 f"{tuple(t_s.shape)!r}; each observation needs one time."
             )
+        m_s = ~jnp.isnan(y_s) if m_s is None else jnp.asarray(m_s, dtype=bool)
+        if m_s.shape != t_s.shape:
+            raise ValueError(
+                f"site {s}: masks has shape {tuple(m_s.shape)!r} but times has "
+                f"{tuple(t_s.shape)!r}; pass one flag per observation."
+            )
         if t_s.shape[0] >= 2:
             # Concrete times only; a tracer cannot be checked and is trusted,
             # as in MarkovGPPrior.
@@ -115,9 +138,9 @@ def pad_sites(
                     raise ValueError(f"site {s}: times must be strictly increasing.")
             except jax.errors.TracerBoolConversionError:
                 pass
-        sites.append((t_s, y_s))
+        sites.append((t_s, jnp.where(m_s, y_s, 0), m_s))
 
-    longest = max(t_s.shape[0] for t_s, _ in sites)
+    longest = max(t_s.shape[0] for t_s, _, _ in sites)
     n = longest if length is None else int(length)
     if n < longest:
         raise ValueError(
@@ -126,7 +149,7 @@ def pad_sites(
         )
 
     t_rows, y_rows, mask_rows = [], [], []
-    for t_s, y_s in sites:
+    for t_s, y_s, m_s in sites:
         n_s = t_s.shape[0]
         # δₛ = median(diff(tₛ)), one time unit for a single observation
         step = jnp.median(jnp.diff(t_s)) if n_s >= 2 else jnp.ones((), dtype=t_dtype)
@@ -134,5 +157,5 @@ def pad_sites(
         padded_times = t_s[-1] + step * jnp.arange(1, n - n_s + 1, dtype=t_dtype)
         t_rows.append(jnp.concatenate([t_s, padded_times]))
         y_rows.append(jnp.concatenate([y_s, jnp.zeros(n - n_s, dtype=y_dtype)]))
-        mask_rows.append(jnp.arange(n) < n_s)
+        mask_rows.append(jnp.concatenate([m_s, jnp.zeros(n - n_s, dtype=bool)]))
     return jnp.stack(t_rows), jnp.stack(y_rows), jnp.stack(mask_rows)

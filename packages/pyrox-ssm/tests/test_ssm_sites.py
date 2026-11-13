@@ -87,3 +87,47 @@ def test_ragged_inputs_are_validated() -> None:
         pad_sites([jnp.array([0.0, 1.0])], [jnp.zeros(3)])
     with pytest.raises(ValueError, match="non-empty 1-D"):
         pad_sites([jnp.zeros(0)], [jnp.zeros(0)])
+
+
+def _site_log_marginal(t_s, y_s, m_s=None):
+    prior = MarkovGPPrior(MaternSDE(0.8, 0.6, order=1), t_s)
+    return prior.log_marginal(y_s, NOISE, mask=m_s)
+
+
+def test_nan_gaps_pad_as_the_site_with_those_days_dropped() -> None:
+    """A NaN-gapped daily record has the log marginal of the record without the gaps."""
+    t_full = jnp.arange(12.0)
+    y_full = jnp.sin(0.5 * t_full)
+    gaps = jnp.array([2, 3, 7])
+    y_gappy = y_full.at[gaps].set(jnp.nan)
+    keep = jnp.ones(12, dtype=bool).at[gaps].set(False)
+    other_t = jnp.array([0.5, 1.0, 2.0])
+
+    t, y, mask = pad_sites([t_full, other_t], [y_gappy, jnp.cos(other_t)])
+    assert mask[0].tolist() == keep.tolist()
+    assert jnp.all(jnp.isfinite(y)) and jnp.all(y[0, gaps] == 0.0)
+
+    padded = _site_log_marginal(t[0], y[0], mask[0])
+    dropped = _site_log_marginal(t_full[keep], y_full[keep])
+    # Masked steps are predict-only, so they add exactly zero (x64).
+    assert jnp.allclose(padded, dropped, rtol=1e-12)
+
+
+def test_explicit_masks_match_the_nan_default() -> None:
+    t_s = jnp.arange(6.0)
+    y_s = jnp.sin(t_s)
+    keep = jnp.array([True, False, True, True, False, True])
+    t_a, y_a, m_a = pad_sites([t_s], [jnp.where(keep, y_s, jnp.nan)], length=8)
+    t_b, y_b, m_b = pad_sites([t_s], [y_s], masks=[keep], length=8)
+    assert jnp.array_equal(t_a, t_b)
+    assert jnp.array_equal(y_a, y_b)
+    assert jnp.array_equal(m_a, m_b)
+    assert m_b[0].tolist() == [*keep.tolist(), False, False]
+
+
+def test_masks_must_match_the_sites() -> None:
+    times, ys = _sites()
+    with pytest.raises(ValueError, match="one mask per site"):
+        pad_sites(times, ys, masks=[jnp.ones(6, dtype=bool)])
+    with pytest.raises(ValueError, match="one flag per observation"):
+        pad_sites(times, ys, masks=[jnp.ones(5, dtype=bool), None, None])
