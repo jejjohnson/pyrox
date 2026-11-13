@@ -223,6 +223,26 @@ def ensemble_step(
 # ============================================================================
 
 
+# Keyword options numpyro's SVI.run consumes itself; SVI.init would pass them
+# on to the model and guide.
+_SVI_RUN_ONLY = ("stable_update", "forward_mode_differentiation", "init_state")
+
+
+def _autoguides(guide: Any) -> list[Any]:
+    """The autoguide ``guide`` and every autoguide nested in it.
+
+    An ``AutoGuideList`` keeps its parts in ``_guides``, and each part caches
+    its own prototype; anything without a ``prototype_trace`` is not an
+    autoguide and caches nothing.
+    """
+    if not hasattr(guide, "prototype_trace"):
+        return []
+    found = [guide]
+    for part in getattr(guide, "_guides", ()):
+        found.extend(_autoguides(part))
+    return found
+
+
 class EnsembleMAP(eqx.Module):
     r"""NumPyro-like ensemble MAP/MLE runner.
 
@@ -454,11 +474,44 @@ class EnsembleVI(eqx.Module):
             )
         return SVI(self.model_fn, self.guide_fn, opt, loss=elbo)
 
+    def _reset_guide(self) -> None:
+        """Clear an autoguide's cached prototype before the member ``vmap``.
+
+        A NumPyro autoguide traces the model on its first call and caches the
+        result on itself, including each site's starting value. Each member
+        must draw its own start, so the cache is cleared before the member
+        ``vmap`` and the guide sets itself up inside it from the member keys.
+        Every autoguide nested in an ``AutoGuideList`` is cleared too. Guides
+        that are not autoguides cache nothing and are left alone.
+        """
+        for guide in _autoguides(self.guide_fn):
+            guide.prototype_trace = None
+
+    def _settle_guide(
+        self, svi: Any, key: PRNGKeyArray, *args: Any, **kwargs: Any
+    ) -> None:
+        """Refill an autoguide's cache with concrete values after the ``vmap``.
+
+        Set up inside ``jax.vmap``, the cache holds the vmap's tracers, and any
+        later use of the same guide object (another ``init``, a plain ``SVI``,
+        ``guide.median``) would raise ``UnexpectedTracerError``. One eager
+        ``svi.init`` replaces it with concrete values. ``kwargs`` are the
+        model's keyword arguments, passed to ``svi.init`` as they are.
+        """
+        guides = _autoguides(self.guide_fn)
+        if guides:
+            for guide in guides:
+                guide.prototype_trace = None
+            svi.init(key, *args, **kwargs)
+
     def init(self, seed: PRNGKeyArray, *args: Any, **kwargs: Any) -> Any:
         """Initialize the ensemble of SVI states."""
         svi = self._build_svi()
         keys = jr.split(seed, self.ensemble_size)
-        return jax.vmap(lambda k: svi.init(k, *args, **kwargs))(keys)
+        self._reset_guide()
+        state = jax.vmap(lambda k: svi.init(k, *args, **kwargs))(keys)
+        self._settle_guide(svi, keys[0], *args, **kwargs)
+        return state
 
     def update(
         self, state: Any, *args: Any, **kwargs: Any
@@ -477,6 +530,7 @@ class EnsembleVI(eqx.Module):
         """Fit the ensemble end-to-end via vmapped ``svi.run``."""
         svi = self._build_svi()
         keys = jr.split(seed, self.ensemble_size)
+        self._reset_guide()
 
         @jax.vmap
         def _run_one(
@@ -486,6 +540,9 @@ class EnsembleVI(eqx.Module):
             return r.params, r.losses
 
         params, losses = _run_one(keys)
+        # SVI.run's own options are not model arguments, so init must not get them
+        model_kwargs = {k: v for k, v in kwargs.items() if k not in _SVI_RUN_ONLY}
+        self._settle_guide(svi, keys[0], *args, **model_kwargs)
         return EnsembleResult(params=params, losses=losses)
 
 
@@ -635,7 +692,7 @@ def ensemble_vi(
     *,
     ensemble_size: int,
     num_epochs: int,
-    data: tuple[Array, Array],
+    data: tuple[Any, ...],
     seed: PRNGKeyArray,
     kl_weight: float = 1.0,
     learning_rate: float = 5e-3,
@@ -645,11 +702,14 @@ def ensemble_vi(
     """One-shot wrapper around `EnsembleVI`.
 
     Args:
-        model_fn: NumPyro model ``(x, y) -> None``.
-        guide_fn: NumPyro guide.
+        model_fn: NumPyro model ``(*data) -> None``.
+        guide_fn: NumPyro guide, called with the same arguments as the model.
+            An autoguide can be reused afterwards, by another `ensemble_vi`,
+            `EnsembleVI` or a plain `numpyro.infer.SVI`.
         ensemble_size: Number of SVI fits ``E``.
         num_epochs: Steps per member.
-        data: ``(x, y)``.
+        data: The model's positional arguments, of any number and type; the
+            model and guide are called as ``model_fn(*data)``.
         seed: PRNG key.
         kl_weight: ELBO temper ``β``. ``1.0`` ⇒ standard ELBO.
         learning_rate: Default-Adam learning rate.
