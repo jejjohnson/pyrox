@@ -103,6 +103,26 @@ class LinearGaussianSSMPrior(eqx.Module):
             before filtering, so a GP with a mean function becomes an exact
             special case (`pyrox_ssm.MarkovGPPrior.as_lgssm` sets it to the
             mean at the observation times).
+        parallel: Filter with `gaussx.parallel_kalman_filter`, an
+            associative scan, instead of the sequential
+            `gaussx.kalman_filter`. Default ``False``. Both give the same
+            filtered moments, log marginal and gradients to round-off. The
+            trade-off, measured on CPU for a scalar observation
+            and a Matérn state of dimension 2 to 3 at 1,095 to 10,000 steps:
+
+            - The value and gradient together (``jax.value_and_grad``, what
+              NUTS and SVI call) are 1.2 to 1.8 times cheaper in parallel,
+              because a reverse-mode pass through a sequential scan of small
+              steps is slow.
+            - The value alone is 1.5 to 2.2 times slower in parallel, so
+              leave it off where only the value is needed (a fixed-parameter
+              fit or predict).
+            - The parallel filter runs in covariance form with dense solves
+              in its combine step and does not take a ``solver``; neither
+              filter is a square-root filter.
+
+            On an accelerator the parallel filter's depth is $O(\log T)$
+            against $O(T)$; the numbers above are CPU only.
 
     Examples:
         A local-level model, $x_k = x_{k-1} + \eta_k$ observed with noise:
@@ -132,6 +152,7 @@ class LinearGaussianSSMPrior(eqx.Module):
     init_mean: Float[Array, " D"]
     init_cov: Float[Array, "D D"]
     obs_offset: Float[Array, "T M"] | None = None
+    parallel: bool = eqx.field(static=True, default=False)
 
     def __init__(
         self,
@@ -142,6 +163,7 @@ class LinearGaussianSSMPrior(eqx.Module):
         init_mean: Float[Array, " D"],
         init_cov: Float[Array, "D D"],
         obs_offset: Float[Array, "T M"] | None = None,
+        parallel: bool = False,
     ) -> None:
         transition = _as_float(transition)
         obs_model = _as_float(obs_model)
@@ -176,6 +198,7 @@ class LinearGaussianSSMPrior(eqx.Module):
         self.init_mean = init_mean
         self.init_cov = init_cov
         self.obs_offset = obs_offset
+        self.parallel = parallel
 
     @property
     def n_steps(self) -> int:
@@ -284,7 +307,10 @@ class LinearGaussianSSMPrior(eqx.Module):
         """
         mask = self._mask(mask)
         residual = self._residual(self._sanitise(self._observations(y), mask))
-        return gaussx.kalman_filter(
+        kalman_filter = (
+            gaussx.parallel_kalman_filter if self.parallel else gaussx.kalman_filter
+        )
+        return kalman_filter(
             transition=self.transition,
             obs_model=self.obs_model,
             process_noise=self.process_noise,
