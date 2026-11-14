@@ -23,7 +23,7 @@ dependencies = [
     "pyrox",
     "gaussx>=0.6.15",
     "kernellib>=0.0.22",
-    "functax[jax] @ git+https://github.com/jejjohnson/functax.git@v0.0.6",
+    "functax[jax] @ git+https://github.com/jejjohnson/functax.git@v0.0.7",
     "lineax>=0.1.1",
     "einx>=0.4.3",
     "flowjax>=0.9",     # AbstractBijection protocol (typed warp fields). Shares
