@@ -33,6 +33,7 @@ from jax.scipy.stats import multivariate_normal
 from numpyro import handlers
 from numpyro.infer import MCMC, NUTS
 from pyrox_ssm import (
+    IntegratedWienerSDE,
     MarkovGPPrior,
     MaternSDE,
     SharedPlusSiteMarkovGP,
@@ -344,6 +345,113 @@ def test_gradients_flow_to_the_mean_parameters():
     grad = jax.grad(with_mean)(level)
     assert jnp.all(jnp.isfinite(grad)) and jnp.any(grad != 0.0)
     np.testing.assert_allclose(grad, jax.grad(by_hand)(level), rtol=1e-12)
+
+
+def _dense_component_posterior(model, y_grid, noise, site, t_star):
+    """Dense means and variances of g and every h_s at ``t_star``."""
+    t_obs, s_obs, y_obs = _observed_pairs(model, y_grid)
+    K = _dense_cov(SHARED, site, t_obs, s_obs, noise, N_SITES)
+    test, obs = t_star[:, None], t_obs[:, None]
+    K_g = matern_kernel(test, obs, SHARED.variance, SHARED.lengthscale, nu=SHARED_NU)
+    g_mean = K_g @ jnp.linalg.solve(K, y_obs)
+    g_var = SHARED.variance - jnp.sum(K_g * jnp.linalg.solve(K, K_g.T).T, axis=1)
+    var_h, ell_h = _site_params(site, N_SITES)
+    h_mean, h_var = [], []
+    for s in range(N_SITES):
+        K_h = matern_kernel(test, obs, var_h[s], ell_h[s], nu=SITE_NU)
+        K_h = jnp.where(s_obs[None, :] == s, K_h, 0.0)
+        h_mean.append(K_h @ jnp.linalg.solve(K, y_obs))
+        h_var.append(var_h[s] - jnp.sum(K_h * jnp.linalg.solve(K, K_h.T).T, axis=1))
+    return g_mean, jnp.stack(h_mean, 1), g_var, jnp.stack(h_var, 1)
+
+
+@pytest.mark.parametrize(
+    ("site", "noise"),
+    [(POOLED_SITE, NOISE), (PER_SITE, NOISE_PER_SITE)],
+    ids=["pooled", "per-site-noise"],
+)
+def test_predict_matches_the_dense_conditional(site, noise):
+    """At observed, gap and forecast times, unsorted, with a repeated time."""
+    times, ys = _dataset(jr.key(9), site, noise)
+    model, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, site, times, ys)
+    gap = 0.5 * (model.times[5] + model.times[6])  # between grid days: no site
+    t_star = jnp.array(
+        [
+            N_DAYS + 3.0,  # forecast
+            model.times[2],  # an observed day
+            gap,
+            -1.0,  # backcast
+            model.times[2],  # the same day again
+            0.5 * (model.times[0] + model.times[1]),
+        ]
+    )
+    got = model.condition(y_grid, noise).predict(t_star)
+    want = _dense_component_posterior(model, y_grid, noise, site, t_star)
+    for g, w in zip(got, want, strict=True):
+        assert g.shape == w.shape
+        np.testing.assert_allclose(g, w, rtol=1e-10, atol=1e-12)
+
+
+def test_predict_matches_the_extended_grid_workaround():
+    """The same numbers as building the model on grid ∪ test times by hand."""
+    times, ys = _dataset(jr.key(10))
+    model, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, POOLED_SITE, times, ys)
+    t_star = jnp.array([N_DAYS + 0.5, N_DAYS + 2.0])
+    got = model.condition(y_grid, NOISE).predict(t_star)
+
+    ext_times = jnp.concatenate([model.times, t_star])
+    ext_mask = jnp.concatenate([model.mask, jnp.zeros((2, N_SITES), dtype=bool)])
+    ext_y = jnp.concatenate([y_grid, jnp.full((2, N_SITES), jnp.nan)])
+    extended = SharedPlusSiteMarkovGP(SHARED, POOLED_SITE, ext_times, ext_mask)
+    want = extended.decompose(ext_y, NOISE, return_var=True)
+    for g, w in zip(got, want, strict=True):
+        np.testing.assert_allclose(g, w[-2:], rtol=1e-12, atol=1e-14)
+
+
+def test_predict_jits_given_a_precomputed_grid():
+    times, ys = _dataset(jr.key(11))
+    grid, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, POOLED_SITE, times, ys)
+    t_star = jnp.array([0.5, N_DAYS + 1.0])
+
+    @jax.jit
+    def predict(lengthscale):
+        shared = MaternSDE(variance=SHARED.variance, lengthscale=lengthscale, order=1)
+        model = SharedPlusSiteMarkovGP(shared, POOLED_SITE, grid.times, grid.mask)
+        return model.condition(y_grid, NOISE).predict(t_star)
+
+    got = predict(SHARED.lengthscale)
+    want = grid.condition(y_grid, NOISE).predict(t_star)
+    for g, w in zip(got, want, strict=True):
+        np.testing.assert_allclose(g, w, rtol=1e-12, atol=1e-14)
+
+
+def test_predict_rejects_a_backcast_with_a_non_stationary_kernel():
+    """The prior of an integrated Wiener process starts at the first grid time."""
+    times, ys = _dataset(jr.key(13))
+    # an explicit P_0: gaussx's default initial covariance fails under jax.jit
+    wiener = IntegratedWienerSDE(
+        diffusion=jnp.asarray(0.5), order=1, P_0=4.0 * jnp.eye(2)
+    )
+    model, y_grid = SharedPlusSiteMarkovGP.from_sites(wiener, POOLED_SITE, times, ys)
+    cond = model.condition(y_grid, NOISE)
+    inside = jnp.array([model.times[0], model.times[3] + 0.5, N_DAYS + 2.0])
+    g_mean, *_ = cond.predict(inside)
+    assert jnp.all(jnp.isfinite(g_mean))
+    with pytest.raises(Exception, match="cannot backcast"):
+        cond.predict(jnp.array([model.times[0] - 1.0]))
+    with pytest.raises(Exception, match="cannot backcast"):
+        jax.jit(lambda t: cond.predict(t))(jnp.array([model.times[0] - 1.0]))
+
+
+def test_condition_checks_shapes():
+    times, ys = _dataset(jr.key(12))
+    model, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, POOLED_SITE, times, ys)
+    with pytest.raises(ValueError, match="mask's shape"):
+        model.condition(y_grid[:, :-1], NOISE)
+    with pytest.raises(ValueError, match="noise_var"):
+        model.condition(y_grid, jnp.ones(N_SITES + 1))
+    with pytest.raises(ValueError, match="t_star must be 1-D"):
+        model.condition(y_grid, NOISE).predict(jnp.ones((2, 2)))
 
 
 # --- from_sites ----------------------------------------------------------

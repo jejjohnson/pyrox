@@ -260,7 +260,17 @@ g_mean, h_mean = model.decompose(y_grid, jnp.asarray(0.05))         # (T,), (T, 
 
 `decompose(..., return_var=True)` also returns the marginal variances `V[g | y]` and `V[h_s | y]` from the same smoother pass. The two parts are correlated a posteriori, so their variances do not add to that of `g + h_s`. A known per-site mean, such as a station climatology, goes in as `mean_fn`, a callable from the `(T,)` grid to `(T, S)` means. It is the observation offset of `as_lgssm`, so the model fits raw readings and its log marginal equals that of the anomalies `y - mean`. A `ConstantSDE` term in the site kernel instead integrates an unknown level out.
 
+To predict at times no site observed, such as a gap or a forecast, condition once and call `predict`, which adds the test times to the grid as unobserved rows:
+
+```python
+cond = model.condition(y_grid, jnp.asarray(0.05))
+g_mean, h_mean, g_var, h_var = cond.predict(t_star)                   # (M,), (M, S), (M,), (M, S)
+```
+
+`from_sites` takes the union of the site times with `jnp.unique`, so it needs concrete times. Inside `jax.jit` or a NumPyro model under NUTS, build the grid and mask once outside and construct the model with `SharedPlusSiteMarkovGP(shared, site, times, mask)` from the sampled kernels.
+
 ::: pyrox_ssm.SharedPlusSiteMarkovGP
+::: pyrox_ssm.ConditionedSharedPlusSiteMarkovGP
 
 ## Normalizing Kalman Filter
 

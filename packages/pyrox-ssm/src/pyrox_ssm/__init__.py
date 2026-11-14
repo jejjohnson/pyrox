@@ -48,7 +48,10 @@ from gaussx import (
     SumSDE,
 )
 
-from pyrox_ssm._hierarchical import SharedPlusSiteMarkovGP
+from pyrox_ssm._hierarchical import (
+    ConditionedSharedPlusSiteMarkovGP,
+    SharedPlusSiteMarkovGP,
+)
 from pyrox_ssm._inference_nongauss_markov import (
     ExpectationPropagationMarkov,
     GaussNewtonMarkovInference,
@@ -85,6 +88,7 @@ __version__ = "0.2.0"  # x-release-please-version
 __all__ = [
     "ConditionedLinearGaussianSSM",
     "ConditionedMarkovGP",
+    "ConditionedSharedPlusSiteMarkovGP",
     "ConstantSDE",
     "CosineSDE",
     "ExpectationPropagationMarkov",
