@@ -6,7 +6,8 @@ of the same length $N$. `pad_sites` pads each site's series after its last
 observation and returns the mask that the `pyrox_ssm.MarkovGPPrior` methods
 take, so the padded steps run the Kalman predict only and the log marginal of
 every site is unchanged. `markov_gp_sites_factor` then scores all the padded
-sites as one factor.
+sites as one factor, and `noncentred_log_normal` draws per-site kernel
+hyperparameters around a population value without NUTS's funnel.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from collections.abc import Callable, Sequence
 import jax
 import jax.numpy as jnp
 import numpyro
+import numpyro.distributions as dist
 from gaussx import SDEKernel
 from jaxtyping import Array, Bool, Float
 
@@ -277,3 +279,67 @@ def markov_gp_sites_factor(
         sde_kernel, times, y, mask, noise_var
     )
     numpyro.factor(name, jnp.sum(log_marginals))
+
+
+def noncentred_log_normal(
+    name: str,
+    loc: Float[Array, " *batch"] | float,
+    scale: Float[Array, " *batch"] | float,
+) -> Float[Array, " *batch"]:
+    r"""A positive per-site parameter around a population value, non-centred.
+
+    Site $n$'s parameter $\theta_n$ (a lengthscale, a variance) is log-normal
+    around a population log-mean $m$ with spread $\tau$,
+
+    $$
+    \log \theta_n = m + \tau z_n, \qquad z_n \sim \mathcal{N}(0, 1),
+    $$
+
+    which has the distribution of the centred form
+    $\log \theta_n \sim \mathcal{N}(m, \tau^2)$. The sampler sees $z_n$, which
+    is independent of $\tau$ a priori, instead of $\log \theta_n$, whose
+    spread shrinks with $\tau$. That removes the funnel NUTS meets when $\tau$
+    is small, the usual case for sites that differ little. NumPyro's
+    ``LocScaleReparam(centered=0)`` does the same rewrite on a centred
+    ``Normal`` site through a reparam handler; this helper writes it out and
+    names its sites predictably.
+
+    Call it inside the ``numpyro.plate`` over sites, so there is one $z_n$ per
+    site; ``loc`` and ``scale`` broadcast against the plate.
+
+    Registers the sample site ``f"{name}_z"`` (standard normal) and the
+    deterministic site ``name`` ($\theta_n$, so its posterior is in the
+    trace).
+
+    Args:
+        name: Name of the deterministic site; the sample site is
+            ``f"{name}_z"``.
+        loc: Population log-mean $m$.
+        scale: Population log-spread $\tau > 0$.
+
+    Returns:
+        $\theta_n = \exp(m + \tau z_n)$, shaped by the enclosing plates.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> import numpyro
+        >>> import numpyro.distributions as dist
+        >>> import pyrox_ssm as pss
+        >>> t, y, mask = pss.pad_sites(
+        ...     [jnp.arange(5.0), jnp.arange(3.0)], [jnp.ones(5), jnp.zeros(3)]
+        ... )
+        >>> def model():
+        ...     loc = numpyro.sample("lengthscale_loc", dist.Normal(jnp.log(7.0), 1.0))
+        ...     scale = numpyro.sample("lengthscale_scale", dist.HalfNormal(0.5))
+        ...     with numpyro.plate("site", 2):
+        ...         ell = pss.noncentred_log_normal("lengthscale", loc, scale)
+        ...     kernel = pss.MaternSDE(1.0, ell, order=1)
+        ...     noise = jnp.asarray(0.1)
+        ...     pss.markov_gp_sites_factor("y", kernel, t, y, noise, mask=mask)
+    """
+    z = numpyro.sample(f"{name}_z", dist.Normal(0.0, 1.0))
+    # log θ_n = m + τ z_n
+    log_value = jnp.asarray(loc) + jnp.asarray(scale) * z
+    return numpyro.deterministic(  # ty: ignore[invalid-return-type]
+        name, jnp.exp(log_value)
+    )

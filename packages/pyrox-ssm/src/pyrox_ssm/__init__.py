@@ -22,7 +22,8 @@ the package whose inference recurses in time. ``pyrox_ssm`` never imports
   UKF, CKF, Gauss-Hermite or Monte Carlo) as a NumPyro factor.
 * Ragged sites: `pad_sites` pads per-site series to one shape and returns
   the observation mask every Markov entry point takes;
-  `markov_gp_sites_factor` scores the padded sites as one factor.
+  `markov_gp_sites_factor` scores the padded sites as one factor, and
+  `noncentred_log_normal` draws per-site hyperparameters non-centred.
 * Shared plus per-site GPs: `SharedPlusSiteMarkovGP` builds a shared GP and
   one GP per site as one linear-Gaussian SSM on the merged time grid.
 * The gaussx SDE kernels (`MaternSDE`, `SumSDE`, …) and the `SDEKernel`
@@ -74,7 +75,11 @@ from pyrox_ssm._markov import (
     markov_gp_sample,
 )
 from pyrox_ssm._nonlinear import nonlinear_ssm_factor
-from pyrox_ssm._sites import markov_gp_sites_factor, pad_sites
+from pyrox_ssm._sites import (
+    markov_gp_sites_factor,
+    noncentred_log_normal,
+    pad_sites,
+)
 from pyrox_ssm._sparse_markov import (
     SparseConditionedMarkovGP,
     SparseMarkovGPPrior,
@@ -117,6 +122,7 @@ __all__ = [
     "markov_gp_sample",
     "markov_gp_sites_factor",
     "markov_laplace_factor",
+    "noncentred_log_normal",
     "nonlinear_ssm_factor",
     "pad_sites",
     "sparse_markov_elbo",
