@@ -211,9 +211,8 @@ class SPDE(AbstractComponent):
             $A$, a `gaussx.SparseOperator` of shape ``(n, N)``.
 
         Raises:
-            ValueError: If a location lies outside the mesh or the grid, if
-                ``points`` does not have ``d`` columns on a grid, or if a grid
-                axis has a single node.
+            ValueError: If a location lies outside the mesh or the grid, or if
+                ``points`` does not have ``d`` columns on a grid.
 
         Examples:
             >>> import numpy as np
@@ -242,10 +241,6 @@ def _grid_projector(
     if pts.ndim != 2 or pts.shape[1] != d:
         raise ValueError(
             f"points must be (n, {d}) on a {d}-D grid; got shape {pts.shape}"
-        )
-    if min(shape) < 2:
-        raise ValueError(
-            f"project_points needs at least two nodes per grid axis; got {shape}"
         )
     axes = [fgeo.Axis(jnp.arange(n, dtype=pts.dtype) * spacing) for n in shape]
     plan = finterp.Linear().plan(

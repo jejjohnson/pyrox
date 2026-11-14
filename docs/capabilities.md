@@ -625,7 +625,7 @@ compose it; if it is almost here, extend it where it lives. Regenerate with
 
 <!-- upstream -->
 
-Listed at gaussx 0.6.15, kernellib 0.0.22, geonnax 0.0.11, functax 0.0.6.
+Listed at gaussx 0.6.15, kernellib 0.0.22, geonnax 0.0.11, functax 0.0.7.
 
 ## Upstream: `gaussx`
 
@@ -1516,6 +1516,7 @@ Bases (Fourier, spherical-harmonic, Slepian, local, …) in one family module ea
 | `pairwise_distance` | function | The distance from every source to every target, in their shared metric. |
 | `pixel_centres` | function | The x and y of every pixel centre of a grid, each of shape (rows, cols). |
 | `rotation_to_pole` | function | The rotation R with R û(centre) = (0, 0, 1). |
+| `slice_transform` | function | The transform of the slice ``[row0::row_step, col0::col_step]`` of a raster. |
 | `spherical_polygon_area` | function | The signed area of a spherical polygon with great-circle edges. |
 | `tangent_to_cartesian` | function | East and north components (u, v) to the 3-D tangent vector u ê + v n̂. |
 | `to_pixel` | function | Map coordinates (x, y) to fractional pixel (row, col), centres at integers. |
@@ -1549,6 +1550,7 @@ Bases (Fourier, spherical-harmonic, Slepian, local, …) in one family module ea
 | `FourierReadout` | class | H y = (M/N) Re F⁻¹_M[S F_N y], band-limited resampling by two FFTs. |
 | `GaussianPlan` | class | A plan read as a Gaussian posterior: f(X*) ∣ y ~ 𝒩(H 𝒮(y), Σ*). |
 | `HermiteFit` | class | [y; m] from y: the values in increasing-knot order and their slopes. |
+| `HermiteGeometry` | class | What a 1-D series plan's Hermite read-out was built from. |
 | `Identity` | class | The fit of every local scheme: c = y. |
 | `Interpolant` | class | A fitted field f̂(x) = ∑ₛ wₛ(t(x)) c_{iₛ(x)}, read at any targets. |
 | `InverseDistance` | class | Inverse-distance weighting of the Q nearest scattered sources. |
@@ -1563,6 +1565,7 @@ Bases (Fourier, spherical-harmonic, Slepian, local, …) in one family module ea
 | `LocalScheme` | class | A scheme with one local basis per axis and the identity fit. |
 | `Nearest` | class | Nearest neighbour on every axis: one tap per target, weight 1. |
 | `NearestBasis` | class | Nearest neighbour: one tap, the closer of i and i + 1, with weight 1. |
+| `NonlinearDerivativePlan` | class | ∂ᵐf̂/∂xᵐ of a nonlinear series plan: it reads, but has no fixed operator. |
 | `NonlinearPlan` | class | A plan whose fit depends on y: no fixed operator or adjoint, but `linearize`. |
 | `Pchip` | class | Monotone piecewise cubic Hermite (Fritsch-Carlson), as SciPy's PCHIP. |
 | `Plan` | class | f̂(X*) = H 𝒮(y), fitted once, applied to many fields. |
@@ -1571,6 +1574,7 @@ Bases (Fourier, spherical-harmonic, Slepian, local, …) in one family module ea
 | `PosteriorCovariance` | class | Σ*, the (M, M) posterior covariance of the field at M targets. |
 | `RBF` | class | Radial basis function interpolation: f̂(x) = ∑ⱼ cⱼ k(x, xⱼ) + ∑ₚ bₚ pₚ(x). |
 | `RadialKernel` | class | k(x, x′) = φ(‖x − x′‖), Euclidean in the coordinates as given. |
+| `ReadGeometry` | class | What a plan's stencil was built from, so `Plan.derivative` can rebuild it. |
 | `Readout` | class | c → f̂(X*): the read-out of a plan, from coefficients to target values. |
 | `Scheme` | class | An interpolation scheme: configuration, frozen into a `Plan` by `plan`. |
 | `SeriesInterpolant` | class | A 1-D series field f̂ read at targets chosen inside the trace. |

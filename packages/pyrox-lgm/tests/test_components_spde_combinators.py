@@ -119,8 +119,24 @@ def test_spde_grid_projector_rejects_points_outside_the_grid():
         spde.project_points(np.array([[0.5, 0.5], [1.6, 0.2]]))
     with pytest.raises(ValueError, match=r"\(n, 2\)"):
         spde.project_points(np.zeros((3, 3)))
-    with pytest.raises(ValueError, match="two nodes"):
-        lgm.SPDE(grid=(1, 5)).project_points(np.zeros((1, 2)))
+
+
+def test_spde_grid_projector_on_a_one_node_axis_is_the_flat_projector():
+    # A (1, Ny, Nx) grid is one layer of the (Ny, Nx) grid: its projector,
+    # at points on that layer, is the (Ny, Nx) projector.
+    pts = np.random.default_rng(2).uniform(0.0, 1.5, size=(9, 2))
+    flat = lgm.SPDE(grid=(5, 4), spacing=0.5).project_points(pts)
+    layer = lgm.SPDE(grid=(1, 5, 4), spacing=0.5).project_points(
+        np.column_stack([np.zeros(len(pts)), pts])
+    )
+    np.testing.assert_allclose(
+        np.asarray(layer.as_matrix()),
+        np.asarray(flat.as_matrix()),
+        rtol=0.0,
+        atol=1e-12,  # float64 round-off in the multilinear weights
+    )
+    with pytest.raises(ValueError, match="outside"):
+        lgm.SPDE(grid=(1, 5)).project_points(np.array([[0.1, 0.5]]))
 
 
 def test_spde_grid_component_takes_locations_in_the_model_projector():
