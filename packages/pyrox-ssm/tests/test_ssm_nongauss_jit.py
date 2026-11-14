@@ -4,9 +4,10 @@
   the reference, to its ``tol``.
 * A fit and its ``log_marginal_approx`` trace under ``jax.jit``, compile once,
   and report ``converged`` as a traced boolean.
-* The implicit gradient of the Laplace evidence matches central finite
-  differences and the gradient through 200 unrolled iterations, and does not
-  depend on the damping.
+* The Laplace evidence gradient matches central finite differences with the
+  default checkpoint adjoint and with the implicit one; the implicit gradient
+  matches the gradient through 200 unrolled iterations, does not depend on the
+  damping, and supports forward mode.
 * `markov_laplace_factor` runs under NUTS and SVI.
 """
 
@@ -37,11 +38,13 @@ from pyrox_ssm import (
     MarkovGPPrior,
     MaternSDE,
     PosteriorLinearizationMarkov,
+    markov_implicit_adjoint,
     markov_laplace_factor,
 )
 from pyrox_ssm._inference_nongauss_markov import (
     _markov_smoothed_posterior,
     _mask_sites,
+    _NonFiniteSafeSolver,
     _prior_marginal_variance,
 )
 from pyrox_ssm._markov import _observation_mask
@@ -277,10 +280,14 @@ def _laplace_evidence(strategy):
     return lambda theta: _fit(theta, strategy).log_marginal_approx
 
 
-def test_laplace_gradient_matches_central_differences() -> None:
+@pytest.mark.parametrize("implicit", [False, True], ids=["checkpoint", "implicit"])
+def test_laplace_gradient_matches_central_differences(implicit) -> None:
     # tol=1e-10 puts the fit at the fixed point to round-off, so the central
     # difference (eps=1e-5, truncation ~eps^2) resolves the gradient to ~1e-9.
-    strategy = LaplaceMarkovInference(max_iter=50, tol=1e-10)
+    adjoint = (
+        markov_implicit_adjoint() if implicit else LaplaceMarkovInference().adjoint
+    )
+    strategy = LaplaceMarkovInference(max_iter=50, tol=1e-10, adjoint=adjoint)
     evidence = jax.jit(_laplace_evidence(strategy))
     grad = jax.jit(jax.grad(_laplace_evidence(strategy)))(THETA)
     eps = 1e-5
@@ -297,7 +304,9 @@ def test_laplace_gradient_matches_central_differences() -> None:
 
 @pytest.mark.parametrize("damping", [1.0, pytest.param(0.3, marks=SLOW)])
 def test_implicit_gradient_equals_200_unrolled_iterations(damping) -> None:
-    implicit = LaplaceMarkovInference(max_iter=300, tol=1e-10, damping=damping)
+    implicit = LaplaceMarkovInference(
+        max_iter=300, tol=1e-10, damping=damping, adjoint=markov_implicit_adjoint()
+    )
     # tol=0 never stops early, so the loop runs all 200 iterations and the
     # gradient differentiates through every one of them.
     unrolled = LaplaceMarkovInference(
@@ -314,12 +323,43 @@ def test_implicit_gradient_equals_200_unrolled_iterations(damping) -> None:
 
 
 def test_implicit_gradient_does_not_depend_on_the_damping() -> None:
-    full = LaplaceMarkovInference(max_iter=50, tol=1e-10, damping=1.0)
-    damped = LaplaceMarkovInference(max_iter=300, tol=1e-10, damping=0.3)
+    adjoint = markov_implicit_adjoint()
+    full = LaplaceMarkovInference(max_iter=50, tol=1e-10, damping=1.0, adjoint=adjoint)
+    damped = LaplaceMarkovInference(
+        max_iter=300, tol=1e-10, damping=0.3, adjoint=adjoint
+    )
     g_full = jax.jit(jax.grad(_laplace_evidence(full)))(THETA)
     g_damped = jax.jit(jax.grad(_laplace_evidence(damped)))(THETA)
     assert int(_fit(THETA, damped).n_iter) > int(_fit(THETA, full).n_iter)
     assert jnp.allclose(g_full, g_damped, rtol=1e-8, atol=1e-10)
+
+
+def test_laplace_defaults_to_the_checkpoint_adjoint_and_agrees_with_implicit():
+    """At the default tol the two adjoints give the same converged gradient."""
+    assert isinstance(LaplaceMarkovInference().adjoint, optx.RecursiveCheckpointAdjoint)
+    assert bool(_fit(THETA, LaplaceMarkovInference()).converged)
+    g_default = jax.jit(jax.grad(_laplace_evidence(LaplaceMarkovInference())))(THETA)
+    implicit = LaplaceMarkovInference(adjoint=markov_implicit_adjoint())
+    g_implicit = jax.jit(jax.grad(_laplace_evidence(implicit)))(THETA)
+    # Both are the gradient at a fit converged to tol=1e-6 on the sites.
+    assert jnp.allclose(g_default, g_implicit, rtol=1e-6, atol=1e-8)
+
+
+def test_only_the_implicit_adjoint_supports_forward_mode() -> None:
+    """The trade-off in LaplaceMarkovInference.adjoint: jacfwd needs implicit."""
+    implicit = LaplaceMarkovInference(adjoint=markov_implicit_adjoint())
+    g_fwd = jax.jit(jax.jacfwd(_laplace_evidence(implicit)))(THETA)
+    g_rev = jax.jit(jax.grad(_laplace_evidence(implicit)))(THETA)
+    assert jnp.allclose(g_fwd, g_rev, rtol=1e-8, atol=1e-10)
+    with pytest.raises(TypeError, match="forward-mode"):
+        jax.jacfwd(_laplace_evidence(LaplaceMarkovInference()))(THETA)
+
+
+def test_markov_implicit_adjoint_is_the_failure_safe_gmres() -> None:
+    adjoint = markov_implicit_adjoint()
+    assert isinstance(adjoint, optx.ImplicitAdjoint)
+    assert isinstance(adjoint.linear_solver, _NonFiniteSafeSolver)
+    assert GaussNewtonMarkovInference().adjoint == adjoint
 
 
 # --- the NumPyro factor ---------------------------------------------------
@@ -416,14 +456,18 @@ def test_factor_runs_under_svi_smoke() -> None:
     assert result.losses[-1] < result.losses[0]
 
 
-def test_gradient_at_a_non_finite_fit_is_a_value_not_an_error() -> None:
+@pytest.mark.parametrize("implicit", [False, True], ids=["checkpoint", "implicit"])
+def test_gradient_at_a_non_finite_fit_is_a_value_not_an_error(implicit) -> None:
     """Far out in a NUTS step-size search the SDE discretisation overflows.
 
-    At lengthscale e^-10 the Matérn transition is NaN, so the fit is too; the
-    implicit solve must then give a non-finite gradient rather than raise.
+    At lengthscale e^-10 the Matérn transition is NaN, so the fit is too; with
+    either adjoint the gradient must then be a non-finite value, not an error.
     """
     theta = jnp.asarray([1.0, jnp.exp(-10.0)])
-    strategy = LaplaceMarkovInference()
+    adjoint = (
+        markov_implicit_adjoint() if implicit else LaplaceMarkovInference().adjoint
+    )
+    strategy = LaplaceMarkovInference(adjoint=adjoint)
     value, grad = jax.jit(jax.value_and_grad(_laplace_evidence(strategy)))(theta)
     assert not jnp.isfinite(value)
     assert not bool(_fit(theta, strategy).converged)

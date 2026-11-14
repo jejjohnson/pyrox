@@ -59,6 +59,7 @@ from pyrox_ssm._inference_nongauss_markov import (
     LaplaceMarkovInference,
     NonGaussConditionedMarkovGP,
     PosteriorLinearizationMarkov,
+    markov_implicit_adjoint,
     markov_laplace_factor,
 )
 from pyrox_ssm._lgssm import (
@@ -121,6 +122,7 @@ __all__ = [
     "markov_gp_innovations_sample",
     "markov_gp_sample",
     "markov_gp_sites_factor",
+    "markov_implicit_adjoint",
     "markov_laplace_factor",
     "noncentred_log_normal",
     "nonlinear_ssm_factor",
