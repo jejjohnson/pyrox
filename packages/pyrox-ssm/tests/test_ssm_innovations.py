@@ -308,3 +308,52 @@ def test_nuts_on_a_2000_point_bernoulli_series() -> None:
     assert samples["f"].shape == (200, 2000)
     assert jnp.all(jnp.isfinite(samples["f"]))
     assert jnp.std(samples["lengthscale"]) > 0.0
+
+
+# --- under pmap (NumPyro's parallel chains) ---------------------------------
+
+
+@pytest.mark.parametrize("sqrt", ["cholesky", "eigh"])
+def test_innovations_path_runs_under_pmap(sqrt) -> None:
+    """Parallel chains pmap the model; one device is enough to show the bug."""
+    times = jnp.linspace(0.0, 5.0, 12)
+    prior = MarkovGPPrior(MaternSDE(1.0, 0.7, order=1), times)
+    eps = jr.normal(jr.key(0), (1, 12, 2))
+    path = jax.pmap(lambda e: markov_gp_from_innovations(prior, e, sqrt=sqrt))(eps)
+    np.testing.assert_array_equal(
+        path[0], markov_gp_from_innovations(prior, eps[0], sqrt=sqrt)
+    )
+
+
+_PARALLEL_NUTS = """
+import os
+os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=2"
+import jax
+jax.config.update("jax_enable_x64", True)
+import jax.numpy as jnp, jax.random as jr, numpyro, numpyro.distributions as dist
+from numpyro.infer import MCMC, NUTS
+import pyrox_ssm as pss
+
+times = jnp.linspace(0.0, 5.0, 20)
+y = (jnp.sin(times) > 0).astype(jnp.int32)
+
+def model():
+    ell = numpyro.sample("ell", dist.LogNormal(0.0, 1.0))
+    prior = pss.MarkovGPPrior(pss.MaternSDE(1.0, ell, order=1), times)
+    f = pss.markov_gp_innovations_sample("f", prior, sqrt="cholesky")
+    numpyro.sample("y", dist.Bernoulli(logits=f), obs=y)
+
+mcmc = MCMC(NUTS(model), num_warmup=5, num_samples=5, num_chains=2,
+            chain_method="parallel", progress_bar=False)
+mcmc.run(jr.key(0))
+assert mcmc.get_samples()["ell"].shape == (10,)
+"""
+
+
+@pytest.mark.slow
+def test_parallel_nuts_chains_with_the_cholesky_root() -> None:
+    """Two host devices need XLA_FLAGS before jax starts, so run in a subprocess."""
+    import subprocess
+    import sys
+
+    subprocess.run([sys.executable, "-c", _PARALLEL_NUTS], check=True)
