@@ -1,6 +1,6 @@
 [project]
 name = "pyrox-nn"
-version = "0.2.0"
+version = "0.2.1"
 description = "Bayesian and uncertainty-aware neural network layers on top of pyrox, kernellib and geonnax, plus the BNF estimator API."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},

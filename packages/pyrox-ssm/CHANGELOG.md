@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.2.1](https://github.com/jejjohnson/pyrox/compare/pyrox-ssm-v0.2.0...pyrox-ssm-v0.2.1) (2026-11-14)
+
+
+### Features
+
+* **ssm:** add include_noise to ConditionedMarkovGP.predict for the band of a new observation ([#431](https://github.com/jejjohnson/pyrox/issues/431)) ([e7e460b](https://github.com/jejjohnson/pyrox/commit/e7e460b344b2258f7a5c6c719f29aae7b8cf3856)), closes [#413](https://github.com/jejjohnson/pyrox/issues/413)
+* **ssm:** add markov_gp_sites_factor, one factor over the padded sites from pad_sites ([#433](https://github.com/jejjohnson/pyrox/issues/433)) ([e1a8b29](https://github.com/jejjohnson/pyrox/commit/e1a8b29dafa8a00ecdaf1db79afa8307c0a9b667)), closes [#415](https://github.com/jejjohnson/pyrox/issues/415)
+* **ssm:** add noncentred_log_normal for per-site hierarchical scales ([#439](https://github.com/jejjohnson/pyrox/issues/439)) ([a2e8277](https://github.com/jejjohnson/pyrox/commit/a2e82777e70134b8ed4cb69d6f0bdfdf5156e0e6)), closes [#414](https://github.com/jejjohnson/pyrox/issues/414)
+* **ssm:** condition SharedPlusSiteMarkovGP and predict its shared and site signals at any times ([#435](https://github.com/jejjohnson/pyrox/issues/435)) ([ad2f1d3](https://github.com/jejjohnson/pyrox/commit/ad2f1d3b83141f83ff227f1faee82580ba2e3d00))
+* **ssm:** give SharedPlusSiteMarkovGP component variances from decompose and a per-site mean ([#434](https://github.com/jejjohnson/pyrox/issues/434)) ([c2625a7](https://github.com/jejjohnson/pyrox/commit/c2625a75bd8ac47677639fe5efb18d3ec31a1feb))
+* **ssm:** let pad_sites take per-site masks, so records with NaN gaps pad as they are ([#432](https://github.com/jejjohnson/pyrox/issues/432)) ([e96899a](https://github.com/jejjohnson/pyrox/commit/e96899a6934b5e9c2db90895b867fbd9d9db3279)), closes [#416](https://github.com/jejjohnson/pyrox/issues/416)
+
+
+### Bug Fixes
+
+* **ssm:** cap LaplaceMarkovInference's Newton step so Bernoulli fits converge at large prior variance ([#438](https://github.com/jejjohnson/pyrox/issues/438)) ([7ab450e](https://github.com/jejjohnson/pyrox/commit/7ab450ebf4fb625a6ff36caf3acf008665db03c9))
+* **ssm:** let markov_gp_from_innovations run under parallel NUTS chains with the Cholesky root ([#437](https://github.com/jejjohnson/pyrox/issues/437)) ([341aad0](https://github.com/jejjohnson/pyrox/commit/341aad02531e8c4f15252dae0d6532d9229958bd))
+
 ## [0.2.0](https://github.com/jejjohnson/pyrox/compare/pyrox-ssm-v0.1.0...pyrox-ssm-v0.2.0) (2026-11-12)
 
 
