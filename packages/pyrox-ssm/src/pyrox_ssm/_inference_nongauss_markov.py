@@ -133,6 +133,7 @@ def _prior_marginal_variance(prior: MarkovGPPrior) -> Float[Array, " N"]:
         zeros,
         zeros,
         jnp.ones_like(times),
+        parallel=prior.parallel,
     )
     return jax.vmap(lambda P: (H @ P @ H.T)[0, 0])(P_pred)
 
@@ -183,7 +184,7 @@ def _markov_smoothed_posterior(
     pseudo_targets = nat1 / site_prec
     residual = pseudo_targets - prior.mean(times)
     m_pred, P_pred, m_filt, P_filt, log_marg = _kalman_filter(
-        F, H, init_cov, A_seq, Q_seq, residual, observed, R_seq
+        F, H, init_cov, A_seq, Q_seq, residual, observed, R_seq, parallel=prior.parallel
     )
     m_smooth, P_smooth = _rts_smoother(m_pred, P_pred, m_filt, P_filt, A_seq)
     f_mean = (m_smooth @ H.T)[:, 0] + prior.mean(times)
@@ -468,7 +469,15 @@ class NonGaussConditionedMarkovGP(eqx.Module):
         dt_full = _build_dt_full(merged_sorted)
         A_seq, Q_seq = self.prior.sde_kernel.discretise_sequence(dt_full)
         m_pred, P_pred, m_filt, P_filt, _ = _kalman_filter(
-            F, H, init_cov, A_seq, Q_seq, residual_full, is_obs, R_full
+            F,
+            H,
+            init_cov,
+            A_seq,
+            Q_seq,
+            residual_full,
+            is_obs,
+            R_full,
+            parallel=self.prior.parallel,
         )
         m_smooth, P_smooth = _rts_smoother(m_pred, P_pred, m_filt, P_filt, A_seq)
 

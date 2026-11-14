@@ -67,6 +67,8 @@ def _kalman_filter(
     residual: Float[Array, " N"],
     mask: Float[Array, " N"],
     R_seq: Float[Array, " N"],
+    *,
+    parallel: bool = False,
 ) -> tuple[
     Float[Array, "N d"],
     Float[Array, "N d d"],
@@ -85,7 +87,8 @@ def _kalman_filter(
     `gaussx.kalman_filter` call site, with the scalar observation lifted to
     ``(N, 1)`` and a zero initial mean. ``F`` is unused, since the predict
     comes from the discretised ``A_seq``; it is kept so the call sites and
-    the existing test signature don't shift.
+    the existing test signature don't shift. ``parallel`` is the prior's
+    `pyrox_ssm.MarkovGPPrior.parallel`.
     """
     del F  # the predict comes from A_seq directly
     # Lift the per-step noise to the (N, 1, 1) stack of a scalar observation
@@ -99,6 +102,7 @@ def _kalman_filter(
         obs_noise=R_3d,
         init_mean=init_mean,
         init_cov=init_cov,
+        parallel=parallel,
     )
     return _filter_tuple(lgssm.filter(residual, mask=mask.astype(bool)))
 
@@ -290,6 +294,24 @@ class MarkovGPPrior(eqx.Module):
             from the prior marginal variance, and a very diffuse prior can
             overflow their quadrature under an exponential-link likelihood
             — as a stationary kernel with an equally large variance does.
+        parallel: Run every Kalman filter over this prior (`log_marginal`,
+            `filter`, `smooth`, `condition`, and each iteration of the
+            non-Gaussian strategies) as `gaussx.parallel_kalman_filter`.
+            Default ``False``. The results agree with the sequential filter
+            to round-off; the RTS smoother stays sequential. Measured on CPU
+            (Matérn state of dimension 2 to 3):
+
+            - With a Gaussian likelihood, turn it on where gradients
+              dominate (NUTS, SVI): the value and gradient of
+              `log_marginal` are 1.2 to 1.8 times cheaper at 1,095 to 10,000
+              steps, while the value alone is 1.5 to 2.2 times slower.
+            - With the non-Gaussian strategies, leave it off: the Laplace
+              evidence was slower in parallel both alone (1.4 to 1.6 times)
+              and with its gradient (1.1 to 1.15 times) at 365 to 1,460
+              steps.
+
+            `pyrox_ssm.LinearGaussianSSMPrior` sets out the rest of the
+            trade-off.
 
     Every method that reads observations (`filter`, `smooth`,
     `log_marginal`, `condition`, `condition_nongauss`) takes an optional
@@ -320,6 +342,7 @@ class MarkovGPPrior(eqx.Module):
     mean_fn: Callable[[Float[Array, " N"]], Float[Array, " N"]] | None = None
     obs_noise_floor: float = eqx.field(static=True, default=0.0)
     init_cov: Float[Array, "d d"] | None = None
+    parallel: bool = eqx.field(static=True, default=False)
 
     def __init__(
         self,
@@ -328,6 +351,7 @@ class MarkovGPPrior(eqx.Module):
         mean_fn: Callable[[Float[Array, " N"]], Float[Array, " N"]] | None = None,
         obs_noise_floor: float = 0.0,
         init_cov: Float[Array, "d d"] | None = None,
+        parallel: bool = False,
     ) -> None:
         if obs_noise_floor < 0:
             raise ValueError(
@@ -361,6 +385,7 @@ class MarkovGPPrior(eqx.Module):
         self.mean_fn = mean_fn
         self.obs_noise_floor = float(obs_noise_floor)
         self.init_cov = init_cov
+        self.parallel = parallel
 
     @property
     def state_dim(self) -> int:
@@ -442,6 +467,7 @@ class MarkovGPPrior(eqx.Module):
             init_mean=jnp.zeros(init_cov.shape[0], dtype=init_cov.dtype),
             init_cov=init_cov,
             obs_offset=einx.id("n -> n 1", self.mean(self.times)),
+            parallel=self.parallel,
         )
 
     def filter(
@@ -789,7 +815,15 @@ class ConditionedMarkovGP(eqx.Module):
         A_seq, Q_seq = self.prior.sde_kernel.discretise_sequence(dt_full)
         R_seq = jnp.broadcast_to(self.prior._R(self.noise_var), merged_sorted.shape)
         m_pred, P_pred, m_filt, P_filt, _ = _kalman_filter(
-            F, H, init_cov, A_seq, Q_seq, residual_full, is_obs, R_seq
+            F,
+            H,
+            init_cov,
+            A_seq,
+            Q_seq,
+            residual_full,
+            is_obs,
+            R_seq,
+            parallel=self.prior.parallel,
         )
         m_smooth, P_smooth = _rts_smoother(m_pred, P_pred, m_filt, P_filt, A_seq)
 
