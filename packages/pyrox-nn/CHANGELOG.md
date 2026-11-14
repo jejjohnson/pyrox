@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/jejjohnson/pyrox/compare/pyrox-nn-v0.2.0...pyrox-nn-v0.2.1) (2026-11-14)
+
+
+### Features
+
+* **lgm:** let SPDE.project_points take a grid with a one-node axis ([#441](https://github.com/jejjohnson/pyrox/issues/441)) ([f4e14db](https://github.com/jejjohnson/pyrox/commit/f4e14dbf32ca2b3650ef37d930e5c6733df9c46f)), closes [#397](https://github.com/jejjohnson/pyrox/issues/397)
+
 ## [0.2.0](https://github.com/jejjohnson/pyrox/compare/pyrox-nn-v0.1.1...pyrox-nn-v0.2.0) (2026-11-10)
 
 

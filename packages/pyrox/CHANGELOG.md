@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.1](https://github.com/jejjohnson/pyrox/compare/pyrox-v0.3.0...pyrox-v0.3.1) (2026-11-14)
+
+
+### Features
+
+* **inference:** return each member's starting parameters from EnsembleVI.run and EnsembleMAP.run ([#430](https://github.com/jejjohnson/pyrox/issues/430)) ([4c1ba84](https://github.com/jejjohnson/pyrox/commit/4c1ba8416aef0d6ca65f8ed29db3cfb8ae8cf119))
+
+
+### Bug Fixes
+
+* **inference:** let an autoguide be reused after ensemble_vi, and accept any data tuple ([#429](https://github.com/jejjohnson/pyrox/issues/429)) ([9ed0693](https://github.com/jejjohnson/pyrox/commit/9ed06936900815e602ab4ad1b7ef78d5ad18d094))
+
 ## [0.3.0](https://github.com/jejjohnson/pyrox/compare/pyrox-v0.2.1...pyrox-v0.3.0) (2026-11-12)
 
 

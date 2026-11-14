@@ -2069,7 +2069,7 @@ wheels = [
 
 [[package]]
 name = "pyrox"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/pyrox" }
 dependencies = [
     { name = "einx" },
@@ -2103,7 +2103,7 @@ provides-extras = ["optax", "colab"]
 
 [[package]]
 name = "pyrox-gp"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/pyrox-gp" }
 dependencies = [
     { name = "einx" },
@@ -2147,7 +2147,7 @@ provides-extras = ["optax", "colab", "flows"]
 
 [[package]]
 name = "pyrox-lgm"
-version = "0.1.3"
+version = "0.1.4"
 source = { editable = "packages/pyrox-lgm" }
 dependencies = [
     { name = "argminax", extra = ["numpyro"] },
@@ -2258,7 +2258,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.42" }]
 
 [[package]]
 name = "pyrox-nn"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/pyrox-nn" }
 dependencies = [
     { name = "argminax" },
@@ -2314,7 +2314,7 @@ provides-extras = ["optax", "bnf", "xarray", "colab"]
 
 [[package]]
 name = "pyrox-ssm"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/pyrox-ssm" }
 dependencies = [
     { name = "einx" },
