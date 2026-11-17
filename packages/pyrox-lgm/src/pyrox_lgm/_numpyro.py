@@ -44,7 +44,7 @@ def sample_component(
     Args:
         component: The component.
         index: Node of each observation; ``None`` returns every addressable
-            node (padding nodes dropped).
+            node (padding nodes dropped), through `AbstractComponent.field_at`.
         soft_constraint_scale: $s$ above.
 
     Returns:
@@ -69,6 +69,4 @@ def sample_component(
         theta, constraint="soft", soft_constraint_scale=soft_constraint_scale
     )
     x = jnp.asarray(numpyro.sample(component.name, gmrf))
-    if index is None:
-        return x[: component.n_index]
-    return x[jnp.asarray(index)]
+    return component.field_at(x, index)

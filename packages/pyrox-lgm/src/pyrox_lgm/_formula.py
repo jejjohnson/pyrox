@@ -25,6 +25,7 @@ from pyrox_lgm._components import (
     Besag,
     Generic,
     Leroux,
+    MarkovGP,
 )
 
 
@@ -40,6 +41,7 @@ _MODELS: dict[str, tuple[Callable[..., AbstractComponent], str, dict[str, str]]]
     "leroux": (Leroux, "graph", {"tau": "tau_prior", "rho": "rho_prior"}),
     "spde": (SPDE, "none", {"range_sigma": "prior"}),
     "generic": (Generic, "none", {"tau": "tau_prior"}),
+    "markov": (MarkovGP, "none", {"range_sigma": "prior", "tau": "tau_prior"}),
 }
 
 
@@ -59,12 +61,13 @@ def f(
             the component's ``name``.
         model: ``"iid"``, ``"rw1"``, ``"rw2"``, ``"ar1"`` (sized by ``n``),
             ``"besag"``, ``"bym2"``, ``"car"``, ``"leroux"`` (on ``graph``),
-            ``"spde"`` (``mesh=`` / ``grid=`` in ``kwargs``) or ``"generic"``
+            ``"spde"`` (``mesh=`` / ``grid=`` in ``kwargs``), ``"markov"``
+            (``sde=`` and ``times=`` in ``kwargs``) or ``"generic"``
             (the structure as the first of ``kwargs``' ``structure=``).
         n: Number of nodes, for the temporal and unstructured models.
         graph: A kernellib graph, for the areal models.
         hyper: Hyperparameter priors by name (``{"tau": ..., "phi": ...}``;
-            ``{"range_sigma": ...}`` for an SPDE).
+            ``{"range_sigma": ...}`` for an SPDE or a Matérn ``"markov"``).
         **kwargs: Passed through to the constructor (``scale_model=``,
             ``cyclic=``, ``alpha=``, ...).
 

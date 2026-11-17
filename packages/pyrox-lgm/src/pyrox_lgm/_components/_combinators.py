@@ -2,10 +2,16 @@ r"""Combinators: separable Kronecker products and replicates of components (P7).
 
 - `Kronecker` (R-INLA's ``group``): $Q = Q_\text{main} \otimes Q_\text{group}$,
   e.g. a spatial field correlated over time. Node $(i, j)$ of the product
-  sits at flat index ``i * group.n_nodes + j``.
+  sits at flat index ``i * group.n_nodes + j``; an observation indexes
+  ``i * group.n_index + j`` over the factors' addressable nodes.
 - `Replicate` (R-INLA's ``replicate``): independent copies sharing
   hyperparameters, $Q = I_r \otimes Q$; copy $r$, node $i$ at
-  ``r * component.n_nodes + i``.
+  ``r * component.n_nodes + i``; an observation indexes
+  ``r * component.n_index + i``.
+
+Both build their projector from their factors' projectors, so a factor whose
+nodes are not its addressable indices (an odd `RW2`'s padding, a
+`MarkovGP`'s states) reads the same values inside the product as alone.
 
 At most one factor may be intrinsic; its null space is lifted to the
 product as $V \otimes I$ (or $I \otimes V$), one constraint per node of the
@@ -18,12 +24,16 @@ import math
 
 import equinox as eqx
 import gaussx as gx
+import jax
 import jax.numpy as jnp
 import lineax as lx
+import numpy as np
 import numpyro.distributions as dist
-from jaxtyping import Array, Float
+from jaxtyping import Array, ArrayLike, Float, Int
 from numpyro.distributions.transforms import Transform
 
+from pyrox_lgm._assembly import full_coo
+from pyrox_lgm._components._areal import BYM2
 from pyrox_lgm._components._base import AbstractComponent, Constraint, probe_theta
 
 
@@ -81,13 +91,50 @@ def _probe_basis(comp: AbstractComponent):
     return comp.constraint_basis(comp.prior(probe_theta(comp.theta_spec())))
 
 
-def _check_addressable(comp: AbstractComponent, role: str) -> None:
-    if comp.n_index != comp.n_nodes:
+def _check_factor(comp: AbstractComponent, role: str) -> None:
+    if isinstance(comp, BYM2):
         raise ValueError(
-            f"{role} {type(comp).__name__} has padding nodes "
-            f"(n_index={comp.n_index}, n_nodes={comp.n_nodes}); it cannot be a "
-            "Kronecker / Replicate factor"
+            f"{role} BYM2 cannot be a Kronecker / Replicate factor: its prior "
+            "is a (b, u*) pair, not one precision"
         )
+
+
+def _check_index(index: ArrayLike, n_index: int) -> np.ndarray:
+    index = np.asarray(index)
+    if index.ndim != 1:
+        raise ValueError(f"index must be 1-D, got shape {index.shape}")
+    if index.size and (index.min() < 0 or index.max() >= n_index):
+        raise ValueError(
+            f"index out of range for {n_index} nodes: [{index.min()}, {index.max()}]"
+        )
+    return index
+
+
+def _row_kron(
+    left: gx.SparseOperator, right: gx.SparseOperator, n_right: int
+) -> gx.SparseOperator:
+    r"""Row-wise Kronecker product: row $j$ is ``kron(left[j], right[j])``.
+
+    Every stored entry $(j, a)$ of ``left`` pairs with every $(j, b)$ of
+    ``right`` into $(j, a\,n_\text{right} + b)$, built on the host.
+    """
+    rl, cl, vl = full_coo(left)
+    rr, cr, vr = full_coo(right)
+    order = np.argsort(rr, kind="stable")
+    rr, cr = rr[order], cr[order]
+    vr = vr[jnp.asarray(order)]
+    starts = np.searchsorted(rr, rl, side="left")
+    counts = np.searchsorted(rr, rl, side="right") - starts
+    li = np.repeat(np.arange(rl.size), counts)
+    offsets = np.arange(counts.sum()) - np.repeat(np.cumsum(counts) - counts, counts)
+    ri = np.repeat(starts, counts) + offsets
+    m = left.out_size()
+    return gx.SparseOperator.from_coo(
+        rl[li],
+        cl[li] * n_right + cr[ri],
+        vl[jnp.asarray(li)] * vr[jnp.asarray(ri)],
+        (m, left.in_size() * n_right),
+    )
 
 
 def _product(
@@ -163,8 +210,8 @@ class Kronecker(AbstractComponent):
         *,
         name: str = "kronecker",
     ) -> None:
-        _check_addressable(main, "main")
-        _check_addressable(group, "group")
+        _check_factor(main, "main")
+        _check_factor(group, "group")
         if "tau" not in group.theta_spec():
             raise ValueError("the group component must have a 'tau' to fix at 1")
         self.main, self.group, self.name = main, group, name
@@ -172,6 +219,24 @@ class Kronecker(AbstractComponent):
     @property
     def n_nodes(self) -> int:
         return self.main.n_nodes * self.group.n_nodes
+
+    @property
+    def n_index(self) -> int:
+        return self.main.n_index * self.group.n_index
+
+    def projector(self, index: Int[ArrayLike, " n_obs"]) -> gx.SparseOperator:
+        """Observation ``i * group.n_index + j`` reads main ``i`` and group ``j``."""
+        i, j = np.divmod(_check_index(index, self.n_index), self.group.n_index)
+        return _row_kron(
+            self.main.projector(i), self.group.projector(j), self.group.n_nodes
+        )
+
+    def field_at(self, x, index=None):
+        X = x.reshape(self.main.n_nodes, self.group.n_nodes)
+        X = jax.vmap(self.group.field_at)(X)
+        X = jax.vmap(self.main.field_at, in_axes=1, out_axes=1)(X)
+        flat = X.reshape(-1)
+        return flat if index is None else flat[jnp.asarray(index)]
 
     def theta_spec(self) -> dict[str, tuple[dist.Distribution, Transform]]:
         spec = {f"{self.main.name}_{k}": v for k, v in self.main.theta_spec().items()}
@@ -242,7 +307,7 @@ class Replicate(AbstractComponent):
     def __init__(
         self, component: AbstractComponent, n_rep: int, *, name: str | None = None
     ) -> None:
-        _check_addressable(component, "replicated")
+        _check_factor(component, "replicated")
         self.component = component
         self.n_rep = int(n_rep)
         self.name = component.name if name is None else name
@@ -250,6 +315,22 @@ class Replicate(AbstractComponent):
     @property
     def n_nodes(self) -> int:
         return self.n_rep * self.component.n_nodes
+
+    @property
+    def n_index(self) -> int:
+        return self.n_rep * self.component.n_index
+
+    def projector(self, index: Int[ArrayLike, " n_obs"]) -> gx.SparseOperator:
+        """Observation ``r * component.n_index + i`` reads node ``i`` of copy ``r``."""
+        r, i = np.divmod(_check_index(index, self.n_index), self.component.n_index)
+        m = r.shape[0]
+        copy = gx.SparseOperator.from_coo(np.arange(m), r, jnp.ones(m), (m, self.n_rep))
+        return _row_kron(copy, self.component.projector(i), self.component.n_nodes)
+
+    def field_at(self, x, index=None):
+        xs = x.reshape(self.n_rep, self.component.n_nodes)
+        flat = jax.vmap(self.component.field_at)(xs).reshape(-1)
+        return flat if index is None else flat[jnp.asarray(index)]
 
     def theta_spec(self) -> dict[str, tuple[dist.Distribution, Transform]]:
         return self.component.theta_spec()

@@ -51,7 +51,8 @@ class AbstractComponent(eqx.Module):
         """Number of addressable nodes: what an observation index refers to.
 
         Equal to `n_nodes` except where the field carries padding nodes
-        (an odd-length `RW2`), which observations never touch.
+        (an odd-length `RW2`), which observations never touch, or several
+        nodes per index (a `MarkovGP`'s state at each time).
         """
         return self.n_nodes
 
@@ -127,6 +128,18 @@ class AbstractComponent(eqx.Module):
         return gx.SparseOperator.from_coo(
             np.arange(m), index, jnp.ones(m), (m, self.n_nodes)
         )
+
+    def field_at(
+        self, x: Float[Array, " n_nodes"], index: Int[ArrayLike, " n_obs"] | None = None
+    ) -> Array:
+        """The field at addressable nodes ``index`` (all `n_index` when ``None``),
+        from the vector ``x`` over all `n_nodes`; what `projector` reads.
+
+        Args:
+            x: The latent field over every node.
+            index: Addressable node of each output, as for `projector`.
+        """
+        return x[: self.n_index] if index is None else x[jnp.asarray(index)]
 
     def sample(
         self,

@@ -204,10 +204,10 @@ def test_kronecker_with_an_intrinsic_main_keeps_its_constraint_at_every_time():
 
 
 def test_kronecker_and_replicate_reject_unsupported_factors():
-    with pytest.raises(ValueError, match="padding"):
-        lgm.Kronecker(lgm.RW2(7), lgm.AR1(3))
-    with pytest.raises(ValueError, match="padding"):  # BYM2: n_index != n_nodes
+    with pytest.raises(ValueError, match="BYM2"):
         lgm.Kronecker(lgm.BYM2(kl.grid_graph((2, 2))), lgm.AR1(3))
+    with pytest.raises(ValueError, match="BYM2"):
+        lgm.Replicate(lgm.BYM2(kl.grid_graph((2, 2))), 2)
     both = lgm.Kronecker(lgm.RW1(4, name="a"), lgm.RW1(3, name="b"))
     with pytest.raises(NotImplementedError, match="two intrinsic"):
         both.prior({"a_tau": jnp.asarray(1.0)})
