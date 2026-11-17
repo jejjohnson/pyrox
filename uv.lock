@@ -2151,6 +2151,7 @@ version = "0.1.3"
 source = { editable = "packages/pyrox-lgm" }
 dependencies = [
     { name = "argminax", extra = ["numpyro"] },
+    { name = "einx" },
     { name = "functax", extra = ["jax"] },
     { name = "gaussx" },
     { name = "kernellib" },
@@ -2168,6 +2169,7 @@ xarray = [
 [package.metadata]
 requires-dist = [
     { name = "argminax", extras = ["numpyro"], git = "https://github.com/jejjohnson/argminax.git?rev=v0.0.6" },
+    { name = "einx", specifier = ">=0.4.3" },
     { name = "functax", extras = ["jax"], git = "https://github.com/jejjohnson/functax.git?rev=v0.0.7" },
     { name = "gaussx", extras = ["numpyro"], git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.15" },
     { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.22" },

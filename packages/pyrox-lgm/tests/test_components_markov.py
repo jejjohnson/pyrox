@@ -323,3 +323,17 @@ def test_poisson_markov_gp_agrees_with_nuts():
     f_inla = np.asarray(mgp.field_at(res.random["trend"].mean))
     gap = np.abs(f_inla - f_draws.mean(axis=0))
     assert np.all(gap < 0.15 * f_draws.std(axis=0) + 4 * f_mcse)
+
+
+def test_float32_times_stay_float32():
+    t = jnp.arange(6, dtype=jnp.float32)
+    mgp = lgm.MarkovGP(gx.MaternSDE(1.0, 1.0, order=1), t)
+    assert mgp.times.dtype == mgp.observation_row.dtype == jnp.float32
+    gmrf = mgp.prior({"range_sigma": jnp.array([2.0, 1.0], dtype=jnp.float32)})
+    assert gmrf.loc.dtype == gmrf.precision.diagonal.dtype == jnp.float32
+    spline = lgm.MarkovGP(gx.IntegratedWienerSDE(1.0, order=1), t)
+    assert spline.structure.diagonal.dtype == spline.null_space.dtype == jnp.float32
+    # Integer times take the default float dtype.
+    assert lgm.MarkovGP(gx.MaternSDE(1.0, 1.0, order=0), jnp.arange(6)).times.dtype == (
+        jnp.float64
+    )

@@ -23,6 +23,7 @@ classifiers = [
 # from the covariance-form GP package (tests/test_import_guard.py).
 dependencies = [
     "pyrox",
+    "einx>=0.4.3",
     "gaussx[numpyro]>=0.6.15",
     "kernellib>=0.0.22",
     "matfree>=0.6.0",

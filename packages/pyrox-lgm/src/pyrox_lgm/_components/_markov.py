@@ -15,6 +15,7 @@ $\Theta = -\tfrac12 \Lambda$ the precision part of what
 
 from __future__ import annotations
 
+import einx
 import equinox as eqx
 import gaussx as gx
 import jax.numpy as jnp
@@ -139,7 +140,9 @@ class MarkovGP(AbstractComponent):
         prior: dist.Distribution | None = None,
         tau_prior: dist.Distribution | None = None,
     ) -> None:
-        t = jnp.asarray(times, dtype=float)
+        t = jnp.asarray(times)
+        if not jnp.issubdtype(t.dtype, jnp.floating):
+            t = t.astype(float)  # integer times: the default float dtype
         t_host = np.asarray(t)
         if t_host.ndim != 1 or t_host.size < 2:
             raise ValueError(
@@ -185,7 +188,7 @@ class MarkovGP(AbstractComponent):
             A, _ = unit.discretise_sequence(jnp.diff(t))
             states = [eye]
             for A_k in A:
-                states.append(A_k @ states[-1])
+                states.append(einx.dot("i j, j k -> i k", A_k, states[-1]))
             basis = jnp.stack(states).reshape(-1, d)
             self.null_space, _ = jnp.linalg.qr(basis)
         else:
@@ -269,5 +272,6 @@ class MarkovGP(AbstractComponent):
     def field_at(
         self, x: Float[Array, " Nd"], index: Int[ArrayLike, " n_obs"] | None = None
     ) -> Array:
-        f = x.reshape(self.n_index, self.state_dim) @ self.observation_row
+        states = x.reshape(self.n_index, self.state_dim)
+        f = einx.dot("n d, d -> n", states, self.observation_row)
         return f if index is None else f[jnp.asarray(index)]
