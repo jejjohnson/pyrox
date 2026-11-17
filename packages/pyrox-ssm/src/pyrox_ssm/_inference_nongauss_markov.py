@@ -29,7 +29,8 @@ $T_\\alpha(s) = (1 - \\alpha)\\, s + \\alpha\\, T(s)$, and the loop is
 `optimistix.fixed_point` with `optimistix.FixedPointIteration`. A fit therefore
 traces under `jax.jit`, and its gradient with respect to the prior's
 hyperparameters $\\theta$ comes from the implicit function theorem at the fixed
-point $s^\\star$ (`optimistix.ImplicitAdjoint`, the default ``adjoint``),
+point $s^\\star$ (`markov_implicit_adjoint`, the default ``adjoint`` of every
+strategy but `LaplaceMarkovInference`),
 
 $$
 \\frac{\\partial s^\\star}{\\partial \\theta}
@@ -41,7 +42,10 @@ which costs one linear solve however many iterations ran; the default solves
 it matrix-free with GMRES, from Jacobian-vector products of the step. Damping
 does not move the fixed point, so the gradient does not depend on $\\alpha$
 either. It is the gradient at a fixed point only when the loop converged: check
-``converged``.
+``converged``. `LaplaceMarkovInference` instead differentiates through the
+iterations by default (`optimistix.RecursiveCheckpointAdjoint`), which is
+cheaper when its capped Newton step converges in a few iterations; its
+``adjoint`` attribute sets out the trade-off.
 """
 
 from __future__ import annotations
@@ -241,15 +245,41 @@ class _NonFiniteSafeSolver(lx.AbstractLinearSolver):
         return self.solver.assume_full_rank()
 
 
-# The default adjoint: optimistix's implicit adjoint with a matrix-free solve.
-# I - dT/ds is not symmetric, so GMRES, which needs only products with the
-# operator (JVPs of the step, and VJPs for its transpose in reverse mode): no
-# (2N, 2N) Jacobian is formed, and each product costs one Kalman smoother pass.
-_IMPLICIT_ADJOINT = optx.ImplicitAdjoint(
-    linear_solver=_NonFiniteSafeSolver(
-        lx.GMRES(rtol=1e-10, atol=1e-10, restart=20, max_steps=50)
+def markov_implicit_adjoint() -> optx.ImplicitAdjoint:
+    r"""The implicit adjoint of the Markov strategies, safe to use inside NUTS.
+
+    The implicit function theorem at the fixed point $s^\star$ (see the module
+    notes), solved matrix-free: $I - \partial T_\alpha / \partial s$ is not
+    symmetric, so ``lineax.GMRES`` (``rtol`` and ``atol`` ``1e-10``, restart
+    20, at most 50 steps), which needs only products with the operator. No
+    ``(2N, 2N)`` Jacobian is formed, and each product costs one Kalman smoother
+    pass. A solve that fails returns a value instead of raising: where the fit
+    is already non-finite the gradient is non-finite, and a solve that stops at
+    ``max_steps`` keeps its last iterate. A bare ``optimistix.ImplicitAdjoint``
+    raises in both cases, which ends a NUTS chain.
+
+    The default ``adjoint`` of `GaussNewtonMarkovInference`,
+    `PosteriorLinearizationMarkov` and `ExpectationPropagationMarkov`; pass it
+    to `LaplaceMarkovInference` for the trade-off its ``adjoint`` attribute
+    describes.
+
+    Returns:
+        An ``optimistix.ImplicitAdjoint`` for a strategy's ``adjoint``.
+
+    Examples:
+        >>> import pyrox_ssm as pss
+        >>> strategy = pss.LaplaceMarkovInference(
+        ...     adjoint=pss.markov_implicit_adjoint()
+        ... )
+    """
+    return optx.ImplicitAdjoint(
+        linear_solver=_NonFiniteSafeSolver(
+            lx.GMRES(rtol=1e-10, atol=1e-10, restart=20, max_steps=50)
+        )
     )
-)
+
+
+_IMPLICIT_ADJOINT = markov_implicit_adjoint()
 
 
 def _solve_sites(
@@ -507,23 +537,46 @@ class LaplaceMarkovInference(eqx.Module):
             ``1.0``. ``None`` takes the full Newton step.
         precision_floor: Lower bound on the diagonal precision. Default
             ``1e-6``.
-        adjoint: How gradients pass through the loop. Default an
-            ``optimistix.ImplicitAdjoint``, the implicit function theorem at the
-            fixed point, solved matrix-free by ``lineax.GMRES`` (``rtol`` and
-            ``atol`` ``1e-10``) from products with the step's Jacobian, so a
-            gradient costs a few Kalman passes and $O(N)$ memory; a fit that is
-            already non-finite gets a non-finite gradient rather than an error.
+        adjoint: How gradients pass through the loop. Default
+            ``optimistix.RecursiveCheckpointAdjoint()``, reverse-mode through
+            the iterations that ran. The alternative is
+            `markov_implicit_adjoint`, the implicit function theorem at the
+            fixed point. Both match central differences equally well on a
+            converged fit (relative error 5e-9 to 1.4e-8 on a 365-day
+            Bernoulli record). They differ as follows:
+
+            - Cost. With the step cap a fit typically converges in about 7
+              iterations, and then the checkpoint gradient is about 1.8 times
+              cheaper (116 against 207 ms at N = 365, 422 against 783 ms at
+              N = 1460, on CPU). Its cost grows with the iterations run, so a
+              fit that needs many (a small ``damping``, ``max_step=None``, or
+              a fit that runs to ``max_iter``) can make the implicit adjoint
+              the cheaper one. The implicit gradient costs about four
+              reverse Kalman passes however many iterations ran.
+            - Memory. The checkpoints hold up to ``max_iter`` copies of the
+              ``(N,)`` site naturals; the implicit adjoint holds a few.
+            - What it is the gradient of. The checkpoint gradient is that of
+              the last iterate, so it matches the fixed point's only as
+              closely as the loop converged, and it depends on ``damping``
+              and ``max_step``. The implicit gradient is the fixed point's
+              whatever the path to it.
+            - Forward mode. The checkpoint adjoint supports reverse mode only:
+              ``jax.jacfwd`` (or NumPyro's
+              ``forward_mode_differentiation=True``) raises, where the
+              implicit adjoint supports both. ``jax.grad`` and
+              ``jax.hessian`` work with either.
+            - Failures. Neither raises inside NUTS: a non-finite fit gives a
+              non-finite gradient.
+
             For small $N$, ``optimistix.ImplicitAdjoint()`` solves the dense
-            ``(2N, 2N)`` Jacobian by LU instead, and
-            ``optimistix.RecursiveCheckpointAdjoint()`` differentiates through
-            the iterations.
+            ``(2N, 2N)`` Jacobian by LU.
     """
 
     max_iter: int = eqx.field(static=True, default=50)
     tol: float = eqx.field(static=True, default=1e-6)
     damping: float = eqx.field(static=True, default=1.0)
     precision_floor: float = eqx.field(static=True, default=1e-6)
-    adjoint: optx.AbstractAdjoint = _IMPLICIT_ADJOINT
+    adjoint: optx.AbstractAdjoint = optx.RecursiveCheckpointAdjoint()
     # last, so the earlier fields keep their positions
     max_step: float | None = eqx.field(static=True, default=1.0)
 
@@ -674,8 +727,8 @@ class GaussNewtonMarkovInference(eqx.Module):
     Identical to `LaplaceMarkovInference` for log-concave
     likelihoods (Bernoulli, Poisson). For non-log-concave likelihoods
     (StudentT) the larger ``precision_floor`` keeps the Newton step
-    PSD-stable. Same fixed-point loop, damping, tolerance and adjoint as
-    `LaplaceMarkovInference`.
+    PSD-stable. Same fixed-point loop, damping and tolerance as
+    `LaplaceMarkovInference`; its default adjoint is the implicit one.
 
     Attributes:
         max_iter: Newton iterations. Default ``20``.
@@ -683,8 +736,9 @@ class GaussNewtonMarkovInference(eqx.Module):
             `LaplaceMarkovInference`. Default ``1e-6``.
         damping: Step-size in (0, 1]. Default ``1.0``.
         precision_floor: Strict positive floor. Default ``1e-3``.
-        adjoint: How gradients pass through the loop. Default an
-            ``optimistix.ImplicitAdjoint``, as in `LaplaceMarkovInference`.
+        adjoint: How gradients pass through the loop. Default
+            `markov_implicit_adjoint`; `LaplaceMarkovInference` sets out
+            the trade-off against ``optimistix.RecursiveCheckpointAdjoint()``.
     """
 
     max_iter: int = eqx.field(static=True, default=20)
@@ -864,8 +918,9 @@ class PosteriorLinearizationMarkov(eqx.Module):
         integrator: Rule for the cavity expectations, any
             `gaussx.AbstractIntegrator`. Default
             ``gaussx.GaussHermiteIntegrator(order=20)``.
-        adjoint: How gradients pass through the loop. Default an
-            ``optimistix.ImplicitAdjoint``, as in `LaplaceMarkovInference`.
+        adjoint: How gradients pass through the loop. Default
+            `markov_implicit_adjoint`; `LaplaceMarkovInference` sets out
+            the trade-off against ``optimistix.RecursiveCheckpointAdjoint()``.
     """
 
     max_iter: int = eqx.field(static=True, default=30)
@@ -979,8 +1034,9 @@ class ExpectationPropagationMarkov(eqx.Module):
             ``gaussx.GaussHermiteIntegrator(order=20)``. EP reads only its
             ``order``, for `gaussx.ep_tilted_moments`, so any other rule
             raises ``TypeError``.
-        adjoint: How gradients pass through the loop. Default an
-            ``optimistix.ImplicitAdjoint``, as in `LaplaceMarkovInference`.
+        adjoint: How gradients pass through the loop. Default
+            `markov_implicit_adjoint`; `LaplaceMarkovInference` sets out
+            the trade-off against ``optimistix.RecursiveCheckpointAdjoint()``.
     """
 
     max_iter: int = eqx.field(static=True, default=40)

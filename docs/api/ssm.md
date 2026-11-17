@@ -339,7 +339,7 @@ Gaussian-likelihood `ConditionedMarkovGP`. `PosteriorLinearizationMarkov` and
 `ExpectationPropagationMarkov` take the same `integrator` as their dense twins;
 expectation propagation accepts only a `gaussx.GaussHermiteIntegrator`.
 
-Each strategy runs its site updates as an `optimistix.fixed_point`, so a fit and its `log_marginal_approx` trace under `jax.jit` and differentiate with respect to the kernel hyperparameters through the implicit function theorem at the fixed point (the `adjoint` field). `converged` and `n_iter` are arrays, traced under `jit`; the gradient is that of a fixed point only when `converged` is true. `markov_laplace_factor` adds the approximate evidence to a NumPyro model, so NUTS or SVI can run over the hyperparameters with the latent path marginalised out; `reject_unconverged=True` makes the factor `-inf` where the fit did not converge.
+Each strategy runs its site updates as an `optimistix.fixed_point`, so a fit and its `log_marginal_approx` trace under `jax.jit` and differentiate with respect to the kernel hyperparameters (the `adjoint` field). `LaplaceMarkovInference` differentiates through the iterations that ran by default, and the other strategies use the implicit function theorem at the fixed point, `markov_implicit_adjoint`; the `adjoint` attribute of `LaplaceMarkovInference` sets out the trade-off. `converged` and `n_iter` are arrays, traced under `jit`; the gradient is that of a fixed point only when `converged` is true. `markov_laplace_factor` adds the approximate evidence to a NumPyro model, so NUTS or SVI can run over the hyperparameters with the latent path marginalised out; `reject_unconverged=True` makes the factor `-inf` where the fit did not converge.
 
 ```python
 import numpyro
@@ -362,6 +362,7 @@ def model(times, y, likelihood):
 ::: pyrox_ssm.ExpectationPropagationMarkov
 ::: pyrox_ssm.NonGaussConditionedMarkovGP
 ::: pyrox_ssm.markov_laplace_factor
+::: pyrox_ssm.markov_implicit_adjoint
 
 ## Sparse Markov GP
 
