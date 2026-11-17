@@ -55,6 +55,7 @@ def test_matern12_markov_gp_is_ar1(range_, sigma):
         {"tau": jnp.asarray(sigma**-2), "rho": jnp.exp(-2.0 * step / range_)}
     )
     expected = np.asarray(ar1.precision.as_matrix())
+    # Round-off only: measured at most 3.1e-15 of the largest entry.
     np.testing.assert_allclose(
         ours.as_matrix(), expected, rtol=1e-12, atol=1e-12 * np.abs(expected).max()
     )
@@ -68,6 +69,8 @@ def test_matern32_covariance_of_f_is_the_gram():
     assert isinstance(gmrf.precision, gx.BlockTriDiag)
     cov = np.linalg.inv(np.asarray(gmrf.precision.as_matrix()))[::2, ::2]
     gram = _matern32_gram(t, sigma**2, range_ / 2.0)
+    # Measured 1.9e-14 of sigma^2 for the covariance and 5.8e-14 relative for
+    # the variances; 1e-10 leaves room for the dense inverse's conditioning.
     np.testing.assert_allclose(cov, gram, rtol=1e-10, atol=1e-10 * sigma**2)
     np.testing.assert_allclose(gmrf.marginal_variances()[::2], sigma**2, rtol=1e-10)
 
@@ -80,14 +83,16 @@ def test_integrated_wiener_null_space_is_the_polynomials():
     S = np.asarray(mgp.structure.as_matrix())
     V = np.asarray(mgp.null_space)
     assert V.shape == (20 * d, d)
+    # Measured: |V^T V - I| 7.8e-16, |S V| 6.6e-17 of the largest entry, the
+    # d null eigenvalues below 2e-17 of the largest and the next at 1e-8.
     np.testing.assert_allclose(V.T @ V, np.eye(d), atol=1e-12)
-    assert np.max(np.abs(S @ V)) < 1e-9 * np.abs(S).max()
+    assert np.max(np.abs(S @ V)) < 1e-12 * np.abs(S).max()
     ev = np.linalg.eigvalsh(S)
-    assert np.sum(ev < 1e-9 * ev.max()) == d  # rank N d - d
+    assert np.sum(ev < 1e-12 * ev.max()) == d  # rank N d - d
     # The f-part of the null space spans 1, t, t^2 exactly.
     poly = np.vander(np.asarray(t), d, increasing=True)
     coef = np.linalg.lstsq(poly, V[::d], rcond=None)[0]
-    np.testing.assert_allclose(poly @ coef, V[::d], atol=1e-10)
+    np.testing.assert_allclose(poly @ coef, V[::d], atol=1e-10)  # measured 3e-15
     # inla() constrains only the level: sum_t f(t) = 0.
     level = np.asarray(mgp.constraint_basis(None))[:, 0]
     np.testing.assert_allclose(level[::d], level[0])
@@ -100,7 +105,7 @@ def test_integrated_wiener_precision_scales_with_tau():
     gmrf = mgp.prior({"tau": jnp.asarray(4.0)})
     assert isinstance(gmrf, gx.IntrinsicGMRF)
     # Q_k is linear in the diffusion, so the precision is tau times the
-    # structure at diffusion 1.
+    # structure at diffusion 1. Measured exact (0.0).
     np.testing.assert_allclose(
         mgp.assembly_precision({"tau": 4.0}, gmrf).as_matrix(),
         4.0 * mgp.structure.as_matrix(),
