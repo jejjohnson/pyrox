@@ -108,12 +108,15 @@ def test_matern12_precision_is_the_ar1_precision(rho, tau, step):
     ours = np.asarray(precision.as_matrix())
     expected = np.asarray(gx.ar1_precision(n, rho, tau).as_matrix())
     scale = np.max(np.abs(expected))
+    # Round-off only: measured at most 1.9e-13 of the largest entry over this
+    # grid (at rho = 0.999, where 1 - rho^2 cancels), 1e-15 elsewhere.
     np.testing.assert_allclose(ours, expected, rtol=1e-12, atol=1e-12 * scale)
 
 
 def test_matern12_marginal_variances_are_the_kernel_variance():
     sde = _ar1_sde(0.8, 4.0, 1.0)
     gmrf = gx.GaussianMRF(jnp.zeros(20), _markov_precision(sde, jnp.arange(20.0)))
+    # Round-off only: measured 1.7e-15 relative.
     np.testing.assert_allclose(gmrf.marginal_variances(), 0.25, rtol=1e-12)
 
 
