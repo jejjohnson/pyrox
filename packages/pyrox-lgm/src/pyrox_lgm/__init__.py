@@ -18,6 +18,7 @@ from pyrox_lgm._components import (
     Generic,
     Kronecker,
     Leroux,
+    MarkovGP,
     Replicate,
 )
 from pyrox_lgm._diagnostics import Diagnostics, diagnostics
@@ -66,6 +67,7 @@ __all__ = [
     "INLAResult",
     "Kronecker",
     "Leroux",
+    "MarkovGP",
     "NegativeBinomial",
     "PCAR1Rho",
     "PCBYM2Phi",

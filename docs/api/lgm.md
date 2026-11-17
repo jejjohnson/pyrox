@@ -12,7 +12,7 @@ API lands with its phases.
 
 | Phase | Adds |
 |---|---|
-| P7 | Components (RW1, RW2, AR1, ICAR, BYM2, SPDE, generic, combinators) and PC priors |
+| P7 | Components (RW1, RW2, AR1, Markov GP, ICAR, BYM2, SPDE, generic, combinators) and PC priors |
 | P8 | `LGM`, `inla()` and `INLAResult` |
 | P9 | `f(...)` formula sugar, diagnostics, simplified Laplace, MCMC-INLA hybrid |
 
@@ -56,6 +56,12 @@ uses; `sample(index)` is the NumPyro face, for NUTS.
 ::: pyrox_lgm.RW2
 
 ::: pyrox_lgm.AR1
+
+### Markov GP (SDE kernels)
+
+A gaussx SDE kernel on sorted times, as the block-tridiagonal precision of its state-space form.
+
+::: pyrox_lgm.MarkovGP
 
 ### Generic
 
