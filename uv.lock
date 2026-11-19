@@ -16,6 +16,7 @@ resolution-markers = [
 [manifest]
 members = [
     "pyrox",
+    "pyrox-gauss",
     "pyrox-gp",
     "pyrox-lgm",
     "pyrox-monorepo",
@@ -2102,6 +2103,31 @@ requires-dist = [
 provides-extras = ["optax", "colab"]
 
 [[package]]
+name = "pyrox-gauss"
+version = "0.0.0"
+source = { editable = "packages/pyrox-gauss" }
+dependencies = [
+    { name = "einx" },
+    { name = "equinox" },
+    { name = "gaussx" },
+    { name = "jax" },
+    { name = "jaxtyping" },
+    { name = "lineax" },
+    { name = "numpyro" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "einx", specifier = ">=0.4.3" },
+    { name = "equinox", specifier = ">=0.13.8" },
+    { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.6.15" },
+    { name = "jax", specifier = ">=0.10.1" },
+    { name = "jaxtyping", specifier = ">=0.2.36" },
+    { name = "lineax", specifier = ">=0.1.1" },
+    { name = "numpyro", specifier = ">=0.21" },
+]
+
+[[package]]
 name = "pyrox-gp"
 version = "0.3.0"
 source = { editable = "packages/pyrox-gp" }
@@ -2192,6 +2218,7 @@ dev = [
     { name = "pandas" },
     { name = "pre-commit" },
     { name = "pyrox" },
+    { name = "pyrox-gauss" },
     { name = "pyrox-gp" },
     { name = "pyrox-lgm" },
     { name = "pyrox-nn" },
@@ -2231,6 +2258,7 @@ dev = [
     { name = "pandas", specifier = ">=3.0.3" },
     { name = "pre-commit", specifier = ">=4.6.0" },
     { name = "pyrox", editable = "packages/pyrox" },
+    { name = "pyrox-gauss", editable = "packages/pyrox-gauss" },
     { name = "pyrox-gp", editable = "packages/pyrox-gp" },
     { name = "pyrox-lgm", editable = "packages/pyrox-lgm" },
     { name = "pyrox-nn", editable = "packages/pyrox-nn" },

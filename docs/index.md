@@ -11,6 +11,7 @@ pyrox bridges [Equinox](https://docs.kidger.site/equinox/) modules and [NumPyro]
 - **`pyrox_nn`** — Bayesian and uncertainty-aware NN layers: dense variants, spectral layers, SNGP, ensembles, the Bayesian Neural Field stack.
 - **`pyrox_lgm`** — latent Gaussian models in precision form: GMRF components, PC priors, `inla()`.
 - **`pyrox_ssm`** — state-space models as NumPyro models, whose inference recurses in time: Markov (Kalman) GPs over SDE kernels, sparse and non-Gaussian Markov GPs, the normalizing Kalman filter.
+- **`pyrox_gauss`** — Gaussian NumPyro distributions on gaussx operators: multivariate normals, linear-Gaussian state-space models, `MarkovGaussian`, and `GMRFDistribution` for gaussx's GMRF fields. It imports gaussx and NumPyro, not `pyrox`.
 
 ## Installation
 
