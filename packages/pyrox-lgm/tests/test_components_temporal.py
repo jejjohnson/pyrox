@@ -168,6 +168,6 @@ def test_sample_is_soft_constrained_and_has_a_finite_log_density():
     tr = handlers.trace(handlers.seed(model, 0)).get_trace()
     site = tr["trend"]
     assert np.isfinite(float(site["fn"].log_prob(site["value"])))
-    assert site["fn"].constraint == "soft"
+    assert site["fn"].field.constraint == "soft"
     # The soft constraint pins the sum to ~ N(0, 1e-3^2): tiny but not zero.
     assert abs(float(site["value"].sum())) < 0.05
