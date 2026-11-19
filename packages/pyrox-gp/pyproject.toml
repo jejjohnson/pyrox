@@ -60,7 +60,7 @@ Repository = "https://github.com/jejjohnson/pyrox"
 [tool.uv.sources]
 # gaussx is not yet on PyPI; resolve the release tag from GitHub. The
 # `>=` floor in `dependencies` is what a PyPI release will satisfy later.
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", rev = "a4172ef054d4ec10bc2766518afff04094755aa3" }
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", rev = "6228d30bf1612830cd9099886b8e87b21d80c077" }
 # kernellib is not yet on PyPI either; same pattern. 0.0.5 carries the
 # spectral methods and RFF draws `_basis` delegates to, and needs gaussx >= 0.2.0.
 kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.22" }
