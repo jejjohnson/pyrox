@@ -32,9 +32,9 @@ import jax.random as jr
 import numpyro
 import numpyro.distributions as dist
 import pytest
-from gaussx import LGSSM, MaskedLGSSM
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
+from pyrox_gauss import LGSSM, MaskedLGSSM
 from pyrox_ssm.flows import NormalizingKalmanPrior, normalizing_kalman_factor
 
 

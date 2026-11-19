@@ -32,14 +32,10 @@ from collections.abc import Callable
 import equinox as eqx
 import jax.numpy as jnp
 import lineax as lx
-from gaussx import (
-    AbstractSolverStrategy,
-    DenseSolver,
-    MultivariateNormal,
-    gaussian_log_prob,
-)
+from gaussx import AbstractSolverStrategy, DenseSolver, gaussian_log_prob
 from jaxtyping import Array, Float
 from pyrox._core import call_context
+from pyrox_gauss import MultivariateNormal
 
 from pyrox_gp._inducing import InducingFeatures
 from pyrox_gp._protocols import Kernel
@@ -237,7 +233,7 @@ class SparseGPPrior(eqx.Module):
         r"""Draw ``u \sim p(u)`` from the inducing prior.
 
         Wraps the inducing operator in a
-        `gaussx.MultivariateNormal` with the configured
+        `pyrox_gauss.MultivariateNormal` with the configured
         `solver`. ``MultivariateNormal.sample`` factors the
         covariance via `gaussx.cholesky` and reparameterizes;
         the returned draw has shape ``(M,)``.

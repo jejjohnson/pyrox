@@ -55,7 +55,6 @@ from gaussx import (
     BlockDiag,
     DenseSolver,
     Kronecker,
-    MultivariateNormal,
     PredictionCache,
     build_prediction_cache,
     log_marginal_likelihood,
@@ -67,6 +66,7 @@ from gaussx import (
 from jaxtyping import Array, Float
 from pyrox._core import call_contexts
 from pyrox.likelihoods import GaussianLikelihood
+from pyrox_gauss import MultivariateNormal
 
 from pyrox_gp._inference import _ell_numerical
 from pyrox_gp._models import ConditionedGP, GPPrior
@@ -400,7 +400,7 @@ class MultiOutputConditionedGP(eqx.Module):
         the single-output `pyrox_gp.ConditionedGP.sample`
         convention. For correlated joint samples, build the full
         predictive covariance explicitly and draw from
-        `gaussx.MultivariateNormal`.
+        `pyrox_gauss.MultivariateNormal`.
         """
         with _mo_kernel_context(self.prior.kernel):
             mean = self.predict_mean(X_star)

@@ -22,11 +22,11 @@ import lineax as lx
 import numpyro.distributions as nd
 from gaussx import (
     DenseSolver,
-    MultivariateNormalPrecision,
     damped_natural_update,
     mean_cov_to_natural,
     natural_to_mean_cov,
 )
+from pyrox_gauss import MultivariateNormalPrecision
 from pyrox_gp import (
     RBF,
     DeltaGuide,
@@ -613,7 +613,7 @@ def test_all_guides_pass_explicit_solver_through_init():
 
 def test_natural_guide_log_prob_matches_explicit_mvn_precision():
     """``NaturalGuide.log_prob`` delegates to
-    :class:`gaussx.MultivariateNormalPrecision`. Constructing that
+    :class:`pyrox_gauss.MultivariateNormalPrecision`. Constructing that
     distribution explicitly with the same parameters must give the same
     log-density to working precision."""
     M = 5

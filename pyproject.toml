@@ -101,8 +101,18 @@ line-length = 88
 extend-exclude = ["design_docs"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "TID251"]
 ignore = ["E402", "E721", "E731", "E741"]
+
+# The Gaussian NumPyro distributions moved from gaussx to pyrox-gauss (#453).
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"gaussx.AbstractMultivariateNormal".msg = "moved to pyrox-gauss: from pyrox_gauss import AbstractMultivariateNormal (#453)"
+"gaussx.MultivariateNormal".msg = "moved to pyrox-gauss: from pyrox_gauss import MultivariateNormal (#453)"
+"gaussx.MultivariateNormalPrecision".msg = "moved to pyrox-gauss: from pyrox_gauss import MultivariateNormalPrecision (#453)"
+"gaussx.MarkovGaussian".msg = "moved to pyrox-gauss: from pyrox_gauss import MarkovGaussian (#453)"
+"gaussx.LGSSM".msg = "moved to pyrox-gauss: from pyrox_gauss import LGSSM (#453)"
+"gaussx.MaskedLGSSM".msg = "moved to pyrox-gauss: from pyrox_gauss import MaskedLGSSM (#453)"
+"gaussx.LGSSMFactory".msg = "moved to pyrox-gauss: from pyrox_gauss import LGSSMFactory (#453)"
 
 [tool.ruff.lint.per-file-ignores]
 # F722 clashes with jaxtyping's string-based shape annotations (Array, "N D").

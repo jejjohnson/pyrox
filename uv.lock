@@ -2139,6 +2139,7 @@ dependencies = [
     { name = "kernellib" },
     { name = "lineax" },
     { name = "pyrox" },
+    { name = "pyrox-gauss" },
 ]
 
 [package.optional-dependencies]
@@ -2167,6 +2168,7 @@ requires-dist = [
     { name = "optax", marker = "extra == 'optax'", specifier = ">=0.2.8" },
     { name = "pandas", marker = "extra == 'colab'", specifier = ">=3.0.3" },
     { name = "pyrox", editable = "packages/pyrox" },
+    { name = "pyrox-gauss", editable = "packages/pyrox-gauss" },
     { name = "watermark", marker = "extra == 'colab'", specifier = ">=2.6.0" },
 ]
 provides-extras = ["optax", "colab", "flows"]
@@ -2185,6 +2187,7 @@ dependencies = [
     { name = "numpyro" },
     { name = "optimistix" },
     { name = "pyrox" },
+    { name = "pyrox-gauss" },
 ]
 
 [package.optional-dependencies]
@@ -2203,6 +2206,7 @@ requires-dist = [
     { name = "numpyro", specifier = ">=0.21" },
     { name = "optimistix", specifier = ">=0.1.0" },
     { name = "pyrox", editable = "packages/pyrox" },
+    { name = "pyrox-gauss", editable = "packages/pyrox-gauss" },
     { name = "xarray", marker = "extra == 'xarray'", specifier = ">=2025.1" },
 ]
 provides-extras = ["xarray"]
@@ -2354,6 +2358,7 @@ dependencies = [
     { name = "numpyro" },
     { name = "optimistix" },
     { name = "pyrox" },
+    { name = "pyrox-gauss" },
 ]
 
 [package.optional-dependencies]
@@ -2377,6 +2382,7 @@ requires-dist = [
     { name = "numpyro", specifier = ">=0.21" },
     { name = "optimistix", specifier = ">=0.1.0" },
     { name = "pyrox", editable = "packages/pyrox" },
+    { name = "pyrox-gauss", editable = "packages/pyrox-gauss" },
 ]
 provides-extras = ["flows", "ensemble"]
 
