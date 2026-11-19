@@ -298,7 +298,7 @@ def _scaled_kronecker_precision():
 
 def test_scaled_kronecker_precision_keeps_its_structure(monkeypatch):
     """2 * Kronecker used to densify: the Cholesky now sees the Kronecker."""
-    import gaussx._distributions._mvn_prec as prec_module
+    import pyrox_gauss._mvn_prec as prec_module
 
     factored = []
     original = prec_module._cholesky
@@ -318,7 +318,7 @@ def test_scaled_kronecker_precision_keeps_its_structure(monkeypatch):
 
 def test_non_finite_cholesky_falls_back_to_dense(monkeypatch):
     """A factor that fails numerically gives draws from the dense route."""
-    import gaussx._distributions._mvn_prec as prec_module
+    import pyrox_gauss._mvn_prec as prec_module
 
     def nan_factor(operator):
         n = operator.in_size()
