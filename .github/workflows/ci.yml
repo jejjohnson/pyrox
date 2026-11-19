@@ -62,6 +62,8 @@ jobs:
               - packages/pyrox-lgm/**
             ssm:
               - packages/pyrox-ssm/**
+            gauss:
+              - packages/pyrox-gauss/**
       - name: Select packages and Python versions
         id: select
         env:
@@ -73,8 +75,9 @@ jobs:
           NN: ${{ steps.filter.outputs.nn }}
           LGM: ${{ steps.filter.outputs.lgm }}
           SSM: ${{ steps.filter.outputs.ssm }}
+          GAUSS: ${{ steps.filter.outputs.gauss }}
         run: |
-          all="pyrox pyrox-gp pyrox-nn pyrox-lgm pyrox-ssm"
+          all="pyrox pyrox-gp pyrox-nn pyrox-lgm pyrox-ssm pyrox-gauss"
           if [[ "$EVENT" != "pull_request" ]]; then
             packages="$all"
             pythons="3.12 3.13"
@@ -87,6 +90,7 @@ jobs:
             [[ "$NN" == "true" ]] && packages+=" pyrox-nn"
             [[ "$LGM" == "true" ]] && packages+=" pyrox-lgm"
             [[ "$SSM" == "true" ]] && packages+=" pyrox-ssm"
+            [[ "$GAUSS" == "true" ]] && packages+=" pyrox-gauss"
             if [[ -n "$packages" || "$CORE_CHECKS" == "true" ]]; then
               packages="pyrox $packages"
             fi

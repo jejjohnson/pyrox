@@ -1,0 +1,47 @@
+[project]
+name = "pyrox-gauss"
+version = "0.0.0"
+description = "Gaussian NumPyro distributions on gaussx's structured operators: multivariate normals, linear-Gaussian state-space models, Markov chains and the GMRF wrapper."
+authors = [
+    {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
+]
+license = "MIT"
+license-files = ["LICENSE"]
+readme = "README.md"
+keywords = ["jax", "equinox", "numpyro", "gaussian", "state-space-models", "gmrf"]
+requires-python = ">=3.12"
+classifiers = [
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Natural Language :: English",
+    "Intended Audience :: Science/Research",
+    "Development Status :: 2 - Pre-Alpha",
+]
+# No pyrox: the distributions take every argument they need and use nothing
+# from the bridge (tests/test_gauss_import_guard.py).
+dependencies = [
+    "gaussx>=0.6.15",
+    "numpyro>=0.21",
+    "jax>=0.10.1",
+    "equinox>=0.13.8",
+    "lineax>=0.1.1",
+    "einx>=0.4.3",
+    "jaxtyping>=0.2.36",
+]
+
+[project.urls]
+Repository = "https://github.com/jejjohnson/pyrox"
+
+[tool.uv.sources]
+# Not on PyPI yet; resolve the release tag from GitHub, in step with the
+# other members' sources (one version per package across the workspace).
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.6.15" }
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pyrox_gauss"]

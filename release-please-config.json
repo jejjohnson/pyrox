@@ -95,6 +95,22 @@
           "jsonpath": "$.package[?(@.name.value=='pyrox-ssm')].version"
         }
       ]
+    },
+    "packages/pyrox-gauss": {
+      "release-type": "python",
+      "package-name": "pyrox-gauss",
+      "component": "pyrox-gauss",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "extra-files": [
+        "src/pyrox_gauss/__init__.py",
+        {
+          "type": "toml",
+          "path": "/uv.lock",
+          "jsonpath": "$.package[?(@.name.value=='pyrox-gauss')].version"
+        }
+      ]
     }
   }
 }

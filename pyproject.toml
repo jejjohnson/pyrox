@@ -36,6 +36,7 @@ pyrox-gp = { workspace = true }
 pyrox-nn = { workspace = true }
 pyrox-lgm = { workspace = true }
 pyrox-ssm = { workspace = true }
+pyrox-gauss = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -57,6 +58,7 @@ dev = [
     "pyrox-lgm",
     # With the ensemble extra, so pyrox_ssm.ensemble's tests run in CI.
     "pyrox-ssm[ensemble]",
+    "pyrox-gauss",
     # Optional-extra backends exercised by the test suites.
     "optax>=0.2.8",
     "pandas>=3.0.3",
@@ -114,11 +116,13 @@ ignore = ["E402", "E721", "E731", "E741"]
 "packages/pyrox-nn/src/pyrox_nn/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "packages/pyrox-lgm/src/pyrox_lgm/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "packages/pyrox-ssm/src/pyrox_ssm/**" = ["F722", "RUF001", "RUF002", "RUF003"]
+"packages/pyrox-gauss/src/pyrox_gauss/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "packages/pyrox/tests/inference/**" = ["F722"]
 "packages/pyrox-gp/tests/**" = ["F722"]
 "packages/pyrox-nn/tests/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "packages/pyrox-lgm/tests/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "packages/pyrox-ssm/tests/**" = ["F722", "RUF001", "RUF002", "RUF003"]
+"packages/pyrox-gauss/tests/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "docs/notebooks/**" = [
     "F722",
     "B905",
@@ -151,6 +155,7 @@ testpaths = [
     "packages/pyrox-nn/tests",
     "packages/pyrox-lgm/tests",
     "packages/pyrox-ssm/tests",
+    "packages/pyrox-gauss/tests",
 ]
 addopts = "--cov --cov-report=term-missing --cov-report=xml:coverage.xml"
 markers = [
@@ -164,6 +169,7 @@ source = [
     "packages/pyrox-nn/src",
     "packages/pyrox-lgm/src",
     "packages/pyrox-ssm/src",
+    "packages/pyrox-gauss/src",
 ]
 omit = ["**/tests/*"]
 
