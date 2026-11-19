@@ -25,7 +25,7 @@ members = ["packages/*"]
 # functax is pinned here at the tag pyrox-gp, pyrox-nn and pyrox-lgm declare, so one
 # functax serves every member once an upstream (kernellib, geonnax) pins its own.
 override-dependencies = [
-    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.6.15",
+    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@a4172ef054d4ec10bc2766518afff04094755aa3",
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.11",
     "functax[jax] @ git+https://github.com/jejjohnson/functax.git@v0.0.7",
 ]

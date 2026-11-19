@@ -37,7 +37,7 @@ Repository = "https://github.com/jejjohnson/pyrox"
 [tool.uv.sources]
 # Not on PyPI yet; resolve the release tag from GitHub, in step with the
 # other members' sources (one version per package across the workspace).
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.6.15" }
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", rev = "a4172ef054d4ec10bc2766518afff04094755aa3" }
 
 [build-system]
 requires = ["hatchling>=1.27"]

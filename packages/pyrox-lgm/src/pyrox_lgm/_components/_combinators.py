@@ -50,15 +50,17 @@ class KroneckerIntrinsicGMRF(gx.IntrinsicGMRF):
     $\log|R \otimes Q|_+ = n_Q \log|R|_+ + r_R \log|Q|$.
     """
 
-    pytree_data_fields = ("intrinsic_op", "intrinsic_null", "proper_op")
+    intrinsic_op: lx.AbstractLinearOperator
+    intrinsic_null: Float[Array, "n c"]
+    proper_op: lx.AbstractLinearOperator
 
     def __init__(
         self, loc, scale, structure, null, intrinsic_op, intrinsic_null, proper_op, **kw
     ):
+        super().__init__(loc, scale, structure, null, **kw)
         self.intrinsic_op = intrinsic_op
         self.intrinsic_null = intrinsic_null
         self.proper_op = proper_op
-        super().__init__(loc, scale, structure, null, **kw)
 
     @property
     def normalized(self) -> bool:
