@@ -2,10 +2,10 @@
 
 pyrox sits in GeoML, tier 3 (probabilistic models and variational assimilation
 (may build on filterax)). Its packages must not import or depend on plumax,
-radtrax, sesmax, somax, vardax: they sit above it, or beside it in the same
-tier. Every import of a stack library is declared, as a dependency or an extra,
-and what importing a package runs needs a dependency. Its packages form no
-cycle. Dev, docs and tutorial dependency groups are not checked.
+radtrax, sesmax, vardax: they sit above it, or beside it in the same tier.
+Every import of a stack library is declared, as a dependency or an extra, and
+what importing a package runs needs a dependency. Its packages form no cycle.
+Dev, docs and tutorial dependency groups are not checked.
 
 The rules: https://github.com/jejjohnson/geostack/blob/main/docs/api/dependency_graph.md
 
@@ -33,6 +33,10 @@ PACKAGES: dict[str, tuple[str, tuple[str, ...]]] = {
         "packages/pyrox/pyproject.toml",
         ("packages/pyrox/src/pyrox",),
     ),
+    "pyrox-gauss": (
+        "packages/pyrox-gauss/pyproject.toml",
+        ("packages/pyrox-gauss/src/pyrox_gauss",),
+    ),
     "pyrox-gp": (
         "packages/pyrox-gp/pyproject.toml",
         ("packages/pyrox-gp/src/pyrox_gp",),
@@ -49,10 +53,6 @@ PACKAGES: dict[str, tuple[str, tuple[str, ...]]] = {
         "packages/pyrox-ssm/pyproject.toml",
         ("packages/pyrox-ssm/src/pyrox_ssm",),
     ),
-    "pyrox-gauss": (
-        "packages/pyrox-gauss/pyproject.toml",
-        ("packages/pyrox-gauss/src/pyrox_gauss",),
-    ),
 }
 
 #: stack libraries pyrox may not use: import name -> distribution
@@ -61,7 +61,6 @@ FORBIDDEN: dict[str, str] = {
     "radtrax": "radtrax",
     "sesmax": "sesmax",
     "sesmax_core": "sesmax-core",
-    "somax": "somax",
     "vardax": "vardax",
 }
 
@@ -85,15 +84,16 @@ ALLOWED: dict[str, str] = {
     "integrix": "integrix",
     "kernellib": "kernellib",
     "manipy": "manipy-jax",
-    "optax_bayes": "optax-bayes",
     "pipekit": "pipekit",
     "pipekit_array": "pipekit-array",
     "pipekit_cycle": "pipekit-cycle",
     "pipekit_evaluate": "pipekit-evaluate",
     "pipekit_experiment": "pipekit-experiment",
     "pipekit_jax": "pipekit-jax",
+    "pipekit_ops": "pipekit-ops",
     "pipekit_train": "pipekit-train",
     "pyrox": "pyrox",
+    "pyrox_gauss": "pyrox-gauss",
     "pyrox_gp": "pyrox-gp",
     "pyrox_lgm": "pyrox-lgm",
     "pyrox_nn": "pyrox-nn",
@@ -104,6 +104,10 @@ ALLOWED: dict[str, str] = {
     "xrtoolz": "xrtoolz",
     "xtremax": "xtremax",
 }
+
+#: packages of pyrox that one of its packages may not use, because they sit in
+#: a higher package tier: distribution -> {import name: distribution}
+FORBIDDEN_INSIDE: dict[str, dict[str, str]] = {}
 
 #: imports left undeclared on purpose, kept in step with geostack:
 #: distribution -> reason
@@ -319,12 +323,13 @@ def test_packages_are_current() -> None:
 
 @pytest.mark.parametrize("dist", sorted(PACKAGES))
 def test_no_import_points_up(dist: str) -> None:
+    forbidden = FORBIDDEN | FORBIDDEN_INSIDE.get(dist, {})
     found = sorted(
         {
-            f"{f.relative_to(ROOT)}:{line} imports {top} ({FORBIDDEN[top]})"
+            f"{f.relative_to(ROOT)}:{line} imports {top} ({forbidden[top]})"
             for f, imports in _modules(PACKAGES[dist][1]).values()
             for name, _, line in imports
-            if (top := name.split(".")[0]) in FORBIDDEN
+            if (top := name.split(".")[0]) in forbidden
         }
     )
     assert not found, "\n".join(found)
@@ -333,7 +338,8 @@ def test_no_import_points_up(dist: str) -> None:
 @pytest.mark.parametrize("dist", sorted(PACKAGES))
 def test_no_dependency_points_up(dist: str) -> None:
     base, extras = _declared(PACKAGES[dist][0])
-    found = sorted((base | extras) & set(FORBIDDEN.values()))
+    forbidden = FORBIDDEN | FORBIDDEN_INSIDE.get(dist, {})
+    found = sorted((base | extras) & set(forbidden.values()))
     assert not found, f"{dist} declares {found}"
 
 

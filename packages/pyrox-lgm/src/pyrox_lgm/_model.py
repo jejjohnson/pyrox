@@ -100,8 +100,11 @@ class _Latent:
 class LatentGMRF(gx.GaussianMRF, _Latent):
     """Proper assembled latent prior (no intrinsic component)."""
 
-    pytree_data_fields = ("parts", "consts")
-    pytree_aux_fields = ("slices", "n_fixed", "fixed_precision")
+    parts: tuple
+    consts: tuple
+    slices: tuple[tuple[int, int], ...] = eqx.field(static=True)
+    n_fixed: int = eqx.field(static=True)
+    fixed_precision: float = eqx.field(static=True)
 
     def __init__(self, parts, slices, consts, n_fixed, fixed_precision, precision):
         self.parts, self.slices, self.consts = (
@@ -119,8 +122,11 @@ class LatentGMRF(gx.GaussianMRF, _Latent):
 class LatentIntrinsicGMRF(gx.IntrinsicGMRF, _Latent):
     """Assembled latent prior with hard constraints from intrinsic components."""
 
-    pytree_data_fields = ("parts", "consts")
-    pytree_aux_fields = ("slices", "n_fixed", "fixed_precision")
+    parts: tuple
+    consts: tuple
+    slices: tuple[tuple[int, int], ...] = eqx.field(static=True)
+    n_fixed: int = eqx.field(static=True)
+    fixed_precision: float = eqx.field(static=True)
 
     def __init__(
         self, parts, slices, consts, n_fixed, fixed_precision, structure, null_space
