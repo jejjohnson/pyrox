@@ -9,7 +9,7 @@ on the primitives exported here. ``pyrox.likelihoods`` holds the
 from pyrox import _core, inference, likelihoods
 
 
-__version__ = "0.3.0"  # x-release-please-version
+__version__ = "0.3.1"  # x-release-please-version
 __all__ = [
     "__version__",
     "_core",

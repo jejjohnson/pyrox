@@ -1,6 +1,6 @@
 [project]
 name = "pyrox-gauss"
-version = "0.0.0"
+version = "0.1.0"
 description = "Gaussian NumPyro distributions on gaussx's structured operators: multivariate normals, linear-Gaussian state-space models, Markov chains and the GMRF wrapper."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
