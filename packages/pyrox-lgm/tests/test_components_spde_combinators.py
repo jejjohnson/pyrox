@@ -233,9 +233,9 @@ def test_soft_constraint_scale_reaches_the_gmrf():
     tr = handlers.trace(
         handlers.seed(lambda: comp.sample(soft_constraint_scale=0.05), 0)
     ).get_trace()
-    assert tr["trend"]["fn"].soft_constraint_scale == 0.05
+    assert tr["trend"]["fn"].field.soft_constraint_scale == 0.05
     default = handlers.trace(handlers.seed(comp.sample, 0)).get_trace()
-    assert default["trend"]["fn"].soft_constraint_scale == 1e-2
+    assert default["trend"]["fn"].field.soft_constraint_scale == 1e-2
 
 
 @pytest.mark.slow

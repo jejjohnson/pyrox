@@ -282,7 +282,7 @@ g_mean, h_mean, g_var, h_var = cond.predict(t_star)                   # (M,), (M
 
 ## Normalizing Kalman Filter
 
-`NormalizingKalmanPrior` wraps a `gaussx.LGSSM` (or `gaussx.MaskedLGSSM`)
+`NormalizingKalmanPrior` wraps a `pyrox_gauss.LGSSM` (or `pyrox_gauss.MaskedLGSSM`)
 base and an optional per-timestep observation warp into the same
 model surface: exact collapsed marginal via `log_marginal`, NumPyro
 registration via `normalizing_kalman_factor`, and observation-space
@@ -301,7 +301,7 @@ below are involved.
 import jax.numpy as jnp
 import numpyro
 from numpyro import distributions as dist
-from gaussx import LGSSM
+from pyrox_gauss import LGSSM
 from pyrox_ssm.flows import NormalizingKalmanPrior, normalizing_kalman_factor
 
 def nkf_model(y, warp=None, mask=None):

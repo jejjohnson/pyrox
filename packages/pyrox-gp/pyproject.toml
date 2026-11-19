@@ -22,6 +22,7 @@ classifiers = [
 dependencies = [
     "pyrox",
     "gaussx>=0.6.15",
+    "pyrox-gauss",
     "kernellib>=0.0.22",
     "functax[jax] @ git+https://github.com/jejjohnson/functax.git@v0.0.7",
     "lineax>=0.1.1",

@@ -27,7 +27,6 @@ import numpyro
 from gaussx import (
     AbstractSolverStrategy,
     DenseSolver,
-    MultivariateNormal,
     PredictionCache,
     build_prediction_cache,
     cholesky,
@@ -40,6 +39,7 @@ from gaussx import (
 from jaxtyping import Array, Float
 from numpyro import distributions as dist
 from pyrox._core import call_context
+from pyrox_gauss import MultivariateNormal
 
 from pyrox_gp._kernel_operator import freeze_kernel, matrix_free_operator
 from pyrox_gp._protocols import Kernel, Likelihood
@@ -176,7 +176,7 @@ class GPPrior(eqx.Module):
     def sample(self, key: Array) -> Float[Array, " N"]:
         r"""Draw ``f \sim p(f) = \mathcal{N}(\mu(X), K + \text{jitter}\,I)``.
 
-        Wraps the prior in a `gaussx.MultivariateNormal` with
+        Wraps the prior in a `pyrox_gauss.MultivariateNormal` with
         the configured `solver`. This is the non-NumPyro analogue
         of `gp_sample` — useful for tests, diagnostics, and
         prior-sample initialization without registering a sample site.
@@ -465,7 +465,7 @@ class ConditionedGP(eqx.Module):
         samples from the full predictive covariance are not covered by
         the Wave 2 dense surface. For correlated samples, build the full
         predictive covariance explicitly and draw from
-        `gaussx.MultivariateNormal`.
+        `pyrox_gauss.MultivariateNormal`.
         """
         with call_context(self.prior.kernel):
             mean = self.predict_mean(X_star)

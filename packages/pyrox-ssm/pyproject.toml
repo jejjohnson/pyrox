@@ -24,6 +24,7 @@ classifiers = [
 dependencies = [
     "pyrox",
     "gaussx[numpyro]>=0.6.15",
+    "pyrox-gauss",
     "equinox>=0.13.8",
     "lineax>=0.1.1",
     "einx>=0.4.3",

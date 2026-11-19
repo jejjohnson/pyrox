@@ -25,7 +25,7 @@ observation model is *not* a non-Gaussian likelihood in the sense that
 module handles (no CVI, no posterior linearisation, no Gauss-Newton), and
 no changes to that module accompany this one.
 
-The base `gaussx.LGSSM` / `gaussx.MaskedLGSSM` is a hard
+The base `pyrox_gauss.LGSSM` / `pyrox_gauss.MaskedLGSSM` is a hard
 ``pyrox-ssm`` dependency, so the **unwarped** multivariate state-space
 model needs no ``gauss_flows`` at runtime (importing `pyrox_ssm.flows`
 needs ``flowjax``, which the ``flows`` extra installs). Passing a ``warp``
@@ -48,9 +48,10 @@ import jax.numpy as jnp
 import lineax as lx
 import numpy as np
 import numpyro
+import pyrox_gauss
 from flowjax.bijections import AbstractBijection
-from gaussx import LGSSM, MaskedLGSSM
 from jaxtyping import Array, Bool, Float
+from pyrox_gauss import LGSSM, MaskedLGSSM
 
 from pyrox_ssm._markov_sites import _pushforward_moments
 
@@ -79,7 +80,7 @@ def _dense(
 class NormalizingKalmanPrior(eqx.Module):
     r"""Normalizing Kalman Filter prior over a multivariate time grid.
 
-    Wraps a `gaussx.LGSSM` (or `gaussx.MaskedLGSSM`) base and an
+    Wraps a `pyrox_gauss.LGSSM` (or `pyrox_gauss.MaskedLGSSM`) base and an
     optional per-timestep observation warp into the ``pyrox_ssm`` model
     surface, so the state-space parameters and the warp can carry NumPyro
     priors and be fitted with any ``pyrox.inference`` driver
@@ -99,9 +100,9 @@ class NormalizingKalmanPrior(eqx.Module):
     recommended fitting pattern rather than a convenience.
 
     Attributes:
-        base: `gaussx.LGSSM` or `gaussx.MaskedLGSSM` with event shape
+        base: `pyrox_gauss.LGSSM` or `pyrox_gauss.MaskedLGSSM` with event shape
             ``(T, M)``. Available without the ``flows`` extra. A
-            `gaussx.MaskedLGSSM` base contributes its ``obs_mask``
+            `pyrox_gauss.MaskedLGSSM` base contributes its ``obs_mask``
             whenever no call-time ``mask`` is given.
         warp: Optional bijection with event shape ``(M,)``, applied
             independently at each step (requires the ``flows`` extra).
@@ -123,7 +124,7 @@ class NormalizingKalmanPrior(eqx.Module):
 
     Examples:
         >>> import jax.numpy as jnp, jax.random as jr
-        >>> from gaussx import LGSSM
+        >>> from pyrox_gauss import LGSSM
         >>> from pyrox_ssm.flows import NormalizingKalmanPrior
         >>> T, M = 12, 2
         >>> base = LGSSM(0.9 * jnp.eye(M), jnp.eye(M), 0.1 * jnp.eye(M),
@@ -254,7 +255,7 @@ class NormalizingKalmanPrior(eqx.Module):
         """Build the ``gauss_flows`` NKF density for the current warp.
 
         Unmasked: wrap the base directly. Masked: rebuild the base's
-        parameters into a `gaussx.LGSSMFactory` so the mask arrives as
+        parameters into a `pyrox_gauss.LGSSMFactory` so the mask arrives as
         a flowjax ``condition`` — that is what routes the log-det through
         ``gauss_flows``' masked change-of-variables (observed channels
         only) and triggers its rejection of channel-mixing warps.
@@ -263,7 +264,7 @@ class NormalizingKalmanPrior(eqx.Module):
             return flows.normalizing_kalman_filter(
                 flows.NumpyroBase(dist=self.base), self.warp
             )
-        factory = gaussx.LGSSMFactory(
+        factory = pyrox_gauss.LGSSMFactory(
             self.base.A,
             self.base.H,
             self.base.Q,
@@ -297,7 +298,7 @@ class NormalizingKalmanPrior(eqx.Module):
                 read and may be ``NaN``.
             mask: Optional observation mask, shape ``(T, M)``; ``True``
                 marks an observed entry. Overrides a
-                `gaussx.MaskedLGSSM` base's own mask when both are
+                `pyrox_gauss.MaskedLGSSM` base's own mask when both are
                 present. Unobserved channels are marginalised exactly;
                 with a warp this requires an elementwise warp (see
                 the class docstring).

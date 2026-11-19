@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 import jax.numpy as jnp
 import numpyro
 from jaxtyping import Array, ArrayLike, Int
+from pyrox_gauss import GMRFDistribution
 
 
 if TYPE_CHECKING:
@@ -68,5 +69,5 @@ def sample_component(
     gmrf = component.prior(
         theta, constraint="soft", soft_constraint_scale=soft_constraint_scale
     )
-    x = jnp.asarray(numpyro.sample(component.name, gmrf))
+    x = jnp.asarray(numpyro.sample(component.name, GMRFDistribution(gmrf)))
     return component.field_at(x, index)

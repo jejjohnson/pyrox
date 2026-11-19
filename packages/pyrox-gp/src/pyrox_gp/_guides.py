@@ -48,7 +48,7 @@ conversions go through `gaussx.natural_to_mean_cov` /
 `gaussx.gaussian_kl`, and Cholesky through
 `gaussx.cholesky` / `gaussx.safe_cholesky`. The
 `NaturalGuide` ``sample`` / ``log_prob`` paths route through
-`gaussx.MultivariateNormalPrecision` so the precision Cholesky
+`pyrox_gauss.MultivariateNormalPrecision` so the precision Cholesky
 is used directly without ever materializing $\\Sigma$. The same
 primitives back the future natural-gradient and CVI inference paths.
 
@@ -77,7 +77,6 @@ import lineax as lx
 from gaussx import (
     AbstractSolverStrategy,
     DenseSolver,
-    MultivariateNormalPrecision,
     cholesky,
     damped_natural_update,
     gaussian_kl,
@@ -88,6 +87,7 @@ from gaussx import (
     whitened_svgp_predict,
 )
 from jaxtyping import Array, Float
+from pyrox_gauss import MultivariateNormalPrecision
 
 from pyrox_gp._protocols import Guide
 
@@ -469,7 +469,7 @@ class NaturalGuide(Guide):
         solver: Optional `gaussx.AbstractSolverStrategy` used for
             ``solve`` and ``logdet`` against the precision operator
             ``Lambda = -2 nat2``. ``sample`` and ``log_prob`` route
-            through `gaussx.MultivariateNormalPrecision` with
+            through `pyrox_gauss.MultivariateNormalPrecision` with
             this solver — efficient because the precision form avoids
             ever materializing $\Sigma$. ``None`` defaults to
             `gaussx.DenseSolver`.
@@ -523,7 +523,7 @@ class NaturalGuide(Guide):
         return m, symmetrize(cov_op.as_matrix())
 
     def _mvn(self) -> MultivariateNormalPrecision:
-        """Wrap the natural form as a `gaussx.MultivariateNormalPrecision`.
+        """Wrap the natural form as a `pyrox_gauss.MultivariateNormalPrecision`.
 
         Carries the precision operator directly, so ``sample`` /
         ``log_prob`` never materialize the covariance.
@@ -545,7 +545,7 @@ class NaturalGuide(Guide):
         return self._moment_mean()
 
     def sample(self, key: Array) -> Float[Array, " M"]:
-        r"""Draw ``u \sim q`` via `gaussx.MultivariateNormalPrecision`.
+        r"""Draw ``u \sim q`` via `pyrox_gauss.MultivariateNormalPrecision`.
 
         Uses the precision Cholesky directly: ``L = chol(\Lambda)``,
         ``y = L^{-T} \epsilon``, ``u = m + y``. No moment-space

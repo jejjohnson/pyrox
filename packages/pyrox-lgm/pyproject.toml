@@ -25,6 +25,7 @@ dependencies = [
     "pyrox",
     "einx>=0.4.3",
     "gaussx[numpyro]>=0.6.15",
+    "pyrox-gauss",
     "kernellib>=0.0.22",
     "matfree>=0.6.0",
     "numpyro>=0.21",

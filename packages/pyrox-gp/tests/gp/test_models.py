@@ -561,7 +561,7 @@ def test_gpprior_sample_marginal_matches_prior_log_prob():
 def test_gpprior_sample_invariant_to_dense_solver_choice():
     """Default solver resolution matches an explicit
     :class:`DenseSolver` — the configured ``solver`` propagates into
-    :class:`gaussx.MultivariateNormal`."""
+    :class:`pyrox_gauss.MultivariateNormal`."""
     X, _ = _toy_dataset(n=6)
     p_default = GPPrior(kernel=RBF(), X=X)
     p_dense = GPPrior(kernel=RBF(), X=X, solver=DenseSolver())

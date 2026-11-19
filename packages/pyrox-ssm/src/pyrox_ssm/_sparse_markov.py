@@ -45,7 +45,6 @@ from gaussx import (
     AbstractSolverStrategy,
     DenseSolver,
     GaussianState,
-    MultivariateNormal,
     SDEKernel,
     expected_log_likelihood,
     gaussian_log_prob,
@@ -54,6 +53,7 @@ from gaussx import (
 )
 from jaxtyping import Array, Bool, Float
 from pyrox.likelihoods import GaussianLikelihood, Guide, Likelihood
+from pyrox_gauss import MultivariateNormal
 
 from pyrox_ssm._markov import _observation_mask, _require_stationary
 from pyrox_ssm._markov_sites import as_gaussx_likelihood
