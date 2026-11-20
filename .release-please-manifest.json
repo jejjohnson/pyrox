@@ -5,5 +5,5 @@
   "packages/pyrox-lgm": "0.1.4",
   "packages/pyrox-ssm": "0.2.1",
   "packages/pyrox-gauss": "0.1.0",
-  "packages/pyrox-xtreme": "0.0.4"
+  "packages/pyrox-xtreme": "0.0.1"
 }

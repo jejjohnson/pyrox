@@ -2764,7 +2764,7 @@ provides-extras = ["flows", "ensemble"]
 
 [[package]]
 name = "pyrox-xtreme"
-version = "0.0.4"
+version = "0.0.1"
 source = { editable = "packages/pyrox-xtreme" }
 dependencies = [
     { name = "einops" },

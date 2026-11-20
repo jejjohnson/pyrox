@@ -1,6 +1,6 @@
 [project]
 name = "pyrox-xtreme"
-version = "0.0.4"
+version = "0.0.1"
 description = "Extreme value modelling in JAX and NumPyro: GEV, GPD, Gumbel, Fréchet and Weibull distributions, temporal, spatial and spatiotemporal point processes, and xarray extraction of block maxima and threshold exceedances."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},

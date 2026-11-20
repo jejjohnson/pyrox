@@ -56,7 +56,7 @@ from pyrox_xtreme.primitives import (
 )
 
 
-__version__: str = "0.0.4"  # x-release-please-version
+__version__: str = "0.0.1"  # x-release-please-version
 
 
 __all__ = [
