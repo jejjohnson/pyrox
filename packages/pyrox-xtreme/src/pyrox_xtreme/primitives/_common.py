@@ -163,3 +163,24 @@ def expm1_over_x(a: Float[Array, ...]) -> Float[Array, ...]:
     )
     result = jnp.where(small, series, exact)
     return jnp.where(posinf, jnp.inf, result)  # expm1(a)/a → +inf as a → +inf
+
+
+def log_neg_expm1_exp_neg(w: Float[Array, ...]) -> Array:
+    r"""Stable :math:`\log(1 - \exp(-e^{-w}))`, the GEV log survival in ``w``.
+
+    The direct form ``log(-expm1(-exp(-w)))`` is exact in the bulk but forms
+    the survival probability first, which underflows to 0 in the deep upper
+    tail (``w ≳ 745`` in float64, ``≳ 103`` in float32) and gives ``-inf``.
+    For ``w > 0`` the identity
+    :math:`\log(1 - e^{-t}) = -w + \log\big((1 - e^{-t})/t\big)`, with
+    :math:`t = e^{-w}`, is exact and tends to ``-w`` without materialising
+    the tiny probability. Each branch is evaluated on a sanitized argument
+    so the discarded one never feeds ``log 0`` to autodiff.
+    """
+    w = jnp.asarray(w)
+    upper = w > 0.0
+    w_up = jnp.where(upper, w, 1.0)
+    tail = -w_up + jnp.log(expm1_over_x(-jnp.exp(-w_up)))
+    t_bulk = jnp.where(upper, 1.0, safe_exp_neg(w))
+    bulk = jnp.log(-jnp.expm1(-t_bulk))
+    return jnp.where(upper, tail, bulk)

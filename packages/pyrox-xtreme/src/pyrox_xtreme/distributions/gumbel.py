@@ -16,6 +16,7 @@ import scipy.special as _sp_special
 from jax.scipy.special import gammaln
 
 from pyrox_xtreme._rng import check_prng_key
+from pyrox_xtreme.primitives._common import log_neg_expm1_exp_neg
 from pyrox_xtreme.primitives.gumbel import (
     gumbel_log_prob,
     gumbel_return_level,
@@ -286,13 +287,9 @@ class GumbelType1GEVD(dist.Gumbel):
         """
         loc, scale = self.loc, self.scale
         z = (value - loc) / scale
-        # S(x) = 1 - F(x) = -expm1(-exp(-z)).
-        # log S(x) = log(-expm1(-exp(-z))) — numerically stable across both
-        # tails. For large z: exp(-z) → 0, -expm1(-u) → u, so log S → -z
-        # (the correct Gumbel upper-tail asymptote). The previous branch
-        # returned ≈ -exp(-z) at large z, which tends to 0 instead of the
-        # large negative log-survival.
-        return jnp.log(-jnp.expm1(-jnp.exp(-z)))
+        # log S(x) = log(-expm1(-exp(-z))), in log space throughout: in the
+        # deep upper tail S underflows to 0 even in float64 while log S → -z.
+        return log_neg_expm1_exp_neg(z)
 
     def hazard_rate(self, value: jnp.ndarray) -> jnp.ndarray:
         r"""Hazard rate :math:`h(x) = f(x) / S(x)` for the Gumbel.

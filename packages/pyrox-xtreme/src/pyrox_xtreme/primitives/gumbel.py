@@ -13,6 +13,7 @@ import jax.numpy as jnp
 from jaxtyping import Array, Float
 
 from pyrox_xtreme.primitives._common import EULER_GAMMA
+from pyrox_xtreme.primitives.gev import gev_log_prob
 
 
 def gumbel_log_prob(
@@ -20,9 +21,13 @@ def gumbel_log_prob(
     loc: Float[Array, ...],
     scale: Float[Array, ...],
 ) -> Float[Array, ...]:
-    r"""Gumbel log PDF: :math:`-\log\sigma - z - e^{-z}`, :math:`z=(x-\mu)/\sigma`."""
-    z = (x - loc) / scale
-    return -jnp.log(scale) - z - jnp.exp(-z)
+    r"""Gumbel log PDF: :math:`-\log\sigma - z - e^{-z}`, :math:`z=(x-\mu)/\sigma`.
+
+    Evaluated by the GEV kernel at ξ = 0, whose guards give the extended-real
+    limits (``-inf`` at ``x = ±inf``) instead of ``inf - inf = nan`` at
+    ``x = -inf``, and keep the gradient finite in the deep lower tail.
+    """
+    return gev_log_prob(x, loc, scale, jnp.zeros_like(jnp.asarray(scale)))
 
 
 def gumbel_cdf(

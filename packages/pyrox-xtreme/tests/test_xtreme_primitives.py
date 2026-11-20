@@ -689,3 +689,58 @@ class TestEndpointDensityOverride:
             upper = d.support.upper_bound
             assert float(d.log_prob(upper)) == pytest.approx(float(limit), rel=1e-6)
             assert jnp.isneginf(d.log_prob(jnp.nextafter(upper, f32(10.0))))
+
+
+class TestDeepTailLogSurvival:
+    """log S stays in log space in the deep upper tail.
+
+    Regression (jejjohnson/pyrox#463): log S was ``log(-expm1(-exp(-w)))``,
+    whose survival probability underflows to 0 even in float64, so a standard
+    Gumbel at x = 1000 gave log S = -inf and an infinite hazard.
+    """
+
+    @pytest.mark.parametrize("x", [20.0, 200.0, 1000.0])
+    def test_gumbel_log_survival_tends_to_minus_z(self, x):
+        from pyrox_xtreme import GumbelType1GEVD
+
+        # Gumbel: log S(x) = log(1 - exp(-e^{-z})) = -z - e^{-z}/2 + O(e^{-2z}).
+        assert float(gev_log_survival(x, 0.0, 1.0, 0.0)) == pytest.approx(-x)
+        assert float(
+            GumbelType1GEVD(0.0, 1.0).log_survival_function(x)
+        ) == pytest.approx(-x)
+
+    def test_hazard_is_finite_far_in_the_tail(self):
+        from pyrox_xtreme import GeneralizedExtremeValueDistribution
+
+        d = GeneralizedExtremeValueDistribution(0.0, 1.0, 0.0)
+        # The Gumbel hazard tends to 1/σ and the cumulative hazard to z.
+        assert float(d.hazard_rate(1000.0)) == pytest.approx(1.0, rel=1e-5)
+        assert float(d.cumulative_hazard_rate(1000.0)) == pytest.approx(1000.0)
+
+    @pytest.mark.parametrize(("x", "xi"), [(-3.0, 0.0), (3.0, 0.0), (3.0, 0.1)])
+    def test_bulk_matches_scipy(self, x, xi):
+        assert float(gev_log_survival(x, 0.0, 1.0, xi)) == pytest.approx(
+            # abs: float32 resolves log S only to about one ulp of 1.
+            st.genextreme.logsf(x, c=-xi),
+            rel=1e-6,
+            abs=1e-6,
+        )
+
+
+class TestGumbelLogProbLimits:
+    """Regression (jejjohnson/pyrox#463): ``gumbel_log_prob(-inf)`` was
+    ``inf - inf = nan``; it now matches ``gev_log_prob`` at ξ = 0."""
+
+    def test_extended_real_limits(self):
+        assert jnp.isneginf(gumbel_log_prob(-jnp.inf, 0.0, 1.0))
+        assert jnp.isneginf(gumbel_log_prob(jnp.inf, 0.0, 1.0))
+        assert jnp.isnan(gumbel_log_prob(jnp.nan, 0.0, 1.0))
+
+    def test_matches_gev_at_shape_zero(self):
+        x = jnp.linspace(-4.0, 12.0, 9)
+        assert jnp.allclose(
+            gumbel_log_prob(x, 0.3, 1.7), gev_log_prob(x, 0.3, 1.7, 0.0)
+        )
+        assert jnp.allclose(
+            gumbel_log_prob(x, 0.3, 1.7), st.gumbel_r.logpdf(x, 0.3, 1.7), rtol=1e-5
+        )

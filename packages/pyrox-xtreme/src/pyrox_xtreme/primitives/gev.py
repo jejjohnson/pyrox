@@ -29,6 +29,7 @@ from pyrox_xtreme.primitives._common import (
     clamped_standardize,
     expm1_over_x,
     log1p_over_x,
+    log_neg_expm1_exp_neg,
     safe_exp_neg,
     safe_exp_neg_density,
 )
@@ -178,7 +179,9 @@ def gev_log_survival(
     valid, u_safe = _support(shape, z)
 
     w = _reduced_exponent(z, u_safe, valid)
-    ls_inside = jnp.log(-jnp.expm1(-safe_exp_neg(w)))
+    # Log space throughout: in the deep upper tail S underflows to 0 even in
+    # float64 (a standard Gumbel at x = 1000), while log S is about -w.
+    ls_inside = log_neg_expm1_exp_neg(w)
     boundary = jnp.where(shape > 0, 0.0, -jnp.inf)
     ls = jnp.where(valid, ls_inside, boundary)
 
