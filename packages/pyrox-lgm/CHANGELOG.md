@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.4](https://github.com/jejjohnson/pyrox/compare/pyrox-lgm-v0.1.3...pyrox-lgm-v0.1.4) (2026-11-19)
+
+
+### Features
+
+* **lgm:** add MarkovGP, a gaussx SDE kernel on sorted times as a GMRF component ([#448](https://github.com/jejjohnson/pyrox/issues/448)) ([38feb4b](https://github.com/jejjohnson/pyrox/commit/38feb4b68153da8e11b0baf66479a1ba5a29ae87))
+* **lgm:** let SPDE.project_points take a grid with a one-node axis ([#441](https://github.com/jejjohnson/pyrox/issues/441)) ([f4e14db](https://github.com/jejjohnson/pyrox/commit/f4e14dbf32ca2b3650ef37d930e5c6733df9c46f)), closes [#397](https://github.com/jejjohnson/pyrox/issues/397)
+
 ## [0.1.3](https://github.com/jejjohnson/pyrox/compare/pyrox-lgm-v0.1.2...pyrox-lgm-v0.1.3) (2026-10-23)
 
 
