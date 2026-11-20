@@ -1,7 +1,7 @@
 # Code Review Agent Instructions
 
 Standing instructions for **all** agents performing code reviews on this
-repository. xtremax is an extreme value library on JAX and NumPyro: most
+repository. pyrox-xtreme is an extreme value library on JAX and NumPyro: most
 defects worth finding are **numerical** (a hard branch at ξ = 0 that
 returns NaN gradients, a tail computed as `1 - F`, a return level that
 rounds to infinity in float32, a support whose bijector breaks NUTS) or
@@ -56,7 +56,7 @@ see.
   modules). A re-implemented density, quantile, return level, compensator,
   sampler, thinning loop, quadrature or GOF statistic is a **High**
   finding, with the existing name to use.
-- No `import pipekit` / `pipekit_cycle` anywhere in `src/xtremax/` (interop
+- No `import pipekit` / `pipekit_cycle` anywhere in `src/pyrox_xtreme/` (interop
   is structural only); no hand-written MCMC / SVI (NumPyro owns inference);
   scikit-learn imported only in `extraction/quantile_regression.py`; no
   GP machinery beyond `primitives/spatial.py`.
@@ -136,21 +136,21 @@ see.
 ### 6. Public API and documentation
 
 - New names: in their subpackage `__all__` (and the top-level
-  `src/xtremax/__init__.py` for distributions and `xtremax.primitives`), in
+  `src/pyrox_xtreme/__init__.py` for distributions and `pyrox_xtreme.primitives`), in
   the `members:` list of the right section of their `docs/api/*.md` page,
   and `docs/api/capabilities.md` regenerated (`make capabilities`).
 - Docstrings: Google style (NumPy style in `extraction/`); the formula, the
   parameterisation and its relation to scipy's sign convention, a
   reference for a published method, and an `Examples:` block that is
   correct (no test runs it).
-- Prose pages use MyST directives and `xref:api#xtremax.<module>.<name>`;
+- Prose pages use MyST directives and `xref:api#pyrox-xtreme.<module>.<name>`;
   notebook basenames stay unique; new notebooks join the `docs/myst.yml`
   toc and are committed executed.
 
 ### 7. Tests
 
 - Values pinned to an independent oracle (`scipy.stats`, a closed form,
-  mpmath), not to xtremax's own formula; parameters away from 0 / 1 so a
+  mpmath), not to pyrox-xtreme's own formula; parameters away from 0 / 1 so a
   parameterisation slip shows; the ξ grid straddles 0 including the small
   band (1e-6, 1e-4).
 - Gradients checked against finite differences, including at ξ = 0.
@@ -183,7 +183,7 @@ see.
 w = jnp.where(xi == 0, z, jnp.log1p(xi * z) / xi)
 
 # ✅ Smooth through ξ = 0; at ξ = 0 the gradient is the exact -z²/2
-from xtremax.primitives._common import log1p_over_x
+from pyrox_xtreme.primitives._common import log1p_over_x
 
 w = z * log1p_over_x(xi * z)
 ```
@@ -232,7 +232,7 @@ script = textwrap.dedent(
     import jax
     jax.config.update("jax_enable_x64", True)
     import numpy as np
-    from xtremax.primitives import gev_survival
+    from pyrox_xtreme.primitives import gev_survival
     s = gev_survival(np.float64(40.0), 0.0, 1.0, 0.0)
     assert s.dtype == np.float64 and abs(s / np.exp(-40.0) - 1) < 1e-12
     """

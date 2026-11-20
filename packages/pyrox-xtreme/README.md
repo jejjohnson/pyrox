@@ -1,33 +1,22 @@
-# xtremax
-
-[![Tests](https://github.com/jejjohnson/xtremax/actions/workflows/tests-extended.yml/badge.svg?branch=main)](https://github.com/jejjohnson/xtremax/actions/workflows/tests-extended.yml)
-[![Lint](https://github.com/jejjohnson/xtremax/actions/workflows/lint.yml/badge.svg)](https://github.com/jejjohnson/xtremax/actions/workflows/lint.yml)
-[![Type Check](https://github.com/jejjohnson/xtremax/actions/workflows/typecheck.yml/badge.svg)](https://github.com/jejjohnson/xtremax/actions/workflows/typecheck.yml)
-[![Deploy Docs](https://github.com/jejjohnson/xtremax/actions/workflows/pages.yml/badge.svg)](https://github.com/jejjohnson/xtremax/actions/workflows/pages.yml)
-[![codecov](https://codecov.io/gh/jejjohnson/xtremax/branch/main/graph/badge.svg)](https://codecov.io/gh/jejjohnson/xtremax)
-[![PyPI version](https://img.shields.io/pypi/v/xtremax.svg)](https://pypi.org/project/xtremax/)
-[![Python versions](https://img.shields.io/pypi/pyversions/xtremax.svg)](https://pypi.org/project/xtremax/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+# pyrox-xtreme
 
 **Extreme value theory for JAX — NumPyro-native EVT distributions, temporal / spatial / spatiotemporal point processes, and xarray-native extremes extraction.**
 
 Built on top of [JAX](https://github.com/jax-ml/jax), [NumPyro](https://github.com/pyro-ppl/numpyro), [equinox](https://github.com/patrick-kidger/equinox), and [xarray](https://github.com/pydata/xarray).
 
-Extreme value analysis is central to climate risk, engineering reliability, finance, and insurance — yet the Python ecosystem forces practitioners to cobble together `scipy.stats`, hand-rolled log-likelihoods, and ad hoc xarray scripts. xtremax puts the whole workflow in one differentiable place: extract extremes from spatiotemporal data, fit Bayesian EVT and point-process models with NumPyro, and compute return levels with full posterior uncertainty.
+This package was the xtremax repository until it moved into the pyrox workspace (jejjohnson/pyrox#454), with its history. The import is now `pyrox_xtreme` (it was `xtremax`), and nothing else about the API changed. It imports nothing from `pyrox`.
+
+Extreme value analysis is central to climate risk, engineering reliability, finance, and insurance — yet the Python ecosystem forces practitioners to cobble together `scipy.stats`, hand-rolled log-likelihoods, and ad hoc xarray scripts. pyrox-xtreme puts the whole workflow in one differentiable place: extract extremes from spatiotemporal data, fit Bayesian EVT and point-process models with NumPyro, and compute return levels with full posterior uncertainty.
 
 ## Installation
 
-```bash
-pip install xtremax
-```
-
-Or with `uv`:
+pyrox-xtreme is not on PyPI yet. Install it from its subdirectory of the pyrox repository with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv add xtremax
+uv add "pyrox-xtreme @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-xtreme"
 ```
+
+The `[threshold]` extra adds scikit-learn for the quantile-regression thresholds.
 
 ## Quick Start
 
@@ -37,11 +26,11 @@ import numpyro
 import numpyro.distributions as dist
 from numpyro.infer import MCMC, NUTS
 
-import xtremax
+import pyrox_xtreme
 
 # NumPyro-native EVT distributions — sample, log_prob, cdf, icdf,
 # moments, and return levels, all differentiable
-gev = xtremax.GeneralizedExtremeValueDistribution(
+gev = pyrox_xtreme.GeneralizedExtremeValueDistribution(
     loc=30.0, scale=2.0, concentration=0.1
 )
 maxima = gev.sample(jr.key(0), (100,))
@@ -54,7 +43,7 @@ def model(y):
     conc = numpyro.sample("concentration", dist.Normal(0.0, 0.3))
     numpyro.sample(
         "obs",
-        xtremax.GeneralizedExtremeValueDistribution(loc, scale, conc),
+        pyrox_xtreme.GeneralizedExtremeValueDistribution(loc, scale, conc),
         obs=y,
     )
 
@@ -65,7 +54,7 @@ mcmc.run(jr.key(1), maxima)
 Extracting extremes from spatiotemporal data stays in xarray — coordinates, dimensions, and metadata are preserved:
 
 ```python
-import xtremax.extraction as xtx
+import pyrox_xtreme.extraction as xtx
 
 # da: any xr.DataArray with a "time" dimension, e.g. daily station temperatures
 annual_max = xtx.temporal_block_maxima(da, freq="YE")       # block maxima
@@ -102,7 +91,7 @@ Turn raw spatiotemporal data into modeling-ready extremes. Inputs are `xr.DataAr
 | Group | Functions |
 |-------|-----------|
 | **Block maxima** | `temporal_block_maxima`, `spatial_block_maxima`, `sliding_block_maxima`, `r_largest_block_maxima`, `declustered_block_maxima` |
-| **Thresholds** | `constant_threshold`, `quantile_threshold`, `rolling_threshold`, `seasonal_threshold`, `temporal_threshold`, quantile-regression thresholds (needs the `xtremax[threshold]` extra) |
+| **Thresholds** | `constant_threshold`, `quantile_threshold`, `rolling_threshold`, `seasonal_threshold`, `temporal_threshold`, quantile-regression thresholds (needs the `pyrox-xtreme[threshold]` extra) |
 | **Declustering** | `decluster_runs`, `decluster_separation`, `estimate_extremal_index` |
 
 ### Point Processes — three-tier API
@@ -123,31 +112,21 @@ Generators for testing and teaching: `simulate_temp_extremes`, `simulate_precip_
 
 ## Documentation
 
-- **[Documentation site](https://jejjohnson.github.io/xtremax/)** — examples, design docs, and full API reference
-- **[Examples](https://jejjohnson.github.io/xtremax/)** — 20+ executed notebooks: GEV on block maxima, GPD peaks-over-threshold, non-stationary GEV (parametric trends, P-splines, neural ODEs), and every point process from scratch *and* through NumPyro
-- **[Spatial extremes tutorials](https://jejjohnson.github.io/xtremax/spatial-extremes/)** — a real-data curriculum on CDS station temperatures over Spain: block maxima → GEV → hierarchical pooling → spatial GP-GEV fields → non-stationary trends
-- **[API reference](https://jejjohnson.github.io/xtremax/reference/)** — every public symbol, generated from the docstrings
-- **[Design docs](https://jejjohnson.github.io/xtremax/design-overview/)** — vision, architecture, API design, and decision records
-- **[Interop](https://jejjohnson.github.io/xtremax/interop/)** — how xtremax composes with the wider ecosystem (NumPyro, pipekit) without depending on it
+- **[Documentation site](https://jejjohnson.github.io/pyrox/xtreme/)** — the pyrox site's extremes section: examples, tutorials and the API reference
+- **[Examples](https://jejjohnson.github.io/pyrox/xtreme/)** — 20+ executed notebooks: GEV on block maxima, GPD peaks-over-threshold, non-stationary GEV (parametric trends, P-splines, neural ODEs), and every point process from scratch *and* through NumPyro
+- **[Spatial extremes tutorials](https://jejjohnson.github.io/pyrox/xtreme/tutorials/spatial_extremes/)** — a real-data curriculum on CDS station temperatures over Spain: block maxima → GEV → hierarchical pooling → spatial GP-GEV fields → non-stationary trends
+- **[API reference](https://jejjohnson.github.io/pyrox/api/xtreme/)** — every public symbol, generated from the docstrings
+- **[Design docs](https://github.com/jejjohnson/pyrox/blob/main/design_docs/pyrox-xtreme/design_overview.md)** — vision, architecture, API design, and decision records
+- **[Interop](https://jejjohnson.github.io/pyrox/xtreme/interop/)** — how pyrox-xtreme composes with the wider ecosystem (NumPyro, pipekit) without depending on it
 
 ## Development
 
-```bash
-git clone https://github.com/jejjohnson/xtremax.git
-cd xtremax
-make install      # install all dependency groups + pre-commit hooks
-make test         # run the whole suite (parallel)
-make test-fast    # fast lane only — what CI runs on a PR (~1 min)
-make lint         # ruff check .
-make typecheck    # ty check src/xtremax
-make docs-serve   # preview docs locally
-```
+pyrox-xtreme is developed in the pyrox workspace; see the root [`README.md`](../../README.md) and [`AGENTS.md`](AGENTS.md). From the repository root:
 
-The suite is split by marker: `slow` (samplers, Monte-Carlo, jit+grad sweeps)
-and `integration` (end-to-end MCMC fits) run on merge to `main`, on release
-tags, and on demand; everything else runs on every PR. Coverage is measured
-over the whole suite in the extended lane — use `make test-cov` locally rather
-than a bare `pytest --cov`.
+```bash
+make install
+uv run pytest --no-cov -m "not slow and not integration" packages/pyrox-xtreme/tests
+```
 
 ## License
 

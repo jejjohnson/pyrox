@@ -3,12 +3,17 @@
   "owner": {
     "name": "jejjohnson"
   },
-  "description": "Claude Code plugins for probabilistic modelling with Equinox and NumPyro on pyrox.",
+  "description": "Claude Code plugins for probabilistic modelling with Equinox and NumPyro on pyrox, and for extreme value analysis on pyrox-xtreme.",
   "plugins": [
     {
       "name": "pyrox",
       "source": "./plugins/pyrox",
       "description": "Build Bayesian models on pyrox (the Equinox ↔ NumPyro bridge, pyrox-gp, pyrox-nn, pyrox-lgm) instead of re-implementing site plumbing, GP likelihoods, Bayesian layers or INLA: a model-building skill and a reuse reviewer."
+    },
+    {
+      "name": "pyrox-xtreme",
+      "source": "./plugins/pyrox-xtreme",
+      "description": "Build extreme value analyses on pyrox-xtreme (NumPyro GEV / GPD / Gumbel / Fréchet / Weibull distributions, stable pure-JAX primitives, return levels, point processes, xarray block maxima, thresholds and declustering) instead of re-implementing them: an extreme-value-analysis skill and a reuse reviewer."
     }
   ]
 }
