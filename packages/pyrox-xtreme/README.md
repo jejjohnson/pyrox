@@ -52,6 +52,8 @@ None of it is new machinery. The distributions subclass [`numpyro`](https://gith
 
 pyrox-xtreme was the xtremax repository until it moved into the pyrox workspace (#454) with its history; the import changed from `xtremax` to `pyrox_xtreme` and nothing else in the API did. It imports nothing from the other pyrox packages; the [workspace README](../../README.md) introduces them.
 
+<p align="center"><img src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_xtreme_overview/pyrox_xtreme_overview.png" alt="pyrox-xtreme in one picture: you supply a record, events, covariates and a NumPyro model; one tail with shape ξ gives the GEV for block maxima, the GPD for excesses over a threshold and an intensity for events in time or space; pyrox-xtreme extracts the extremes, holds the EVT likelihoods, the pure-JAX maths, the point processes and synthetic climates; out come extremes on their grid, a posterior over μ, σ and ξ, return levels with intervals and an intensity with its fit; numpyro, jax, equinox, and xarray with scipy underneath" width="100%"></p>
+
 ## 🌟 Highlights
 
 - 📈 **EVT distributions that NumPyro can sample**: `GeneralizedExtremeValueDistribution`, `GeneralizedParetoDistribution`, `GumbelType1GEVD`, `FrechetType2GEVD` and `WeibullType3GEVD` are NumPyro distributions whose supports have working bijectors, so each one is a likelihood or a latent site under NUTS, SVI and `Predictive`.
@@ -235,6 +237,15 @@ This prints `events 165  proposals 13946  mu 0.59  alpha/beta 0.30  KS 0.064`. T
 
 ## 🔬 What else is in the box
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_xtreme_roles/pyrox_xtreme_roles-dark.svg">
+    <img alt="pyrox-xtreme on the GeoStack role ladder: the samplers and the non-stationary return-level solve as algorithms; the five EVT distributions, the fourteen point processes, their NumPyro wrappers and the quantile regressor as models; the Hawkes kernel, the piecewise intensity and the retention and mark adapters as strategies; the EVT maths, the point-process functions, the quadrature, the diagnostics, the extraction and the models' methods as primitives; the domains, event histories and sample results as structures; NumPyro's inference and the synthetic-climate generators beside the ladder" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_xtreme_roles/pyrox_xtreme_roles-light.svg" width="100%">
+  </picture>
+</p>
+
+Each public name sits on one rung of the GeoStack role ladder, by the job it does; the figure shows a few names per group, and the table below lists them all.
+
 `import pyrox_xtreme` exports the five distributions and every primitive; each subpackage has its own `__all__`.
 
 | Module | Symbols | Notes |
@@ -276,6 +287,13 @@ This prints `events 165  proposals 13946  mu 0.59  alpha/beta 0.30  KS 0.064`. T
 - **[`AGENTS.md`](AGENTS.md)**: the contracts of each layer (stable forms, supports, padded buffers, xarray in and out) and the tests that hold them.
 
 ## 🧩 Ecosystem
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_xtreme_ecosystem/pyrox_xtreme_ecosystem-dark.svg">
+    <img alt="No package imports pyrox-xtreme yet; plumax's population extra still imports xtremax.point_processes lazily from the archived xtremax repository, drawn dashed in GeoModels; pyrox-xtreme builds on JAX, NumPyro, Equinox, xarray, NumPy, SciPy, pandas, einops and jaxtyping, and on scikit-learn through its threshold extra" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_xtreme_ecosystem/pyrox_xtreme_ecosystem-light.svg" width="100%">
+  </picture>
+</p>
 
 pyrox-xtreme is a package of the pyrox [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/), in the GeoML layer of the [GeoStack](https://github.com/jejjohnson/geostack). It owns the extreme-value maths, the point processes and the extraction, and composes the rest in:
 
