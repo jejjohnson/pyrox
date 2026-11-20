@@ -82,6 +82,9 @@ docs = [
     # cross-reference into it. See docs/README.md.
     "zensical>=0.0.74",
     "mkdocstrings[python]>=1.0.8",
+    # scripts/build_docs.py, which builds both halves and checks their links.
+    "cyclopts>=4",
+    "loguru>=0.7",
     "jupytext>=1.19.1",
     "ipykernel>=7.2.0",
     # matplotlib + watermark used by the example notebooks during local

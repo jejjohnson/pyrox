@@ -2,7 +2,7 @@
 
 *Explainer · how KISS-GP's interpolation weights and the methane column averaging kernel relate, followed through one TROPOMI example.*
 
-[Open the full page](pages/averaging-kernel-kiss-gp.html){ .md-button .md-button--primary }
+{button}`Open the full page <https://jejjohnson.github.io/pyrox/explainers/pages/averaging-kernel-kiss-gp.html>`
 
 **Where it sits.** The full page is a self-contained document (operator chart, model boxes, units checks, a code sketch and worked numbers) that opens on its own and links back here. It uses one running example throughout: three TROPOMI XCH₄ pixels over a 25 km model grid with 12 retrieval layers.
 

@@ -12,7 +12,7 @@ pyrox bridges [Equinox](https://docs.kidger.site/equinox/) modules and [NumPyro]
 - **`pyrox_lgm`** — latent Gaussian models in precision form: GMRF components, PC priors, `inla()`.
 - **`pyrox_ssm`** — state-space models as NumPyro models, whose inference recurses in time: Markov (Kalman) GPs over SDE kernels, sparse and non-Gaussian Markov GPs, the normalizing Kalman filter.
 - **`pyrox_gauss`** — Gaussian NumPyro distributions on gaussx operators: multivariate normals, linear-Gaussian state-space models, `MarkovGaussian`, and `GMRFDistribution` for gaussx's GMRF fields. It imports gaussx and NumPyro, not `pyrox`.
-- **`pyrox_xtreme`** — extreme value modelling, formerly xtremax: GEV, GPD, Gumbel, Fréchet and Weibull distributions as NumPyro likelihoods, temporal, spatial and spatiotemporal point processes, and xarray block maxima, thresholds and declustering. It imports NumPyro, not `pyrox`; see [Extremes](xtreme/index.md).
+- **`pyrox_xtreme`** — extreme value modelling, formerly xtremax: GEV, GPD, Gumbel, Fréchet and Weibull distributions as NumPyro likelihoods, temporal, spatial and spatiotemporal point processes, and xarray block maxima, thresholds and declustering. It imports NumPyro, not `pyrox`; see [Extremes](xtreme/extremes.md).
 
 ## Installation
 
@@ -104,10 +104,10 @@ Switch `kernel.set_mode("guide")` to draw variational params instead of sampling
 
 ## Links
 
-- [API Reference](api/reference.md)
-- [Core API](api/core.md)
-- [GP API](api/gp.md)
-- [NN API](api/nn.md)
+- [API reference](https://jejjohnson.github.io/pyrox/reference/)
+- [Core API](https://jejjohnson.github.io/pyrox/reference/core/)
+- [GP API](https://jejjohnson.github.io/pyrox/reference/gp/)
+- [NN API](https://jejjohnson.github.io/pyrox/reference/nn/)
 - [Contributing](contributing.md)
 - [Changelog](CHANGELOG.md)
 - [GitHub](https://github.com/jejjohnson/pyrox)

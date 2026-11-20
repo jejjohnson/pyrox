@@ -99,6 +99,8 @@ venv.bak/
 
 # mkdocs documentation
 /site
+# the assembled two-tool docs site (scripts/build_docs.py)
+/public
 
 # mypy
 .mypy_cache/

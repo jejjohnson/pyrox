@@ -40,7 +40,7 @@ nif = HyperSIREN(
 y = nif(jnp.ones((10, 2)), jnp.ones((3,)))           # (10, 1)
 ```
 
-For a hands-on walkthrough see the [Conditional Neural Fields notebook](../../../conditioning/).
+For a hands-on walkthrough see the [Conditional Neural Fields notebook](../../conditioning/).
 
 ## Protocol
 

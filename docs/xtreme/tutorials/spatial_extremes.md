@@ -31,9 +31,9 @@ primitives, and
 [`assemble_nonstationary_gev_fields`][pyrox_xtreme.primitives.assemble_nonstationary_gev_fields]
 for the time-varying models.
 
-!!! note "Pre-executed notebooks"
-
-    These notebooks are committed **with their outputs** and are not re-run by the docs build: the real-data path needs CDS credentials and a long, resumable download. See [Re-running the notebooks](#re-running-the-notebooks) to reproduce them.
+:::{note} Pre-executed notebooks
+These notebooks are committed **with their outputs** and are not re-run by the docs build: the real-data path needs CDS credentials and a long, resumable download. See [Re-running the notebooks](#re-running-the-notebooks) to reproduce them.
+:::
 
 ## The build-up
 
@@ -90,6 +90,7 @@ integrated random walk, the stochastic sibling of the ODE), shows why a free
 stationary GP over-fits a short record, and puts all three trends on one set of
 axes.
 
+(re-running-the-notebooks)=
 ## Re-running the notebooks
 
 The notebooks share a small helper package, `spatial_extremes`, that lives next
