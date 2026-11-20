@@ -102,6 +102,8 @@ def local_level(y, mask):
 
 `MarkovGPPrior` is its kernel-built special case: [`as_lgssm(noise_var)`][pyrox_ssm.MarkovGPPrior.as_lgssm] returns the kernel's discretised transitions over the time grid (with a leading zero step, so `A_1 = I` and `Q_1 = 0`), `H`, `R_k = noise_var + obs_noise_floor`, `m_0 = 0`, `P_0 = initial_covariance()` and the offset `b_k = mean_fn(t_k)`. `MarkovGPPrior`'s filtering and smoothing run through this model, so the two agree bit for bit.
 
+After `condition(y, mask=mask)`, [`predict()`][pyrox_ssm.ConditionedLinearGaussianSSM.predict] returns each channel's posterior mean `H_k m_{k|T} + b_k` and variance `diag(H_k P_{k|T} H_kᵀ)` at every step, `(T, M)` each, and `include_noise=True` adds `diag(R_k)` for the band a new observation should fall in. The model is indexed by step, so to forecast or fill a gap, extend the matrices over the extra steps and mask them.
+
 ::: pyrox_ssm.LinearGaussianSSMPrior
 ::: pyrox_ssm.ConditionedLinearGaussianSSM
 ::: pyrox_ssm.lgssm_factor
