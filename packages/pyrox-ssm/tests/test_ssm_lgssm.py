@@ -10,7 +10,10 @@ The contracts:
   masked (the dense reference keeps the observed entries only);
 * gradients match finite differences, and every matrix field is
   differentiable under ``jit``, inside NUTS, and with ``NaN`` placeholders at
-  masked entries.
+  masked entries;
+* ``ConditionedLinearGaussianSSM.predict`` equals ``ConditionedMarkovGP.predict``
+  on an ``as_lgssm`` model and the dense Gaussian conditional of each channel,
+  and ``include_noise`` adds exactly ``diag(R_k)``.
 
 The dense references are exact in exact arithmetic; under x64 the Kalman
 recursion and the dense Cholesky round differently by ~1e-14 on these
@@ -397,3 +400,85 @@ def test_bad_observation_and_mask_shapes_raise() -> None:
         prior.log_marginal(jnp.ones(T))
     with pytest.raises(ValueError, match="mask has shape"):
         prior.log_marginal(jnp.ones((T, 2)), mask=jnp.ones((T, 3), dtype=bool))
+
+
+# --- ConditionedLinearGaussianSSM.predict ----------------------------------
+
+
+@pytest.mark.parametrize("with_mean", [False, True], ids=["zero-mean", "mean-fn"])
+@pytest.mark.parametrize("masked", [False, True], ids=["unmasked", "masked"])
+@pytest.mark.parametrize("include_noise", [False, True], ids=["latent", "noisy"])
+def test_predict_matches_the_markov_gp_at_its_times(
+    with_mean: bool, masked: bool, include_noise: bool
+) -> None:
+    prior = _markov_prior(with_mean=with_mean)
+    times = prior.times
+    y = jnp.sin(2.0 * times) + 0.3 * times
+    mask = (jnp.arange(T) % 3 != 1) if masked else None
+    if masked:
+        y = jnp.where(mask, y, jnp.nan)
+    mean, var = (
+        prior.as_lgssm(NOISE)
+        .condition(y, mask=mask)
+        .predict(include_noise=include_noise)
+    )
+    mean_ref, var_ref = prior.condition(y, NOISE, mask=mask).predict(
+        times, include_noise=include_noise
+    )
+    # The same model on one grid against the merged grid with a zero-length
+    # step to each test time: equal to round-off, so the issue's rtol=1e-10.
+    assert mean.shape == var.shape == (T, 1)
+    assert jnp.allclose(mean[:, 0], mean_ref, rtol=1e-10, atol=1e-12)
+    assert jnp.allclose(var[:, 0], var_ref, rtol=1e-10, atol=1e-12)
+
+
+@pytest.mark.parametrize("per_entry", [True, False], ids=["T-M-mask", "T-mask"])
+def test_predict_matches_the_dense_gaussian_conditional(per_entry: bool) -> None:
+    prior = _two_output_model(jr.key(16))
+    y = jr.normal(jr.key(17), (T, 2))
+    if per_entry:
+        mask = jnp.ones((T, 2), dtype=bool)
+        mask = mask.at[jnp.array([1, 4, 8]), 0].set(False).at[6, 1].set(False)
+        keep = mask.reshape(-1)
+    else:
+        mask = jnp.arange(T) % 4 != 3
+        keep = jnp.repeat(mask, 2)
+    mean, cov_y = _dense_moments(prior)
+    # The signal f_k = H_k x_k + b_k has the observations' covariance less R_k.
+    R = jnp.broadcast_to(prior.obs_noise, (T, 2, 2))
+    cov_f = cov_y - jax.scipy.linalg.block_diag(*R)
+    obs = jnp.flatnonzero(keep)
+    gain = jnp.linalg.solve(cov_y[jnp.ix_(obs, obs)], cov_f[obs, :]).T
+    mean_ref = mean + gain @ (y.reshape(-1)[obs] - mean[obs])
+    var_ref = jnp.diag(cov_f - gain @ cov_f[obs, :])
+
+    y_in = jnp.where(mask if per_entry else mask[:, None], y, jnp.nan)
+    got_mean, got_var = prior.condition(y_in, mask=mask).predict()
+    assert jnp.allclose(got_mean.reshape(-1), mean_ref, rtol=1e-10, atol=1e-12)
+    assert jnp.allclose(got_var.reshape(-1), var_ref, rtol=1e-10, atol=1e-12)
+
+
+@pytest.mark.parametrize("per_step_noise", [False, True], ids=["one-R", "R-per-step"])
+def test_predict_include_noise_adds_exactly_the_noise_diagonal(
+    per_step_noise: bool,
+) -> None:
+    prior = _two_output_model(jr.key(18))
+    if per_step_noise:
+        scale = 1.0 + jnp.arange(T)[:, None, None] / T
+        prior = LinearGaussianSSMPrior(
+            prior.transition,
+            prior.obs_model,
+            prior.process_noise,
+            scale * prior.obs_noise,
+            prior.init_mean,
+            prior.init_cov,
+            obs_offset=prior.obs_offset,
+        )
+    cond = prior.condition(jr.normal(jr.key(19), (T, 2)))
+    mean, var = cond.predict()
+    mean_noisy, var_noisy = cond.predict(include_noise=True)
+    R = jnp.broadcast_to(prior.obs_noise, (T, 2, 2))
+    assert jnp.array_equal(mean_noisy, mean)
+    assert jnp.allclose(
+        var_noisy - var, jnp.diagonal(R, axis1=-2, axis2=-1), rtol=1e-12
+    )

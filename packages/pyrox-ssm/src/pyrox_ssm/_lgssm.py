@@ -441,7 +441,8 @@ class ConditionedLinearGaussianSSM(eqx.Module):
     r"""A `LinearGaussianSSMPrior` conditioned on observations.
 
     Holds the smoothed moments of $p(x_k \mid y_{1:T})$, row $k - 1$ for
-    step $k$, and the log marginal.
+    step $k$, and the log marginal. `predict` gives each observation
+    channel's marginal mean and variance at every step.
 
     Attributes:
         prior: The originating `LinearGaussianSSMPrior`.
@@ -470,6 +471,70 @@ class ConditionedLinearGaussianSSM(eqx.Module):
     smoothed_covs: Float[Array, "T D D"]
     log_marginal: Float[Array, ""]
     mask: Bool[Array, " T"] | Bool[Array, "T M"] | None = None
+
+    def predict(
+        self, *, include_noise: bool = False
+    ) -> tuple[Float[Array, "T M"], Float[Array, "T M"]]:
+        r"""Marginal mean and variance of each observation channel at every step.
+
+        With the smoothed moments $m_{k \mid T}, P_{k \mid T}$ and the known
+        offset $b_k$ (``obs_offset``, zero by default),
+
+        $$
+        \mathbb{E}[y_k \mid y_{\mathrm{obs}}] = H_k m_{k \mid T} + b_k,
+        \qquad
+        \mathrm{Var}[(H_k x_k)_j \mid y_{\mathrm{obs}}]
+          = (H_k P_{k \mid T} H_k^\top)_{jj},
+        $$
+
+        and ``include_noise=True`` adds $(R_k)_{jj}$, the variance of a new
+        observation, for the band a withheld one should fall in. The mean is
+        the same either way.
+
+        The model is indexed by step, so there are no new times to predict
+        at: to forecast or fill a gap, extend the prior's matrices over the
+        extra steps and mask them, since a masked step runs the predict only.
+        For a `pyrox_ssm.MarkovGPPrior.as_lgssm` model this equals
+        `pyrox_ssm.ConditionedMarkovGP.predict` at the training times.
+
+        Args:
+            include_noise: Add the observation-noise variance $(R_k)_{jj}$.
+                Default ``False``.
+
+        Returns:
+            ``(mean, var)``, each shaped ``(T, M)``, row $k - 1$ holding
+            step $k$.
+
+        Examples:
+            A local-level model with its third step missing:
+
+            >>> import jax.numpy as jnp
+            >>> import pyrox_ssm as pss
+            >>> prior = pss.LinearGaussianSSMPrior(
+            ...     jnp.ones((4, 1, 1)), jnp.eye(1), jnp.full((4, 1, 1), 0.1),
+            ...     0.5 * jnp.eye(1), jnp.zeros(1), jnp.eye(1),
+            ... )
+            >>> y = jnp.array([0.1, 0.3, jnp.nan, 0.2])
+            >>> cond = prior.condition(y, mask=~jnp.isnan(y))
+            >>> mean, var = cond.predict()
+            >>> _, band = cond.predict(include_noise=True)
+            >>> mean.shape, var.shape
+            ((4, 1), (4, 1))
+        """
+        H = self.prior.obs_model
+        # H_k m_k|T and diag(H_k P_k|T H_kᵀ), with one H or one per step.
+        if H.ndim == 2:
+            mean = einx.dot("m d, t d -> t m", H, self.smoothed_means)
+            var = einx.dot("m d, t d e, m e -> t m", H, self.smoothed_covs, H)
+        else:
+            mean = einx.dot("t m d, t d -> t m", H, self.smoothed_means)
+            var = einx.dot("t m d, t d e, t m e -> t m", H, self.smoothed_covs, H)
+        if self.prior.obs_offset is not None:
+            mean = mean + self.prior.obs_offset
+        if include_noise:
+            # diag(R_k), (M,) for one R or (T, M) for one per step; broadcasts.
+            var = var + jnp.diagonal(self.prior.obs_noise, axis1=-2, axis2=-1)
+        return mean, var
 
 
 def lgssm_factor(
