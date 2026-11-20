@@ -42,7 +42,7 @@ from pyrox_ssm._lgssm import LinearGaussianSSMPrior
 
 
 if TYPE_CHECKING:
-    from pyrox_ssm._inference_nongauss_markov import NonGaussConditionedMarkovGP
+    from pyrox_ssm._inference_nongauss_markov import ConditionedNonGaussMarkovGP
 
 
 class _NonGaussMarkovStrategy(Protocol):
@@ -55,7 +55,7 @@ class _NonGaussMarkovStrategy(Protocol):
         y: Float[Array, " N"],
         *,
         mask: Bool[Array, " N"] | None = None,
-    ) -> NonGaussConditionedMarkovGP: ...
+    ) -> ConditionedNonGaussMarkovGP: ...
 
 
 def _kalman_filter(
@@ -639,7 +639,7 @@ class MarkovGPPrior(eqx.Module):
         *,
         strategy: _NonGaussMarkovStrategy,
         mask: Bool[Array, " N"] | None = None,
-    ) -> NonGaussConditionedMarkovGP:
+    ) -> ConditionedNonGaussMarkovGP:
         """Condition on a non-Gaussian likelihood via a site-based strategy.
 
         Convenience that forwards to ``strategy.fit(self, likelihood, y)``.
@@ -649,7 +649,7 @@ class MarkovGPPrior(eqx.Module):
         `pyrox_ssm.GaussNewtonMarkovInference`,
         `pyrox_ssm.PosteriorLinearizationMarkov`, or
         `pyrox_ssm.ExpectationPropagationMarkov`. Returns a
-        `pyrox_ssm.NonGaussConditionedMarkovGP` with the same
+        `pyrox_ssm.ConditionedNonGaussMarkovGP` with the same
         ``predict`` API as the Gaussian-likelihood
         `ConditionedMarkovGP`.
 
@@ -664,7 +664,7 @@ class MarkovGPPrior(eqx.Module):
                 a ``mask`` keyword still works unmasked.
 
         Returns:
-            The `pyrox_ssm.NonGaussConditionedMarkovGP` from the strategy.
+            The `pyrox_ssm.ConditionedNonGaussMarkovGP` from the strategy.
 
         Examples:
             >>> import jax.numpy as jnp

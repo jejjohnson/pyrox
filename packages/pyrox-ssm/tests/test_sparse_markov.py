@@ -11,7 +11,7 @@ Coverage strategy:
   likelihoods without an integrator raise.
 * NumPyro hook: :func:`sparse_markov_factor` registers a finite factor
   site under :func:`numpyro.handlers.trace`.
-* prediction surface: :class:`SparseConditionedMarkovGP.predict`
+* prediction surface: :class:`ConditionedSparseMarkovGP.predict`
   returns finite mean / non-negative variance.
 
 A direct SVGP-Markov ↔ dense ``MarkovGPPrior`` equivalence test and a
@@ -27,8 +27,8 @@ import jax.random as jr
 import pytest
 from pyrox.likelihoods import GaussianLikelihood
 from pyrox_ssm import (
+    ConditionedSparseMarkovGP,
     MaternSDE,
-    SparseConditionedMarkovGP,
     SparseMarkovGPPrior,
     sparse_markov_elbo,
     sparse_markov_factor,
@@ -137,7 +137,7 @@ def test_sparse_markov_factor_registers_finite_factor_site() -> None:
 def test_sparse_conditioned_predict_is_finite() -> None:
     prior, times, _y = _make_problem()
     guide = FullRankGuide.init(prior.num_inducing, scale=0.3)
-    cond = SparseConditionedMarkovGP(prior=prior, guide=guide)
+    cond = ConditionedSparseMarkovGP(prior=prior, guide=guide)
     t_star = jnp.linspace(times[0] - 0.5, times[-1] + 0.5, 20)
     mean, var = cond.predict(t_star)
     assert mean.shape == (20,) and var.shape == (20,)

@@ -22,13 +22,13 @@ import jax
 import jax.numpy as jnp
 import pytest
 from pyrox_ssm import (
+    ConditionedNonGaussMarkovGP,
     ExpectationPropagationMarkov,
     GaussNewtonMarkovInference,
     IntegratedWienerSDE,
     LaplaceMarkovInference,
     MarkovGPPrior,
     MaternSDE,
-    NonGaussConditionedMarkovGP,
     PosteriorLinearizationMarkov,
 )
 from pyrox_ssm._inference_nongauss_markov import _prior_marginal_variance
@@ -55,7 +55,7 @@ def test_markov_laplace_smoke_tiny() -> None:
     sde = MaternSDE(variance=1.0, lengthscale=0.5, order=1)
     prior = MarkovGPPrior(sde, times)
     cond = LaplaceMarkovInference(max_iter=2).fit(prior, BernoulliLikelihood(), y)
-    assert isinstance(cond, NonGaussConditionedMarkovGP)
+    assert isinstance(cond, ConditionedNonGaussMarkovGP)
     assert cond.q_mean.shape == y.shape
     assert jnp.all(jnp.isfinite(cond.q_mean))
     assert jnp.all(jnp.isfinite(cond.q_var))
@@ -79,7 +79,7 @@ def test_markov_strategy_runs_and_returns_finite_posterior(strategy_factory) -> 
     prior, _, y = _make_bernoulli_timeseries()
     strategy = strategy_factory()
     cond = strategy.fit(prior, BernoulliLikelihood(), y)
-    assert isinstance(cond, NonGaussConditionedMarkovGP)
+    assert isinstance(cond, ConditionedNonGaussMarkovGP)
     assert cond.q_mean.shape == y.shape
     assert cond.q_var.shape == y.shape
     assert jnp.all(jnp.isfinite(cond.q_mean))

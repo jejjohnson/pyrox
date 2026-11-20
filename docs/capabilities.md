@@ -545,17 +545,17 @@ compose it; if it is almost here, extend it where it lives. Regenerate with
 
 | Name | Kind | What it does |
 |---|---|---|
-| `ConditionedSharedPlusSiteMarkovGP` | class | A `SharedPlusSiteMarkovGP` conditioned on its observations. |
-| `SharedPlusSiteMarkovGP` | class | A shared GP plus one independent GP per site, on a merged time grid. |
+| `ConditionedSharedPlusSiteMarkovGP` | class | A `SharedPlusSiteMarkovGPPrior` conditioned on its observations. |
+| `SharedPlusSiteMarkovGPPrior` | class | A shared GP plus one independent GP per site, on a merged time grid. |
 
 #### Site-based non-Gaussian inference for `MarkovGPPrior`. (`pyrox_ssm._inference_nongauss_markov`)
 
 | Name | Kind | What it does |
 |---|---|---|
+| `ConditionedNonGaussMarkovGP` | class | Markov GP conditioned on a non-Gaussian likelihood via a site-based strategy. |
 | `ExpectationPropagationMarkov` | class | Parallel Expectation Propagation for `MarkovGPPrior`. |
 | `GaussNewtonMarkovInference` | class | Gauss-Newton (Markov) inference: Newton with a strict PSD floor. |
 | `LaplaceMarkovInference` | class | Laplace approximation for `MarkovGPPrior`. |
-| `NonGaussConditionedMarkovGP` | class | Markov GP conditioned on a non-Gaussian likelihood via a site-based strategy. |
 | `PosteriorLinearizationMarkov` | class | Posterior linearization for `MarkovGPPrior` (Markov IPLF). |
 | `markov_implicit_adjoint` | function | The implicit adjoint of the Markov strategies, safe to use inside NUTS. |
 | `markov_laplace_factor` | function | Register a non-Gaussian Markov GP's approximate evidence with NumPyro. |
@@ -597,7 +597,7 @@ compose it; if it is almost here, extend it where it lives. Regenerate with
 
 | Name | Kind | What it does |
 |---|---|---|
-| `SparseConditionedMarkovGP` | class | Sparse Markov GP fitted to a guide. |
+| `ConditionedSparseMarkovGP` | class | Sparse Markov GP fitted to a guide. |
 | `SparseMarkovGPPrior` | class | Sparse variational GP prior over an SDE kernel and inducing time grid. |
 | `sparse_markov_elbo` | function | Sparse variational ELBO for `SparseMarkovGPPrior`. |
 | `sparse_markov_factor` | function | Register `sparse_markov_elbo` as a NumPyro factor site. |

@@ -247,7 +247,7 @@ with numpyro.plate("site", t.shape[0]):
 
 ### A shared GP plus one GP per site
 
-When the sites share a regional signal, `y_s(t) = g(t) + h_s(t) + eps_s(t)` with one shared GP `g` and an independent GP `h_s` per site is one linear-Gaussian SSM on the merged grid of all site times: `SharedPlusSiteMarkovGP.from_sites` merges the ragged series (`NaN` and a `(T, S)` mask where a site was not observed), `as_lgssm` builds the block-diagonal transitions and the observation rows `H[s] = (H_g, 0, …, H_h at block s, …, 0)`, `log_marginal` is the exact log marginal of the observed pairs and `decompose` splits the smoothed means into `E[g | y]` and `E[h_s | y]`. The site kernel's hyperparameters are pooled (scalar leaves) or per site (leaves with a leading axis of length `S`), and each pass costs `O(T D^3)` with `D = d_g + S d_h`, so it suits a few dozen sites:
+When the sites share a regional signal, `y_s(t) = g(t) + h_s(t) + eps_s(t)` with one shared GP `g` and an independent GP `h_s` per site is one linear-Gaussian SSM on the merged grid of all site times: `SharedPlusSiteMarkovGPPrior.from_sites` merges the ragged series (`NaN` and a `(T, S)` mask where a site was not observed), `as_lgssm` builds the block-diagonal transitions and the observation rows `H[s] = (H_g, 0, …, H_h at block s, …, 0)`, `log_marginal` is the exact log marginal of the observed pairs and `decompose` splits the smoothed means into `E[g | y]` and `E[h_s | y]`. The site kernel's hyperparameters are pooled (scalar leaves) or per site (leaves with a leading axis of length `S`), and each pass costs `O(T D^3)` with `D = d_g + S d_h`, so it suits a few dozen sites:
 
 ```python
 import jax.numpy as jnp
@@ -257,7 +257,7 @@ import pyrox_ssm as pss
 
 shared = pss.MaternSDE(variance=1.0, lengthscale=30.0, order=1)
 site = pss.MaternSDE(variance=jnp.full(S, 0.3), lengthscale=5.0, order=1)  # per-site variance
-model, y_grid = pss.SharedPlusSiteMarkovGP.from_sites(shared, site, times_per_site, y_per_site)
+model, y_grid = pss.SharedPlusSiteMarkovGPPrior.from_sites(shared, site, times_per_site, y_per_site)
 
 def regional_model(y_grid):
     noise_var = numpyro.sample("noise_var", dist.LogNormal(-3.0, 1.0))
@@ -275,9 +275,9 @@ cond = model.condition(y_grid, jnp.asarray(0.05))
 g_mean, h_mean, g_var, h_var = cond.predict(t_star)                   # (M,), (M, S), (M,), (M, S)
 ```
 
-`from_sites` takes the union of the site times with `jnp.unique`, so it needs concrete times. Inside `jax.jit` or a NumPyro model under NUTS, build the grid and mask once outside and construct the model with `SharedPlusSiteMarkovGP(shared, site, times, mask)` from the sampled kernels.
+`from_sites` takes the union of the site times with `jnp.unique`, so it needs concrete times. Inside `jax.jit` or a NumPyro model under NUTS, build the grid and mask once outside and construct the model with `SharedPlusSiteMarkovGPPrior(shared, site, times, mask)` from the sampled kernels.
 
-::: pyrox_ssm.SharedPlusSiteMarkovGP
+::: pyrox_ssm.SharedPlusSiteMarkovGPPrior
 ::: pyrox_ssm.ConditionedSharedPlusSiteMarkovGP
 
 ## Normalizing Kalman Filter
@@ -334,7 +334,7 @@ The Markov-aware counterparts of pyrox-gp's site-based strategies
 diagonal-site math, but the global posterior recomputation runs through
 the Kalman filter / RTS smoother in `O(N d^3)` instead of a dense
 `O(N^3)` solve. Each `fit(prior, likelihood, y)` returns a
-`NonGaussConditionedMarkovGP` with the same `predict` API as the
+`ConditionedNonGaussMarkovGP` with the same `predict` API as the
 Gaussian-likelihood `ConditionedMarkovGP`. `PosteriorLinearizationMarkov` and
 `ExpectationPropagationMarkov` take the same `integrator` as their dense twins;
 expectation propagation accepts only a `gaussx.GaussHermiteIntegrator`.
@@ -360,7 +360,7 @@ def model(times, y, likelihood):
 ::: pyrox_ssm.GaussNewtonMarkovInference
 ::: pyrox_ssm.PosteriorLinearizationMarkov
 ::: pyrox_ssm.ExpectationPropagationMarkov
-::: pyrox_ssm.NonGaussConditionedMarkovGP
+::: pyrox_ssm.ConditionedNonGaussMarkovGP
 ::: pyrox_ssm.markov_laplace_factor
 ::: pyrox_ssm.markov_implicit_adjoint
 
@@ -371,6 +371,6 @@ the variational family lives on the inducing times while predictions
 exploit the Markov structure between them.
 
 ::: pyrox_ssm.SparseMarkovGPPrior
-::: pyrox_ssm.SparseConditionedMarkovGP
+::: pyrox_ssm.ConditionedSparseMarkovGP
 ::: pyrox_ssm.sparse_markov_elbo
 ::: pyrox_ssm.sparse_markov_factor

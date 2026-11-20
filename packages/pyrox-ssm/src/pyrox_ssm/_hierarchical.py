@@ -13,7 +13,7 @@ with $g$ and every $h_s$ independent, is a linear-Gaussian state-space
 model on the union of the site times: the state stacks the SDE states of
 $g$ and of each $h_s$, the transitions are block diagonal, and site $s$
 observes the sum of the $g$ block and its own block.
-`SharedPlusSiteMarkovGP` builds that model as a
+`SharedPlusSiteMarkovGPPrior` builds that model as a
 `pyrox_ssm.LinearGaussianSSMPrior` with a ``(T, S)`` observation mask, so
 the marginal likelihood and the posterior split into $g$ and $h_s$ are
 exact Kalman filtering and RTS smoothing.
@@ -121,7 +121,7 @@ def _shared_plus_site_rows(
     return jnp.concatenate([shared.astype(sites.dtype), sites], axis=-1)
 
 
-class SharedPlusSiteMarkovGP(eqx.Module):
+class SharedPlusSiteMarkovGPPrior(eqx.Module):
     r"""A shared GP plus one independent GP per site, on a merged time grid.
 
     Site $s = 1, \dots, S$ is observed on its own days as
@@ -228,7 +228,7 @@ class SharedPlusSiteMarkovGP(eqx.Module):
         >>> shared = pss.MaternSDE(variance=1.0, lengthscale=2.0, order=1)
         >>> site = pss.MaternSDE(variance=jnp.array([0.3, 0.5, 0.2]),
         ...                      lengthscale=0.5, order=1)
-        >>> model, y_grid = pss.SharedPlusSiteMarkovGP.from_sites(
+        >>> model, y_grid = pss.SharedPlusSiteMarkovGPPrior.from_sites(
         ...     shared, site, t_per_site, y_per_site
         ... )
         >>> y_grid.shape, model.state_dim
@@ -302,7 +302,7 @@ class SharedPlusSiteMarkovGP(eqx.Module):
         times_per_site: Sequence[Float[Array, " N_s"]],
         y_per_site: Sequence[Float[Array, " N_s"]],
         mean_fn: Callable[[Float[Array, " T"]], Float[Array, "T S"]] | None = None,
-    ) -> tuple[SharedPlusSiteMarkovGP, Float[Array, "T S"]]:
+    ) -> tuple[SharedPlusSiteMarkovGPPrior, Float[Array, "T S"]]:
         r"""Merge ragged site series onto one grid and build the model.
 
         The grid is the sorted union of the site times,
@@ -338,7 +338,7 @@ class SharedPlusSiteMarkovGP(eqx.Module):
             >>> import jax.numpy as jnp
             >>> import pyrox_ssm as pss
             >>> kernel = pss.MaternSDE(variance=1.0, lengthscale=1.0, order=0)
-            >>> model, y_grid = pss.SharedPlusSiteMarkovGP.from_sites(
+            >>> model, y_grid = pss.SharedPlusSiteMarkovGPPrior.from_sites(
             ...     kernel, kernel,
             ...     [jnp.array([0.0, 2.0]), jnp.array([1.0, 2.0])],
             ...     [jnp.array([0.5, 0.1]), jnp.array([0.3, 0.2])],
@@ -437,7 +437,7 @@ class SharedPlusSiteMarkovGP(eqx.Module):
             >>> import jax.numpy as jnp
             >>> import pyrox_ssm as pss
             >>> kernel = pss.MaternSDE(variance=1.0, lengthscale=1.0, order=1)
-            >>> model = pss.SharedPlusSiteMarkovGP(
+            >>> model = pss.SharedPlusSiteMarkovGPPrior(
             ...     kernel, kernel, jnp.arange(5.0), jnp.ones((5, 3), dtype=bool)
             ... )
             >>> lgssm = model.as_lgssm(jnp.array([0.1, 0.2, 0.1]))
@@ -503,7 +503,7 @@ class SharedPlusSiteMarkovGP(eqx.Module):
             >>> kernel = pss.MaternSDE(variance=1.0, lengthscale=1.0, order=0)
             >>> mask = jnp.array([[True, False], [True, True]])
             >>> times = jnp.arange(2.0)
-            >>> model = pss.SharedPlusSiteMarkovGP(kernel, kernel, times, mask)
+            >>> model = pss.SharedPlusSiteMarkovGPPrior(kernel, kernel, times, mask)
             >>> y = jnp.array([[0.3, jnp.nan], [0.1, -0.2]])
             >>> log_marg = model.log_marginal(y, jnp.asarray(0.1))
         """
@@ -568,7 +568,7 @@ class SharedPlusSiteMarkovGP(eqx.Module):
             >>> kernel = pss.MaternSDE(variance=1.0, lengthscale=1.0, order=0)
             >>> mask = jnp.array([[True, False], [True, True]])
             >>> times = jnp.arange(2.0)
-            >>> model = pss.SharedPlusSiteMarkovGP(kernel, kernel, times, mask)
+            >>> model = pss.SharedPlusSiteMarkovGPPrior(kernel, kernel, times, mask)
             >>> y = jnp.array([[0.3, jnp.nan], [0.1, -0.2]])
             >>> g_mean, h_mean = model.decompose(y, jnp.asarray(0.1))
             >>> g_mean.shape, h_mean.shape
@@ -623,7 +623,7 @@ class SharedPlusSiteMarkovGP(eqx.Module):
             >>> kernel = pss.MaternSDE(variance=1.0, lengthscale=1.0, order=0)
             >>> mask = jnp.array([[True, False], [True, True]])
             >>> times = jnp.arange(2.0)
-            >>> model = pss.SharedPlusSiteMarkovGP(kernel, kernel, times, mask)
+            >>> model = pss.SharedPlusSiteMarkovGPPrior(kernel, kernel, times, mask)
             >>> y = jnp.array([[0.3, jnp.nan], [0.1, -0.2]])
             >>> cond = model.condition(y, jnp.asarray(0.1))
             >>> g_mean, h_mean, g_var, h_var = cond.predict(jnp.array([0.5, 3.0]))
@@ -640,21 +640,21 @@ class SharedPlusSiteMarkovGP(eqx.Module):
 
 
 class ConditionedSharedPlusSiteMarkovGP(eqx.Module):
-    r"""A `SharedPlusSiteMarkovGP` conditioned on its observations.
+    r"""A `SharedPlusSiteMarkovGPPrior` conditioned on its observations.
 
-    Returned by `SharedPlusSiteMarkovGP.condition`. `predict` gives the
+    Returned by `SharedPlusSiteMarkovGPPrior.condition`. `predict` gives the
     posterior marginals of the shared signal $g$ and of each site's signal
     $h_s$ at any times: observed days, gaps no site observed, and forecasts
     or backcasts beyond the grid.
 
     Attributes:
-        model: The conditioned `SharedPlusSiteMarkovGP`.
+        model: The conditioned `SharedPlusSiteMarkovGPPrior`.
         y: Observations on the model's grid, ``(T, S)``; unobserved entries
             may be ``NaN``.
         noise_var: Observation noise variance, scalar or ``(S,)``.
     """
 
-    model: SharedPlusSiteMarkovGP
+    model: SharedPlusSiteMarkovGPPrior
     y: Float[Array, "T S"]
     noise_var: Float[Array, ""] | Float[Array, " S"]
 
@@ -667,7 +667,7 @@ class ConditionedSharedPlusSiteMarkovGP(eqx.Module):
 
         The test times join the grid as rows with no observed site, the
         sorted union $t_{1:T} \cup t^*_{1:M}$, and one filter and smoother
-        pass over that grid gives `SharedPlusSiteMarkovGP.decompose`'s means
+        pass over that grid gives `SharedPlusSiteMarkovGPPrior.decompose`'s means
         and variances at every row; the test rows are read off. An
         unobserved row runs the Kalman predict only, so the log marginal and
         the posterior at the observed rows are unchanged, and a test time
@@ -703,7 +703,7 @@ class ConditionedSharedPlusSiteMarkovGP(eqx.Module):
             >>> kernel = pss.MaternSDE(variance=1.0, lengthscale=1.0, order=0)
             >>> mask = jnp.array([[True, False], [True, True]])
             >>> times = jnp.arange(2.0)
-            >>> model = pss.SharedPlusSiteMarkovGP(kernel, kernel, times, mask)
+            >>> model = pss.SharedPlusSiteMarkovGPPrior(kernel, kernel, times, mask)
             >>> y = jnp.array([[0.3, jnp.nan], [0.1, -0.2]])
             >>> cond = model.condition(y, jnp.asarray(0.1))
             >>> g_mean, h_mean, g_var, h_var = cond.predict(jnp.array([0.5, 3.0]))

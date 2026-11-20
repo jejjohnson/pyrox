@@ -186,15 +186,21 @@ _MOVED_TO_SSM = frozenset(
     }
 )
 _SSM_FLOWS = frozenset({"NormalizingKalmanPrior", "normalizing_kalman_factor"})
+# Moved names that pyrox-ssm has since renamed (pyrox#481).
+_SSM_RENAMED = {
+    "NonGaussConditionedMarkovGP": "ConditionedNonGaussMarkovGP",
+    "SparseConditionedMarkovGP": "ConditionedSparseMarkovGP",
+}
 
 
 def __getattr__(name: str):
     """Raise an `ImportError` naming the pyrox-ssm home of a moved name."""
     if name in _MOVED_TO_SSM:
         module = "pyrox_ssm.flows" if name in _SSM_FLOWS else "pyrox_ssm"
+        new = _SSM_RENAMED.get(name, name)
         raise ImportError(
             f"pyrox_gp.{name} moved to pyrox-ssm; install pyrox-ssm and use "
-            f"`from {module} import {name}`."
+            f"`from {module} import {new}`."
         )
     raise AttributeError(f"module 'pyrox_gp' has no attribute {name!r}")
 
