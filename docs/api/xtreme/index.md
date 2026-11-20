@@ -51,5 +51,5 @@ A few patterns hold across the whole package:
 - [Architecture](https://github.com/jejjohnson/pyrox/blob/main/design_docs/pyrox-xtreme/architecture.md) — draft roadmap for the
   layered primitives → components → models design; parts are aspirational,
   and this reference reflects what ships today.
-- [Interop](../../xtreme/interop.md) — how pyrox-xtreme composes with the wider ecosystem
+- [Interop](../../interop/) — how pyrox-xtreme composes with the wider ecosystem
   without depending on it.
