@@ -35,6 +35,16 @@ from pyrox_xtreme.point_processes._history import EventHistory
 from pyrox_xtreme.point_processes.primitives.thinning import thinning_sample
 
 
+def _per_event(param: Float[Array, ...]) -> Array:
+    """``param`` with a trailing singleton event axis.
+
+    Process parameters have the batch shape; per-event arrays have the batch
+    shape plus the event axis. The singleton pairs each process's parameter
+    with its own row instead of with the event columns.
+    """
+    return jnp.asarray(param)[..., None]
+
+
 def exp_hawkes_intensity(
     t: Float[Array, ...],
     event_times: Float[Array, ...],
@@ -60,6 +70,9 @@ def exp_hawkes_intensity(
         ``t`` and the leading event-time batch dims.
     """
     t_arr = jnp.asarray(t)
+    # Per-event terms carry the event axis last; batched parameters (one per
+    # process) gain it as a singleton so they pair with their own row.
+    alpha_ev, beta_ev = _per_event(alpha), _per_event(beta)
     past = mask & (
         event_times < t_arr[..., None] if t_arr.ndim > 0 else event_times < t_arr
     )
@@ -70,10 +83,10 @@ def exp_hawkes_intensity(
     # the value. (Same fix as the spatiotemporal twin.)
     if t_arr.ndim == 0:
         dt_pos = jnp.clip(t_arr - event_times, 0.0, jnp.inf)
-        contributions = jnp.where(past, alpha * jnp.exp(-beta * dt_pos), 0.0)
+        contributions = jnp.where(past, alpha_ev * jnp.exp(-beta_ev * dt_pos), 0.0)
         return mu + jnp.sum(contributions, axis=-1)
     dt_pos = jnp.clip(t_arr[..., None] - event_times, 0.0, jnp.inf)
-    contributions = jnp.where(past, alpha * jnp.exp(-beta * dt_pos), 0.0)
+    contributions = jnp.where(past, alpha_ev * jnp.exp(-beta_ev * dt_pos), 0.0)
     return mu + jnp.sum(contributions, axis=-1)
 
 
@@ -95,14 +108,15 @@ def exp_hawkes_cumulative_intensity(
     # overflow the discarded branch into a NaN β-gradient (see
     # exp_hawkes_intensity); the clip also makes the clipped per-event
     # term vanish exactly for future events.
+    alpha_ev, beta_ev = _per_event(alpha), _per_event(beta)
     if t_arr.ndim == 0:
         past = mask & (event_times <= t_arr)
         dt_pos = jnp.clip(t_arr - event_times, 0.0, jnp.inf)
-        per_event = (alpha / beta) * (1.0 - jnp.exp(-beta * dt_pos))
+        per_event = (alpha_ev / beta_ev) * (1.0 - jnp.exp(-beta_ev * dt_pos))
         return mu * t_arr + jnp.sum(jnp.where(past, per_event, 0.0), axis=-1)
     past = mask & (event_times <= t_arr[..., None])
     dt_pos = jnp.clip(t_arr[..., None] - event_times, 0.0, jnp.inf)
-    per_event = (alpha / beta) * (1.0 - jnp.exp(-beta * dt_pos))
+    per_event = (alpha_ev / beta_ev) * (1.0 - jnp.exp(-beta_ev * dt_pos))
     return mu * t_arr + jnp.sum(jnp.where(past, per_event, 0.0), axis=-1)
 
 
@@ -157,13 +171,22 @@ def exp_hawkes_log_prob(
         R_i = jnp.where(valid, A_new - 1.0, 0.0)
         return A_new, R_i
 
+    # The carry holds one A per process: the joint batch of the event
+    # buffers and the parameters, so batched parameters scan their own rows.
+    batch = jnp.broadcast_shapes(
+        event_times.shape[:-1],
+        jnp.shape(mu),
+        jnp.shape(alpha),
+        jnp.shape(beta),
+        jnp.shape(mask)[:-1],
+    )
     _, R_strict = jax.lax.scan(
         step,
-        jnp.zeros(event_times.shape[:-1], dtype=event_times.dtype),
+        jnp.zeros(batch, dtype=event_times.dtype),
         (jnp.moveaxis(gaps, -1, 0), jnp.moveaxis(mask, -1, 0)),
     )
     R_strict = jnp.moveaxis(R_strict, 0, -1)
-    lam_at_events = mu + alpha * R_strict
+    lam_at_events = _per_event(mu) + _per_event(alpha) * R_strict
     # Guard the log at padding positions (lam_at_events = μ > 0 there anyway).
     log_lam = jnp.log(jnp.clip(lam_at_events, 1e-30, jnp.inf))
     sum_log_lam = jnp.sum(jnp.where(mask, log_lam, 0.0), axis=-1)

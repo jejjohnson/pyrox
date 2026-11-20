@@ -154,3 +154,36 @@ class TestExpHawkesSample:
         real = t[m]
         assert jnp.all(jnp.diff(real) >= 0)
         assert jnp.all(real <= 10.0)
+
+
+class TestBatchedParameters:
+    """Batched Hawkes parameters pair with their own event row.
+
+    Regression (jejjohnson/pyrox#463): per-event terms multiplied ``(B,)``
+    parameters against ``(B, M)`` arrays, which failed for M != B and, for
+    M == B, applied process parameters along the event columns.
+    """
+
+    @pytest.mark.parametrize("n_events", [2, 3])
+    def test_log_prob_matches_each_process(self, n_events):
+        times = jnp.array([[0.5, 1.0, 2.0], [0.3, 0.9, 3.0]])[:, :n_events]
+        mask = jnp.array([[True, True, True], [True, True, False]])[:, :n_events]
+        mu = jnp.array([0.5, 1.0])
+        alpha = jnp.array([0.3, 0.6])
+        beta = jnp.array([1.0, 2.0])
+        batched = exp_hawkes_log_prob(times, mask, 4.0, mu, alpha, beta)
+        assert batched.shape == (2,)
+        for b in range(2):
+            single = exp_hawkes_log_prob(
+                times[b], mask[b], 4.0, mu[b], alpha[b], beta[b]
+            )
+            assert float(batched[b]) == pytest.approx(float(single), rel=1e-6)
+            lam = exp_hawkes_intensity(2.5, times, mask, mu, alpha, beta)[b]
+            assert float(lam) == pytest.approx(
+                float(
+                    exp_hawkes_intensity(
+                        2.5, times[b], mask[b], mu[b], alpha[b], beta[b]
+                    )
+                ),
+                rel=1e-6,
+            )
