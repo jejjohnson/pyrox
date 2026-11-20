@@ -63,6 +63,10 @@ In any MyST page, link to an API object with the `xref:` protocol and the name a
 
 A target that does not exist in the inventory fails `myst build --strict`, so broken API links are caught on the pull request rather than in production.
 
+## Never link to a file under `docs/api/`
+
+mystmd does not build the API pages, so a relative prose link such as `[Extremes API](../api/xtreme/index.md)` does not fail: mystmd publishes `index.md` as a raw download, the link resolves, and the reader gets a Markdown file. Link to an API object with `xref:api#<name>`, and to a whole API page by its deployed URL (`https://jejjohnson.github.io/pyrox/reference/xtreme/`). `source_link_problems` in `scripts/build_docs.py` fails the build on any relative prose link into `docs/api/` or `docs/templates/`.
+
 ## Known upstream issue: the `$` anchor abbreviation
 
 A Sphinx inventory may record an object's anchor as the literal `$`, meaning "the anchor is the object's own name". mystmd 1.11.0 **lowercases the name when it expands that abbreviation**, which breaks links into mkdocstrings' case-sensitive anchors:
