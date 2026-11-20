@@ -14,7 +14,16 @@ window.MathJax = {
     inlineMath: [["\\(", "\\)"], ["$", "$"]],
     displayMath: [["\\[", "\\]"], ["$$", "$$"]],
     processEscapes: true,
-    processEnvironments: true
+    processEnvironments: true,
+    // Maths macros from the eman-style-math standard ("Maths notation" in
+    // AGENTS.md); keep in sync with the `math:` block in docs/myst.yml.
+    macros: {
+      vect: ["\\mathbf{#1}", 1],
+      mat: ["\\mathbf{#1}", 1],
+      gvect: ["\\boldsymbol{#1}", 1],
+      gmat: ["\\boldsymbol{#1}", 1],
+      op: ["\\mathrm{#1}", 1]
+    }
   }
 };
 

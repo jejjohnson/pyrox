@@ -68,7 +68,7 @@ check-env-%:
 # Phony declarations
 # ---------------------------------------------------------------------------
 .PHONY: help install lint format typecheck test test-cov \
-        precommit build clean version docs docs-serve docs-deploy \
+        precommit build clean version docs docs-check docs-api docs-serve \
         capabilities gh-labels gh-sub gh-block gh-show
 
 .DEFAULT_GOAL := help
@@ -174,14 +174,17 @@ clean: ## 🗑️  Remove build artefacts and cache directories
 ##@ Docs
 # ===========================================================================
 
-docs: ## 📖 Build documentation with mkdocs
-	uv run --group docs --group dev mkdocs build
+docs: ## 📖 Build the site (MyST prose + Zensical API) into public/ and check its links
+	uv run --group docs --group dev python scripts/build_docs.py
 
-docs-serve: ## 🌐 Serve documentation locally
-	uv run --group docs --group dev mkdocs serve
+docs-check: ## 🔎 Validate the docs sources without rendering the MyST theme
+	uv run --group docs --group dev python scripts/build_docs.py --check
 
-docs-deploy: ## 🚀 Deploy documentation to GitHub Pages
-	uv run --group docs --group dev mkdocs gh-deploy --force
+docs-api: ## 📚 Build only the Zensical API reference into site/
+	uv run --group docs --group dev zensical build --strict
+
+docs-serve: docs ## 🌐 Build, then serve the assembled site at http://127.0.0.1:8000
+	uv run python -m http.server 8000 --directory public
 
 capabilities: ## 🗂️  Regenerate docs/capabilities.md (every public name, for reuse)
 	uv run python scripts/capabilities.py

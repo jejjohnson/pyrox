@@ -143,10 +143,10 @@ see.
   parameterisation and its relation to scipy's sign convention, a
   reference for a published method, and an `Examples:` block that is
   correct (no test runs it).
-- Prose pages are MkDocs Markdown (admonitions as `!!! note`, API links as
-  `[name][pyrox_xtreme.<module>.<name>]`); notebook basenames stay unique;
-  new notebooks join the `mkdocs.yml` nav under "Extremes" and are
-  committed executed.
+- Prose pages are MyST Markdown (admonitions as `:::{note}`, API links as
+  ``[`name`](xref:api#pyrox_xtreme.<name>)``); notebook basenames stay
+  unique; new notebooks join the `toc` in `docs/myst.yml` under "Extremes"
+  and are committed executed.
 
 ### 7. Tests
 

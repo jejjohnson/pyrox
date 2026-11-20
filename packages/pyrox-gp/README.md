@@ -17,8 +17,8 @@
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 
 📖 [Documentation](https://jejjohnson.github.io/pyrox/) ·
-📚 [GP API](https://jejjohnson.github.io/pyrox/api/gp/) ·
-🚀 [Exact GP regression](https://jejjohnson.github.io/pyrox/notebooks/exact_gp_regression/) ·
+📚 [GP API](https://jejjohnson.github.io/pyrox/reference/gp/) ·
+🚀 [Exact GP regression](https://jejjohnson.github.io/pyrox/exact-gp-regression/) ·
 🗂️ [Capability index](https://jejjohnson.github.io/pyrox/capabilities/)
 
 </div>
@@ -281,7 +281,7 @@ pathwise [ 0.04  1.   -0.25] [0.03 0.03 0.75]
   sparse [ 0.04  1.   -0.28] [0.03 0.03 0.73]
 ```
 
-that is, for each route, the mean of $`f`$ at $`x = 0`$, 0.5 and 2 and its standard deviation. SVI put $`\hat{\sigma}_f^2`$ at 0.59, $`\hat{\ell}`$ at 0.55 and $`\hat{\sigma}^2`$ at 0.012, close to the true noise variance of 0.01. Inside the data the exact posterior is within 0.04 of $`\sin(0) = 0`$ and $`\sin(1.5) = 1.00`$, with a standard deviation of 0.03. At $`x = 2`$, almost two lengthscales from the nearest point, the mean of $`-0.28`$ happens to match $`\sin(6) = -0.28`$, but the standard deviation has grown to 0.73, close to the prior's $`\hat{\sigma}_f = 0.77`$: the data no longer pin $`f`$ down there. The 256 pathwise draws reproduce those moments to within Monte Carlo error, and the eight inducing points reproduce them to two decimals, because a lengthscale of 0.55 on $`[-1, 1]`$ leaves the function few degrees of freedom. The [exact GP regression](https://jejjohnson.github.io/pyrox/notebooks/exact_gp_regression/) and [pathwise sampling](https://jejjohnson.github.io/pyrox/notebooks/gp_pathwise/) tutorials go further.
+that is, for each route, the mean of $`f`$ at $`x = 0`$, 0.5 and 2 and its standard deviation. SVI put $`\hat{\sigma}_f^2`$ at 0.59, $`\hat{\ell}`$ at 0.55 and $`\hat{\sigma}^2`$ at 0.012, close to the true noise variance of 0.01. Inside the data the exact posterior is within 0.04 of $`\sin(0) = 0`$ and $`\sin(1.5) = 1.00`$, with a standard deviation of 0.03. At $`x = 2`$, almost two lengthscales from the nearest point, the mean of $`-0.28`$ happens to match $`\sin(6) = -0.28`$, but the standard deviation has grown to 0.73, close to the prior's $`\hat{\sigma}_f = 0.77`$: the data no longer pin $`f`$ down there. The 256 pathwise draws reproduce those moments to within Monte Carlo error, and the eight inducing points reproduce them to two decimals, because a lengthscale of 0.55 on $`[-1, 1]`$ leaves the function few degrees of freedom. The [exact GP regression](https://jejjohnson.github.io/pyrox/exact-gp-regression/) and [pathwise sampling](https://jejjohnson.github.io/pyrox/gp-pathwise/) tutorials go further.
 
 ## 🎲 Counts: swap the strategy, keep the prior
 
@@ -321,7 +321,7 @@ This prints
 ExpectationPropagation [ 1.11  1.9  -0.01] [0.15 0.11 0.99]
 ```
 
-that is, the posterior mean and standard deviation of the log-rate at $`x = 0`$, 0.5 and 2, against the true values of 1.00, 2.00 and 0.72. Laplace and expectation propagation agree to 0.01. Inside the data both are within 0.12 of the truth, with standard deviations of 0.11 to 0.15, and at $`x = 2`$, where there are no counts, both return to the prior: a mean of zero and a standard deviation of 0.99 against the prior's 1. Gauss-Newton, posterior linearisation and quasi-Newton slot into the same call; the [Laplace](https://jejjohnson.github.io/pyrox/notebooks/advanced_gp_laplace/) and [expectation propagation](https://jejjohnson.github.io/pyrox/notebooks/advanced_gp_ep/) tutorials compare them on a classification task.
+that is, the posterior mean and standard deviation of the log-rate at $`x = 0`$, 0.5 and 2, against the true values of 1.00, 2.00 and 0.72. Laplace and expectation propagation agree to 0.01. Inside the data both are within 0.12 of the truth, with standard deviations of 0.11 to 0.15, and at $`x = 2`$, where there are no counts, both return to the prior: a mean of zero and a standard deviation of 0.99 against the prior's 1. Gauss-Newton, posterior linearisation and quasi-Newton slot into the same call; the [Laplace](https://jejjohnson.github.io/pyrox/advanced-gp-laplace/) and [expectation propagation](https://jejjohnson.github.io/pyrox/advanced-gp-ep/) tutorials compare them on a classification task.
 
 ## 🔬 What else is in the box
 
@@ -356,18 +356,18 @@ The Markov GPs on a time grid (`MarkovGPPrior`, the SDE kernels and the Kalman-b
 
 | # | Tutorial | What it shows |
 |---|---|---|
-| 1 | [Exact GP regression](https://jejjohnson.github.io/pyrox/notebooks/exact_gp_regression/) | three ways to put priors on a kernel, fitted by SVI, then the posterior at the fitted hyperparameters |
-| 2 | [Latent GP classification](https://jejjohnson.github.io/pyrox/notebooks/latent_gp_classification/) | a Bernoulli likelihood on a whitened latent GP, fitted by SVI |
-| 3 | [Pathwise sampling](https://jejjohnson.github.io/pyrox/notebooks/gp_pathwise/) and [with NumPyro](https://jejjohnson.github.io/pyrox/notebooks/gp_pathwise_numpyro/) | Matheron's rule for exact and sparse GPs, and inside NumPyro models |
-| 4 | [GP derivatives](https://jejjohnson.github.io/pyrox/notebooks/gp_derivatives/) | the gradient posterior and sensitivity maps with error bars |
-| 5 | [Multi-output GPs](https://jejjohnson.github.io/pyrox/notebooks/multioutput_gp/) | LMC, ICM and OILMM |
-| 6 | [Laplace](https://jejjohnson.github.io/pyrox/notebooks/advanced_gp_laplace/), [Gauss-Newton](https://jejjohnson.github.io/pyrox/notebooks/advanced_gp_gauss_newton/), [posterior linearisation](https://jejjohnson.github.io/pyrox/notebooks/advanced_gp_pl/), [EP](https://jejjohnson.github.io/pyrox/notebooks/advanced_gp_ep/) and [quasi-Newton](https://jejjohnson.github.io/pyrox/notebooks/advanced_gp_qn/) | one notebook per non-Gaussian strategy |
-| 7 | [Regression masterclass](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_parameterized/) | seven regressors on one dataset, the exact GP among them |
+| 1 | [Exact GP regression](https://jejjohnson.github.io/pyrox/exact-gp-regression/) | three ways to put priors on a kernel, fitted by SVI, then the posterior at the fitted hyperparameters |
+| 2 | [Latent GP classification](https://jejjohnson.github.io/pyrox/latent-gp-classification/) | a Bernoulli likelihood on a whitened latent GP, fitted by SVI |
+| 3 | [Pathwise sampling](https://jejjohnson.github.io/pyrox/gp-pathwise/) and [with NumPyro](https://jejjohnson.github.io/pyrox/gp-pathwise-numpyro/) | Matheron's rule for exact and sparse GPs, and inside NumPyro models |
+| 4 | [GP derivatives](https://jejjohnson.github.io/pyrox/gp-derivatives/) | the gradient posterior and sensitivity maps with error bars |
+| 5 | [Multi-output GPs](https://jejjohnson.github.io/pyrox/multioutput-gp/) | LMC, ICM and OILMM |
+| 6 | [Laplace](https://jejjohnson.github.io/pyrox/advanced-gp-laplace/), [Gauss-Newton](https://jejjohnson.github.io/pyrox/advanced-gp-gauss-newton/), [posterior linearisation](https://jejjohnson.github.io/pyrox/advanced-gp-pl/), [EP](https://jejjohnson.github.io/pyrox/advanced-gp-ep/) and [quasi-Newton](https://jejjohnson.github.io/pyrox/advanced-gp-qn/) | one notebook per non-Gaussian strategy |
+| 7 | [Regression masterclass](https://jejjohnson.github.io/pyrox/regression-masterclass-parameterized/) | seven regressors on one dataset, the exact GP among them |
 
 ## 📖 Documentation
 
 - **[Documentation](https://jejjohnson.github.io/pyrox/)**: the whole workspace, with the tutorials and examples of every package.
-- **[GP API](https://jejjohnson.github.io/pyrox/api/gp/)**: the public names, generated from the docstrings, with the derivations of the gradient posterior and the inducing features; the multi-output model entry points (`MultiOutputGPPrior` and the rest) are not on it yet.
+- **[GP API](https://jejjohnson.github.io/pyrox/reference/gp/)**: the public names, generated from the docstrings, with the derivations of the gradient posterior and the inducing features; the multi-output model entry points (`MultiOutputGPPrior` and the rest) are not on it yet.
 - **[Capability index](https://jejjohnson.github.io/pyrox/capabilities/)**: every public name in the workspace and in the libraries it builds on, to check before writing something new.
 - **[`AGENTS.md`](AGENTS.md)**: the contracts every kernel, guide, likelihood and strategy keeps (the kernel context, gaussx for the linear algebra) and the tests that hold them.
 

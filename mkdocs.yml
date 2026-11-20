@@ -1,19 +1,41 @@
-site_name: pyrox
-site_description: Probabilistic modeling with Equinox and NumPyro — Bayesian neural networks, Gaussian processes, and composable GP building blocks.
+# ---------------------------------------------------------------------------
+# Zensical builds ONLY the API reference from this file (it reads mkdocs.yml
+# as is), and it is deployed as the `/reference/` subtree of the MyST site.
+# Prose, guides and notebooks are built by mystmd from `docs/myst.yml`. See
+# `docs/README.md` for the split and the rationale.
+#
+# mkdocstrings publishes a Sphinx-compatible `objects.inv` into `site/`, and
+# that inventory is what lets the MyST prose cross-reference into these pages.
+# ---------------------------------------------------------------------------
+site_name: pyrox API reference
+site_description: API reference for the pyrox workspace (pyrox, pyrox-gp, pyrox-nn, pyrox-lgm, pyrox-ssm, pyrox-gauss and pyrox-xtreme), generated from Google-style docstrings.
 site_author: J. Emmanuel Johnson
 repo_url: https://github.com/jejjohnson/pyrox
 repo_name: jejjohnson/pyrox
 
+docs_dir: docs/api
+site_dir: site
+
+# The guide pages and notebooks live in the MyST half of the site, so links to
+# them point outside `docs_dir` by design. The assembled-site link checker in
+# `scripts/build_docs.py` validates them instead, across both halves, which
+# neither tool can do on its own.
+validation:
+  links:
+    unrecognized_links: ignore
+    absolute_links: ignore
+
 theme:
   name: material
+  # Zensical's Material-compatible look; `modern` is its newer default.
+  variant: classic
   logo: assets/icon.svg
   favicon: assets/icon.svg
   features:
-    - navigation.tabs
     - navigation.sections
     - navigation.top
     - content.code.copy
-    - content.code.annotate
+    - toc.follow
   palette:
     - scheme: default
       primary: indigo
@@ -57,136 +79,34 @@ plugins:
             # aliases; without this the render path raises
             # AliasResolutionError and the deploy fails.
             preload_modules: [gaussx, geonnax, functax]
-  - mkdocs-jupyter:
-      execute: false
-      ignore_h1_titles: true
 
 nav:
-  - Home: index.md
-  - Building with Agents: agents.md
-  - Tutorials:
-      - "Regression Masterclass — Pattern 1 (eqx.tree_at)": notebooks/regression_masterclass_treeat.ipynb
-      - "Regression Masterclass — Pattern 2 (PyroxModule)": notebooks/regression_masterclass_pyrox_sample.ipynb
-      - "Regression Masterclass — Pattern 3 (Parameterized)": notebooks/regression_masterclass_parameterized.ipynb
-  - API Reference:
-      - Overview: api/reference.md
-      - Capability Index: capabilities.md
-      - Core: api/core.md
-      - Likelihoods: api/likelihoods.md
-      - GP: api/gp.md
-      - NN:
-          - Overview: api/nn.md
-          - Geo encoders: api/nn/geo_encoders.md
-          - Conditioning: api/nn/conditioning.md
-          - MFN: api/nn/mfn.md
-      - LGM: api/lgm.md
-      - SSM: api/ssm.md
-      - Gauss: api/gauss.md
-      - Xtreme:
-          - Overview: api/xtreme/index.md
-          - Distributions: api/xtreme/distributions.md
-          - Primitives: api/xtreme/primitives.md
-          - Extraction: api/xtreme/extraction.md
-          - "Point Processes — Overview": api/xtreme/point-processes.md
-          - "Point Processes — Primitives": api/xtreme/point-process-primitives.md
-          - "Point Processes — Operators": api/xtreme/point-process-operators.md
-          - "Point Processes — Distributions": api/xtreme/point-process-distributions.md
-          - Simulations: api/xtreme/simulations.md
-      - Inference: api/inference.md
-      - Preprocessing: api/preprocessing.md
-      - Estimator: api/api.md
-  - Examples:
-      - Exact GP Regression: notebooks/exact_gp_regression.ipynb
-      - Latent GP Classification: notebooks/latent_gp_classification.ipynb
-      - "Ensemble Primitives Tutorial": notebooks/ensemble_primitives_tutorial.ipynb
-      - "Ensemble Runner (EnsembleMAP / EnsembleVI) Tutorial": notebooks/ensemble_runner_tutorial.ipynb
-      - "Pathwise GP Posterior Sampling": notebooks/gp_pathwise.ipynb
-      - "Pathwise GP × NumPyro — extended use cases": notebooks/gp_pathwise_numpyro.ipynb
-      - "GP Derivatives — The Gradient Posterior": notebooks/gp_derivatives.ipynb
-      - "SIREN — Sinusoidal Implicit Neural Representations": notebooks/siren_inr.ipynb
-      - "Kernel Approximation with Random Fourier Features": notebooks/kernel_approximation.ipynb
-      - "Spectral Kernel Models — A Visual Guide for Earth-System Priors": notebooks/spectral_kernel_models.ipynb
-      - "Random Fourier Features → SSGP → VSSGP — Three Spectral Views of a Gaussian Process": notebooks/random_fourier_features.ipynb
-      - "Random Fourier Features as Neural Networks — Fixed, Learned, Ensemble": notebooks/rff_as_neural_networks.ipynb
-      - "Deep Random Feature Expansions — Stacked Spectral GPs (Cutajar 2017)": notebooks/deep_random_fourier_features.ipynb
-      - "Conditional Neural Fields — FiLM, Hypernetworks, NIF": notebooks/conditioning.ipynb
-      - "Spatiotemporal Preprocessing — Geo, Time, Pandas": notebooks/spatiotemporal_preprocessing.ipynb
-      - "Multi-Output Gaussian Processes — LMC, ICM, OILMM": notebooks/multioutput_gp.ipynb
-      - "MCMC with INLA — A Parameter Outside the Latent Gaussian Model": notebooks/lgm_mcmc_inla.ipynb
-      - "State-space models (pyrox-ssm)":
-          - "Example 1: One Site — NUTS, SVI and Prediction Through the Gaps": notebooks/ssm/ssm_one_site.ipynb
-          - "Example 2: Many Sites, Pooled Hyperparameters over Ragged Records": notebooks/ssm/ssm_hierarchical_sites.ipynb
-          - "Example 3: A Regional Signal Plus a Local Signal per Site": notebooks/ssm/ssm_shared_plus_site.ipynb
-          - "Example 3b: A Spatial Field, Per-Facility Paths and Poisson Counts, with NUTS and SVI": notebooks/ssm/ssm_spatial_hierarchical.ipynb
-          - "Example 4: A Non-Gaussian Likelihood, Collapsed (Route A) and Latent (Route B), with a Cross-Check": notebooks/ssm/ssm_nongauss.ipynb
-          - "Example 5: An Ensemble Kalman Likelihood (5a) and an Ensemble of Variational Fits (5b)": notebooks/ssm/ssm_ensemble.ipynb
-          - "Example 6: A Nonlinear State-Space Model with nonlinear_ssm_factor": notebooks/ssm/ssm_nonlinear.ipynb
-          - "Markov Gaussian Processes — Matern Kernels in State-Space Form": notebooks/ssm/markov_gp_sde_kernels.ipynb
-          - "Markov Gaussian Processes — Kalman Filtering and RTS Smoothing": notebooks/ssm/markov_gp_kalman.ipynb
-          - "Non-Gaussian Markov GP Inference — Laplace, Gauss–Newton, Posterior Linearisation and EP": notebooks/ssm/markov_gp_nongauss.ipynb
-          - "Training a Markov GP — Maximum Likelihood, NUTS, Variational Inference and Identifiability": notebooks/ssm/markov_gp_training.ipynb
-          - "Sparse Variational Markov GP — Inducing Times, Non-Gaussian Likelihoods and NumPyro": notebooks/ssm/sparse_markov_gp.ipynb
+  - Overview: index.md
+  - Core (pyrox):
+      - Modules and sites: core.md
+      - Likelihoods: likelihoods.md
+      - Inference: inference.md
+  - GP (pyrox-gp): gp.md
+  - NN (pyrox-nn):
+      - Layers: nn.md
+      - Geo encoders: nn/geo_encoders.md
+      - Conditioning: nn/conditioning.md
+      - MFN: nn/mfn.md
+      - Estimator: api.md
+      - Preprocessing: preprocessing.md
+  - LGM (pyrox-lgm): lgm.md
+  - SSM (pyrox-ssm): ssm.md
+  - Gauss (pyrox-gauss): gauss.md
   - Extremes (pyrox-xtreme):
       - Overview: xtreme/index.md
-      - "Examples":
-          - "Extreme Value Distributions":
-              - "EVT Distributions: A Visual & Physical Tour": xtreme/notebooks/evt_distributions_overview.ipynb
-              - "GEVD: Annual Maxima from Block-Maxima": xtreme/notebooks/evt_gevd_block_maxima.ipynb
-              - "Fréchet (Type II): Heavy-Tailed Block Maxima": xtreme/notebooks/evt_frechet_heavy_tails.ipynb
-              - "Weibull (Type III): Bounded Extremes": xtreme/notebooks/evt_weibull_bounded.ipynb
-          - "Peaks Over Threshold":
-              - "GPD via Peaks-Over-Threshold": xtreme/notebooks/evt_gpd_pot.ipynb
-              - "Non-Stationary Thresholds: Quantile Regression → GPD": xtreme/notebooks/evt_quantile_regression_gpd.ipynb
-          - "Non-stationary EVT":
-              - "Non-Stationary GEVD: Parametric Trend in μ(t)": xtreme/notebooks/evt_nonstat_parametric.ipynb
-              - "Non-Stationary GEVD: Non-Parametric μ(t) via P-Splines": xtreme/notebooks/evt_nonstat_splines.ipynb
-              - "Non-Stationary GEVD: Neural ODE on μ(t)": xtreme/notebooks/evt_nonstat_neural_ode.ipynb
-          - "Point Processes: Temporal":
-              - "Homogeneous Poisson Process — From Scratch and With NumPyro": xtreme/notebooks/hpp_from_scratch_and_numpyro.ipynb
-              - "Inhomogeneous Poisson Process — From Scratch and With NumPyro": xtreme/notebooks/ipp_from_scratch_and_numpyro.ipynb
-              - "Renewal Temporal Point Process — From Scratch and With NumPyro": xtreme/notebooks/renewal_from_scratch_and_numpyro.ipynb
-              - "Self-exciting Hawkes Process — From Scratch and With NumPyro": xtreme/notebooks/hawkes_from_scratch_and_numpyro.ipynb
-              - "Marked Temporal Point Process — From Scratch and With NumPyro": xtreme/notebooks/marked_from_scratch_and_numpyro.ipynb
-              - "Thinning / Observation-Operator TPP — From Scratch and With NumPyro": xtreme/notebooks/thinning_from_scratch_and_numpyro.ipynb
-          - "Point Processes: Spatial":
-              - "Homogeneous Spatial Poisson Process — From Scratch and With NumPyro": xtreme/notebooks/hpp_spatial_from_scratch_and_numpyro.ipynb
-              - "Inhomogeneous Spatial Poisson Process — From Scratch and With NumPyro": xtreme/notebooks/ipp_spatial_from_scratch_and_numpyro.ipynb
-              - "Marked Spatial Point Process — From Scratch and With NumPyro": xtreme/notebooks/marked_spatial_from_scratch_and_numpyro.ipynb
-          - "Point Processes: Spatiotemporal":
-              - "Homogeneous Spatiotemporal Poisson Process — From Scratch and With NumPyro": xtreme/notebooks/hpp_spatiotemporal_from_scratch_and_numpyro.ipynb
-              - "Inhomogeneous Spatiotemporal Poisson Process — From Scratch and With NumPyro": xtreme/notebooks/ipp_spatiotemporal_from_scratch_and_numpyro.ipynb
-              - "Marked Spatiotemporal Poisson Process — From Scratch and With NumPyro": xtreme/notebooks/marked_spatiotemporal_from_scratch_and_numpyro.ipynb
-              - "Spatiotemporal Hawkes (ETAS-style) — From Scratch and With NumPyro": xtreme/notebooks/hawkes_spatiotemporal_from_scratch_and_numpyro.ipynb
-          - "Neural / Advanced":
-              - "Latent ODE for irregularly-observed Inhomogeneous Poisson Processes": xtreme/notebooks/latent_ode_ipp.ipynb
-      - "Tutorials":
-          - "Spatial Extremes":
-              - Overview: xtreme/tutorials/spatial_extremes.md
-              - "Data":
-                  - "Iberian station data": xtreme/tutorials/spatial_extremes/00_data/00_cds_insitu_iberia.ipynb
-              - "EVT Foundations":
-                  - "From daily series to block maxima": xtreme/tutorials/spatial_extremes/01_evt_foundations/01_block_maxima.ipynb
-                  - "The GEV distribution at one station": xtreme/tutorials/spatial_extremes/01_evt_foundations/02_gev_one_station.ipynb
-                  - "The three faces of the GEV": xtreme/tutorials/spatial_extremes/01_evt_foundations/03_extremal_types.ipynb
-                  - "03 · Return levels and return periods": xtreme/tutorials/spatial_extremes/01_evt_foundations/03_return_levels.ipynb
-              - "Pooling & GPs":
-                  - "Every station on its own": xtreme/tutorials/spatial_extremes/02_pooling/04_many_stations_independent.ipynb
-                  - "Independent fits, fast: a Laplace approximation": xtreme/tutorials/spatial_extremes/02_pooling/04_many_stations_laplace.ipynb
-                  - "Borrowing strength across stations": xtreme/tutorials/spatial_extremes/02_pooling/05_hierarchical_pooling.ipynb
-                  - "A Gaussian-process primer (with `pyrox`)": xtreme/tutorials/spatial_extremes/02_pooling/06_gp_primer.ipynb
-              - "Spatial GEV":
-                  - "A spatial GEV: location as a Gaussian process": xtreme/tutorials/spatial_extremes/03_spatial_gev/07_spatial_gp_mu.ipynb
-                  - "Two fields: a spatial location *and* a spatial scale": xtreme/tutorials/spatial_extremes/03_spatial_gev/08_spatial_gp_mu_sigma.ipynb
-                  - "Three fields: a fully non-stationary spatial GEV": xtreme/tutorials/spatial_extremes/03_spatial_gev/09_spatial_gp_mu_sigma_xi.ipynb
-              - "Non-stationary":
-                  - "Non-stationary extremes: a parametric trend": xtreme/tutorials/spatial_extremes/04_nonstationary/10_nonstationary_parametric.ipynb
-                  - "Non-stationary extremes: a mechanistic ODE": xtreme/tutorials/spatial_extremes/04_nonstationary/11_nonstationary_ode.ipynb
-                  - "Non-stationary extremes: a state-space Gaussian process": xtreme/tutorials/spatial_extremes/04_nonstationary/12_nonstationary_gp.ipynb
-      - "Ecosystem interop: pipekit & NumPyro": xtreme/interop.md
-  - Explainers:
-      - "Averaging kernel vs KISS-GP": explainers/averaging_kernel_kiss_gp.md
-  - Contributing: contributing.md
-  - Changelog: CHANGELOG.md
+      - Distributions: xtreme/distributions.md
+      - Primitives: xtreme/primitives.md
+      - Extraction: xtreme/extraction.md
+      - Point processes: xtreme/point-processes.md
+      - Point-process primitives: xtreme/point-process-primitives.md
+      - Point-process operators: xtreme/point-process-operators.md
+      - Point-process distributions: xtreme/point-process-distributions.md
+      - Simulations: xtreme/simulations.md
 
 markdown_extensions:
   - admonition
@@ -194,12 +114,14 @@ markdown_extensions:
       generic: true
   - pymdownx.highlight:
       anchor_linenums: true
+  - pymdownx.inlinehilite
   - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.details
   - attr_list
   - md_in_html
+  - tables
   - toc:
       permalink: true
 

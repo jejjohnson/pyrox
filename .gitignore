@@ -99,6 +99,8 @@ venv.bak/
 
 # mkdocs documentation
 /site
+# the assembled two-tool docs site (scripts/build_docs.py)
+/public
 
 # mypy
 .mypy_cache/
@@ -119,5 +121,5 @@ venv.bak/
 .plans/
 
 # Jupytext .py sources for tutorial notebooks — local-only dev artefacts.
-# The committed source of truth is the executed .ipynb (mkdocs-jupyter renders it).
+# The committed source of truth is the executed .ipynb (mystmd renders it).
 docs/notebooks/**/*.py
