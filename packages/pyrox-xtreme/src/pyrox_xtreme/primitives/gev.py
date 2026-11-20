@@ -92,13 +92,17 @@ def gev_log_prob(
     # case), +inf for ξ < -1 (density diverges toward the endpoint), and 0
     # for -1 < ξ. The support mask alone would report -inf everywhere, which
     # disagrees with the closed upper endpoint the class layer advertises.
-    # Tolerance of a few ulps: standardizing the advertised endpoint
-    # x = μ - σ/ξ rounds through several float ops, so ξ·z lands near — not
-    # exactly on — -1 for ordinary parameter values. Snapping the band to the
-    # endpoint limit is benign: the interior density approaches that same
-    # limit continuously on both branches.
-    at_endpoint = (jnp.abs(shape * z + 1.0) <= 8.0 * jnp.finfo(z.dtype).eps) & (
-        jnp.isfinite(x)
+    # The endpoint is x = μ - σ/ξ computed as the class layer advertises it,
+    # so `x == upper_bound` hits it exactly. Standardizing rounds through
+    # several float ops, so ξ·z can land at or below -1 for a point on the
+    # support side of it; such a point takes the endpoint limit, which the
+    # interior density approaches continuously. A point beyond the endpoint
+    # stays out of support (-inf), and an interior point keeps its finite
+    # density.
+    safe_shape = jnp.where(shape == 0.0, 1.0, shape)
+    x_end = loc - scale / safe_shape
+    at_endpoint = (
+        (shape < 0.0) & jnp.isfinite(x) & (x <= x_end) & ((x == x_end) | ~valid)
     )
     endpoint_val = jnp.where(
         shape == -1.0,

@@ -83,13 +83,20 @@ def gpd_log_prob(
     # ξ < -1 (density diverges toward the endpoint), and 0 for -1 < ξ < 0.
     # The support mask alone would report -inf everywhere, disagreeing with
     # the closed endpoint the class-layer support advertises.
-    # Tolerance of a few ulps: standardizing the advertised endpoint
-    # x = -σ/ξ rounds through several float ops, so ξ·r lands near — not
-    # exactly on — -1 for ordinary parameter values. Snapping the band to the
-    # endpoint limit is benign: the interior density approaches that same
-    # limit continuously on both branches.
+    # The endpoint is x = -σ/ξ computed as the class layer advertises it, so
+    # `x == upper_bound` hits it exactly. Standardizing rounds through several
+    # float ops, so ξ·r can land at or below -1 for a point on the support
+    # side of it; such a point takes the endpoint limit, which the interior
+    # density approaches continuously. A point beyond the endpoint stays out
+    # of support (-inf), and an interior point keeps its finite density.
+    safe_shape = jnp.where(shape == 0.0, 1.0, shape)
+    x_end = -scale / safe_shape
     at_endpoint = (
-        (jnp.abs(shape * r + 1.0) <= 8.0 * jnp.finfo(r.dtype).eps) & finite & (x >= 0.0)
+        (shape < 0.0)
+        & finite
+        & (x >= 0.0)
+        & (x <= x_end)
+        & ((x == x_end) | ~valid)
     )
     endpoint_val = jnp.where(
         shape == -1.0,

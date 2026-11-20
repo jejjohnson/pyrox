@@ -646,3 +646,46 @@ class TestExtendedRealLimits:
     def test_nan_input_propagates(self, fn, args):
         """A NaN observation must stay NaN, not be read as a support boundary."""
         assert jnp.isnan(fn(jnp.asarray(float("nan")), *args))
+
+
+class TestEndpointDensityOverride:
+    """The finite-endpoint density limit applies at the endpoint only.
+
+    Regression (jejjohnson/pyrox#463): a band of 8 ulps around ξ·z = -1 used
+    to give the endpoint limit to points on both sides of it, so in float32 an
+    observation one ulp beyond the upper bound scored +inf instead of -inf.
+    """
+
+    @pytest.mark.parametrize("family", ["gev", "gpd"])
+    def test_float32_neighbours_of_the_endpoint(self, family):
+        f32 = jnp.float32
+        endpoint = f32(0.5)  # μ - σ/ξ and -σ/ξ at μ = 0, σ = 1, ξ = -2
+        above = jnp.nextafter(endpoint, f32(1.0))
+        below = jnp.nextafter(endpoint, f32(0.0))
+
+        def lp(x):
+            if family == "gev":
+                return gev_log_prob(x, f32(0.0), f32(1.0), f32(-2.0))
+            return gpd_log_prob(x, f32(1.0), f32(-2.0))
+
+        assert jnp.isneginf(lp(above))
+        assert jnp.isposinf(lp(endpoint))
+        assert jnp.isfinite(lp(below))
+
+    @pytest.mark.parametrize("xi", [-2.0, -1.0, -0.5])
+    def test_class_upper_bound_takes_the_limit_and_beyond_is_out(self, xi):
+        f32 = jnp.float32
+        from pyrox_xtreme import (
+            GeneralizedExtremeValueDistribution,
+            GeneralizedParetoDistribution,
+        )
+
+        gev = GeneralizedExtremeValueDistribution(f32(1.3), f32(0.7), f32(xi))
+        gpd = GeneralizedParetoDistribution(f32(0.7), f32(xi))
+        # The density limit at the endpoint: +inf for ξ < -1, 1/σ at ξ = -1,
+        # 0 for -1 < ξ < 0.
+        limit = {-2.0: jnp.inf, -1.0: -jnp.log(0.7), -0.5: -jnp.inf}[xi]
+        for d in (gev, gpd):
+            upper = d.support.upper_bound
+            assert float(d.log_prob(upper)) == pytest.approx(float(limit), rel=1e-6)
+            assert jnp.isneginf(d.log_prob(jnp.nextafter(upper, f32(10.0))))
