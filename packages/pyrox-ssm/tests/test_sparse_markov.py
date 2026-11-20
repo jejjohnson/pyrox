@@ -12,7 +12,9 @@ Coverage strategy:
 * NumPyro hook: :func:`sparse_markov_factor` registers a finite factor
   site under :func:`numpyro.handlers.trace`.
 * prediction surface: :class:`ConditionedSparseMarkovGP.predict`
-  returns finite mean / non-negative variance.
+  returns finite mean / non-negative variance, and
+  ``SparseMarkovGPPrior.condition(guide)`` builds the same result as the
+  direct construction.
 
 A direct SVGP-Markov ↔ dense ``MarkovGPPrior`` equivalence test and a
 gradient-based ELBO-improvement test are exercised via the demo
@@ -143,3 +145,17 @@ def test_sparse_conditioned_predict_is_finite() -> None:
     assert mean.shape == (20,) and var.shape == (20,)
     assert jnp.all(jnp.isfinite(mean))
     assert jnp.all(var >= 0.0)
+
+
+def test_condition_equals_the_direct_construction() -> None:
+    prior, times, _y = _make_problem()
+    guide = FullRankGuide.init(prior.num_inducing, scale=0.3)
+    cond = prior.condition(guide)
+    assert isinstance(cond, ConditionedSparseMarkovGP)
+    assert cond.prior is prior and cond.guide is guide
+    t_star = jnp.array([times[0] - 0.5, 2.3, times[-1] + 0.5])
+    mean, var = cond.predict(t_star)
+    mean_ref, var_ref = ConditionedSparseMarkovGP(prior=prior, guide=guide).predict(
+        t_star
+    )
+    assert jnp.array_equal(mean, mean_ref) and jnp.array_equal(var, var_ref)
