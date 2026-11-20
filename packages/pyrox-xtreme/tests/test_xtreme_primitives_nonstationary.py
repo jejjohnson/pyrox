@@ -204,6 +204,21 @@ class TestNonStationary:
             assert z[0] > 20.0  # the old buggy clamp value
             assert jnp.allclose(z[0], ref, rtol=1e-3)
 
+    def test_short_period_negative_shape_brackets_root_below(self):
+        """Regression (jejjohnson/pyrox#463): a root below the default
+        ``loc - 8*scale`` lower bracket must not clamp to it.
+
+        At ξ = -2 and T = 1.01 the stationary quantile is about -10.15; the
+        solve used to stop at -8, where the residual is already negative.
+        """
+        loc = jnp.zeros(2)
+        scale = jnp.ones(2)
+        shape = jnp.full(2, -2.0)
+        z = nonstationary_return_level(1.01, loc, scale, shape, time_axis=0)
+        ref = gev_return_level(1.01, 0.0, 1.0, -2.0)
+        assert float(z) < -8.0  # the old clamp value
+        assert float(z) == pytest.approx(float(ref), rel=1e-4)
+
     def test_jit_and_grad_safe(self):
         loc, scale, shape = self._fields()
         fn = jax.jit(

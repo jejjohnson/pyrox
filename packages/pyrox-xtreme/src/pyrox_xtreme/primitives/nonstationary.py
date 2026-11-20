@@ -226,6 +226,34 @@ def _expand_upper_bracket(
     return upper
 
 
+def _expand_lower_bracket(
+    fn,
+    lower: Float[Array, ...],
+    upper: Float[Array, ...],
+    max_expansions: int = _MAX_BRACKET_EXPANSIONS,
+) -> Float[Array, ...]:
+    """Grow ``lower`` until ``fn(lower) >= 0`` everywhere, for decreasing ``fn``.
+
+    The mirror of :func:`_expand_upper_bracket`: doubles the gap
+    ``upper - lower`` downwards, only for the elements whose residual is still
+    negative at the lower end, under ``jax.lax.while_loop``.
+    """
+    lower, upper = jnp.broadcast_arrays(jnp.asarray(lower), jnp.asarray(upper))
+
+    def cond(state):
+        low, i = state
+        return jnp.any(fn(low) < 0) & (i < max_expansions)
+
+    def body(state):
+        low, i = state
+        needs_growth = fn(low) < 0
+        grown = upper - 2.0 * (upper - low)
+        return jnp.where(needs_growth, grown, low), i + 1
+
+    lower, _ = jax.lax.while_loop(cond, body, (lower, 0))
+    return lower
+
+
 def nonstationary_return_level(
     return_period: Float[Array, ...],
     loc: Float[Array, ...],
@@ -256,8 +284,9 @@ def nonstationary_return_level(
         shape: GEV shape field.
         time_axis: Axis indexing blocks, or ``None`` for the stationary case.
         num_bisection_steps: Bisection iterations for the non-stationary solve.
-        lower: Optional lower bracket for the non-stationary solve. Defaults
-            to a conservative value derived from ``loc`` and ``scale``.
+        lower: Optional starting lower bracket for the non-stationary solve.
+            Defaults to a value derived from ``loc`` and ``scale``, and is
+            grown downwards until it brackets the root, as ``upper`` is.
         upper: Optional starting upper bracket. It is grown automatically until
             it brackets the root, so an underestimate (including the default)
             is corrected rather than silently returned.
@@ -297,8 +326,12 @@ def nonstationary_return_level(
         # including past the finite Weibull endpoint where ``gev_survival``
         # saturates to 0). A fixed ``loc + 20*scale`` underestimates heavy
         # Fréchet tails, so grow the upper bracket until it brackets the root.
-        up = _expand_upper_bracket(fn, lower, upper)
-        return _bisect_monotone_decreasing(fn, lower, up, num_steps=num_bisection_steps)
+        # Towards ``-inf`` the residual tends to ``N (1 - 1/T) > 0``, but a
+        # fixed ``loc - 8*scale`` can sit above the root for short periods
+        # with a strongly negative shape, so grow the lower bracket too.
+        low = _expand_lower_bracket(fn, lower, upper)
+        up = _expand_upper_bracket(fn, low, upper)
+        return _bisect_monotone_decreasing(fn, low, up, num_steps=num_bisection_steps)
 
     # ``custom_root`` supplies the derivative via the implicit function theorem
     # (dz/dθ = -(∂R/∂θ)/(∂R/∂z)) instead of differentiating the bracketing
