@@ -54,10 +54,10 @@ import warnings
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+import argminax.adjoint
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-import jax.tree_util as jtu
 import lineax as lx
 import numpyro
 import optimistix as optx
@@ -196,56 +196,6 @@ def _markov_smoothed_posterior(
 _Sites = tuple[Float[Array, " N"], Float[Array, " N"]]
 
 
-class _NonFiniteSafeSolver(lx.AbstractLinearSolver):
-    r"""A linear solver for the implicit adjoint that never raises mid-sampler.
-
-    The implicit adjoint solves $(I - \partial T_\alpha / \partial s)^\top v = c$
-    at the fixed point. lineax raises whenever a solve fails, which ends a NUTS
-    chain at the first point that fails. Two failures are therefore turned into
-    values here:
-
-    * Where the forward fit is already non-finite (an SDE discretisation that
-      overflows at an extreme lengthscale, say) the solution is zero, so the
-      value stays non-finite and NUTS rejects the point as it would any other.
-    * An iterative solve that stops at ``max_steps`` or stagnates keeps its last
-      iterate, as the forward loop keeps its last sites with ``throw=False``.
-
-    Every other result is reported exactly as ``solver`` reports it.
-
-    Attributes:
-        solver: The solver used for finite systems.
-    """
-
-    solver: lx.AbstractLinearSolver
-
-    def init(self, operator, options):
-        return self.solver.init(operator, options)
-
-    def compute(self, state, vector, options):
-        solution, result, stats = self.solver.compute(state, vector, options)
-        leaves = jtu.tree_leaves(eqx.filter((state, vector), eqx.is_inexact_array))
-        broken = jnp.logical_not(
-            jnp.all(jnp.stack([jnp.all(jnp.isfinite(x)) for x in leaves]))
-        )
-        solution = jtu.tree_map(
-            lambda x: jnp.where(broken, jnp.zeros_like(x), x), solution
-        )
-        stopped = (result == lx.RESULTS.max_steps_reached) | (
-            result == lx.RESULTS.stagnation
-        )
-        result = lx.RESULTS.where(broken | stopped, lx.RESULTS.successful, result)
-        return solution, result, stats
-
-    def transpose(self, state, options):
-        return self.solver.transpose(state, options)
-
-    def conj(self, state, options):
-        return self.solver.conj(state, options)
-
-    def assume_full_rank(self):
-        return self.solver.assume_full_rank()
-
-
 def markov_implicit_adjoint() -> optx.ImplicitAdjoint:
     r"""The implicit adjoint of the Markov strategies, safe to use inside NUTS.
 
@@ -257,7 +207,9 @@ def markov_implicit_adjoint() -> optx.ImplicitAdjoint:
     pass. A solve that fails returns a value instead of raising: where the fit
     is already non-finite the gradient is non-finite, and a solve that stops at
     ``max_steps`` keeps its last iterate. A bare ``optimistix.ImplicitAdjoint``
-    raises in both cases, which ends a NUTS chain.
+    raises in both cases, which ends a NUTS chain. The mechanism is
+    ``argminax.adjoint.safe_implicit_adjoint``; only the GMRES setting is
+    Markov-specific.
 
     The default ``adjoint`` of `GaussNewtonMarkovInference`,
     `PosteriorLinearizationMarkov` and `ExpectationPropagationMarkov`; pass it
@@ -273,10 +225,8 @@ def markov_implicit_adjoint() -> optx.ImplicitAdjoint:
         ...     adjoint=pss.markov_implicit_adjoint()
         ... )
     """
-    return optx.ImplicitAdjoint(
-        linear_solver=_NonFiniteSafeSolver(
-            lx.GMRES(rtol=1e-10, atol=1e-10, restart=20, max_steps=50)
-        )
+    return argminax.adjoint.safe_implicit_adjoint(
+        lx.GMRES(rtol=1e-10, atol=1e-10, restart=20, max_steps=50)
     )
 
 

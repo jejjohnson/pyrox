@@ -50,9 +50,10 @@ wheels = [
 
 [[package]]
 name = "argminax"
-version = "0.0.6"
-source = { git = "https://github.com/jejjohnson/argminax.git?rev=v0.0.6#c7bd0c3fe78014c86bdc4289e59abc99833905a2" }
+version = "0.0.7"
+source = { git = "https://github.com/jejjohnson/argminax.git?rev=089d61f33344a269694f345765f918675d323d1e#089d61f33344a269694f345765f918675d323d1e" }
 dependencies = [
+    { name = "einx" },
     { name = "equinox" },
     { name = "gaussx" },
     { name = "jax" },
@@ -2516,7 +2517,7 @@ xarray = [
 
 [package.metadata]
 requires-dist = [
-    { name = "argminax", extras = ["numpyro"], git = "https://github.com/jejjohnson/argminax.git?rev=v0.0.6" },
+    { name = "argminax", extras = ["numpyro"], git = "https://github.com/jejjohnson/argminax.git?rev=089d61f33344a269694f345765f918675d323d1e" },
     { name = "einx", specifier = ">=0.4.3" },
     { name = "functax", extras = ["jax"], git = "https://github.com/jejjohnson/functax.git?rev=v0.0.7" },
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.7.0" },
@@ -2647,7 +2648,7 @@ xarray = [
 
 [package.metadata]
 requires-dist = [
-    { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?rev=v0.0.6" },
+    { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?rev=089d61f33344a269694f345765f918675d323d1e" },
     { name = "einx", specifier = ">=0.4.3" },
     { name = "functax", extras = ["jax"], git = "https://github.com/jejjohnson/functax.git?rev=v0.0.7" },
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.7.0" },
@@ -2672,6 +2673,7 @@ name = "pyrox-ssm"
 version = "0.2.1"
 source = { editable = "packages/pyrox-ssm" }
 dependencies = [
+    { name = "argminax" },
     { name = "einx" },
     { name = "equinox" },
     { name = "gaussx" },
@@ -2693,6 +2695,7 @@ flows = [
 
 [package.metadata]
 requires-dist = [
+    { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?rev=089d61f33344a269694f345765f918675d323d1e" },
     { name = "einx", specifier = ">=0.4.3" },
     { name = "equinox", specifier = ">=0.13.8" },
     { name = "filterax", marker = "extra == 'ensemble'", git = "https://github.com/jejjohnson/filterax?rev=v0.0.8" },
