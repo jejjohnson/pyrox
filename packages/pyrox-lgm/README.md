@@ -59,6 +59,8 @@ None of it is new machinery. Every precision is a [`gaussx`](https://github.com/
 
 pyrox-lgm is one package of the pyrox workspace; the [workspace README](../../README.md) introduces the others.
 
+<p align="center"><img src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_lgm_overview/pyrox_lgm_overview.png" alt="pyrox-lgm in one picture: you supply a data table, components with PC priors, a likelihood, and a graph or a mesh; the model is one sparse Gaussian field whose linear predictor reads a few latent nodes per observation, whose precision has one sparse block per component, and which inla() integrates out by Laplace at each hyperparameter; pyrox-lgm offers temporal, areal, spatial and combined components, PC priors, inla() and each component's NumPyro face; out come the hyperparameters, the latent marginals, diagnostics without refits and NUTS draws; pyrox and pyrox-gauss, gaussx and lineax, kernellib and functax, and argminax and optimistix underneath" width="100%"></p>
+
 ## 🌟 Highlights
 
 - 🧱 **Components in precision form**: `IID`, `RW1`, `RW2`, `AR1` and `MarkovGP` over time, `Besag`, `BYM2`, `CAR` and `Leroux` over areas, `SPDE` for a Matérn field on a mesh or a grid, `Generic` for any structure matrix, and `Kronecker` and `Replicate` to combine them; each keeps its precision sparse.
@@ -235,6 +237,15 @@ that is, NUTS's posterior mean of $`\tau`$, 2.79 against `inla()`'s 3.02 (both w
 
 ## 🔬 What else is in the box
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_lgm_roles/pyrox_lgm_roles-dark.svg">
+    <img alt="pyrox-lgm on the GeoStack role ladder: inla(), the Laplace fit, the log posterior of the hyperparameters, the diagnostics and each component's NumPyro face as algorithms; the components, PC priors, likelihoods, the model and the fitted results as models; no strategy objects, since inla() takes string options; the result's predictions, draws and xarray view and a component's prior and field as primitives; the structure spectrum and gaussx's GMRFs as structure; the setup functions and kernellib's graphs beside the ladder" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_lgm_roles/pyrox_lgm_roles-light.svg" width="100%">
+  </picture>
+</p>
+
+Each public name sits on one rung of the GeoStack role ladder, by the job it does; the table below lists them by area.
+
 `pyrox_lgm` is one namespace; its `__all__` holds every name below.
 
 | Area | Symbols | Notes |
@@ -262,6 +273,13 @@ that is, NUTS's posterior mean of $`\tau`$, 2.79 against `inla()`'s 3.02 (both w
 - **[`AGENTS.md`](AGENTS.md)**: the contracts every component, prior and observation model keeps (sparse precisions, the wiring of a new component, the R-INLA fixtures) and the tests that hold them.
 
 ## 🧩 Ecosystem
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_lgm_ecosystem/pyrox_lgm_ecosystem-dark.svg">
+    <img alt="No package imports pyrox-lgm; pyrox-gauss, pyrox-ssm and pyrox-xtreme forbid importing it in their import-guard tests; pyrox-lgm builds on pyrox, pyrox-gauss, gaussx, lineax, kernellib, functax, argminax, optimistix, matfree, JAX, Equinox, NumPyro and einx, and on xarray through an extra" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_lgm_ecosystem/pyrox_lgm_ecosystem-light.svg" width="100%">
+  </picture>
+</p>
 
 pyrox-lgm is a package of the pyrox [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/), in the GeoML tier of the [GeoStack](https://github.com/jejjohnson/geostack). It owns the latent Gaussian models and their NumPyro surface, and composes the rest in:
 
