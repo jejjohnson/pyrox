@@ -1,6 +1,6 @@
 """Structural pipekit-interop tests (#76).
 
-xtremax must stay pipekit-free (see ``docs/interop.md``), so
+pyrox_xtreme must stay pipekit-free (see ``docs/interop.md``), so
 conformance is asserted against a local mirror of the relevant
 runtime-checkable Protocols; a real-pipekit `isinstance` check runs
 only when pipekit happens to be installed.
@@ -16,7 +16,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from xtremax.distributions import (
+from pyrox_xtreme.distributions import (
     GeneralizedExtremeValueDistribution,
     GeneralizedParetoDistribution,
 )
@@ -122,7 +122,7 @@ class TestStructuralConformance:
         sklearn_present = importlib.util.find_spec("sklearn") is not None
         if not sklearn_present:
             pytest.skip("sklearn not installed (optional [threshold] extra)")
-        from xtremax.extraction.quantile_regression import XarrayQuantileRegressor
+        from pyrox_xtreme.extraction.quantile_regression import XarrayQuantileRegressor
 
         assert isinstance(XarrayQuantileRegressor(quantile=0.9), _Predictor)
 

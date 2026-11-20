@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from xtremax.extraction import (
+from pyrox_xtreme.extraction import (
     constant_threshold,
     decluster_runs,
     decluster_separation,

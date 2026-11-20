@@ -7,14 +7,14 @@ import numpyro.distributions as dist
 import pytest
 from jax import random
 
-from xtremax.point_processes import RectangularDomain, TemporalDomain
-from xtremax.point_processes.distributions import (
+from pyrox_xtreme.point_processes import RectangularDomain, TemporalDomain
+from pyrox_xtreme.point_processes.distributions import (
     HomogeneousSpatioTemporalPP,
     InhomogeneousSpatioTemporalPP,
     MarkedSpatioTemporalPP,
     SpatioTemporalHawkes,
 )
-from xtremax.point_processes.operators import (
+from pyrox_xtreme.point_processes.operators import (
     HomogeneousSpatioTemporalPP as HppStOp,
     InhomogeneousSpatioTemporalPP as IppStOp,
 )

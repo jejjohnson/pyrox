@@ -13,14 +13,14 @@ import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
 
-from xtremax.point_processes import (
+from pyrox_xtreme.point_processes import (
     MarkedSampleResult,
     SampleResult,
     SpatialSampleResult,
     SpatiotemporalSampleResult,
 )
-from xtremax.point_processes._domain import RectangularDomain, TemporalDomain
-from xtremax.point_processes.operators import (
+from pyrox_xtreme.point_processes._domain import RectangularDomain, TemporalDomain
+from pyrox_xtreme.point_processes.operators import (
     ExponentialHawkes,
     HomogeneousPoissonProcess,
     InhomogeneousPoissonProcess,
@@ -28,8 +28,8 @@ from xtremax.point_processes.operators import (
     RenewalProcess,
     ThinningProcess,
 )
-from xtremax.point_processes.operators.hpp_spatial import HomogeneousSpatialPP
-from xtremax.point_processes.operators.hpp_spatiotemporal import (
+from pyrox_xtreme.point_processes.operators.hpp_spatial import HomogeneousSpatialPP
+from pyrox_xtreme.point_processes.operators.hpp_spatiotemporal import (
     HomogeneousSpatioTemporalPP,
 )
 

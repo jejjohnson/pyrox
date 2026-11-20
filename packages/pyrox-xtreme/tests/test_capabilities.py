@@ -4,7 +4,7 @@ Agents and contributors search the index before writing a helper ("Reuse
 before you write" in AGENTS.md), so a stale index sends them to
 re-implement something that exists. ``scripts/capabilities.py`` regenerates
 it; this runs its ``--check``. The index lists the quantile-regression names
-that ``xtremax.extraction`` exports only with scikit-learn (the
+that ``pyrox_xtreme.extraction`` exports only with scikit-learn (the
 ``[threshold]`` extra, which CI installs), so it skips without it.
 """
 
@@ -39,7 +39,7 @@ def test_capability_index_is_current() -> None:
 def test_no_name_is_bound_to_two_objects() -> None:
     _, clashes = capabilities.collect()
     assert not clashes, (
-        "a name is exported for different objects by two xtremax homes: "
+        "a name is exported for different objects by two pyrox_xtreme homes: "
         f"{clashes}. Rename it, or add it to ALLOWED_SHARED_NAMES in "
         "scripts/capabilities.py with a reason."
     )

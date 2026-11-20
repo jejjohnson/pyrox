@@ -1,4 +1,4 @@
-"""Tests for :mod:`xtremax.point_processes.primitives.ipp_spatial`."""
+"""Tests for :mod:`pyrox_xtreme.point_processes.primitives.ipp_spatial`."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import jax.numpy as jnp
 import pytest
 from jax import random
 
-from xtremax.point_processes import RectangularDomain
-from xtremax.point_processes.primitives import (
+from pyrox_xtreme.point_processes import RectangularDomain
+from pyrox_xtreme.point_processes.primitives import (
     ipp_spatial_intensity,
     ipp_spatial_log_prob,
     ipp_spatial_predict_count,

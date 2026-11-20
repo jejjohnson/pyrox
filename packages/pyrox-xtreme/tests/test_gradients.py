@@ -17,28 +17,28 @@ import numpy as np
 import pytest
 import scipy.stats as st
 
-from xtremax.distributions import (
+from pyrox_xtreme.distributions import (
     FrechetType2GEVD,
     GeneralizedExtremeValueDistribution,
     GeneralizedParetoDistribution,
     GumbelType1GEVD,
     WeibullType3GEVD,
 )
-from xtremax.primitives.gev import (
+from pyrox_xtreme.primitives.gev import (
     gev_cdf,
     gev_icdf,
     gev_log_prob,
     gev_mean,
     gev_survival,
 )
-from xtremax.primitives.gpd import (
+from pyrox_xtreme.primitives.gpd import (
     gpd_cdf,
     gpd_icdf,
     gpd_log_prob,
     gpd_mean,
     gpd_survival,
 )
-from xtremax.primitives.spatial import pairwise_distances
+from pyrox_xtreme.primitives.spatial import pairwise_distances
 
 
 LOC, SCALE = 0.0, 1.0

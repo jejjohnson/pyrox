@@ -1,4 +1,4 @@
-"""Tests for :mod:`xtremax.point_processes.primitives.diagnostics`."""
+"""Tests for :mod:`pyrox_xtreme.point_processes.primitives.diagnostics`."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import pytest
 from jax import random
 
-from xtremax.point_processes.primitives import (
+from pyrox_xtreme.point_processes.primitives import (
     compensator_curve,
     hpp_cumulative_intensity,
     hpp_sample,
@@ -113,7 +113,7 @@ class TestKsStatisticRegression:
         dominates. A version that omits the lower branch would return
         ≈ 0.743 instead.
         """
-        from xtremax.point_processes.primitives import ks_statistic_exp1
+        from pyrox_xtreme.point_processes.primitives import ks_statistic_exp1
 
         residuals = jnp.array([5.0, 5.0, 5.0, 5.0])
         mask = jnp.ones_like(residuals, dtype=jnp.bool_)
@@ -124,7 +124,7 @@ class TestKsStatisticRegression:
 
     @pytest.mark.slow
     def test_monotone_residuals_trivial_case(self):
-        from xtremax.point_processes.primitives import ks_statistic_exp1
+        from pyrox_xtreme.point_processes.primitives import ks_statistic_exp1
 
         # Residuals exactly matching theoretical (i - 0.5)/n quantiles
         # give a small KS statistic.

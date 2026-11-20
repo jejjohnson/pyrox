@@ -37,6 +37,7 @@ pyrox-nn = { workspace = true }
 pyrox-lgm = { workspace = true }
 pyrox-ssm = { workspace = true }
 pyrox-gauss = { workspace = true }
+pyrox-xtreme = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -59,6 +60,8 @@ dev = [
     # With the ensemble extra, so pyrox_ssm.ensemble's tests run in CI.
     "pyrox-ssm[ensemble]",
     "pyrox-gauss",
+    # With the threshold extra, so the quantile-regression tests run in CI.
+    "pyrox-xtreme[threshold]",
     # Optional-extra backends exercised by the test suites.
     "optax>=0.2.8",
     "pandas>=3.0.3",
@@ -98,7 +101,15 @@ examples = [
 [tool.ruff]
 target-version = "py312"
 line-length = 88
-extend-exclude = ["design_docs"]
+extend-exclude = [
+    "design_docs",
+    # The spatial-extremes tutorials ship pre-executed on CDS data that CI
+    # cannot fetch; reformatting their sources would desynchronise code from
+    # the committed outputs. Their `_helpers/` modules are linted as normal.
+    "docs/notebooks/xtreme/spatial_extremes/**/*.ipynb",
+]
+# Honour the exclude even when pre-commit passes the files explicitly.
+force-exclude = true
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "TID251"]
@@ -127,12 +138,16 @@ ignore = ["E402", "E721", "E731", "E741"]
 "packages/pyrox-lgm/src/pyrox_lgm/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "packages/pyrox-ssm/src/pyrox_ssm/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "packages/pyrox-gauss/src/pyrox_gauss/**" = ["F722", "RUF001", "RUF002", "RUF003"]
+# RUF012: NumPyro's Distribution interface needs class-level dict and list
+# attributes (`arg_constraints`, `reparametrized_params`).
+"packages/pyrox-xtreme/src/pyrox_xtreme/**" = ["F722", "RUF001", "RUF002", "RUF003", "RUF012"]
 "packages/pyrox/tests/inference/**" = ["F722"]
 "packages/pyrox-gp/tests/**" = ["F722"]
 "packages/pyrox-nn/tests/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "packages/pyrox-lgm/tests/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "packages/pyrox-ssm/tests/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "packages/pyrox-gauss/tests/**" = ["F722", "RUF001", "RUF002", "RUF003"]
+"packages/pyrox-xtreme/tests/**" = ["F722", "RUF001", "RUF002", "RUF003", "RUF012"]
 "docs/notebooks/**" = [
     "F722",
     "B905",
@@ -158,6 +173,26 @@ lines-after-imports = 2
 [tool.ty.environment]
 python-version = "3.12"
 
+# pyrox-xtreme keeps the rule ignores it had as xtremax, over its ported NumPyro
+# distribution classes, its scipy-backed simulation helpers and JAX scan and
+# vmap outputs that ty does not narrow. Tightening them rule by rule is
+# pyrox-xtreme's own task; the other packages stay on the default rules.
+[[tool.ty.overrides]]
+include = ["packages/pyrox-xtreme/src/**"]
+
+[tool.ty.overrides.rules]
+unsupported-operator = "ignore"
+invalid-argument-type = "ignore"
+invalid-method-override = "ignore"
+unresolved-attribute = "ignore"
+invalid-return-type = "ignore"
+not-iterable = "ignore"
+not-subscriptable = "ignore"
+invalid-assignment = "ignore"
+# NumPyro's `constraints.interval` is a class; ty reads its `__call__` as
+# `(self, x)` rather than the constructor and flags two-argument construction.
+too-many-positional-arguments = "ignore"
+
 [tool.pytest.ini_options]
 testpaths = [
     "packages/pyrox/tests",
@@ -166,10 +201,12 @@ testpaths = [
     "packages/pyrox-lgm/tests",
     "packages/pyrox-ssm/tests",
     "packages/pyrox-gauss/tests",
+    "packages/pyrox-xtreme/tests",
 ]
 addopts = "--cov --cov-report=term-missing --cov-report=xml:coverage.xml"
 markers = [
     "slow: long-running tests (convergence / integration); skip with `-m 'not slow'`",
+    "integration: end-to-end workflows (MCMC fits through NumPyro, subprocess runs); pyrox-xtreme runs them in their own CI job",
 ]
 
 [tool.coverage.run]
@@ -180,6 +217,7 @@ source = [
     "packages/pyrox-lgm/src",
     "packages/pyrox-ssm/src",
     "packages/pyrox-gauss/src",
+    "packages/pyrox-xtreme/src",
 ]
 omit = ["**/tests/*"]
 

@@ -21,17 +21,17 @@ DOCS_API = pathlib.Path(__file__).resolve().parents[1] / "docs" / "api"
 # Modules with a dedicated reference page, and the sub-modules they re-export
 # (documented on their own pages, so they are not members of the parent).
 DOCUMENTED_MODULES = [
-    "xtremax.distributions",
-    "xtremax.primitives",
-    "xtremax.extraction",
-    "xtremax.simulations",
-    "xtremax.point_processes",
-    "xtremax.point_processes.primitives",
-    "xtremax.point_processes.operators",
-    "xtremax.point_processes.distributions",
+    "pyrox_xtreme.distributions",
+    "pyrox_xtreme.primitives",
+    "pyrox_xtreme.extraction",
+    "pyrox_xtreme.simulations",
+    "pyrox_xtreme.point_processes",
+    "pyrox_xtreme.point_processes.primitives",
+    "pyrox_xtreme.point_processes.operators",
+    "pyrox_xtreme.point_processes.distributions",
 ]
 RE_EXPORTED_SUBMODULES = {
-    "xtremax.point_processes": {"primitives", "operators", "distributions"},
+    "pyrox_xtreme.point_processes": {"primitives", "operators", "distributions"},
 }
 
 _BLOCK = re.compile(r"^::: ([\w.]+)\n((?:^[ \t].*\n|^\n)*)", re.M)
@@ -63,7 +63,7 @@ def _expected(module_path: str) -> set[str]:
 def _actual(module_path: str, documented: dict[str, list[str]]) -> list[str]:
     names = list(documented.get(module_path, []))
     # Symbols documented from a sub-path page, e.g. conditionally exported
-    # members shown via ``xtremax.extraction.quantile_regression``.
+    # members shown via ``pyrox_xtreme.extraction.quantile_regression``.
     for other, members in documented.items():
         if other.startswith(f"{module_path}.") and other not in DOCUMENTED_MODULES:
             names += members

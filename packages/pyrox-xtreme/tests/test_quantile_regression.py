@@ -16,7 +16,7 @@ import xarray as xr
 
 pytest.importorskip("sklearn")
 
-from xtremax.extraction.quantile_regression import (
+from pyrox_xtreme.extraction.quantile_regression import (
     XarrayQuantileRegressor,
     quantile_regression_threshold,
 )

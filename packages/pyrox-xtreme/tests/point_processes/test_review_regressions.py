@@ -12,15 +12,15 @@ import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
 
-from xtremax.point_processes import EventHistory
-from xtremax.point_processes.operators import (
+from pyrox_xtreme.point_processes import EventHistory
+from pyrox_xtreme.point_processes.operators import (
     ExponentialHawkes,
     HomogeneousPoissonProcess,
     MarkedTemporalPointProcess,
     ThinningProcess,
 )
-from xtremax.point_processes.primitives.marked import sample_marks_at_times
-from xtremax.point_processes.primitives.thinning import (
+from pyrox_xtreme.point_processes.primitives.marked import sample_marks_at_times
+from pyrox_xtreme.point_processes.primitives.thinning import (
     retention_compensator,
     thinning_retention_log_prob,
 )
@@ -292,7 +292,7 @@ class TestThinningSampleReturnsMarks:
         assert third_arr.shape[-1] == t.shape[-1]
 
     def test_distribution_round_trip_with_marked_base(self):
-        from xtremax.point_processes.distributions import (
+        from pyrox_xtreme.point_processes.distributions import (
             ThinningProcess as ThinningDist,
         )
 
@@ -325,7 +325,7 @@ class TestRenewalBatchShape:
     """Codex P2: Renewal batch_shape must include inter-event dims."""
 
     def test_batch_shape_broadcasts_with_inter_event_batch(self):
-        from xtremax.point_processes.distributions import (
+        from pyrox_xtreme.point_processes.distributions import (
             RenewalProcess as RenewalDist,
         )
 
@@ -341,10 +341,10 @@ class TestGeneralHawkesBatchShape:
     """Codex P2: GeneralHawkes batch_shape must include ``mu``."""
 
     def test_batch_shape_broadcasts_with_mu(self):
-        from xtremax.point_processes.distributions import (
+        from pyrox_xtreme.point_processes.distributions import (
             GeneralHawkesProcess as GenHawkesDist,
         )
-        from xtremax.point_processes.operators import ExponentialKernel
+        from pyrox_xtreme.point_processes.operators import ExponentialKernel
 
         batched_mu = jnp.array([0.3, 0.5, 0.7])
         kernel = ExponentialKernel(alpha=jnp.asarray(0.3), beta=jnp.asarray(1.0))
@@ -369,8 +369,8 @@ class TestSpatialIppLambdaMaxRequired:
     """
 
     def test_unset_lambda_max_raises(self):
-        from xtremax.point_processes import RectangularDomain
-        from xtremax.point_processes.operators import InhomogeneousSpatialPP
+        from pyrox_xtreme.point_processes import RectangularDomain
+        from pyrox_xtreme.point_processes.operators import InhomogeneousSpatialPP
 
         domain = RectangularDomain.from_size(jnp.array([4.0, 4.0]))
 
@@ -382,8 +382,8 @@ class TestSpatialIppLambdaMaxRequired:
             op.sample(jax.random.PRNGKey(0), max_candidates=64)
 
     def test_pinned_lambda_max_used(self):
-        from xtremax.point_processes import RectangularDomain
-        from xtremax.point_processes.operators import InhomogeneousSpatialPP
+        from pyrox_xtreme.point_processes import RectangularDomain
+        from pyrox_xtreme.point_processes.operators import InhomogeneousSpatialPP
 
         domain = RectangularDomain.from_size(jnp.array([4.0, 4.0]))
 
@@ -404,16 +404,16 @@ class TestHomogeneousSpatialPPRejectsBatchedRate:
     """
 
     def test_scalar_rate_ok(self):
-        from xtremax.point_processes import RectangularDomain
-        from xtremax.point_processes.distributions import HomogeneousSpatialPP
+        from pyrox_xtreme.point_processes import RectangularDomain
+        from pyrox_xtreme.point_processes.distributions import HomogeneousSpatialPP
 
         domain = RectangularDomain.from_size(jnp.array([4.0, 4.0]))
         d = HomogeneousSpatialPP(rate=0.5, domain=domain)
         assert d.batch_shape == ()
 
     def test_batched_rate_raises(self):
-        from xtremax.point_processes import RectangularDomain
-        from xtremax.point_processes.distributions import HomogeneousSpatialPP
+        from pyrox_xtreme.point_processes import RectangularDomain
+        from pyrox_xtreme.point_processes.distributions import HomogeneousSpatialPP
 
         domain = RectangularDomain.from_size(jnp.array([4.0, 4.0]))
         with pytest.raises(ValueError, match="scalar"):
@@ -432,7 +432,7 @@ class TestSpatialMarksPaddingSupportAware:
     @pytest.mark.slow
     def test_uniform_2_3_padding(self):
         # Uniform(2, 3) — old fallback ``1.0`` is below the support.
-        from xtremax.point_processes.primitives import spatial_marks_log_prob
+        from pyrox_xtreme.point_processes.primitives import spatial_marks_log_prob
 
         locations = jnp.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]])
         marks = jnp.array([2.5, 2.7, 0.0])  # padding mark at row 2
@@ -449,7 +449,7 @@ class TestSpatialMarksPaddingSupportAware:
     def test_beta_padding(self):
         # Beta on (0, 1) — endpoints are not in support; ``1.0`` would
         # fail and so would ``0.0``. ``feasible_like`` returns 0.5.
-        from xtremax.point_processes.primitives import spatial_marks_log_prob
+        from pyrox_xtreme.point_processes.primitives import spatial_marks_log_prob
 
         locations = jnp.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]])
         marks = jnp.array([0.3, 0.7, 0.0])
@@ -464,7 +464,7 @@ class TestSpatialMarksPaddingSupportAware:
         # Without the support-aware substitute, gradients through the
         # masked branch were NaN even though the value itself was
         # masked out. Verify the gradient is finite end-to-end.
-        from xtremax.point_processes.primitives import spatial_marks_log_prob
+        from pyrox_xtreme.point_processes.primitives import spatial_marks_log_prob
 
         locations = jnp.array([[0.0, 0.0], [1.0, 1.0]])
         marks = jnp.array([2.5, 0.0])
@@ -486,7 +486,7 @@ class TestMarkSamplerPreservesDiscreteDtype:
     """Copilot: padding for discrete-mark draws must preserve int dtype."""
 
     def test_categorical_sample_dtype(self):
-        from xtremax.point_processes.primitives import (
+        from pyrox_xtreme.point_processes.primitives import (
             sample_spatial_marks_at_locations,
         )
 
@@ -507,13 +507,13 @@ class TestRectangularDomainValidation:
     """Copilot: ``RectangularDomain.__init__`` validates bounds."""
 
     def test_shape_mismatch_raises(self):
-        from xtremax.point_processes import RectangularDomain
+        from pyrox_xtreme.point_processes import RectangularDomain
 
         with pytest.raises(ValueError, match="shape"):
             RectangularDomain(lo=jnp.zeros(2), hi=jnp.ones(3))
 
     def test_inverted_bounds_raise(self):
-        from xtremax.point_processes import RectangularDomain
+        from pyrox_xtreme.point_processes import RectangularDomain
 
         with pytest.raises(ValueError, match="hi > lo"):
             RectangularDomain(lo=jnp.array([1.0, 2.0]), hi=jnp.array([3.0, 1.0]))
@@ -524,7 +524,7 @@ class TestHaltonDynamicPrimes:
 
     @pytest.mark.slow
     def test_d13_runs(self):
-        from xtremax.point_processes import (
+        from pyrox_xtreme.point_processes import (
             RectangularDomain,
             integrate_log_intensity_spatial,
         )
@@ -545,8 +545,8 @@ class TestMarkedSpatialDomainReturnsRectangularDomain:
     """Copilot: ``MarkedSpatialPP.domain`` returns a RectangularDomain."""
 
     def test_domain_has_volume(self):
-        from xtremax.point_processes import RectangularDomain
-        from xtremax.point_processes.operators import (
+        from pyrox_xtreme.point_processes import RectangularDomain
+        from pyrox_xtreme.point_processes.operators import (
             HomogeneousSpatialPP,
             MarkedSpatialPP,
         )
@@ -570,7 +570,7 @@ class TestHppSpatialLogProbJanossy:
     """
 
     def test_drops_n_log_volume_term(self):
-        from xtremax.point_processes.primitives import hpp_spatial_log_prob
+        from pyrox_xtreme.point_processes.primitives import hpp_spatial_log_prob
 
         rate = 0.5
         vol = 100.0
@@ -580,7 +580,7 @@ class TestHppSpatialLogProbJanossy:
         assert jnp.allclose(hpp_spatial_log_prob(n, rate, vol), expected)
 
     def test_matches_ipp_with_constant_intensity(self):
-        from xtremax.point_processes.primitives import (
+        from pyrox_xtreme.point_processes.primitives import (
             hpp_spatial_log_prob,
             ipp_spatial_log_prob,
         )
@@ -607,9 +607,9 @@ class TestHppSpatialDistCountPathNoClip:
     """
 
     def test_count_above_buffer_size_unclipped(self):
-        from xtremax.point_processes import RectangularDomain
-        from xtremax.point_processes.distributions import HomogeneousSpatialPP
-        from xtremax.point_processes.primitives import hpp_spatial_log_prob
+        from pyrox_xtreme.point_processes import RectangularDomain
+        from pyrox_xtreme.point_processes.distributions import HomogeneousSpatialPP
+        from pyrox_xtreme.point_processes.primitives import hpp_spatial_log_prob
 
         domain = RectangularDomain.from_size(jnp.array([2.0, 2.0]))
         # Tiny buffer of size 8; supply a count well above it.
@@ -625,8 +625,8 @@ class TestHppSpatialDistCountPathNoClip:
 
     @pytest.mark.slow
     def test_mask_path_still_works(self):
-        from xtremax.point_processes import RectangularDomain
-        from xtremax.point_processes.distributions import HomogeneousSpatialPP
+        from pyrox_xtreme.point_processes import RectangularDomain
+        from pyrox_xtreme.point_processes.distributions import HomogeneousSpatialPP
 
         domain = RectangularDomain.from_size(jnp.array([4.0, 4.0]))
         d_pp = HomogeneousSpatialPP(rate=0.5, domain=domain, max_events=64)
@@ -655,7 +655,7 @@ class TestStppHawkesIntensityHandlesPaddingTimes:
     """
 
     def test_no_nan_with_padding_times_in_future(self) -> None:
-        from xtremax.point_processes.primitives import stpp_hawkes_intensity
+        from pyrox_xtreme.point_processes.primitives import stpp_hawkes_intensity
 
         # All slots are padding; padding times in the "future".
         event_locs = jnp.zeros((4, 2))
@@ -689,8 +689,8 @@ class TestStppHawkesLogProbCausalityByTimestamp:
 
     @pytest.mark.slow
     def test_log_prob_invariant_to_row_permutation(self) -> None:
-        from xtremax.point_processes import RectangularDomain, TemporalDomain
-        from xtremax.point_processes.primitives import stpp_hawkes_log_prob
+        from pyrox_xtreme.point_processes import RectangularDomain, TemporalDomain
+        from pyrox_xtreme.point_processes.primitives import stpp_hawkes_log_prob
 
         spatial = RectangularDomain.from_size(jnp.array([4.0, 4.0]))
         temporal = TemporalDomain.from_duration(2.0)
@@ -730,8 +730,8 @@ class TestStppHawkesSampleNoOOB:
         # ``n_max`` repeatedly.
         from jax import random
 
-        from xtremax.point_processes import RectangularDomain, TemporalDomain
-        from xtremax.point_processes.primitives import stpp_hawkes_sample
+        from pyrox_xtreme.point_processes import RectangularDomain, TemporalDomain
+        from pyrox_xtreme.point_processes.primitives import stpp_hawkes_sample
 
         spatial = RectangularDomain.from_size(jnp.array([2.0, 2.0]))
         temporal = TemporalDomain.from_duration(1.0)
@@ -764,8 +764,8 @@ class TestStppHawkesSampleZeroBaselineDoesNotDivByZero:
     def test_mu_zero_buffer_finite(self) -> None:
         from jax import random
 
-        from xtremax.point_processes import RectangularDomain, TemporalDomain
-        from xtremax.point_processes.primitives import stpp_hawkes_sample
+        from pyrox_xtreme.point_processes import RectangularDomain, TemporalDomain
+        from pyrox_xtreme.point_processes.primitives import stpp_hawkes_sample
 
         spatial = RectangularDomain.from_size(jnp.array([2.0, 2.0]))
         temporal = TemporalDomain.from_duration(1.0)
@@ -798,8 +798,8 @@ class TestPearsonResidualsNoSentinelArtifact:
 
     @pytest.mark.slow
     def test_last_cell_residual_uses_real_count_only(self) -> None:
-        from xtremax.point_processes import RectangularDomain, TemporalDomain
-        from xtremax.point_processes.primitives import (
+        from pyrox_xtreme.point_processes import RectangularDomain, TemporalDomain
+        from pyrox_xtreme.point_processes.primitives import (
             ipp_spatiotemporal_pearson_residuals,
         )
 

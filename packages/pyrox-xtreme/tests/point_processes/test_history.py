@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from xtremax.point_processes import EventHistory
+from pyrox_xtreme.point_processes import EventHistory
 
 
 class TestEventHistory:

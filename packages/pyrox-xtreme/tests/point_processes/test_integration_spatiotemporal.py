@@ -5,7 +5,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 import pytest
 
-from xtremax.point_processes import (
+from pyrox_xtreme.point_processes import (
     RectangularDomain,
     TemporalDomain,
     integrate_log_intensity_spatiotemporal,
@@ -56,7 +56,7 @@ class TestSpatiotemporalIntegration:
             return -0.5 * jnp.sum(s * s, axis=-1) + t / 3.0
 
         # Reference: spatial integral via QMC × temporal integral closed-form.
-        from xtremax.point_processes import integrate_log_intensity_spatial
+        from pyrox_xtreme.point_processes import integrate_log_intensity_spatial
 
         spatial_int = integrate_log_intensity_spatial(
             lambda s: -0.5 * jnp.sum(s * s, axis=-1), spatial, n_points=4096

@@ -1,4 +1,4 @@
-"""Tests for :mod:`xtremax.point_processes.primitives.hpp_spatial`."""
+"""Tests for :mod:`pyrox_xtreme.point_processes.primitives.hpp_spatial`."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import jax.numpy as jnp
 import pytest
 from jax import random
 
-from xtremax.point_processes import RectangularDomain
-from xtremax.point_processes.primitives import (
+from pyrox_xtreme.point_processes import RectangularDomain
+from pyrox_xtreme.point_processes.primitives import (
     csr_l_function,
     csr_pair_correlation,
     csr_ripleys_k,
@@ -33,7 +33,7 @@ class TestHppSpatialLogProb:
     def test_matches_ipp_for_constant_intensity(self) -> None:
         # The HPP log-prob must equal the IPP log-prob under constant
         # intensity. Codex P2 regression.
-        from xtremax.point_processes.primitives import ipp_spatial_log_prob
+        from pyrox_xtreme.point_processes.primitives import ipp_spatial_log_prob
 
         rate = 0.7
         vol = 9.0

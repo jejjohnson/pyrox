@@ -1,4 +1,4 @@
-"""Tests for :mod:`xtremax.point_processes.primitives.ipp_spatiotemporal`."""
+"""Tests for :mod:`pyrox_xtreme.point_processes.primitives.ipp_spatiotemporal`."""
 
 from __future__ import annotations
 
@@ -7,12 +7,12 @@ import jax.numpy as jnp
 import pytest
 from jax import random
 
-from xtremax.point_processes import (
+from pyrox_xtreme.point_processes import (
     RectangularDomain,
     TemporalDomain,
     integrate_log_intensity_spatiotemporal,
 )
-from xtremax.point_processes.primitives import (
+from pyrox_xtreme.point_processes.primitives import (
     ipp_spatiotemporal_chi_square_gof,
     ipp_spatiotemporal_intensity_surface_at_time,
     ipp_spatiotemporal_log_prob,

@@ -13,7 +13,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from xtremax import (
+from pyrox_xtreme import (
     assemble_nonstationary_gev_fields,
     design_matrix,
     expected_exceedances,

@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from xtremax.distributions import (
+from pyrox_xtreme.distributions import (
     FrechetType2GEVD,
     GeneralizedExtremeValueDistribution,
     GeneralizedParetoDistribution,
@@ -103,7 +103,7 @@ class TestGEVD:
         `σ` for every threshold when ξ=0 — even though the true Gumbel
         mean excess depends on u and only asymptotes to σ in the far tail.
         """
-        from xtremax.distributions import GumbelType1GEVD
+        from pyrox_xtreme.distributions import GumbelType1GEVD
 
         gev0 = GeneralizedExtremeValueDistribution(
             loc=0.0, scale=1.0, concentration=0.0
@@ -721,7 +721,7 @@ class TestPRNGKeyValidation:
         icdf to -inf (Gumbel/GEV at p=0) or +inf (Fréchet at p=1).
         Samples must now all be finite.
         """
-        from xtremax.distributions import (
+        from pyrox_xtreme.distributions import (
             FrechetType2GEVD,
             GeneralizedExtremeValueDistribution,
             GeneralizedParetoDistribution,

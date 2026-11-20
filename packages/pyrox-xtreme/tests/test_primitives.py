@@ -12,7 +12,7 @@ import jax.numpy as jnp
 import pytest
 import scipy.stats as st
 
-from xtremax import (
+from pyrox_xtreme import (
     frechet_cdf,
     frechet_icdf,
     frechet_log_prob,
@@ -249,19 +249,19 @@ class TestClassPrimitiveParity:
         return jnp.linspace(0.5, 3.0, 20)
 
     def test_gevd_log_prob_parity(self, x):
-        from xtremax import GeneralizedExtremeValueDistribution
+        from pyrox_xtreme import GeneralizedExtremeValueDistribution
 
         d = GeneralizedExtremeValueDistribution(0.0, 1.0, 0.2)
         assert jnp.allclose(d.log_prob(x), gev_log_prob(x, 0.0, 1.0, 0.2))
 
     def test_gumbel_log_prob_parity(self, x):
-        from xtremax import GumbelType1GEVD
+        from pyrox_xtreme import GumbelType1GEVD
 
         d = GumbelType1GEVD(0.0, 1.0)
         assert jnp.allclose(d.log_prob(x), gumbel_log_prob(x, 0.0, 1.0))
 
     def test_gpd_log_prob_parity(self, x):
-        from xtremax import GeneralizedParetoDistribution
+        from pyrox_xtreme import GeneralizedParetoDistribution
 
         d = GeneralizedParetoDistribution(scale=1.0, shape=0.2)
         assert jnp.allclose(d.log_prob(x), gpd_log_prob(x, 1.0, 0.2))
@@ -269,7 +269,7 @@ class TestClassPrimitiveParity:
     def test_gpd_survival_delegates_to_primitive(self, x):
         """Class survival / cumulative-hazard must match the stable primitives
         (incl. the small-ξ band), not the old threshold-based branches."""
-        from xtremax import GeneralizedParetoDistribution
+        from pyrox_xtreme import GeneralizedParetoDistribution
 
         for xi in (0.2, 5e-8, -0.2):
             d = GeneralizedParetoDistribution(scale=1.0, concentration=xi)
@@ -280,13 +280,13 @@ class TestClassPrimitiveParity:
             )
 
     def test_frechet_log_prob_parity(self, x):
-        from xtremax import FrechetType2GEVD
+        from pyrox_xtreme import FrechetType2GEVD
 
         d = FrechetType2GEVD(0.0, 1.0, 0.2)
         assert jnp.allclose(d.log_prob(x), frechet_log_prob(x, 0.0, 1.0, 0.2))
 
     def test_weibull_log_prob_parity(self):
-        from xtremax import WeibullType3GEVD
+        from pyrox_xtreme import WeibullType3GEVD
 
         d = WeibullType3GEVD(0.0, 1.0, -0.2)
         x = jnp.linspace(-3.0, 2.0, 20)
@@ -295,7 +295,7 @@ class TestClassPrimitiveParity:
     def test_gevd_survival_delegates_to_primitive(self, x):
         """Class survival / log-survival must match the stable primitives (incl.
         the small-ξ band), not the old threshold-based branches."""
-        from xtremax import GeneralizedExtremeValueDistribution
+        from pyrox_xtreme import GeneralizedExtremeValueDistribution
 
         for xi in (0.2, 5e-8, -0.2):
             d = GeneralizedExtremeValueDistribution(0.0, 1.0, xi)

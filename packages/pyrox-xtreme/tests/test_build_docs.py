@@ -32,7 +32,7 @@ def make_inventory(entries: list[str]) -> bytes:
     """Build a minimal Sphinx v2 inventory payload from raw entry lines."""
     header = (
         b"# Sphinx inventory version 2\n"
-        b"# Project: xtremax\n"
+        b"# Project: pyrox_xtreme\n"
         b"# Version: 0.0.0\n"
         b"# The remainder of this file is compressed using zlib.\n"
     )
@@ -44,18 +44,18 @@ class TestParseInventory:
     def test_reads_entries(self) -> None:
         data = make_inventory(
             [
-                "xtremax.Clip py:class 2 api/transforms/#xtremax.transforms.Clip -",
-                "xtremax.summarize py:function 2 api/stats/#xtremax.stats.summarize -",
+                "pyrox_xtreme.Clip py:class 2 api/transforms/#pyrox_xtreme.transforms.Clip -",
+                "pyrox_xtreme.summarize py:function 2 api/stats/#pyrox_xtreme.stats.summarize -",
             ]
         )
         entries = build_docs.parse_inventory(data)
-        assert entries["xtremax.Clip"] == "api/transforms/#xtremax.transforms.Clip"
+        assert entries["pyrox_xtreme.Clip"] == "api/transforms/#pyrox_xtreme.transforms.Clip"
         assert len(entries) == 2
 
     def test_expands_dollar_abbreviation(self) -> None:
-        data = make_inventory(["xtremax.stats.Summary py:class 1 api/stats/#$ -"])
+        data = make_inventory(["pyrox_xtreme.stats.Summary py:class 1 api/stats/#$ -"])
         entries = build_docs.parse_inventory(data)
-        assert entries["xtremax.stats.Summary"] == ("api/stats/#xtremax.stats.Summary")
+        assert entries["pyrox_xtreme.stats.Summary"] == ("api/stats/#pyrox_xtreme.stats.Summary")
 
     def test_rejects_unknown_version(self) -> None:
         with pytest.raises(ValueError, match="unsupported inventory header"):
@@ -67,25 +67,25 @@ class TestParseInventory:
         if not real.is_file():
             pytest.skip("run `mkdocs build` first")
         entries = build_docs.parse_inventory(real.read_bytes())
-        assert "xtremax.extraction.temporal_block_maxima" in entries
+        assert "pyrox_xtreme.extraction.temporal_block_maxima" in entries
         assert all("$" not in uri for uri in entries.values())
 
 
 class TestAnchorCaseMap:
     def test_maps_lowercased_to_true_spelling(self) -> None:
-        entries = {"a": "api/stats/#xtremax.stats.RunningStats"}
+        entries = {"a": "api/stats/#pyrox_xtreme.stats.RunningStats"}
         mapping = build_docs.anchor_case_map(entries)
-        assert mapping["xtremax.stats.runningstats"] == ("xtremax.stats.RunningStats")
+        assert mapping["pyrox_xtreme.stats.runningstats"] == ("pyrox_xtreme.stats.RunningStats")
 
     def test_omits_already_lowercase_anchors(self) -> None:
-        entries = {"a": "api/stats/#xtremax.stats.summarize"}
+        entries = {"a": "api/stats/#pyrox_xtreme.stats.summarize"}
         assert build_docs.anchor_case_map(entries) == {}
 
     def test_omits_ambiguous_anchors(self) -> None:
         """Two symbols colliding under lowercasing must not be guessed at."""
         entries = {
-            "a": "api/x/#xtremax.Foo",
-            "b": "api/y/#xtremax.FOO",
+            "a": "api/x/#pyrox_xtreme.Foo",
+            "b": "api/y/#pyrox_xtreme.FOO",
         }
         assert build_docs.anchor_case_map(entries) == {}
 
@@ -95,11 +95,11 @@ class TestAnchorCaseMap:
 
 class TestRestoreAnchorCase:
     def test_repairs_a_lowercased_anchor(self) -> None:
-        mapping = {"xtremax.stats.runningstats": "xtremax.stats.RunningStats"}
-        html = '<a href="/reference/api/stats/#xtremax.stats.runningstats">x</a>'
+        mapping = {"pyrox_xtreme.stats.runningstats": "pyrox_xtreme.stats.RunningStats"}
+        html = '<a href="/reference/api/stats/#pyrox_xtreme.stats.runningstats">x</a>'
         fixed, count = build_docs.restore_anchor_case(html, mapping)
         assert count == 1
-        assert "#xtremax.stats.RunningStats" in fixed
+        assert "#pyrox_xtreme.stats.RunningStats" in fixed
 
     def test_leaves_unknown_anchors_alone(self) -> None:
         html = '<a href="/guide/#some-heading">x</a>'
@@ -111,11 +111,11 @@ class TestRestoreAnchorCase:
         assert build_docs.restore_anchor_case(html, {"a": "A"}) == (html, 0)
 
     def test_repairs_every_occurrence(self) -> None:
-        mapping = {"xtremax.clip": "xtremax.Clip"}
-        html = '<a href="a#xtremax.clip">1</a><a href="b#xtremax.clip">2</a>'
+        mapping = {"pyrox_xtreme.clip": "pyrox_xtreme.Clip"}
+        html = '<a href="a#pyrox_xtreme.clip">1</a><a href="b#pyrox_xtreme.clip">2</a>'
         fixed, count = build_docs.restore_anchor_case(html, mapping)
         assert count == 2
-        assert "xtremax.clip" not in fixed
+        assert "pyrox_xtreme.clip" not in fixed
 
 
 class TestRewriteApiOrigin:
@@ -154,8 +154,8 @@ class TestVerifyLinks:
         self.build_site(
             tmp_path,
             {
-                "index.html": '<a href="reference/stats/#xtremax.Clip">api</a>',
-                "reference/stats/index.html": '<h3 id="xtremax.Clip">Clip</h3>',
+                "index.html": '<a href="reference/stats/#pyrox_xtreme.Clip">api</a>',
+                "reference/stats/index.html": '<h3 id="pyrox_xtreme.Clip">Clip</h3>',
             },
         )
         assert build_docs.verify_links(tmp_path) == []
@@ -171,8 +171,8 @@ class TestVerifyLinks:
         self.build_site(
             tmp_path,
             {
-                "index.html": '<a href="reference/stats/#xtremax.clip">api</a>',
-                "reference/stats/index.html": '<h3 id="xtremax.Clip">Clip</h3>',
+                "index.html": '<a href="reference/stats/#pyrox_xtreme.clip">api</a>',
+                "reference/stats/index.html": '<h3 id="pyrox_xtreme.Clip">Clip</h3>',
             },
         )
         problems = build_docs.verify_links(tmp_path)
@@ -253,20 +253,20 @@ class TestDollarAbbreviationRepair:
     """
 
     def test_repairs_a_dollar_expanded_anchor(self) -> None:
-        data = make_inventory(["xtremax.stats.Summary py:class 1 stats/#$ -"])
+        data = make_inventory(["pyrox_xtreme.stats.Summary py:class 1 stats/#$ -"])
         mapping = build_docs.anchor_case_map(build_docs.parse_inventory(data))
-        html = '<a href="/reference/stats/#xtremax.stats.summary">Summary</a>'
+        html = '<a href="/reference/stats/#pyrox_xtreme.stats.summary">Summary</a>'
         fixed, count = build_docs.restore_anchor_case(html, mapping)
         assert count == 1
-        assert "#xtremax.stats.Summary" in fixed
+        assert "#pyrox_xtreme.stats.Summary" in fixed
 
     def test_explicit_anchors_need_no_repair(self) -> None:
         """The form mkdocstrings uses for top-level re-exports."""
         data = make_inventory(
-            ["xtremax.Summary py:class 2 stats/#xtremax.stats.Summary -"]
+            ["pyrox_xtreme.Summary py:class 2 stats/#pyrox_xtreme.stats.Summary -"]
         )
         mapping = build_docs.anchor_case_map(build_docs.parse_inventory(data))
-        html = '<a href="/reference/stats/#xtremax.stats.Summary">Summary</a>'
+        html = '<a href="/reference/stats/#pyrox_xtreme.stats.Summary">Summary</a>'
         assert build_docs.restore_anchor_case(html, mapping) == (html, 0)
 
 

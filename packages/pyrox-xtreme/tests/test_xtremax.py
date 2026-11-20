@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import xtremax
+import pyrox_xtreme
 
 
 def test_import():
-    assert xtremax is not None
+    assert pyrox_xtreme is not None

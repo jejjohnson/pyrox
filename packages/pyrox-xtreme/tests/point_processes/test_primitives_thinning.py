@@ -6,8 +6,8 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from xtremax.point_processes import EventHistory
-from xtremax.point_processes.primitives.thinning import (
+from pyrox_xtreme.point_processes import EventHistory
+from pyrox_xtreme.point_processes.primitives.thinning import (
     retention_compensator,
     thinning_retention_log_prob,
     thinning_sample,

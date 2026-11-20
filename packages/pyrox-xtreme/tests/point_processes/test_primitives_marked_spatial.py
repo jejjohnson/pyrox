@@ -1,4 +1,4 @@
-"""Tests for :mod:`xtremax.point_processes.primitives.marked_spatial`."""
+"""Tests for :mod:`pyrox_xtreme.point_processes.primitives.marked_spatial`."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import numpyro.distributions as dist
 import pytest
 from jax import random
 
-from xtremax.point_processes.primitives import (
+from pyrox_xtreme.point_processes.primitives import (
     sample_spatial_marks_at_locations,
     spatial_marks_log_prob,
 )

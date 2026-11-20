@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from xtremax.simulations import (
+from pyrox_xtreme.simulations import (
     compute_climate_signal,
     generate_fractal_terrain,
     generate_gmst_trajectory,
@@ -72,7 +72,7 @@ class TestSpatial:
         ~0.1013 spacing, silently distorting downstream distance-derived
         features.
         """
-        from xtremax.simulations.spatial import create_iberian_domain
+        from pyrox_xtreme.simulations.spatial import create_iberian_domain
 
         ds = create_iberian_domain(res_deg=0.1, bounds=(-10, 5, 36, 44), seed=0)
         # Both axes must have exactly `res_deg` spacing.
@@ -145,7 +145,7 @@ class TestCleanupBatch:
             generate_gmst_trajectory(trend_type="quadratic")  # type: ignore[arg-type]
 
     def test_augment_spatial_features_does_not_mutate_input(self):
-        from xtremax.simulations.spatial import (
+        from pyrox_xtreme.simulations.spatial import (
             augment_spatial_features,
             create_iberian_domain,
         )
@@ -160,7 +160,7 @@ class TestCleanupBatch:
         """Codex round on #86: a dataset storing its variables as
         (lon, lat) must produce the same labeled features as the
         (lat, lon) layout — the extractors transpose by name."""
-        from xtremax.simulations.spatial import (
+        from pyrox_xtreme.simulations.spatial import (
             augment_spatial_features,
             create_iberian_domain,
         )
@@ -222,7 +222,7 @@ class TestSpatialGeometry:
     (previously entirely untested)."""
 
     def test_domain_geometry_and_clipping(self):
-        from xtremax.simulations.spatial import create_iberian_domain
+        from pyrox_xtreme.simulations.spatial import create_iberian_domain
 
         ds = create_iberian_domain(res_deg=0.25, seed=0)
         land_fraction = float(ds["mask"].mean())
@@ -233,7 +233,7 @@ class TestSpatialGeometry:
         assert float(ds["elevation"].where(~ds["mask"]).max()) == -100.0
 
     def test_advanced_climate_signal_dims_and_masking(self):
-        from xtremax.simulations.spatial import (
+        from pyrox_xtreme.simulations.spatial import (
             augment_spatial_features,
             compute_advanced_climate_signal,
             create_iberian_domain,

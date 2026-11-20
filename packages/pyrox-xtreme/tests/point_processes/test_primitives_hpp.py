@@ -1,4 +1,4 @@
-"""Tests for :mod:`xtremax.point_processes.primitives.hpp`."""
+"""Tests for :mod:`pyrox_xtreme.point_processes.primitives.hpp`."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import jax.numpy as jnp
 import pytest
 from jax import random
 
-from xtremax.point_processes.primitives import (
+from pyrox_xtreme.point_processes.primitives import (
     hpp_cumulative_intensity,
     hpp_exceedance_log_prob,
     hpp_hazard,
@@ -170,7 +170,7 @@ def test_empirical_intensity_matches_parameter(rate):
 
 def test_hpp_intensity_broadcasts_scalar_t_with_batched_rate():
     """Regression (PR #10 review): scalar t + batched rate must broadcast."""
-    from xtremax.point_processes.primitives import hpp_intensity
+    from pyrox_xtreme.point_processes.primitives import hpp_intensity
 
     rates = jnp.array([1.0, 2.0, 3.0])
     out = hpp_intensity(jnp.asarray(0.5), rates)

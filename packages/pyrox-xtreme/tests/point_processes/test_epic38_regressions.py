@@ -19,14 +19,14 @@ import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
 
-from xtremax.point_processes.operators import (
+from pyrox_xtreme.point_processes.operators import (
     ExponentialHawkes,
     ExponentialKernel,
     GeneralHawkesProcess,
     InhomogeneousPoissonProcess,
     ThinningProcess,
 )
-from xtremax.point_processes.primitives import (
+from pyrox_xtreme.point_processes.primitives import (
     exp_hawkes_cumulative_intensity,
     exp_hawkes_intensity,
     general_hawkes_log_prob,

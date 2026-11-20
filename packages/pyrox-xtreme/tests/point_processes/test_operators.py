@@ -8,12 +8,12 @@ import jax.numpy as jnp
 import pytest
 from jax import random
 
-from xtremax.point_processes.operators import (
+from pyrox_xtreme.point_processes.operators import (
     GoodnessOfFit,
     HomogeneousPoissonProcess,
     InhomogeneousPoissonProcess,
 )
-from xtremax.point_processes.primitives import (
+from pyrox_xtreme.point_processes.primitives import (
     ipp_sample_inversion as ipp_sample_inversion_op,
 )
 
@@ -233,7 +233,7 @@ class TestRegressionsFromPrReview:
         # should now appear as leaves.
         import equinox as eqx
 
-        from xtremax.point_processes.operators import PiecewiseConstantLogIntensity
+        from pyrox_xtreme.point_processes.operators import PiecewiseConstantLogIntensity
 
         op = InhomogeneousPoissonProcess.from_piecewise_constant(
             bin_edges=jnp.array([0.0, 2.0, 5.0]),

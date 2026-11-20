@@ -24,14 +24,14 @@ import numpy as np
 import pytest
 import scipy.stats as st
 
-from xtremax.distributions import (
+from pyrox_xtreme.distributions import (
     FrechetType2GEVD,
     GeneralizedExtremeValueDistribution,
     GeneralizedParetoDistribution,
     GumbelType1GEVD,
     WeibullType3GEVD,
 )
-from xtremax.primitives.gev import (
+from pyrox_xtreme.primitives.gev import (
     gev_cdf,
     gev_icdf,
     gev_log_prob,
@@ -40,7 +40,7 @@ from xtremax.primitives.gev import (
     gev_return_level,
     gev_survival,
 )
-from xtremax.primitives.gpd import (
+from pyrox_xtreme.primitives.gpd import (
     gpd_cdf,
     gpd_icdf,
     gpd_log_prob,
@@ -49,7 +49,7 @@ from xtremax.primitives.gpd import (
     gpd_return_level,
     gpd_survival,
 )
-from xtremax.primitives.gumbel import (
+from pyrox_xtreme.primitives.gumbel import (
     gumbel_cdf,
     gumbel_icdf,
     gumbel_log_prob,
@@ -216,7 +216,7 @@ class TestGumbelPrimitiveOracles:
 
 
 def _class_and_frozen(family, xi):
-    """Build (xtremax distribution, scipy frozen) pairs per family."""
+    """Build (pyrox_xtreme distribution, scipy frozen) pairs per family."""
     if family == "gev":
         return (
             GeneralizedExtremeValueDistribution(LOC, SCALE, concentration=xi),
@@ -429,8 +429,8 @@ class TestFloat64Isolation:
             """
             import numpy as np
             import scipy.stats as st
-            from xtremax.primitives.gev import gev_cdf, gev_icdf, gev_survival
-            from xtremax.primitives.gpd import gpd_cdf, gpd_icdf
+            from pyrox_xtreme.primitives.gev import gev_cdf, gev_icdf, gev_survival
+            from pyrox_xtreme.primitives.gpd import gpd_cdf, gpd_icdf
 
             LOC, SCALE = 1.5, 2.0
             for xi in (-0.3, 0.0, 1e-5, 0.3):

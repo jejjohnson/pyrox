@@ -1,4 +1,4 @@
-"""Tests for :mod:`xtremax.point_processes._domain.RectangularDomain`."""
+"""Tests for :mod:`pyrox_xtreme.point_processes._domain.RectangularDomain`."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import pytest
 from jax import random
 
-from xtremax.point_processes import RectangularDomain
+from pyrox_xtreme.point_processes import RectangularDomain
 
 
 class TestRectangularDomain:
@@ -45,7 +45,7 @@ class TestRectangularDomain:
 
 class TestTemporalDomain:
     def test_from_duration(self) -> None:
-        from xtremax.point_processes import TemporalDomain
+        from pyrox_xtreme.point_processes import TemporalDomain
 
         td = TemporalDomain.from_duration(5.0)
         assert jnp.allclose(td.t0, 0.0)
@@ -54,7 +54,7 @@ class TestTemporalDomain:
         assert jnp.allclose(td.volume(), 5.0)
 
     def test_explicit_bounds(self) -> None:
-        from xtremax.point_processes import TemporalDomain
+        from pyrox_xtreme.point_processes import TemporalDomain
 
         td = TemporalDomain(t0=2.0, t1=7.0)
         assert jnp.allclose(td.duration, 5.0)
@@ -63,14 +63,14 @@ class TestTemporalDomain:
         assert not bool(td.contains(jnp.asarray(1.99)))
 
     def test_validation_rejects_inverted(self) -> None:
-        from xtremax.point_processes import TemporalDomain
+        from pyrox_xtreme.point_processes import TemporalDomain
 
         with pytest.raises(ValueError, match="t1 > t0"):
             TemporalDomain(t0=5.0, t1=2.0)
 
     @pytest.mark.slow
     def test_sample_uniform(self) -> None:
-        from xtremax.point_processes import TemporalDomain
+        from pyrox_xtreme.point_processes import TemporalDomain
 
         td = TemporalDomain(t0=2.0, t1=7.0)
         ts = td.sample_uniform(random.PRNGKey(0), shape=(1024,))

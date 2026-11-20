@@ -1,11 +1,11 @@
-"""Tests for :mod:`xtremax.point_processes._integration_spatial`."""
+"""Tests for :mod:`pyrox_xtreme.point_processes._integration_spatial`."""
 
 from __future__ import annotations
 
 import jax.numpy as jnp
 import pytest
 
-from xtremax.point_processes import (
+from pyrox_xtreme.point_processes import (
     RectangularDomain,
     integrate_log_intensity_spatial,
 )

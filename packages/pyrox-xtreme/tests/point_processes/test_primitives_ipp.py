@@ -1,4 +1,4 @@
-"""Tests for :mod:`xtremax.point_processes.primitives.ipp`."""
+"""Tests for :mod:`pyrox_xtreme.point_processes.primitives.ipp`."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import jax.numpy as jnp
 import pytest
 from jax import random
 
-from xtremax.point_processes._integration import integrate_log_intensity
-from xtremax.point_processes.primitives import (
+from pyrox_xtreme.point_processes._integration import integrate_log_intensity
+from pyrox_xtreme.point_processes.primitives import (
     ipp_cumulative_hazard,
     ipp_cumulative_intensity,
     ipp_hazard,

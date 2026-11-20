@@ -9,7 +9,7 @@ import pytest
 from jax import random
 from numpyro.infer import MCMC, NUTS
 
-from xtremax.point_processes.distributions import (
+from pyrox_xtreme.point_processes.distributions import (
     HomogeneousPoissonProcess,
     InhomogeneousPoissonProcess,
 )

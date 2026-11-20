@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from xtremax.point_processes._integration import (
+from pyrox_xtreme.point_processes._integration import (
     cumulative_log_intensity,
     integrate_log_intensity,
 )

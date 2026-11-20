@@ -7,8 +7,8 @@ import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
 
-from xtremax.point_processes import constant_mark_distribution
-from xtremax.point_processes.primitives.marked import (
+from pyrox_xtreme.point_processes import constant_mark_distribution
+from pyrox_xtreme.point_processes.primitives.marked import (
     marks_log_prob,
     sample_marks_at_times,
 )

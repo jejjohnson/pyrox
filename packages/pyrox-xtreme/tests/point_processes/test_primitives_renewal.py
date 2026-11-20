@@ -7,8 +7,8 @@ import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
 
-from xtremax.point_processes.primitives.hpp import hpp_log_prob
-from xtremax.point_processes.primitives.renewal import (
+from pyrox_xtreme.point_processes.primitives.hpp import hpp_log_prob
+from pyrox_xtreme.point_processes.primitives.renewal import (
     renewal_cumulative_hazard,
     renewal_hazard,
     renewal_log_prob,

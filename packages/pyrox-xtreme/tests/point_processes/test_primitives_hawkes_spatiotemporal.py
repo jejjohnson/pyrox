@@ -1,4 +1,4 @@
-"""Tests for :mod:`xtremax.point_processes.primitives.hawkes_spatiotemporal`."""
+"""Tests for :mod:`pyrox_xtreme.point_processes.primitives.hawkes_spatiotemporal`."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import jax.numpy as jnp
 import pytest
 from jax import random
 
-from xtremax.point_processes import RectangularDomain, TemporalDomain
-from xtremax.point_processes.primitives import (
+from pyrox_xtreme.point_processes import RectangularDomain, TemporalDomain
+from pyrox_xtreme.point_processes.primitives import (
     stpp_hawkes_compensator,
     stpp_hawkes_intensity,
     stpp_hawkes_lambda_max,
@@ -111,7 +111,7 @@ class TestStppHawkesLogProb:
     @pytest.mark.slow
     def test_zero_alpha_matches_hpp_log_prob(self) -> None:
         # alpha → 0 collapses to homogeneous: ∑ log μ - μ |D| T.
-        from xtremax.point_processes.primitives import hpp_spatiotemporal_log_prob
+        from pyrox_xtreme.point_processes.primitives import hpp_spatiotemporal_log_prob
 
         spatial = RectangularDomain.from_size(jnp.array([3.0, 3.0]))
         temporal = TemporalDomain.from_duration(2.0)

@@ -15,11 +15,11 @@ import numpy as np
 import numpyro.distributions as dist
 import pytest
 
-from xtremax.point_processes import SampleResult
-from xtremax.point_processes.distributions.temporal import (
+from pyrox_xtreme.point_processes import SampleResult
+from pyrox_xtreme.point_processes.distributions.temporal import (
     HomogeneousPoissonProcess as HppDist,
 )
-from xtremax.point_processes.operators import (
+from pyrox_xtreme.point_processes.operators import (
     ExponentialHawkes,
     ExponentialKernel,
     GeneralHawkesProcess,
@@ -29,7 +29,7 @@ from xtremax.point_processes.operators import (
     RenewalProcess,
     ThinningProcess,
 )
-from xtremax.point_processes.primitives.hawkes import general_hawkes_log_prob
+from pyrox_xtreme.point_processes.primitives.hawkes import general_hawkes_log_prob
 
 
 # Heavy module: the majority of these tests build large XLA graphs (samplers

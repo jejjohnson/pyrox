@@ -2,9 +2,9 @@
 
 ``plugins/xtremax/skills/extreme-value-analysis-with-xtremax/SKILL.md`` is
 what agents in downstream projects read before writing extreme value code
-on xtremax, so a stale name or a broken example there teaches them the
+on pyrox_xtreme, so a stale name or a broken example there teaches them the
 wrong API. These tests run its worked example (slow: two NUTS fits) and
-check that every ``xtremax.X`` / ``xtx.X`` (``xtremax.extraction``) path it
+check that every ``pyrox_xtreme.X`` / ``xtx.X`` (``pyrox_xtreme.extraction``) path it
 and the plugin's reviewer name still exists.
 """
 
@@ -20,17 +20,17 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PLUGIN = ROOT / "plugins" / "xtremax"
+PLUGIN = ROOT / "plugins" / "pyrox_xtreme"
 SKILL = PLUGIN / "skills" / "extreme-value-analysis-with-xtremax" / "SKILL.md"
 AGENT = PLUGIN / "agents" / "xtremax-reuse-reviewer.md"
 if not SKILL.is_file():
     # A built distribution ships tests/ without the repository root.
     pytest.skip("the plugin is not present", allow_module_level=True)
 
-_ALIASES = {"xtx": "xtremax.extraction"}
+_ALIASES = {"xtx": "pyrox_xtreme.extraction"}
 # Dotted paths, not preceded by a word character, dot or slash (so the
 # repository URL ``github.com/jejjohnson/xtremax.git`` is not a name).
-_NAME = re.compile(r"(?<![\w./])((?:xtx|xtremax)(?:\.[A-Za-z_]\w*)+)")
+_NAME = re.compile(r"(?<![\w./])((?:xtx|pyrox_xtreme)(?:\.[A-Za-z_]\w*)+)")
 _BLOCKS = re.compile(r"```python\n(.*?)```", re.S)
 
 

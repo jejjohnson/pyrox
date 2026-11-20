@@ -1,13 +1,14 @@
 [project]
-name = "xtremax"
+name = "pyrox-xtreme"
 version = "0.0.4"
-description = "JAX/NumPyro-native library for extreme value modeling — custom distributions, Bayesian models, and spatiotemporal data extraction."
+description = "Extreme value modelling in JAX and NumPyro: GEV, GPD, Gumbel, Fréchet and Weibull distributions, temporal, spatial and spatiotemporal point processes, and xarray extraction of block maxima and threshold exceedances."
 authors = [
     {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
 ]
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 readme = "README.md"
-keywords = []
+keywords = ["jax", "numpyro", "extreme-value-theory", "gev", "gpd", "point-processes", "xarray"]
 requires-python = ">=3.12"
 classifiers = [
     "Topic :: Scientific/Engineering",
@@ -15,13 +16,14 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Natural Language :: English",
-    "License :: OSI Approved :: MIT License",
     "Intended Audience :: Science/Research",
     "Development Status :: 2 - Pre-Alpha",
 ]
+# No pyrox: the distributions and point processes use nothing from the bridge
+# (tests/test_xtreme_import_guard.py). The version continues xtremax's (0.0.4).
 dependencies = [
     # numpyro >= 0.21 restored support for the jax internals that moved in
-    # jax 0.7; keep the ceiling below the next major (0.11) as a guard rail.
+    # jax 0.7; keep the ceiling below the next major as a guard rail.
     "jax>=0.4,<0.13",
     "jaxlib>=0.4,<0.13",
     "numpyro>=0.21",
@@ -40,55 +42,25 @@ threshold = [
 ]
 
 [project.urls]
-Repository = "https://github.com/jejjohnson/xtremax"
+Repository = "https://github.com/jejjohnson/pyrox"
 
 [dependency-groups]
-dev = [
-    "pytest>=9.0.3",
-    "pytest-cov>=7.1.0",
-    "pre-commit>=4.5.1",
-    "pytest-xdist>=3.5",
-]
-lint = [
-    "ruff>=0.15.10",
-]
-typecheck = [
-    "ty>=0.0.30",
-]
-docs = [
-    # The prose half of the site is built by mystmd, a Node CLI installed with
-    # `npm install -g mystmd` rather than through uv. See docs/README.md.
-    # MkDocs here builds only the API reference, whose `objects.inv` is what
-    # lets the MyST prose cross-reference into it.
-    "mkdocs>=1.6.1",
-    "mkdocs-material>=9.7.6",
-    "mkdocstrings[python]>=1.0.3",
-    "jupytext>=1.19.1",
-    "ipykernel>=7.2.0",
-    # Executes notebooks for docs/notebooks (see the docs-examples instructions).
-    "nbconvert>=7.16.6",
-    # matplotlib + watermark used by the example notebooks during local
-    # re-execution. The guarded watermark cell in each notebook no-ops
-    # if the package is missing, but installing it here lets the version
-    # readout actually print under `nbconvert --execute`.
-    "matplotlib>=3.8",
-    "watermark>=2.4",
-    # pygments 2.20.0 dropped the None -> '' coercion for HtmlFormatter(filename=...),
-    # but pymdownx.highlight 10.21.x still passes the untitled-code-block title
-    # through as None. Pin until a fixed pymdown-extensions release ships (#38).
-    "pygments>=2.19,<2.22",
-    # Latent-ODE notebook only: diffrax for the ODE solver, interpax for the
-    # observation-path interpolation, optax for training. Not used elsewhere
-    # in the package, so they live in the docs group rather than main deps.
+# Re-executes the example notebooks in docs/notebooks/xtreme (they ship
+# pre-executed; the docs build never runs them). The latent-ODE notebook uses
+# diffrax, interpax and optax. `uv sync --package pyrox-xtreme --group notebooks`.
+notebooks = [
     "diffrax>=0.7.2",
     "interpax>=0.3.14",
     "optax>=0.2.8",
+    "matplotlib>=3.8",
+    "watermark>=2.4",
+    "ipykernel>=7.2.0",
+    "nbconvert>=7.16.6",
 ]
+# Re-runs the spatial-extremes tutorials in docs/notebooks/xtreme/spatial_extremes,
+# which also ship pre-executed and need CDS credentials and data (see the
+# tutorial index). pyrox resolves to the workspace member.
 tutorials = [
-    # Optional: only needed to RE-RUN the spatial-extremes tutorials in
-    # docs/tutorials/spatial_extremes/. The notebooks ship pre-executed, so the
-    # docs build never needs these. Install with `uv sync --group tutorials`.
-    # See docs/tutorials/spatial_extremes.md for CDS credentials and data.
     "xrreader[cds-insitu]",
     "pyrox",
     "optax>=0.2",
@@ -104,90 +76,13 @@ tutorials = [
     "nbconvert>=7.16.6",
 ]
 
+[tool.uv.sources]
+# xrreader is not on PyPI; the tutorials group resolves it from GitHub.
+xrreader = { git = "https://github.com/jejjohnson/xrreader.git" }
+
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/xtremax"]
-
-[tool.ruff]
-target-version = "py312"
-line-length = 88
-# The spatial-extremes tutorial notebooks ship pre-executed on CDS data that
-# CI cannot fetch. Reformatting or auto-fixing their sources would silently
-# desynchronise code from the committed outputs, so they are not linted. Their
-# `_helpers/` Python modules are linted as normal.
-extend-exclude = ["docs/tutorials/**/*.ipynb"]
-# Honour the exclude even when pre-commit passes the files explicitly.
-force-exclude = true
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
-ignore = [
-    "E402", "E721", "E731", "E741",
-    # RUF002/RUF003: we use Greek letters (μ, σ, ξ, γ) in math docstrings/comments.
-    "RUF002",
-    "RUF003",
-    # RUF012: NumPyro's Distribution interface requires class-level dict/list
-    # attributes (`arg_constraints`, `reparametrized_params`).
-    "RUF012",
-]
-
-[tool.ruff.lint.per-file-ignores]
-# Jupytext notebook sources use single-line paragraphs in markdown cells
-# and sometimes have long Colab-badge URLs; keep those unwrapped.
-# RUF001 triggers on typographic en/em dashes used in narrative prose.
-"docs/notebooks/*.py" = ["E501", "RUF001", "B905"]
-"docs/notebooks/*.ipynb" = ["E501", "RUF001", "B905"]
-
-[tool.ruff.lint.isort]
-combine-as-imports = true
-lines-after-imports = 2
-
-[tool.ty.environment]
-python-version = "3.12"
-
-[tool.ty.rules]
-# Broad ignores over the ported NumPyro distribution classes and scipy-backed
-# simulation helpers. These snippets predate ty's scrutiny; tightening per-rule
-# is a v0.1 polish task.
-unsupported-operator = "ignore"
-invalid-argument-type = "ignore"
-invalid-method-override = "ignore"
-unresolved-attribute = "ignore"
-invalid-return-type = "ignore"
-not-iterable = "ignore"
-# JAX scan/vmap outputs: ty doesn't narrow to ArrayLike; subscripts
-# and tuple unpacking on JAX traced outputs are structurally fine at
-# runtime but opaque to the type inferencer.
-not-subscriptable = "ignore"
-invalid-assignment = "ignore"
-# NumPyro's `constraints.interval` is a class (factory); ty reads its
-# `__call__` as `(self, x)` rather than the constructor, flagging two-arg
-# construction. This is a stub/type-inference mismatch, not a real bug.
-too-many-positional-arguments = "ignore"
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-# Coverage is NOT in addopts: it costs ~23% and only the `main` push job and
-# `make test-cov` actually need it. Ad-hoc local runs stay uninstrumented.
-markers = [
-    "slow: individually expensive tests (>~1.5s: samplers, Monte-Carlo, jit+grad sweeps)",
-    "integration: end-to-end workflows (MCMC fits through numpyro, subprocess runs)",
-]
-
-[tool.coverage.run]
-source = ["src/xtremax"]
-omit = ["tests/*"]
-
-[tool.coverage.report]
-show_missing = true
-# Ported snippets ship with smoke tests only; raise toward 80% as v0.1 matures.
-fail_under = 40
-
-# pyrox and xrreader are not on PyPI yet; the `tutorials` group resolves them
-# from their public git repositories.
-[tool.uv.sources]
-pyrox = { git = "https://github.com/jejjohnson/pyrox.git", rev = "395251388c8bbad50fe1bf929733b0a481d4e9ef" }
-xrreader = { git = "https://github.com/jejjohnson/xrreader.git" }
+packages = ["src/pyrox_xtreme"]

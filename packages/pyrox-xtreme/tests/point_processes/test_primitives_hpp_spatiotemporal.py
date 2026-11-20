@@ -1,4 +1,4 @@
-"""Tests for :mod:`xtremax.point_processes.primitives.hpp_spatiotemporal`."""
+"""Tests for :mod:`pyrox_xtreme.point_processes.primitives.hpp_spatiotemporal`."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import jax.numpy as jnp
 import pytest
 from jax import random
 
-from xtremax.point_processes import RectangularDomain, TemporalDomain
-from xtremax.point_processes.primitives import (
+from pyrox_xtreme.point_processes import RectangularDomain, TemporalDomain
+from pyrox_xtreme.point_processes.primitives import (
     hpp_spatiotemporal_count_log_prob,
     hpp_spatiotemporal_log_prob,
     hpp_spatiotemporal_predict_count,

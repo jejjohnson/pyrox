@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from xtremax.point_processes.primitives.hawkes import (
+from pyrox_xtreme.point_processes.primitives.hawkes import (
     exp_hawkes_cumulative_intensity,
     exp_hawkes_intensity,
     exp_hawkes_log_prob,
@@ -72,7 +72,7 @@ class TestExpHawkesLogProb:
         Critical invariant — if the Ozaki recursion leaks the `1` self-term
         this test fails because log L then picks up spurious events.
         """
-        from xtremax.point_processes.primitives.hpp import hpp_log_prob
+        from pyrox_xtreme.point_processes.primitives.hpp import hpp_log_prob
 
         event_times = jnp.array([0.5, 1.2, 2.7, 3.9])
         mask = jnp.array([True, True, True, True])
