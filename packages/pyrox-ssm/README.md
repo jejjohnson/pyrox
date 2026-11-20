@@ -4,7 +4,7 @@
 
 # pyrox-ssm
 
-**State-space models for JAX and NumPyro: temporal Gaussian processes as Kalman filters, linear and nonlinear state-space models, non-Gaussian and sparse Markov GPs, and many sites on one grid, on pyrox, pyrox-gauss, gaussx, lineax and optimistix.**
+**State-space models for JAX and NumPyro: temporal Gaussian processes as Kalman filters, linear and nonlinear state-space models, non-Gaussian and sparse Markov GPs, and many sites on one grid, on pyrox, pyrox-gauss, gaussx, lineax, optimistix and argminax.**
 
 [![Tests](https://github.com/jejjohnson/pyrox/actions/workflows/ci.yml/badge.svg)](https://github.com/jejjohnson/pyrox/actions/workflows/ci.yml)
 [![Lint](https://github.com/jejjohnson/pyrox/actions/workflows/lint.yml/badge.svg)](https://github.com/jejjohnson/pyrox/actions/workflows/lint.yml)
@@ -54,7 +54,7 @@ approx = prior.condition_nongauss(likelihood, counts, strategy=strategy, mask=ma
 times_s, targets_s, mask_s = pad_sites(site_times, site_targets)
 ```
 
-None of it is new machinery. The SDE kernels (`MaternSDE`, `PeriodicSDE`, `SumSDE`, …), the Kalman filter, the RTS smoother, the nonlinear filters and the per-site derivatives and expectations are [`gaussx`](https://github.com/jejjohnson/gaussx)'s, and pyrox-ssm re-exports the kernels so a model needs one import. The likelihoods and guides are the [`pyrox`](../pyrox) core's protocols, so a `pyrox.likelihoods.DistLikelihood` or any of [pyrox-gp](../pyrox-gp)'s likelihoods and guides work unchanged, though pyrox-ssm never imports pyrox-gp. The non-Gaussian strategies iterate to a fixed point with [`optimistix`](https://github.com/patrick-kidger/optimistix), the sparse prior's multivariate normal is [`pyrox-gauss`](../pyrox-gauss)'s, the operators are [`lineax`](https://github.com/patrick-kidger/lineax)'s, and the models are plain [`numpyro`](https://github.com/pyro-ppl/numpyro) functions. Two extras reach further: `flows` adds the normalizing Kalman filter over [gauss_flows](https://github.com/jejjohnson/gauss_flows) warps, and `ensemble` adds the ensemble Kalman log likelihood of a [filterax](https://github.com/jejjohnson/filterax) run.
+None of it is new machinery. The SDE kernels (`MaternSDE`, `PeriodicSDE`, `SumSDE`, …), the Kalman filter, the RTS smoother, the nonlinear filters and the per-site derivatives and expectations are [`gaussx`](https://github.com/jejjohnson/gaussx)'s, and pyrox-ssm re-exports the kernels so a model needs one import. The likelihoods and guides are the [`pyrox`](../pyrox) core's protocols, so a `pyrox.likelihoods.DistLikelihood` or any of [pyrox-gp](../pyrox-gp)'s likelihoods and guides work unchanged, though pyrox-ssm never imports pyrox-gp. The non-Gaussian strategies iterate to a fixed point with [`optimistix`](https://github.com/patrick-kidger/optimistix) and differentiate it with [`argminax`](https://github.com/jejjohnson/argminax)'s sampler-safe implicit adjoint, the sparse prior's multivariate normal is [`pyrox-gauss`](../pyrox-gauss)'s, the operators are [`lineax`](https://github.com/patrick-kidger/lineax)'s, and the models are plain [`numpyro`](https://github.com/pyro-ppl/numpyro) functions. Two extras reach further: `flows` adds the normalizing Kalman filter over [gauss_flows](https://github.com/jejjohnson/gauss_flows) warps, and `ensemble` adds the ensemble Kalman log likelihood of a [filterax](https://github.com/jejjohnson/filterax) run.
 
 pyrox-ssm is one package of the pyrox workspace; the [workspace README](../../README.md) introduces the others.
 
@@ -108,13 +108,13 @@ with $`\mathbf{m}_k^-`$ and $`\mathbf{P}_k^-`$ the predicted mean and covariance
 
 ## 📥 Install
 
-We have not put pyrox-ssm on PyPI, and the name `pyrox` there belongs to an unrelated project, so install it from GitHub with [uv](https://docs.astral.sh/uv/). It brings in the pyrox core and pyrox-gauss from the same repository, gaussx, lineax, optimistix, NumPyro and einx, and needs Python 3.12 or newer.
+We have not put pyrox-ssm on PyPI, and the name `pyrox` there belongs to an unrelated project, so install it from GitHub with [uv](https://docs.astral.sh/uv/). It brings in the pyrox core and pyrox-gauss from the same repository, gaussx, lineax, optimistix, argminax, NumPyro and einx, and needs Python 3.12 or newer.
 
 ```bash
 uv add "pyrox-ssm @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-ssm"
 ```
 
-Two extras add the rest: `flows` for `pyrox_ssm.flows` (flowjax and gauss-flows) and `ensemble` for `pyrox_ssm.ensemble` (filterax). The quickstart needs neither. filterax v0.0.8 pins gaussx v0.6.9, while pyrox-ssm needs gaussx v0.7.0, so with the `ensemble` extra add this override to your project's `pyproject.toml`; without it uv cannot resolve the install.
+argminax pins gaussx v0.6.13 (and filterax v0.0.8, behind the `ensemble` extra, pins gaussx v0.6.9), while pyrox-ssm needs gaussx v0.7.0, so add this override to your project's `pyproject.toml`; without it uv cannot resolve the install.
 
 ```toml
 [tool.uv]
@@ -122,6 +122,8 @@ override-dependencies = [
     "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.7.0",
 ]
 ```
+
+Two extras add the rest: `flows` for `pyrox_ssm.flows` (flowjax and gauss-flows) and `ensemble` for `pyrox_ssm.ensemble` (filterax). The quickstart needs neither.
 
 ## 🧠 Quickstart: a year of daily data with a month missing
 
@@ -368,6 +370,7 @@ pyrox-ssm is a package of the pyrox [uv workspace](https://docs.astral.sh/uv/con
 | Multivariate normals over operators | [`pyrox-gauss`](../pyrox-gauss) |
 | SDE kernels, Kalman filters (sequential, parallel and nonlinear), the RTS smoother, per-site derivatives and expectations | [`gaussx`](https://github.com/jejjohnson/gaussx) and [`lineax`](https://github.com/patrick-kidger/lineax) |
 | The fixed-point loop of the non-Gaussian strategies | [`optimistix`](https://github.com/patrick-kidger/optimistix) |
+| The implicit adjoint that keeps a NUTS chain alive when its linear solve fails (`safe_implicit_adjoint`) | [`argminax`](https://github.com/jejjohnson/argminax) |
 | Sample and factor sites, NUTS, SVI and `Predictive` | [`numpyro`](https://github.com/pyro-ppl/numpyro) |
 | Modules as pytrees | [`equinox`](https://github.com/patrick-kidger/equinox) |
 | Observation warps for the normalizing Kalman filter (the `flows` extra) | [`flowjax`](https://github.com/danielward27/flowjax) and [`gauss_flows`](https://github.com/jejjohnson/gauss_flows) |

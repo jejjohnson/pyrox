@@ -30,6 +30,7 @@ dependencies = [
     "einx>=0.4.3",
     "numpyro>=0.21",
     "optimistix>=0.1.0",
+    "argminax>=0.0.7",
 ]
 
 [project.optional-dependencies]
@@ -53,6 +54,10 @@ Repository = "https://github.com/jejjohnson/pyrox"
 # Not on PyPI yet; resolve the release tag from GitHub, in step with the
 # other members' sources (one version per package across the workspace).
 gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.7.0" }
+# `markov_implicit_adjoint` is built on `argminax.adjoint.safe_implicit_adjoint`,
+# in step with pyrox-lgm's and pyrox-nn's source. argminax pins gaussx v0.6.13
+# by URL; the root override keeps the workspace's one gaussx instead.
+argminax = { git = "https://github.com/jejjohnson/argminax.git", rev = "089d61f33344a269694f345765f918675d323d1e" }
 
 [build-system]
 requires = ["hatchling>=1.27"]

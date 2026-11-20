@@ -49,9 +49,10 @@ Repository = "https://github.com/jejjohnson/pyrox"
 gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.7.0" }
 kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.22" }
 # The inner Newton loop of `inla()` (`argminax.solve.laplace_mode`), at the
-# v0.0.6 release, in step with pyrox-nn's source. argminax pins gaussx v0.6.13
+# commit that adds `safe_implicit_adjoint` (v0.0.8 once tagged), in step with
+# pyrox-nn's and pyrox-ssm's sources. argminax pins gaussx v0.6.13
 # by URL; the root override keeps the workspace's one gaussx instead.
-argminax = { git = "https://github.com/jejjohnson/argminax.git", rev = "v0.0.6" }
+argminax = { git = "https://github.com/jejjohnson/argminax.git", rev = "089d61f33344a269694f345765f918675d323d1e" }
 
 [build-system]
 requires = ["hatchling>=1.27"]

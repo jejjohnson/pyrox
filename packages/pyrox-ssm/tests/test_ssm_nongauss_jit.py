@@ -17,10 +17,12 @@ import gaussx
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import lineax as lx
 import numpyro
 import numpyro.distributions as dist
 import optimistix as optx
 import pytest
+from argminax.solve import TolerantLinearSolver
 from gaussx import (
     cavity_distribution,
     damped_natural_update,
@@ -44,7 +46,6 @@ from pyrox_ssm import (
 from pyrox_ssm._inference_nongauss_markov import (
     _markov_smoothed_posterior,
     _mask_sites,
-    _NonFiniteSafeSolver,
     _prior_marginal_variance,
 )
 from pyrox_ssm._markov import _observation_mask
@@ -358,7 +359,8 @@ def test_only_the_implicit_adjoint_supports_forward_mode() -> None:
 def test_markov_implicit_adjoint_is_the_failure_safe_gmres() -> None:
     adjoint = markov_implicit_adjoint()
     assert isinstance(adjoint, optx.ImplicitAdjoint)
-    assert isinstance(adjoint.linear_solver, _NonFiniteSafeSolver)
+    assert isinstance(adjoint.linear_solver, TolerantLinearSolver)
+    assert isinstance(adjoint.linear_solver.inner, lx.GMRES)
     assert GaussNewtonMarkovInference().adjoint == adjoint
 
 
