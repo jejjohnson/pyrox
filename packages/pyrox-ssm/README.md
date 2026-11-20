@@ -1,5 +1,7 @@
 <div align="center">
 
+<img alt="pyrox-ssm" src="../../docs/assets/icon-ssm.svg" width="120">
+
 # pyrox-ssm
 
 **State-space models for JAX and NumPyro: temporal Gaussian processes as Kalman filters, linear and nonlinear state-space models, non-Gaussian and sparse Markov GPs, and many sites on one grid, on pyrox, pyrox-gauss, gaussx, lineax and optimistix.**
