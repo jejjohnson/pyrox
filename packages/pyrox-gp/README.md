@@ -62,6 +62,8 @@ None of it is new machinery. Each kernel is a [`pyrox`](../pyrox) `Parameterized
 
 pyrox-gp is one package of the pyrox workspace; the [workspace README](../../README.md) introduces the others.
 
+<p align="center"><img src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_gp_overview/pyrox_gp_overview.png" alt="pyrox-gp in one picture: you supply data, a kernel with priors, a likelihood and a NumPyro model; the model writes one joint density with priors on the kernel, whose sites are named by pyrox_name; pyrox-gp conditions it exactly, by sparse variational inference, by site-based approximations for other likelihoods or by pathwise draws, and for many outputs; out come the hyperparameters, the posterior at new inputs, whole functions and the gradient; pyrox and pyrox-gauss, kernellib, functax and flowjax, and gaussx and lineax underneath" width="100%"></p>
+
 ## 🌟 Highlights
 
 - 🎛️ **Kernels with priors**: `RBF`, `Matern`, `Periodic`, `RationalQuadratic`, `Linear`, `Polynomial`, `Cosine`, `White` and `Constant` register their hyperparameters with `set_prior` and `autoguide`, and `kernel.frozen()` hands kernellib the plain kernel for spectral densities and feature maps.
@@ -323,6 +325,15 @@ that is, the posterior mean and standard deviation of the log-rate at $`x = 0`$,
 
 ## 🔬 What else is in the box
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_gp_roles/pyrox_gp_roles-dark.svg">
+    <img alt="pyrox-gp on the GeoStack role ladder: conditioning, the evidence factors, the variational objectives and the samplers as algorithms; the kernels, GP priors, likelihoods, guides, posteriors and pathwise samplers as models; the inference strategies and the CG solver as strategies; the predict and density methods and the functions on arrays as primitives; the inducing features as structure; the setup functions and gaussx's solver strategies beside the ladder" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_gp_roles/pyrox_gp_roles-light.svg" width="100%">
+  </picture>
+</p>
+
+Each public name sits on one rung of the GeoStack role ladder, by the job it does; the figure shows a few names per group, and the table below lists them all.
+
 `pyrox_gp` is one flat namespace; its `__all__` holds every name below.
 
 | Area | Symbols | Notes |
@@ -361,6 +372,13 @@ The Markov GPs on a time grid (`MarkovGPPrior`, the SDE kernels and the Kalman-b
 - **[`AGENTS.md`](AGENTS.md)**: the contracts every kernel, guide, likelihood and strategy keeps (the kernel context, gaussx for the linear algebra) and the tests that hold them.
 
 ## 🧩 Ecosystem
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_gp_ecosystem/pyrox_gp_ecosystem-dark.svg">
+    <img alt="No package imports pyrox-gp; pyrox-nn, pyrox-lgm, pyrox-ssm, pyrox-gauss and pyrox-xtreme forbid importing it in their import-guard tests; pyrox-gp builds on pyrox, pyrox-gauss, kernellib, gaussx, lineax, functax, flowjax, JAX, Equinox, NumPyro and einx, and on optax and gauss-flows through extras" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_gp_ecosystem/pyrox_gp_ecosystem-light.svg" width="100%">
+  </picture>
+</p>
 
 pyrox-gp is a package of the pyrox [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/), in the GeoML tier of the [GeoStack](https://github.com/jejjohnson/geostack). It owns the GP models and their NumPyro surface, and composes the rest in:
 
