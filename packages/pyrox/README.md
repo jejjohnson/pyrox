@@ -36,20 +36,20 @@ where $`\mathbf{X} \in \mathbb{R}^{N \times D_x}`$ holds the $`N`$ inputs, $`\ma
 
 ```python
 # Shapes: N samples; D_x inputs; E ensemble members
-# (BayesianLinear, model, the data and the keys as in the quickstart below)
+# (net, the two MLP classes, log_joint, init_fn and the data as in the quickstart)
 
 # today (pyrox)
-# f(X; θ), with θ recorded as the sites linear.weight and linear.bias
-layer = BayesianLinear()
-# today (numpyro)
-# θ⁽ˢ⁾ ~ p(θ | y), by NUTS on the model that calls the layer
-MCMC(NUTS(model), num_warmup=500, num_samples=500).run(key, inputs, targets)
+# f(X; θ), an Equinox MLP whose weights θ are the sites mlp.hidden_weight, …
+mlp_b = BayesianMLP(net)
 # today (pyrox)
-# ν⁽ᵉ⁾ for e = 1, …, E, the same model fitted by SVI E times under one vmap
-guide_params, losses = ensemble_vi(
-    model,
-    AutoNormal(model),
-    ensemble_size=4,
+# the same MLP, with p(θ) and its own guide q(θ; ν) declared once in setup()
+mlp_c = ParameterizedMLP(net)
+# today (pyrox)
+# θ⁽ᵉ⁾ = argmin_θ ℒ(θ) for e = 1, …, E, a deep ensemble under one vmap
+members, losses = ensemble_map(
+    log_joint,
+    init_fn,
+    ensemble_size=8,
     num_epochs=2000,
     data=(inputs, targets),
     seed=key,
@@ -72,17 +72,17 @@ This is the core of the pyrox workspace. The GP, neural-network, latent-Gaussian
 
 ## 📐 Three ways to declare a site
 
-We are opinionated about how Equinox and NumPyro compose, not about which piece you reach for. Three patterns cover the common cases, from the lightest machinery to the heaviest, and all three emit plain NumPyro sites, so they fit the same model to the same loss.
+We are opinionated about how Equinox and NumPyro compose, not about which piece you reach for. Three patterns cover the common cases, from the lightest machinery to the heaviest, and all three emit plain NumPyro sites, so one model written three ways is one joint density, which the quickstart checks.
 
 | Pattern | You write | The site | Reach for it when |
 |---|---|---|---|
 | A. Plain sites | `numpyro.sample` in the model, then `eqx.tree_at` into the module | named by you | one field of an existing Equinox module becomes random |
-| B. `PyroxModule` | `self.pyrox_sample` and `self.pyrox_param` inside a `@pyrox_method` call | `<pyrox_name>.<site>`, cached per call | the module is itself probabilistic, such as a Bayesian layer |
-| C. `Parameterized` | `register_param`, `set_prior` and `autoguide` in `setup()`, then `get_param` | $`\boldsymbol{\theta} \sim p(\boldsymbol{\theta})`$ in model mode, $`\boldsymbol{\theta} \sim q(\boldsymbol{\theta}; \boldsymbol{\nu})`$ in guide mode | constrained hyperparameters with priors, as in a GP kernel |
+| B. `PyroxModule` | `self.pyrox_sample` and `self.pyrox_param` inside a `@pyrox_method` call | `<pyrox_name>.<site>`, cached per call | the module is itself probabilistic, such as a Bayesian network |
+| C. `Parameterized` | `register_param`, `set_prior` and `autoguide` in `setup()`, then `get_param` | $`\boldsymbol{\theta} \sim p(\boldsymbol{\theta})`$ in model mode, $`\boldsymbol{\theta} \sim q(\boldsymbol{\theta}; \boldsymbol{\nu})`$ in guide mode | constrained parameters with priors, and the module as its own guide |
 
 In pattern C, $`q(\boldsymbol{\theta}; \boldsymbol{\nu})`$ is the module's own guide with variational parameters $`\boldsymbol{\nu}`$. The `"normal"` guide is a normal distribution in unconstrained space, mapped back onto the parameter's support, and the `"delta"` guide is a point mass on the prior's support, which makes SVI with it a MAP fit.
 
-Once the sites exist, `pyrox.inference` fits the model $`E`$ times, member $`e`$ starting from its own random key. The MAP runner takes a log joint and minimises, for each member and at each step $`i`$,
+Once the model exists, `pyrox.inference` fits it $`E`$ times, member $`e`$ starting from its own random key. The MAP runner takes a log joint and minimises, for each member and at each step $`i`$,
 
 ```math
 \mathcal{L}(\boldsymbol{\theta}^{(e)}) = -\frac{N}{N_\text{batch}} \sum_{(\mathbf{x}_n, y_n) \in \mathcal{D}^{(i)}} \log p(y_n \mid \mathbf{x}_n, \boldsymbol{\theta}^{(e)}) - w \log p(\boldsymbol{\theta}^{(e)})
@@ -110,111 +110,210 @@ Two extras add the rest: `optax` for the ensemble MAP path and `param_group_opti
 pip install "pyrox[optax] @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox"
 ```
 
-## 📈 Quickstart: one Bayesian layer, NUTS and an ensemble of SVI fits
+## 🧠 Quickstart: one Bayesian MLP, three ways
 
-A line through 50 noisy points, $`y_n = 2 x_n + 0.5 + \varepsilon_n`$ with $`\varepsilon_n \sim \mathcal{N}(0, \sigma_\varepsilon^2)`$ and $`\sigma_\varepsilon = 0.1`$. The module is $`f(\mathbf{X}; \boldsymbol{\theta}) = \mathbf{X} \mathbf{w} + b`$, whose parameters $`\boldsymbol{\theta} = (\mathbf{w}, b)`$ are the slope $`\mathbf{w} \in \mathbb{R}^{D_x}`$ and the intercept $`b`$, each with a standard normal prior. NUTS draws $`S`$ samples $`\boldsymbol{\theta}^{(s)}`$ from the posterior, and `ensemble_vi` fits $`E`$ mean-field normal guides with variational parameters $`\boldsymbol{\nu}^{(e)}`$ to the same model.
+A one-hidden-layer MLP with $`H = 16`$ tanh units, $`f(\mathbf{x}; \boldsymbol{\theta}) = \mathbf{W}_2 \tanh(\mathbf{W}_1 \mathbf{x} + \mathbf{b}_1) + \mathbf{b}_2`$, on 64 noisy points of $`y_n = \sin(3 x_n) + \varepsilon_n`$ with $`\varepsilon_n \sim \mathcal{N}(0, \sigma_\varepsilon^2)`$ and $`\sigma_\varepsilon = 0.1`$. Its weights $`\boldsymbol{\theta} = (\mathbf{W}_1, \mathbf{b}_1, \mathbf{W}_2, \mathbf{b}_2)`$, with $`\mathbf{W}_1 \in \mathbb{R}^{H \times D_x}`$, $`\mathbf{b}_1 \in \mathbb{R}^{H}`$, $`\mathbf{W}_2 \in \mathbb{R}^{1 \times H}`$ and $`\mathbf{b}_2 \in \mathbb{R}^{1}`$, get a standard normal prior $`p(\boldsymbol{\theta})`$. The network is an ordinary `eqx.nn.MLP`, and the block makes it Bayesian once per pattern: A samples $`\boldsymbol{\theta}`$ in the model and splices it in with `eqx.tree_at`, B wraps the MLP in a `PyroxModule` that samples its own weights, and C wraps it in a `Parameterized` module that also carries a normal guide $`q(\boldsymbol{\theta}; \boldsymbol{\nu})`$ with variational parameters $`\boldsymbol{\nu}`$. Then it evaluates the log joint of each of the three models at the same $`\boldsymbol{\theta}`$, the MLP's initial weights.
 
 ```python
-import einx
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import jax.random as jr
 import numpyro
 import numpyro.distributions as dist
 from jaxtyping import Array, Float
-from numpyro import handlers
-from numpyro.infer import MCMC, NUTS
-from numpyro.infer.autoguide import AutoNormal
-from pyrox._core import PyroxModule, pyrox_method
-from pyrox.inference import ensemble_vi
+from numpyro.infer.util import log_density
+from pyrox._core import Parameterized, PyroxModule, pyrox_method
 
 
 # The package's tests run in double precision, so the quickstart does too.
 jax.config.update("jax_enable_x64", True)
 
-# Shapes: N = 50 samples; D_x = 1 input; S = 500 posterior draws; E = 4 members
+# Shapes: N = 64 samples; D_x = 1 input; H = 16 hidden units
+
+# today (equinox)
+# f(x; θ) = W₂ tanh(W₁ x + b₁) + b₂, an ordinary Equinox MLP
+net = eqx.nn.MLP(1, "scalar", 16, 1, activation=jnp.tanh, key=jr.key(0))
+# the names of θ = (W₁, b₁, W₂, b₂)
+NAMES = ("hidden_weight", "hidden_bias", "output_weight", "output_bias")
 
 
-class BayesianLinear(PyroxModule):
-    pyrox_name: str = "linear"
-    in_features: int = 1
+# user
+# θ = (W₁, b₁, W₂, b₂), of shapes (H, D_x), (H,), (1, H) and (1,)
+def weights_of(mlp: eqx.nn.MLP) -> tuple[Array, ...]:
+    hidden, output = mlp.layers
+    return hidden.weight, hidden.bias, output.weight, output.bias
+
+
+# user
+# p(θ) = 𝒩(0, I), at the shape of one weight array
+def prior(value: Array) -> dist.Distribution:
+    return dist.Normal(0.0, 1.0).expand(value.shape).to_event(value.ndim)
+
+
+# user
+# f(X; θ), the MLP applied to each of the N inputs
+def forward(mlp: eqx.nn.MLP, inputs: Float[Array, "N D_x"]) -> Float[Array, " N"]:
+    return jax.vmap(mlp)(inputs)
+
+
+# user
+# p(y | X, θ) = 𝒩(y; f(X; θ), σ_ε² I), with σ_ε = 0.1
+def observe(mean: Float[Array, " N"], targets: Float[Array, " N"]) -> None:
+    # today (numpyro)
+    numpyro.sample("obs", dist.Normal(mean, 0.1).to_event(1), obs=targets)
+
+
+# A. Plain sites: sample θ in the model, then splice it into the MLP
+def model_a(inputs: Float[Array, "N D_x"], targets: Float[Array, " N"]) -> None:
+    # today (numpyro)
+    # θ ~ p(θ), recorded as the sites hidden_weight, …, output_bias
+    weights = tuple(
+        numpyro.sample(name, prior(value))
+        for name, value in zip(NAMES, weights_of(net), strict=True)
+    )
+    # today (equinox)
+    # f(·; θ), the MLP with its weights replaced by θ
+    sampled_net = eqx.tree_at(weights_of, net, weights)
+    observe(forward(sampled_net, inputs), targets)
+
+
+# B. A PyroxModule that owns its sites
+class BayesianMLP(PyroxModule):
+    net: eqx.nn.MLP
+    pyrox_name: str = "mlp"
 
     @pyrox_method
     def __call__(self, inputs: Float[Array, "N D_x"]) -> Float[Array, " N"]:
         # today (pyrox)
-        # w ~ 𝒩(0, I), recorded as the site linear.weight
-        # → (D_x,)
-        weight = self.pyrox_sample(
-            "weight", dist.Normal(0.0, 1.0).expand([self.in_features]).to_event(1)
+        # θ ~ p(θ), recorded as the sites mlp.hidden_weight, …, mlp.output_bias
+        weights = tuple(
+            self.pyrox_sample(name, prior(value))
+            for name, value in zip(NAMES, weights_of(self.net), strict=True)
         )
-        # today (pyrox)
-        # b ~ 𝒩(0, 1), recorded as the site linear.bias
-        # → ()
-        bias = self.pyrox_sample("bias", dist.Normal(0.0, 1.0))
-        # f(X; θ) = X w + b
+        # today (equinox)
         # (N, D_x) → (N,)
-        return einx.dot("n d, d -> n", inputs, weight) + bias
+        return forward(eqx.tree_at(weights_of, self.net, weights), inputs)
 
 
-layer = BayesianLinear()
+# C. A Parameterized module: each weight's prior and guide, declared once
+class ParameterizedMLP(Parameterized):
+    net: eqx.nn.MLP
+    pyrox_name: str = "mlp"
+
+    def setup(self) -> None:
+        for name, value in zip(NAMES, weights_of(self.net), strict=True):
+            # today (pyrox)
+            self.register_param(name, value)
+            # today (pyrox)
+            # p(θ) = 𝒩(0, I)
+            self.set_prior(name, prior(value))
+            # today (pyrox)
+            # q(θ; ν), a normal guide with variational parameters ν
+            self.autoguide(name, "normal")
+
+    @pyrox_method
+    def __call__(self, inputs: Float[Array, "N D_x"]) -> Float[Array, " N"]:
+        # today (pyrox)
+        # θ ~ p(θ) in model mode, θ ~ q(θ; ν) in guide mode
+        weights = tuple(self.get_param(name) for name in NAMES)
+        # today (equinox)
+        # (N, D_x) → (N,)
+        return forward(eqx.tree_at(weights_of, self.net, weights), inputs)
+
+
+mlp_b = BayesianMLP(net)
+mlp_c = ParameterizedMLP(net)
 
 
 # user
-# y = f(X; θ) + ε, with ε ~ 𝒩(0, σ_ε² I) and σ_ε = 0.1
-def model(inputs: Float[Array, "N D_x"], targets: Float[Array, " N"]) -> None:
-    # user
-    # f(X; θ)
-    # (N, D_x) → (N,)
-    mean = layer(inputs)
-    # today (numpyro)
-    # p(y | X, θ) = 𝒩(y; f(X; θ), σ_ε² I), recorded as the site obs
-    numpyro.sample("obs", dist.Normal(mean, 0.1).to_event(1), obs=targets)
+def model_b(inputs: Float[Array, "N D_x"], targets: Float[Array, " N"]) -> None:
+    observe(mlp_b(inputs), targets)
+
+
+# user
+def model_c(inputs: Float[Array, "N D_x"], targets: Float[Array, " N"]) -> None:
+    # today (pyrox)
+    mlp_c.set_mode("model")
+    observe(mlp_c(inputs), targets)
 
 
 # X, evenly spaced on [−1, 1]
 # → (N, D_x)
-inputs = jnp.linspace(-1.0, 1.0, 50)[:, None]
+inputs = jnp.linspace(-1.0, 1.0, 64)[:, None]
 # ε ~ 𝒩(0, σ_ε² I)
 # → (N,)
-noise = 0.1 * jr.normal(jr.key(0), (50,))
-# y = 2 X + 0.5 + ε
+noise = 0.1 * jr.normal(jr.key(1), (64,))
+# y = sin(3 X) + ε
 # (N, D_x) → (N,)
-targets = 2.0 * inputs[:, 0] + 0.5 + noise
+targets = jnp.sin(3.0 * inputs[:, 0]) + noise
 
+# θ, the MLP's initial weights, under each pattern's site names
+plain = dict(zip(NAMES, weights_of(net), strict=True))
+scoped = {f"mlp.{name}": value for name, value in plain.items()}
 # today (numpyro)
-# the names NumPyro records for the sites
-trace = handlers.trace(handlers.seed(model, rng_seed=0)).get_trace(inputs, targets)
+# log p(y, θ | X), the joint each pattern writes, at the same θ
+log_joints = [
+    log_density(model, (inputs, targets), {}, values)[0]
+    for model, values in ((model_a, plain), (model_b, scoped), (model_c, scoped))
+]
 
-# today (numpyro)
-mcmc = MCMC(NUTS(model), num_warmup=500, num_samples=500, progress_bar=False)
-# today (numpyro)
-# θ⁽ˢ⁾ ~ p(θ | y) ∝ p(y | X, θ) p(θ), by NUTS
-mcmc.run(jr.key(1), inputs, targets)
-# today (numpyro)
-# 𝔼[w | y], the posterior mean of the slope
-# (S, D_x) → (D_x,)
-nuts_slope = mcmc.get_samples()["linear.weight"].mean(axis=0)
+print(list(scoped), [round(float(value), 3) for value in log_joints])
+```
+
+This prints `['mlp.hidden_weight', 'mlp.hidden_bias', 'mlp.output_weight', 'mlp.output_bias'] [-3549.83, -3549.83, -3549.83]`: the site names B and C record, scoped by `pyrox_name`, and the same log joint from all three models, so the three patterns write one model. (The log joint is so low because the initial weights do not fit the data yet.) What differs is what you write and what you get for it. A needs nothing from pyrox, but the model function names every site and splices the weights in itself. B moves the sites into the module, so a second `BayesianMLP(net, pyrox_name="mlp2")` in the same model gets names of its own, and the trace rejects two instances that share one. C is also its own guide: after `mlp_c.set_mode("guide")` the same call samples $`q(\boldsymbol{\theta}; \boldsymbol{\nu})`$ and registers $`\boldsymbol{\nu}`$ as the param sites `mlp.hidden_weight_loc`, `mlp.hidden_weight_scale` and so on, so SVI needs no autoguide. The regression masterclass fits a model with each pattern: [A](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_treeat/), [B](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_pyrox_sample/) and [C](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_parameterized/).
+
+## 👥 A deep ensemble of the same MLP
+
+`pyrox.inference` fits a model $`E`$ times under one `vmap`, each member from its own random start. `ensemble_map` minimises the loss $`\mathcal{L}(\boldsymbol{\theta}^{(e)})`$ above for each member, which for a neural network with `prior_weight` at its default of 1 is a deep ensemble of MAP fits. It takes a log joint and an `init_fn` rather than sites, so the members here are plain `eqx.nn.MLP`s. The block continues from the quickstart and needs the `optax` extra; $`\mathbf{X}_* \in \mathbb{R}^{N_* \times D_x}`$ holds three test inputs, two inside the data and $`x = 2`$ outside it.
+
+```python
+from pyrox.inference import ensemble_map, ensemble_predict
+
+
+# Shapes: E = 8 members; N_* = 3 test inputs
+# (weights_of, prior, forward and the data as in the quickstart above)
+
+
+# user
+# log p(y | X, θ) and log p(θ), the two terms of the MAP loss
+def log_joint(
+    mlp: eqx.nn.MLP, inputs: Float[Array, "N D_x"], targets: Float[Array, " N"]
+) -> tuple[Float[Array, ""], Float[Array, ""]]:
+    log_likelihood = dist.Normal(forward(mlp, inputs), 0.1).log_prob(targets).sum()
+    log_prior = sum(prior(value).log_prob(value) for value in weights_of(mlp))
+    return log_likelihood, log_prior
+
+
+# user
+# θ⁽ᵉ⁾ at the start, a fresh MLP from member e's key
+def init_fn(key: Array) -> eqx.nn.MLP:
+    return eqx.nn.MLP(1, "scalar", 16, 1, activation=jnp.tanh, key=key)
+
 
 # today (pyrox)
-# ν⁽ᵉ⁾ = argmin_ν ℒ_ELBO(ν) for e = 1, …, E, the same model fitted E times
-guide_params, losses = ensemble_vi(
-    model,
-    AutoNormal(model),
-    ensemble_size=4,
+# θ⁽ᵉ⁾ = argmin_θ ℒ(θ) for e = 1, …, E, each from its own start
+members, losses = ensemble_map(
+    log_joint,
+    init_fn,
+    ensemble_size=8,
     num_epochs=2000,
     data=(inputs, targets),
     seed=jr.key(2),
+    learning_rate=1e-2,
 )
-# the mean of w under each member's q(θ; ν⁽ᵉ⁾)
-# → (E, D_x)
-member_slopes = guide_params["linear.weight_auto_loc"]
+# X_*, two inputs inside the data and one outside
+# → (N_*, D_x)
+test_inputs = jnp.array([[0.0], [0.5], [2.0]])
+# today (pyrox)
+# f(X_*; θ⁽ᵉ⁾) for every member e
+# (N_*, D_x) → (E, N_*)
+predictions = ensemble_predict(members, forward, test_inputs)
 
-print(list(trace), nuts_slope.round(3), member_slopes[:, 0].round(3))
+print(predictions.mean(axis=0).round(2), predictions.std(axis=0).round(2))
 ```
 
-This prints `['linear.weight', 'linear.bias', 'obs'] [1.958] [1.96  1.963 1.955 1.957]`: the three sites NumPyro sees, named after the module, the NUTS posterior mean of the slope, and the slope each of the four SVI members settled on, all within 0.01 of one another and close to the true slope of 2. The posterior of a line has one mode, so the members agree; on a multimodal objective (a neural network, a latent-factor GP) their spread is what the ensemble is for. Nothing here is specific to a line, so a pyrox-nn layer or a pyrox-gp kernel in place of `BayesianLinear` runs through the same NUTS and SVI calls.
-
-The [tutorials](#-tutorials) take this further: the same model written with each of the three patterns, and the ensemble runners from the functional primitives up.
+This prints `[ 0.04  0.99 -1.81] [0.   0.   0.24]`: the members' mean prediction at $`x = 0`$, 0.5 and 2, and their spread. Inside the data the eight members agree to two decimals and come within 0.04 of $`\sin(3x)`$. At $`x = 2`$ they disagree by 0.24, which flags the extrapolation, but their mean of −1.81 is far from $`\sin(6) = -0.28`$, so the spread there is a warning and not an error bar. `ensemble_vi` does the same for SVI fits of a NumPyro model and guide, and the [ensemble tutorials](#-tutorials) build both runners from the functional primitives up.
 
 ## 🔬 What else is in the box
 
