@@ -60,6 +60,8 @@ None of it is a new inference engine. A `PyroxModule` is an [`equinox`](https://
 
 This is the core of the pyrox workspace. The GP, neural-network, latent-Gaussian and state-space packages build on it; the [workspace README](../../README.md) introduces all of them.
 
+<p align="center"><img src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_overview/pyrox_overview.png" alt="pyrox in one picture: you supply an Equinox module, priors and a NumPyro model or a log joint; they define one joint density p(y, θ | X) whose parameters are named sites; pyrox declares the sites in one of three ways (plain sites, PyroxModule, Parameterized), holds one draw across calls and fits the model E times; out come the named sites, posterior samples, a variational posterior and E ensemble members; equinox, numpyro and optax underneath" width="100%"></p>
+
 ## 🌟 Highlights
 
 - 🏷️ **Stable site names**: every site is recorded as `<pyrox_name>.<site>`, with the class name when no `pyrox_name` is set and never an object `id`, so the names an MCMC run recorded still match after `eqx.tree_at`, `jit` or a checkpoint rebuilds the module.
@@ -320,6 +322,15 @@ This prints `[ 0.04  0.99 -1.81] [0.   0.   0.24]`: the members' mean prediction
 
 ## 🔬 What else is in the box
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_roles/pyrox_roles-dark.svg">
+    <img alt="pyrox on the GeoStack role ladder: the ensemble runners as algorithms; the bases your models subclass, the observation models and the fitted ensembles as models; EnsembleMAP, EnsembleVI and param_group_optimizer as strategies; the verbs that make a site and hold one draw across calls as primitives; two site descriptors as structures; NumPyro beside the ladder as the floor every site is handed to, and ensemble_init as setup" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_roles/pyrox_roles-light.svg" width="100%">
+  </picture>
+</p>
+
+Each public name sits on one rung of the GeoStack role ladder, by the job it does.
+
 The package has three public namespaces, each with its own `__all__`; `pyrox` itself exports only the version and the namespaces.
 
 | Module | Symbols | Notes |
@@ -349,6 +360,13 @@ The package has three public namespaces, each with its own `__all__`; `pyrox` it
 - **[`AGENTS.md`](AGENTS.md)**: the contracts this package keeps (site semantics, stable scope names, the duplicate-param guard) and the tests that hold them.
 
 ## 🧩 Ecosystem
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_ecosystem/pyrox_ecosystem-dark.svg">
+    <img alt="The packages that import pyrox's core: pyrox-gp (_core and likelihoods), pyrox-nn (_core and inference), pyrox-lgm and pyrox-ssm (likelihoods), all in the pyrox workspace in GeoML; pyrox builds on JAX, Equinox, NumPyro and einx, and on optax through an extra" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_ecosystem/pyrox_ecosystem-light.svg" width="100%">
+  </picture>
+</p>
 
 pyrox is the core of a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) in the GeoML tier of the [GeoStack](https://github.com/jejjohnson/geostack). It owns the bridge between a module and its sites, and composes the rest in:
 
