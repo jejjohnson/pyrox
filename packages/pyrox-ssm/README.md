@@ -17,8 +17,8 @@
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 
 📖 [Documentation](https://jejjohnson.github.io/pyrox/) ·
-📚 [SSM API](https://jejjohnson.github.io/pyrox/api/ssm/) ·
-🚀 [One site, end to end](https://jejjohnson.github.io/pyrox/notebooks/ssm/ssm_one_site/) ·
+📚 [SSM API](https://jejjohnson.github.io/pyrox/reference/ssm/) ·
+🚀 [One site, end to end](https://jejjohnson.github.io/pyrox/ssm-one-site/) ·
 🗂️ [Capability index](https://jejjohnson.github.io/pyrox/capabilities/)
 
 </div>
@@ -234,7 +234,7 @@ observed: RMSE 0.35, 96 % within 2 sd
 day 395: -0.00 ± 1.82
 ```
 
-The first line is $`\bar{\boldsymbol{\theta}}`$: $`\ell`$ at 5.20 days against the true 5, $`\sigma^2`$ at 0.31 against 0.25, and $`\sigma_f^2`$ at 3.31 against 4. On the observed days the posterior mean is within 0.35 of the true anomaly (as a root mean square), less than the noise's 0.5, and 96 % of them fall within two posterior standard deviations. Inside the outage the error grows to 1.61, and the band grows with it: every outage day lies inside. A month after the record ends the smoother is back at the prior, a mean of zero and a standard deviation of $`1.82 = \sqrt{3.31}`$. The [one site, end to end](https://jejjohnson.github.io/pyrox/notebooks/ssm/ssm_one_site/) tutorial adds a seasonal mean and SVI, and measures the cost of one log density and its gradient per day staying flat as the record grows sixteen-fold.
+The first line is $`\bar{\boldsymbol{\theta}}`$: $`\ell`$ at 5.20 days against the true 5, $`\sigma^2`$ at 0.31 against 0.25, and $`\sigma_f^2`$ at 3.31 against 4. On the observed days the posterior mean is within 0.35 of the true anomaly (as a root mean square), less than the noise's 0.5, and 96 % of them fall within two posterior standard deviations. Inside the outage the error grows to 1.61, and the band grows with it: every outage day lies inside. A month after the record ends the smoother is back at the prior, a mean of zero and a standard deviation of $`1.82 = \sqrt{3.31}`$. The [one site, end to end](https://jejjohnson.github.io/pyrox/ssm-one-site/) tutorial adds a seasonal mean and SVI, and measures the cost of one log density and its gradient per day staying flat as the record grows sixteen-fold.
 
 ## 🎲 Counts on the same days: swap the strategy, keep the prior
 
@@ -287,7 +287,7 @@ This prints
 ExpectationPropagationMarkov: 24 iterations, RMSE observed 0.31, RMSE outage 0.86
 ```
 
-Laplace converges in 10 iterations and expectation propagation in 24, and their errors agree to 0.01: on the observed days the posterior mean of the log-rate is within about 0.3 of the truth, and through the outage, where only the prior speaks, within about 0.87. Gauss-Newton and posterior linearisation take the same call, and `markov_laplace_factor` puts the Laplace evidence in a NumPyro model so that NUTS samples the hyperparameters too, as the [non-Gaussian likelihood](https://jejjohnson.github.io/pyrox/notebooks/ssm/ssm_nongauss/) tutorial does.
+Laplace converges in 10 iterations and expectation propagation in 24, and their errors agree to 0.01: on the observed days the posterior mean of the log-rate is within about 0.3 of the truth, and through the outage, where only the prior speaks, within about 0.87. Gauss-Newton and posterior linearisation take the same call, and `markov_laplace_factor` puts the Laplace evidence in a NumPyro model so that NUTS samples the hyperparameters too, as the [non-Gaussian likelihood](https://jejjohnson.github.io/pyrox/ssm-nongauss/) tutorial does.
 
 ## 🔬 What else is in the box
 
@@ -311,23 +311,23 @@ The Markov GPs moved here from pyrox-gp with every name and signature unchanged;
 
 | # | Tutorial | What it shows |
 |---|---|---|
-| 1 | [One site, end to end](https://jejjohnson.github.io/pyrox/notebooks/ssm/ssm_one_site/) | a station record with gaps, NUTS and SVI over the hyperparameters, and prediction through an outage |
-| 2 | [Many sites, pooled hyperparameters](https://jejjohnson.github.io/pyrox/notebooks/ssm/ssm_hierarchical_sites/) | ragged records padded with `pad_sites` and scored as one factor |
-| 3 | [A regional signal plus a local signal per site](https://jejjohnson.github.io/pyrox/notebooks/ssm/ssm_shared_plus_site/) | `SharedPlusSiteMarkovGP` |
-| 4 | [A spatial field, per-facility paths and Poisson counts](https://jejjohnson.github.io/pyrox/notebooks/ssm/ssm_spatial_hierarchical/) | a hierarchical count model with NUTS and SVI |
-| 5 | [A non-Gaussian likelihood, collapsed and latent](https://jejjohnson.github.io/pyrox/notebooks/ssm/ssm_nongauss/) | `markov_laplace_factor` against a latent path, with a cross-check |
-| 6 | [An ensemble Kalman likelihood](https://jejjohnson.github.io/pyrox/notebooks/ssm/ssm_ensemble/) | `ensemble_factor` and an ensemble of variational fits |
-| 7 | [A nonlinear state-space model](https://jejjohnson.github.io/pyrox/notebooks/ssm/ssm_nonlinear/) | `nonlinear_ssm_factor` |
-| 8 | [Matérn kernels in state-space form](https://jejjohnson.github.io/pyrox/notebooks/ssm/markov_gp_sde_kernels/) | the SDE kernels and their compositions |
-| 9 | [Kalman filtering and RTS smoothing](https://jejjohnson.github.io/pyrox/notebooks/ssm/markov_gp_kalman/) | the Markov GP step by step, against a dense GP |
-| 10 | [Non-Gaussian Markov GP inference](https://jejjohnson.github.io/pyrox/notebooks/ssm/markov_gp_nongauss/) | Laplace, Gauss-Newton, posterior linearisation and EP side by side |
-| 11 | [Training a Markov GP](https://jejjohnson.github.io/pyrox/notebooks/ssm/markov_gp_training/) | maximum likelihood, NUTS, variational inference and identifiability |
-| 12 | [Sparse variational Markov GP](https://jejjohnson.github.io/pyrox/notebooks/ssm/sparse_markov_gp/) | inducing times, non-Gaussian likelihoods and NumPyro |
+| 1 | [One site, end to end](https://jejjohnson.github.io/pyrox/ssm-one-site/) | a station record with gaps, NUTS and SVI over the hyperparameters, and prediction through an outage |
+| 2 | [Many sites, pooled hyperparameters](https://jejjohnson.github.io/pyrox/ssm-hierarchical-sites/) | ragged records padded with `pad_sites` and scored as one factor |
+| 3 | [A regional signal plus a local signal per site](https://jejjohnson.github.io/pyrox/ssm-shared-plus-site/) | `SharedPlusSiteMarkovGP` |
+| 4 | [A spatial field, per-facility paths and Poisson counts](https://jejjohnson.github.io/pyrox/ssm-spatial-hierarchical/) | a hierarchical count model with NUTS and SVI |
+| 5 | [A non-Gaussian likelihood, collapsed and latent](https://jejjohnson.github.io/pyrox/ssm-nongauss/) | `markov_laplace_factor` against a latent path, with a cross-check |
+| 6 | [An ensemble Kalman likelihood](https://jejjohnson.github.io/pyrox/ssm-ensemble/) | `ensemble_factor` and an ensemble of variational fits |
+| 7 | [A nonlinear state-space model](https://jejjohnson.github.io/pyrox/ssm-nonlinear/) | `nonlinear_ssm_factor` |
+| 8 | [Matérn kernels in state-space form](https://jejjohnson.github.io/pyrox/markov-gp-sde-kernels/) | the SDE kernels and their compositions |
+| 9 | [Kalman filtering and RTS smoothing](https://jejjohnson.github.io/pyrox/markov-gp-kalman/) | the Markov GP step by step, against a dense GP |
+| 10 | [Non-Gaussian Markov GP inference](https://jejjohnson.github.io/pyrox/markov-gp-nongauss/) | Laplace, Gauss-Newton, posterior linearisation and EP side by side |
+| 11 | [Training a Markov GP](https://jejjohnson.github.io/pyrox/markov-gp-training/) | maximum likelihood, NUTS, variational inference and identifiability |
+| 12 | [Sparse variational Markov GP](https://jejjohnson.github.io/pyrox/sparse-markov-gp/) | inducing times, non-Gaussian likelihoods and NumPyro |
 
 ## 📖 Documentation
 
 - **[Documentation](https://jejjohnson.github.io/pyrox/)**: the whole workspace, with the tutorials and examples of every package.
-- **[SSM API](https://jejjohnson.github.io/pyrox/api/ssm/)**: every public name, generated from the docstrings, with the kernel compositions and the masking rules.
+- **[SSM API](https://jejjohnson.github.io/pyrox/reference/ssm/)**: every public name, generated from the docstrings, with the kernel compositions and the masking rules.
 - **[Capability index](https://jejjohnson.github.io/pyrox/capabilities/)**: every public name in the workspace and in the libraries it builds on, to check before writing something new.
 - **[`AGENTS.md`](AGENTS.md)**: the contracts every model keeps (no import of pyrox-gp, pyrox-lgm or pyrox-nn, gaussx for the linear algebra, the extras) and the tests that hold them.
 

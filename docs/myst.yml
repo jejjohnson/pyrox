@@ -34,146 +34,229 @@ project:
     - title: Getting started
       children:
         - file: agents.md
+          title: Building with agents
         - file: capabilities.md
+          title: Capability index
     - title: Core (pyrox)
       children:
         - title: Three ways to write a model
           children:
             - file: notebooks/regression_masterclass_treeat.ipynb
+              title: "Pattern 1: eqx.tree_at"
             - file: notebooks/regression_masterclass_pyrox_sample.ipynb
+              title: "Pattern 2: PyroxModule"
             - file: notebooks/regression_masterclass_parameterized.ipynb
+              title: "Pattern 3: Parameterized"
         - title: Ensembles
           children:
             - file: notebooks/ensemble_primitives_tutorial.ipynb
+              title: Ensemble primitives
             - file: notebooks/ensemble_runner_tutorial.ipynb
+              title: EnsembleMAP and EnsembleVI
     - title: Gaussian processes (pyrox-gp)
       children:
         - title: Basics
           children:
             - file: notebooks/exact_gp_regression.ipynb
+              title: Exact regression
             - file: notebooks/latent_gp_classification.ipynb
+              title: Latent classification
             - file: notebooks/multioutput_gp.ipynb
+              title: Multi-output GPs
         - title: Samples and derivatives
           children:
             - file: notebooks/gp_pathwise.ipynb
+              title: Pathwise sampling
             - file: notebooks/gp_pathwise_numpyro.ipynb
+              title: Pathwise sampling in NumPyro
             - file: notebooks/gp_derivatives.ipynb
+              title: The gradient posterior
         - title: Non-conjugate inference
           children:
             - file: notebooks/advanced_gp_laplace.ipynb
+              title: Laplace
             - file: notebooks/advanced_gp_gauss_newton.ipynb
+              title: Gauss–Newton
             - file: notebooks/advanced_gp_qn.ipynb
+              title: Quasi-Newton
             - file: notebooks/advanced_gp_pl.ipynb
+              title: Posterior linearisation
             - file: notebooks/advanced_gp_ep.ipynb
+              title: Expectation propagation
         - title: Spectral views
           children:
             - file: notebooks/kernel_approximation.ipynb
+              title: Kernel approximation with random features
             - file: notebooks/spectral_kernel_models.ipynb
+              title: Spectral kernels
             - file: notebooks/random_fourier_features.ipynb
+              title: RFF, SSGP and VSSGP
     - title: Neural networks (pyrox-nn)
       children:
         - file: notebooks/rff_as_neural_networks.ipynb
+          title: Random features as networks
         - file: notebooks/deep_random_fourier_features.ipynb
+          title: Deep random features
         - file: notebooks/siren_inr.ipynb
+          title: SIREN
         - file: notebooks/conditioning.ipynb
+          title: Conditional neural fields
         - file: notebooks/spatiotemporal_preprocessing.ipynb
+          title: Spatiotemporal preprocessing
     - title: Latent Gaussian models (pyrox-lgm)
       children:
         - file: notebooks/lgm_mcmc_inla.ipynb
+          title: MCMC with INLA
     - title: State-space models (pyrox-ssm)
       children:
         - title: Markov GPs
           children:
             - file: notebooks/ssm/markov_gp_sde_kernels.ipynb
+              title: SDE kernels
             - file: notebooks/ssm/markov_gp_kalman.ipynb
+              title: Kalman and RTS smoothing
             - file: notebooks/ssm/markov_gp_nongauss.ipynb
+              title: Non-Gaussian inference
             - file: notebooks/ssm/markov_gp_training.ipynb
+              title: Training
             - file: notebooks/ssm/sparse_markov_gp.ipynb
+              title: Sparse variational
         - title: Worked examples
           children:
             - file: notebooks/ssm/ssm_one_site.ipynb
+              title: One site
             - file: notebooks/ssm/ssm_hierarchical_sites.ipynb
+              title: Many sites
             - file: notebooks/ssm/ssm_shared_plus_site.ipynb
+              title: Regional plus local
             - file: notebooks/ssm/ssm_spatial_hierarchical.ipynb
+              title: A spatial field and facilities
             - file: notebooks/ssm/ssm_nongauss.ipynb
+              title: Wet and dry days
             - file: notebooks/ssm/ssm_ensemble.ipynb
+              title: Ensembles
             - file: notebooks/ssm/ssm_nonlinear.ipynb
+              title: Lorenz-63
     - title: Extremes (pyrox-xtreme)
       children:
         - file: xtreme/extremes.md
+          title: Overview
         - file: xtreme/interop.md
+          title: Interop with pipekit and NumPyro
         - title: Distributions
           children:
             - file: xtreme/notebooks/evt_distributions_overview.ipynb
+              title: A tour of the five
             - file: xtreme/notebooks/evt_gevd_block_maxima.ipynb
+              title: GEV on block maxima
             - file: xtreme/notebooks/evt_frechet_heavy_tails.ipynb
+              title: "Fréchet: heavy tails"
             - file: xtreme/notebooks/evt_weibull_bounded.ipynb
+              title: "Weibull: bounded tails"
         - title: Peaks over threshold
           children:
             - file: xtreme/notebooks/evt_gpd_pot.ipynb
+              title: GPD
             - file: xtreme/notebooks/evt_quantile_regression_gpd.ipynb
+              title: Quantile-regression thresholds
         - title: Non-stationary
           children:
             - file: xtreme/notebooks/evt_nonstat_parametric.ipynb
+              title: Parametric trend
             - file: xtreme/notebooks/evt_nonstat_splines.ipynb
+              title: P-splines
             - file: xtreme/notebooks/evt_nonstat_neural_ode.ipynb
+              title: Neural ODE
         - title: Temporal processes
           children:
             - file: xtreme/notebooks/hpp_from_scratch_and_numpyro.ipynb
+              title: Poisson
             - file: xtreme/notebooks/ipp_from_scratch_and_numpyro.ipynb
+              title: Inhomogeneous Poisson
             - file: xtreme/notebooks/renewal_from_scratch_and_numpyro.ipynb
+              title: Renewal
             - file: xtreme/notebooks/hawkes_from_scratch_and_numpyro.ipynb
+              title: Hawkes
             - file: xtreme/notebooks/marked_from_scratch_and_numpyro.ipynb
+              title: Marked
             - file: xtreme/notebooks/thinning_from_scratch_and_numpyro.ipynb
+              title: Thinning
         - title: Spatial processes
           children:
             - file: xtreme/notebooks/hpp_spatial_from_scratch_and_numpyro.ipynb
+              title: Poisson
             - file: xtreme/notebooks/ipp_spatial_from_scratch_and_numpyro.ipynb
+              title: Inhomogeneous Poisson
             - file: xtreme/notebooks/marked_spatial_from_scratch_and_numpyro.ipynb
+              title: Marked
         - title: Spatiotemporal processes
           children:
             - file: xtreme/notebooks/hpp_spatiotemporal_from_scratch_and_numpyro.ipynb
+              title: Poisson
             - file: xtreme/notebooks/ipp_spatiotemporal_from_scratch_and_numpyro.ipynb
+              title: Inhomogeneous Poisson
             - file: xtreme/notebooks/marked_spatiotemporal_from_scratch_and_numpyro.ipynb
+              title: Marked
             - file: xtreme/notebooks/hawkes_spatiotemporal_from_scratch_and_numpyro.ipynb
+              title: Hawkes (ETAS)
         - title: Neural
           children:
             - file: xtreme/notebooks/latent_ode_ipp.ipynb
+              title: Latent ODE intensity
         - title: Spatial extremes tutorial
           children:
             - file: xtreme/tutorials/spatial_extremes.md
+              title: Overview
             - title: Data
               children:
                 - file: xtreme/tutorials/spatial_extremes/00_data/00_cds_insitu_iberia.ipynb
+                  title: Iberian stations
             - title: Foundations
               children:
                 - file: xtreme/tutorials/spatial_extremes/01_evt_foundations/01_block_maxima.ipynb
+                  title: Block maxima
                 - file: xtreme/tutorials/spatial_extremes/01_evt_foundations/02_gev_one_station.ipynb
+                  title: "One station's GEV"
                 - file: xtreme/tutorials/spatial_extremes/01_evt_foundations/03_extremal_types.ipynb
+                  title: The three GEV types
                 - file: xtreme/tutorials/spatial_extremes/01_evt_foundations/03_return_levels.ipynb
+                  title: Return levels
             - title: Pooling
               children:
                 - file: xtreme/tutorials/spatial_extremes/02_pooling/04_many_stations_independent.ipynb
+                  title: Each station alone
                 - file: xtreme/tutorials/spatial_extremes/02_pooling/04_many_stations_laplace.ipynb
+                  title: Fast Laplace fits
                 - file: xtreme/tutorials/spatial_extremes/02_pooling/05_hierarchical_pooling.ipynb
+                  title: Hierarchical pooling
                 - file: xtreme/tutorials/spatial_extremes/02_pooling/06_gp_primer.ipynb
+                  title: A GP primer
             - title: Spatial GEV
               children:
                 - file: xtreme/tutorials/spatial_extremes/03_spatial_gev/07_spatial_gp_mu.ipynb
+                  title: A location field
                 - file: xtreme/tutorials/spatial_extremes/03_spatial_gev/08_spatial_gp_mu_sigma.ipynb
+                  title: Location and scale
                 - file: xtreme/tutorials/spatial_extremes/03_spatial_gev/09_spatial_gp_mu_sigma_xi.ipynb
+                  title: All three fields
             - title: Non-stationary
               children:
                 - file: xtreme/tutorials/spatial_extremes/04_nonstationary/10_nonstationary_parametric.ipynb
+                  title: Parametric trend
                 - file: xtreme/tutorials/spatial_extremes/04_nonstationary/11_nonstationary_ode.ipynb
+                  title: Mechanistic ODE
                 - file: xtreme/tutorials/spatial_extremes/04_nonstationary/12_nonstationary_gp.ipynb
+                  title: State-space GP
     - title: Explainers
       children:
         - file: explainers/averaging_kernel_kiss_gp.md
+          title: Averaging kernel vs KISS-GP
     - title: Project
       children:
         - file: contributing.md
+          title: Contributing
         - file: CHANGELOG.md
+          title: Changelog
 
 site:
   title: pyrox
