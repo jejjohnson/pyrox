@@ -73,7 +73,7 @@ Every model in the package is a Kalman recursion over some state, and they diffe
 | Model | Entry points | The state and the likelihood | Reach for it when |
 |---|---|---|---|
 | Markov GP | `MarkovGPPrior`, `markov_gp_factor`, `.condition()` | an SDE kernel's state; Gaussian noise | a GP over a long series |
-| Linear-Gaussian SSM | `LinearGaussianSSMPrior`, `lgssm_factor` | your matrices $`\mathbf{A}_k`$, $`\mathbf{H}_k`$, $`\mathbf{Q}_k`$, $`\mathbf{R}_k`$ | known linear dynamics, or several outputs |
+| Linear-Gaussian SSM | `LinearGaussianSSMPrior`, `lgssm_factor`, `.condition()` | your matrices $`\mathbf{A}_k`$, $`\mathbf{H}_k`$, $`\mathbf{Q}_k`$, $`\mathbf{R}_k`$ | known linear dynamics, or several outputs |
 | Nonlinear SSM | `nonlinear_ssm_factor` | dynamics $`f`$ and observation $`h`$, moment-matched | nonlinear dynamics, at the cost of a surrogate likelihood |
 | Non-Gaussian | `.condition_nongauss()`, `markov_laplace_factor` | an SDE kernel's state; a Gaussian site per observation | counts, labels or heavy tails |
 | Sparse | `SparseMarkovGPPrior`, `sparse_markov_elbo` | inducing times; any likelihood, through a guide | a variational fit with fewer inducing times than steps |
