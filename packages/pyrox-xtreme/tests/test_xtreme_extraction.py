@@ -887,3 +887,43 @@ class TestKeepOriginalCoordinates:
                     assert float(da.sel(t=t, y=yv, x=xv)) == pytest.approx(
                         float(row.values[iy, ix])
                     )
+
+
+class TestDeclusteringOnChunkedInput:
+    """Declustering and the extremal index accept dask-backed inputs.
+
+    Regression (jejjohnson/pyrox#463): their ``xr.apply_ufunc`` calls left
+    ``dask`` at its default, ``"forbidden"``, so a chunked DataArray raised.
+    The results must match the in-memory ones, with time split into chunks.
+    """
+
+    @pytest.fixture
+    def pair(self):
+        pytest.importorskip("dask")
+        rng = np.random.default_rng(0)
+        time = pd.date_range("2020-01-01", periods=60, freq="D")
+        da = xr.DataArray(
+            rng.gamma(2.0, 1.0, size=(3, 60)),
+            dims=("site", "time"),
+            coords={"site": [0, 1, 2], "time": time},
+        )
+        return da, da.chunk({"site": 1, "time": 20})
+
+    def test_decluster_runs(self, pair):
+        da, chunked = pair
+        got = decluster_runs(chunked, threshold=3.0, min_separation=2)
+        xr.testing.assert_allclose(
+            got.compute(), decluster_runs(da, threshold=3.0, min_separation=2)
+        )
+
+    def test_decluster_separation(self, pair):
+        da, chunked = pair
+        got = decluster_separation(chunked, threshold=3.0, min_separation=3)
+        xr.testing.assert_allclose(
+            got.compute(), decluster_separation(da, threshold=3.0, min_separation=3)
+        )
+
+    def test_estimate_extremal_index(self, pair):
+        da, chunked = pair
+        got = estimate_extremal_index(chunked, threshold=3.0)
+        xr.testing.assert_allclose(got.compute(), estimate_extremal_index(da, 3.0))

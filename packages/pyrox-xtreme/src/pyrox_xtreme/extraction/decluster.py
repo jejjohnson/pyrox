@@ -106,6 +106,10 @@ def decluster_runs(
         output_core_dims=[[dim]],
         vectorize=True,
         output_dtypes=[float],
+        # Chunked (dask) inputs run block by block; a time axis split into
+        # several chunks is consolidated first, as in the block-maxima code.
+        dask="parallelized",
+        dask_gufunc_kwargs={"allow_rechunk": True},
     )
 
 
@@ -204,6 +208,8 @@ def decluster_separation(
         output_core_dims=[[dim]],
         vectorize=True,
         output_dtypes=[bool],
+        dask="parallelized",
+        dask_gufunc_kwargs={"allow_rechunk": True},
     )
 
     def _select_separated_peaks_1d(
@@ -241,8 +247,14 @@ def decluster_separation(
         output_core_dims=[[dim]],
         vectorize=True,
         output_dtypes=[bool],
+        dask="parallelized",
+        dask_gufunc_kwargs={"allow_rechunk": True},
     )
 
+    # `drop=True` gives a data-dependent length, so xarray needs the mask in
+    # memory; computing the boolean mask alone keeps chunked values lazy.
+    if selected_mask.chunks is not None:
+        selected_mask = selected_mask.compute()
     return da.where(selected_mask, drop=True)
 
 
@@ -328,6 +340,8 @@ def estimate_extremal_index(
         output_core_dims=[[]],
         vectorize=True,
         output_dtypes=[float],
+        dask="parallelized",
+        dask_gufunc_kwargs={"allow_rechunk": True},
     )
     # Preserve the historical 1-D scalar return type.
     if theta.ndim == 0:
