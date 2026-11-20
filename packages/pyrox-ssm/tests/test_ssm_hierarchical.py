@@ -31,13 +31,15 @@ import numpyro.distributions as dist
 import pytest
 from jax.scipy.stats import multivariate_normal
 from numpyro import handlers
-from numpyro.infer import MCMC, NUTS
+from numpyro.infer import MCMC, NUTS, SVI, Trace_ELBO
+from numpyro.infer.autoguide import AutoNormal
 from pyrox_ssm import (
     IntegratedWienerSDE,
     MarkovGPPrior,
     MaternSDE,
     SharedPlusSiteMarkovGPPrior,
     lgssm_factor,
+    shared_plus_site_factor,
 )
 from ssm_reference import matern_kernel
 
@@ -650,3 +652,64 @@ def test_log_marginal_matches_dense_many_sites():
         _dense_log_marginal(model, y_grid, noise),
         rtol=1e-10,
     )
+
+
+# --- shared_plus_site_factor ----------------------------------------------
+
+
+def _network_model(times, mask, y_grid):
+    """A shared lengthscale and a per-site noise, scored by the factor."""
+    ell = numpyro.sample("shared_lengthscale", dist.LogNormal(jnp.log(8.0), 0.5))
+    noise = numpyro.sample("noise_var", dist.LogNormal(jnp.log(0.05), 0.5))
+    shared = MaternSDE(variance=jnp.asarray(1.0), lengthscale=ell, order=1)
+    prior = SharedPlusSiteMarkovGPPrior(shared, POOLED_SITE, times, mask)
+    shared_plus_site_factor("y", prior, y_grid, noise)
+
+
+def test_shared_plus_site_factor_registers_the_log_marginal():
+    times, ys = _dataset(jr.key(20))
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(
+        SHARED, POOLED_SITE, times, ys
+    )
+    tr = handlers.trace(handlers.seed(_network_model, 0)).get_trace(
+        model.times, model.mask, y_grid
+    )
+    assert tr["y"]["type"] == "sample" and isinstance(tr["y"]["fn"], dist.Unit)
+    ell, noise = tr["shared_lengthscale"]["value"], tr["noise_var"]["value"]
+    shared = MaternSDE(variance=jnp.asarray(1.0), lengthscale=ell, order=1)
+    prior = SharedPlusSiteMarkovGPPrior(shared, POOLED_SITE, model.times, model.mask)
+    expected = prior.log_marginal(y_grid, noise)
+    # numpyro.factor stores its value as the Unit distribution's log factor.
+    assert jnp.array_equal(tr["y"]["fn"].log_factor, expected)
+    assert jnp.isfinite(expected)
+
+
+def test_shared_plus_site_factor_takes_a_noise_per_site():
+    times, ys = _dataset(jr.key(21), noise=NOISE_PER_SITE)
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(
+        SHARED, POOLED_SITE, times, ys
+    )
+
+    def per_site_model():
+        shared_plus_site_factor("y", model, y_grid, NOISE_PER_SITE)
+
+    tr = handlers.trace(per_site_model).get_trace()
+    expected = model.log_marginal(y_grid, NOISE_PER_SITE)
+    assert jnp.array_equal(tr["y"]["fn"].log_factor, expected)
+
+
+def test_shared_plus_site_factor_runs_an_svi_step_smoke():
+    times, ys = _dataset(jr.key(22))
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(
+        SHARED, POOLED_SITE, times, ys
+    )
+    args = (model.times, model.mask, y_grid)
+    svi = SVI(
+        _network_model,
+        AutoNormal(_network_model),
+        numpyro.optim.Adam(0.01),
+        Trace_ELBO(),
+    )
+    state = svi.init(jr.key(23), *args)
+    state, loss = svi.update(state, *args)
+    assert jnp.isfinite(loss)

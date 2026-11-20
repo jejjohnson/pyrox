@@ -14,7 +14,7 @@ One facade, `pyrox_ssm` (`__init__.py` re-exports; implementation in private `_*
 | Sparse Markov GP | `_sparse_markov.py` | `SparseMarkovGPPrior`, `ConditionedSparseMarkovGP`, `sparse_markov_elbo`, `sparse_markov_factor` |
 | Non-Gaussian likelihoods | `_inference_nongauss_markov.py` | `LaplaceMarkovInference`, `GaussNewtonMarkovInference`, `PosteriorLinearizationMarkov`, `ExpectationPropagationMarkov`, `ConditionedNonGaussMarkovGP`, `markov_laplace_factor`, `markov_implicit_adjoint` |
 | Ragged sites (padding + observation mask) | `_sites.py` | `pad_sites` |
-| Shared GP plus one GP per site on a merged grid (block-diagonal LGSSM) | `_hierarchical.py` | `SharedPlusSiteMarkovGPPrior` |
+| Shared GP plus one GP per site on a merged grid (block-diagonal LGSSM) | `_hierarchical.py` | `SharedPlusSiteMarkovGPPrior`, `ConditionedSharedPlusSiteMarkovGP`, `shared_plus_site_factor` |
 | Per-site numerics (private) | `_markov_sites.py` | `as_gaussx_likelihood`, `_cavity_site_derivatives`, `_check_scalar_latent`, `_require_gauss_hermite`, `_pushforward_moments` |
 | Normalizing Kalman filter (`[flows]`) | `flows/_markov_flow.py` | `pyrox_ssm.flows.NormalizingKalmanPrior`, `normalizing_kalman_factor` |
 | Ensemble Kalman log likelihood of a filterax run (`[ensemble]`) | `ensemble.py` | `pyrox_ssm.ensemble.ensemble_factor` |
