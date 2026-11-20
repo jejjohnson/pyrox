@@ -112,7 +112,7 @@ pip install "pyrox[optax] @ git+https://github.com/jejjohnson/pyrox.git#subdirec
 
 ## 🧠 Quickstart: one Bayesian MLP, three ways
 
-A one-hidden-layer MLP with $`H = 16`$ tanh units, $`f(\mathbf{x}; \boldsymbol{\theta}) = \mathbf{W}_2 \tanh(\mathbf{W}_1 \mathbf{x} + \mathbf{b}_1) + \mathbf{b}_2`$, on 64 noisy points of $`y_n = \sin(3 x_n) + \varepsilon_n`$ with $`\varepsilon_n \sim \mathcal{N}(0, \sigma_\varepsilon^2)`$ and $`\sigma_\varepsilon = 0.1`$. Its weights $`\boldsymbol{\theta} = (\mathbf{W}_1, \mathbf{b}_1, \mathbf{W}_2, \mathbf{b}_2)`$, with $`\mathbf{W}_1 \in \mathbb{R}^{H \times D_x}`$, $`\mathbf{b}_1 \in \mathbb{R}^{H}`$, $`\mathbf{W}_2 \in \mathbb{R}^{1 \times H}`$ and $`\mathbf{b}_2 \in \mathbb{R}^{1}`$, get a standard normal prior $`p(\boldsymbol{\theta})`$. The network is an ordinary `eqx.nn.MLP`, and the block makes it Bayesian once per pattern: A samples $`\boldsymbol{\theta}`$ in the model and splices it in with `eqx.tree_at`, B wraps the MLP in a `PyroxModule` that samples its own weights, and C wraps it in a `Parameterized` module that also carries a normal guide $`q(\boldsymbol{\theta}; \boldsymbol{\nu})`$ with variational parameters $`\boldsymbol{\nu}`$. Then it evaluates the log joint of each of the three models at the same $`\boldsymbol{\theta}`$, the MLP's initial weights.
+One MLP with $`H = 16`$ tanh units, $`f(\mathbf{x}; \boldsymbol{\theta}) = \mathbf{W}_2 \tanh(\mathbf{W}_1 \mathbf{x} + \mathbf{b}_1) + \mathbf{b}_2`$, made Bayesian once per pattern. Its weights $`\boldsymbol{\theta} = (\mathbf{W}_1, \mathbf{b}_1, \mathbf{W}_2, \mathbf{b}_2)`$, with $`\mathbf{W}_1 \in \mathbb{R}^{H \times D_x}`$, $`\mathbf{b}_1 \in \mathbb{R}^{H}`$, $`\mathbf{W}_2 \in \mathbb{R}^{1 \times H}`$ and $`\mathbf{b}_2 \in \mathbb{R}^{1}`$, get a standard normal prior $`p(\boldsymbol{\theta})`$, and the data are 64 noisy points of $`y_n = \sin(3 x_n) + \varepsilon_n`$ with $`\varepsilon_n \sim \mathcal{N}(0, \sigma_\varepsilon^2)`$ and $`\sigma_\varepsilon = 0.1`$. The setup is shared by all three: an ordinary `eqx.nn.MLP`, the prior, `splice` (which puts a set of weights into the MLP with `eqx.tree_at`) and one NumPyro model that takes any of the Bayesian versions.
 
 ```python
 import equinox as eqx
@@ -122,8 +122,6 @@ import jax.random as jr
 import numpyro
 import numpyro.distributions as dist
 from jaxtyping import Array, Float
-from numpyro.infer.util import log_density
-from pyrox._core import Parameterized, PyroxModule, pyrox_method
 
 
 # The package's tests run in double precision, so the quickstart does too.
@@ -134,12 +132,11 @@ jax.config.update("jax_enable_x64", True)
 # today (equinox)
 # f(x; θ) = W₂ tanh(W₁ x + b₁) + b₂, an ordinary Equinox MLP
 net = eqx.nn.MLP(1, "scalar", 16, 1, activation=jnp.tanh, key=jr.key(0))
-# the names of θ = (W₁, b₁, W₂, b₂)
 NAMES = ("hidden_weight", "hidden_bias", "output_weight", "output_bias")
 
 
 # user
-# θ = (W₁, b₁, W₂, b₂), of shapes (H, D_x), (H,), (1, H) and (1,)
+# θ = (W₁, b₁, W₂, b₂)
 def weights_of(mlp: eqx.nn.MLP) -> tuple[Array, ...]:
     hidden, output = mlp.layers
     return hidden.weight, hidden.bias, output.weight, output.bias
@@ -152,33 +149,49 @@ def prior(value: Array) -> dist.Distribution:
 
 
 # user
-# f(X; θ), the MLP applied to each of the N inputs
-def forward(mlp: eqx.nn.MLP, inputs: Float[Array, "N D_x"]) -> Float[Array, " N"]:
-    return jax.vmap(mlp)(inputs)
+# f(X; θ), the MLP with its weights replaced by θ, on each of the N inputs
+def splice(mlp: eqx.nn.MLP, weights: list[Array], inputs: Array) -> Array:
+    return jax.vmap(eqx.tree_at(weights_of, mlp, tuple(weights)))(inputs)
 
 
 # user
 # p(y | X, θ) = 𝒩(y; f(X; θ), σ_ε² I), with σ_ε = 0.1
-def observe(mean: Float[Array, " N"], targets: Float[Array, " N"]) -> None:
-    # today (numpyro)
-    numpyro.sample("obs", dist.Normal(mean, 0.1).to_event(1), obs=targets)
+def model(mlp, inputs: Float[Array, "N D_x"], targets: Float[Array, " N"]) -> None:
+    numpyro.sample("obs", dist.Normal(mlp(inputs), 0.1).to_event(1), obs=targets)
 
 
-# A. Plain sites: sample θ in the model, then splice it into the MLP
-def model_a(inputs: Float[Array, "N D_x"], targets: Float[Array, " N"]) -> None:
+# X evenly spaced on [−1, 1], and y = sin(3 X) + ε
+# → (N, D_x), (N,)
+inputs = jnp.linspace(-1.0, 1.0, 64)[:, None]
+targets = jnp.sin(3.0 * inputs[:, 0]) + 0.1 * jr.normal(jr.key(1), (64,))
+```
+
+**A. Plain sites.** The model samples $`\boldsymbol{\theta}`$ with `numpyro.sample` and splices it into the MLP. This needs nothing from pyrox, but the function names every site itself.
+
+```python
+# Shapes: N samples; D_x inputs (net, prior and splice as above)
+
+
+def plain_mlp(inputs: Float[Array, "N D_x"]) -> Float[Array, " N"]:
     # today (numpyro)
     # θ ~ p(θ), recorded as the sites hidden_weight, …, output_bias
-    weights = tuple(
+    weights = [
         numpyro.sample(name, prior(value))
         for name, value in zip(NAMES, weights_of(net), strict=True)
-    )
-    # today (equinox)
-    # f(·; θ), the MLP with its weights replaced by θ
-    sampled_net = eqx.tree_at(weights_of, net, weights)
-    observe(forward(sampled_net, inputs), targets)
+    ]
+    # (N, D_x) → (N,)
+    return splice(net, weights, inputs)
+```
+
+**B. A `PyroxModule` owns its sites.** The module samples its own weights inside a `@pyrox_method` call, and pyrox records them as `mlp.<name>`, so a second `BayesianMLP(net, pyrox_name="mlp2")` in the same model gets names of its own.
+
+```python
+from pyrox._core import PyroxModule, pyrox_method
 
 
-# B. A PyroxModule that owns its sites
+# Shapes: N samples; D_x inputs (prior and splice as above)
+
+
 class BayesianMLP(PyroxModule):
     net: eqx.nn.MLP
     pyrox_name: str = "mlp"
@@ -187,16 +200,23 @@ class BayesianMLP(PyroxModule):
     def __call__(self, inputs: Float[Array, "N D_x"]) -> Float[Array, " N"]:
         # today (pyrox)
         # θ ~ p(θ), recorded as the sites mlp.hidden_weight, …, mlp.output_bias
-        weights = tuple(
+        weights = [
             self.pyrox_sample(name, prior(value))
             for name, value in zip(NAMES, weights_of(self.net), strict=True)
-        )
-        # today (equinox)
+        ]
         # (N, D_x) → (N,)
-        return forward(eqx.tree_at(weights_of, self.net, weights), inputs)
+        return splice(self.net, weights, inputs)
+```
+
+**C. `Parameterized` declares each weight's prior and guide once.** `setup()` registers each weight, attaches $`p(\boldsymbol{\theta})`$ and a normal guide $`q(\boldsymbol{\theta}; \boldsymbol{\nu})`$ with variational parameters $`\boldsymbol{\nu}`$, and `get_param` samples whichever of the two the mode asks for. After `set_mode("guide")` the same call registers $`\boldsymbol{\nu}`$ as the param sites `mlp.hidden_weight_loc`, `mlp.hidden_weight_scale` and so on, so the module is its own SVI guide.
+
+```python
+from pyrox._core import Parameterized
 
 
-# C. A Parameterized module: each weight's prior and guide, declared once
+# Shapes: N samples; D_x inputs (prior and splice as above)
+
+
 class ParameterizedMLP(Parameterized):
     net: eqx.nn.MLP
     pyrox_name: str = "mlp"
@@ -204,75 +224,57 @@ class ParameterizedMLP(Parameterized):
     def setup(self) -> None:
         for name, value in zip(NAMES, weights_of(self.net), strict=True):
             # today (pyrox)
+            # θ on its support, p(θ) = 𝒩(0, I) and a normal guide q(θ; ν)
             self.register_param(name, value)
-            # today (pyrox)
-            # p(θ) = 𝒩(0, I)
             self.set_prior(name, prior(value))
-            # today (pyrox)
-            # q(θ; ν), a normal guide with variational parameters ν
             self.autoguide(name, "normal")
 
     @pyrox_method
     def __call__(self, inputs: Float[Array, "N D_x"]) -> Float[Array, " N"]:
         # today (pyrox)
         # θ ~ p(θ) in model mode, θ ~ q(θ; ν) in guide mode
-        weights = tuple(self.get_param(name) for name in NAMES)
-        # today (equinox)
+        weights = [self.get_param(name) for name in NAMES]
         # (N, D_x) → (N,)
-        return forward(eqx.tree_at(weights_of, self.net, weights), inputs)
+        return splice(self.net, weights, inputs)
+```
+
+**One joint.** All three emit plain NumPyro sites, so at the same weights they write the same log joint.
+
+```python
+from numpyro.infer.util import log_density
 
 
-mlp_b = BayesianMLP(net)
-mlp_c = ParameterizedMLP(net)
+# Shapes: N samples; D_x inputs (net, model and the three patterns as above)
 
-
-# user
-def model_b(inputs: Float[Array, "N D_x"], targets: Float[Array, " N"]) -> None:
-    observe(mlp_b(inputs), targets)
-
-
-# user
-def model_c(inputs: Float[Array, "N D_x"], targets: Float[Array, " N"]) -> None:
-    # today (pyrox)
-    mlp_c.set_mode("model")
-    observe(mlp_c(inputs), targets)
-
-
-# X, evenly spaced on [−1, 1]
-# → (N, D_x)
-inputs = jnp.linspace(-1.0, 1.0, 64)[:, None]
-# ε ~ 𝒩(0, σ_ε² I)
-# → (N,)
-noise = 0.1 * jr.normal(jr.key(1), (64,))
-# y = sin(3 X) + ε
-# (N, D_x) → (N,)
-targets = jnp.sin(3.0 * inputs[:, 0]) + noise
-
-# θ, the MLP's initial weights, under each pattern's site names
+# θ, the MLP's initial weights, under A's site names and under B's and C's
 plain = dict(zip(NAMES, weights_of(net), strict=True))
 scoped = {f"mlp.{name}": value for name, value in plain.items()}
+patterns = [
+    (plain_mlp, plain),
+    (BayesianMLP(net), scoped),
+    (ParameterizedMLP(net), scoped),
+]
 # today (numpyro)
 # log p(y, θ | X), the joint each pattern writes, at the same θ
 log_joints = [
-    log_density(model, (inputs, targets), {}, values)[0]
-    for model, values in ((model_a, plain), (model_b, scoped), (model_c, scoped))
+    log_density(model, (mlp, inputs, targets), {}, values)[0]
+    for mlp, values in patterns
 ]
 
 print(list(scoped), [round(float(value), 3) for value in log_joints])
 ```
 
-This prints `['mlp.hidden_weight', 'mlp.hidden_bias', 'mlp.output_weight', 'mlp.output_bias'] [-3549.83, -3549.83, -3549.83]`: the site names B and C record, scoped by `pyrox_name`, and the same log joint from all three models, so the three patterns write one model. (The log joint is so low because the initial weights do not fit the data yet.) What differs is what you write and what you get for it. A needs nothing from pyrox, but the model function names every site and splices the weights in itself. B moves the sites into the module, so a second `BayesianMLP(net, pyrox_name="mlp2")` in the same model gets names of its own, and the trace rejects two instances that share one. C is also its own guide: after `mlp_c.set_mode("guide")` the same call samples $`q(\boldsymbol{\theta}; \boldsymbol{\nu})`$ and registers $`\boldsymbol{\nu}`$ as the param sites `mlp.hidden_weight_loc`, `mlp.hidden_weight_scale` and so on, so SVI needs no autoguide. The regression masterclass fits a model with each pattern: [A](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_treeat/), [B](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_pyrox_sample/) and [C](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_parameterized/).
+This prints `['mlp.hidden_weight', 'mlp.hidden_bias', 'mlp.output_weight', 'mlp.output_bias'] [-3549.83, -3549.83, -3549.83]`: the site names B and C record, and the same log joint from all three models (low, because the initial weights do not fit the data yet). The regression masterclass fits a model with each pattern: [A](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_treeat/), [B](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_pyrox_sample/) and [C](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_parameterized/).
 
 ## 👥 A deep ensemble of the same MLP
 
-`pyrox.inference` fits a model $`E`$ times under one `vmap`, each member from its own random start. `ensemble_map` minimises the loss $`\mathcal{L}(\boldsymbol{\theta}^{(e)})`$ above for each member, which for a neural network with `prior_weight` at its default of 1 is a deep ensemble of MAP fits. It takes a log joint and an `init_fn` rather than sites, so the members here are plain `eqx.nn.MLP`s. The block continues from the quickstart and needs the `optax` extra; $`\mathbf{X}_* \in \mathbb{R}^{N_* \times D_x}`$ holds three test inputs, two inside the data and $`x = 2`$ outside it.
+`pyrox.inference` fits a model $`E`$ times under one `vmap`, each member from its own random start. `ensemble_map` minimises the loss $`\mathcal{L}(\boldsymbol{\theta}^{(e)})`$ above for each member, which for a neural network with `prior_weight` at its default of 1 is a deep ensemble of MAP fits. It takes a log joint and an `init_fn` rather than sites, so the members are plain `eqx.nn.MLP`s. The block continues from the quickstart and needs the `optax` extra; $`\mathbf{X}_* \in \mathbb{R}^{N_* \times D_x}`$ holds three test inputs, two inside the data and $`x = 2`$ outside it.
 
 ```python
 from pyrox.inference import ensemble_map, ensemble_predict
 
 
-# Shapes: E = 8 members; N_* = 3 test inputs
-# (weights_of, prior, forward and the data as in the quickstart above)
+# Shapes: E = 8 members; N_* = 3 test inputs (prior, splice and the data as above)
 
 
 # user
@@ -280,7 +282,8 @@ from pyrox.inference import ensemble_map, ensemble_predict
 def log_joint(
     mlp: eqx.nn.MLP, inputs: Float[Array, "N D_x"], targets: Float[Array, " N"]
 ) -> tuple[Float[Array, ""], Float[Array, ""]]:
-    log_likelihood = dist.Normal(forward(mlp, inputs), 0.1).log_prob(targets).sum()
+    mean = splice(mlp, list(weights_of(mlp)), inputs)
+    log_likelihood = dist.Normal(mean, 0.1).log_prob(targets).sum()
     log_prior = sum(prior(value).log_prob(value) for value in weights_of(mlp))
     return log_likelihood, log_prior
 
@@ -308,7 +311,7 @@ test_inputs = jnp.array([[0.0], [0.5], [2.0]])
 # today (pyrox)
 # f(X_*; θ⁽ᵉ⁾) for every member e
 # (N_*, D_x) → (E, N_*)
-predictions = ensemble_predict(members, forward, test_inputs)
+predictions = ensemble_predict(members, lambda mlp, x: jax.vmap(mlp)(x), test_inputs)
 
 print(predictions.mean(axis=0).round(2), predictions.std(axis=0).round(2))
 ```
