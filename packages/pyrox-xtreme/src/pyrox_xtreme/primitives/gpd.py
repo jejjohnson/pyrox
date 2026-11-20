@@ -92,11 +92,7 @@ def gpd_log_prob(
     safe_shape = jnp.where(shape == 0.0, 1.0, shape)
     x_end = -scale / safe_shape
     at_endpoint = (
-        (shape < 0.0)
-        & finite
-        & (x >= 0.0)
-        & (x <= x_end)
-        & ((x == x_end) | ~valid)
+        (shape < 0.0) & finite & (x >= 0.0) & (x <= x_end) & ((x == x_end) | ~valid)
     )
     endpoint_val = jnp.where(
         shape == -1.0,

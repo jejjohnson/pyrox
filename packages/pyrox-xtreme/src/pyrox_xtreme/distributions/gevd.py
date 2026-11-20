@@ -551,12 +551,13 @@ class GeneralizedExtremeValueDistribution(dist.Distribution):
         # the fixed linear grid systematically underresolved heavy
         # tails where most of the conditional mass lives near p = 1.
         n_grid = 1024
-        p0 = self.cdf(threshold_arr)
+        # S(u) from the stable survival function, never 1 - F(u): in float32
+        # 1 - F(u) rounds to 0 in the far tail (u = 20 on a standard Gumbel).
+        s_u = self.survival_function(threshold_arr)
         # Joint batch of threshold and distribution parameters — the grid
         # axis is appended after this, so every per-batch quantity must be
         # broadcast to it before gaining the trailing axis.
-        batch = jnp.shape(p0)
-        s_u = 1.0 - p0
+        batch = jnp.shape(s_u)
         # Floor S(u) so log is finite; the NaN mask below drops results
         # whose threshold is effectively at or beyond the upper support.
         # Also cap just below 1.0 so the integration grid stays strictly

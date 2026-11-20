@@ -472,11 +472,12 @@ class WeibullType3GEVD(dist.Distribution):
         # for the derivation). Correctly normalises by S(u) rather than
         # the truncated mass `(1-ε) - F(u)`.
         n_grid = 1024
-        p0 = self.cdf(threshold_arr)
+        # S(u) from the stable survival function, never 1 - F(u): in float32
+        # 1 - F(u) rounds to 0 in the far tail (u = 20 on a standard Gumbel).
+        s_u = self.survival_function(threshold_arr)
         # Joint batch of threshold and parameters; per-batch quantities are
         # broadcast to it before gaining the trailing grid axis.
-        batch = jnp.shape(p0)
-        s_u = 1.0 - p0
+        batch = jnp.shape(s_u)
         # Cap away from 1.0 so p_grid stays strictly in (0, 1). See
         # GEVD.conditional_excess_mean.
         s_u_safe = jnp.clip(s_u, 1e-12, 1.0 - 1e-6)

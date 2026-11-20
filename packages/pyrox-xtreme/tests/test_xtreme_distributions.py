@@ -1285,3 +1285,32 @@ class TestBoundarySemantics:
         assert jnp.isnan(eager[-1])  # k = n invalid
         assert jnp.all(jnp.isfinite(eager[1:-1]))
         assert jnp.allclose(eager[1:-1], jitted[1:-1], atol=1e-6)
+
+
+class TestConditionalExcessMeanFarTail:
+    """The mean-excess quadrature starts from the stable survival function.
+
+    Regression (jejjohnson/pyrox#463): S(u) was formed as ``1 - cdf(u)``, which
+    rounds to 0 in float32 far in the tail, so a standard Gumbel at u = 20
+    returned NaN instead of a mean excess of about 1.
+    """
+
+    def test_gumbel_far_threshold_float32(self):
+        f32 = jnp.float32
+        d = GeneralizedExtremeValueDistribution(f32(0.0), f32(1.0), f32(0.0))
+        me = d.conditional_excess_mean(f32(20.0))
+        # Gumbel tail: X - u | X > u tends to Exp(1) as u grows.
+        assert float(me) == pytest.approx(1.0, abs=1e-2)
+
+    @pytest.mark.parametrize(
+        ("cls", "xi", "u"),
+        [(FrechetType2GEVD, 0.2, 1e3), (WeibullType3GEVD, -0.2, 4.9)],
+    )
+    def test_fixed_type_far_threshold_float32(self, cls, xi, u):
+        f32 = jnp.float32
+        d = cls(f32(0.0), f32(1.0), f32(xi))
+        me = d.conditional_excess_mean(f32(u))
+        # Far in the tail the excess is GPD with scale σ + ξ(u - μ), whose
+        # mean is (σ + ξ(u - μ)) / (1 - ξ).
+        limit = (1.0 + xi * u) / (1.0 - xi)
+        assert float(me) == pytest.approx(limit, rel=2e-2)
