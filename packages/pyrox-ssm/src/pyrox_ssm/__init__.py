@@ -17,9 +17,10 @@ the package whose inference recurses in time. ``pyrox_ssm`` never imports
   `GaussNewtonMarkovInference`, `PosteriorLinearizationMarkov`,
   `ExpectationPropagationMarkov`, all returning `ConditionedNonGaussMarkovGP`,
   and `markov_laplace_factor`, the approximate evidence as a NumPyro factor.
-* Nonlinear state-space models: `nonlinear_ssm_factor`, the
-  moment-matched log likelihood of `gaussx.nonlinear_kalman_filter` (EKF,
-  UKF, CKF, Gauss-Hermite or Monte Carlo) as a NumPyro factor.
+* Nonlinear state-space models: `NonlinearGaussianSSMPrior`,
+  `ConditionedNonlinearGaussianSSM`, `nonlinear_ssm_factor`; the
+  moment-matched filter and smoother of gaussx (EKF, UKF, CKF, Gauss-Hermite
+  or Monte Carlo) and its log likelihood as a NumPyro factor.
 * Ragged sites: `pad_sites` pads per-site series to one shape and returns
   the observation mask every Markov entry point takes;
   `MarkovGPSitesPrior` holds the padded sites as one prior, with `condition`
@@ -89,7 +90,11 @@ from pyrox_ssm._markov import (
     markov_gp_innovations_sample,
     markov_gp_sample,
 )
-from pyrox_ssm._nonlinear import nonlinear_ssm_factor
+from pyrox_ssm._nonlinear import (
+    ConditionedNonlinearGaussianSSM,
+    NonlinearGaussianSSMPrior,
+    nonlinear_ssm_factor,
+)
 from pyrox_ssm._sites import (
     ConditionedMarkovGPSites,
     MarkovGPSitesPrior,
@@ -133,6 +138,7 @@ __all__ = [
     "ConditionedMarkovGP",
     "ConditionedMarkovGPSites",
     "ConditionedNonGaussMarkovGP",
+    "ConditionedNonlinearGaussianSSM",
     "ConditionedSharedPlusSiteMarkovGP",
     "ConditionedSparseMarkovGP",
     "ConstantSDE",
@@ -145,6 +151,7 @@ __all__ = [
     "MarkovGPPrior",
     "MarkovGPSitesPrior",
     "MaternSDE",
+    "NonlinearGaussianSSMPrior",
     "PeriodicSDE",
     "PosteriorLinearizationMarkov",
     "ProductSDE",

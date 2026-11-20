@@ -126,6 +126,19 @@ def log_emission(y):  # x_k = a x_{k-1} + eta_k,  y_k = exp(x_k) + eps_k
     )
 ```
 
+`NonlinearGaussianSSMPrior` holds the same model, `(f, h, Q, R, m_0, P_0)` and the integrator, as a prior, as `LinearGaussianSSMPrior` does for the linear case: `filter`, `log_marginal` (the value the factor registers), `smooth`, which runs `gaussx.nonlinear_rts_smoother` with the same integrator, and `condition`. The `ConditionedNonlinearGaussianSSM` it returns holds the smoothed states and gives `predict()`, each channel's mean and variance at every step, pushed through `h` by the integrator (`include_noise=True` adds `diag(R_k)`). The factor builds this prior, so the two cannot drift apart. With affine `f` and `h` every deterministic integrator reproduces `LinearGaussianSSMPrior`.
+
+```python
+prior = pss.NonlinearGaussianSSMPrior(
+    lambda x: 0.8 * x, jnp.exp, 0.1 * jnp.eye(1), 0.05 * jnp.eye(1), jnp.zeros(1), jnp.eye(1)
+)
+posterior = prior.condition(y, mask=mask)
+states, state_covs = posterior.smoothed_means, posterior.smoothed_covs   # (T, D), (T, D, D)
+mean, var = posterior.predict(include_noise=True)                         # (T, M) each
+```
+
+::: pyrox_ssm.NonlinearGaussianSSMPrior
+::: pyrox_ssm.ConditionedNonlinearGaussianSSM
 ::: pyrox_ssm.nonlinear_ssm_factor
 
 ## Markov GP — Kalman / RTS workflow
