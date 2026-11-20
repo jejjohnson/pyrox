@@ -206,6 +206,40 @@ class SparseMarkovGPPrior(eqx.Module):
         mvn = MultivariateNormal(loc, op, solver=self._resolved_solver())
         return mvn.sample(key)
 
+    def condition(self, guide: Guide) -> ConditionedSparseMarkovGP:
+        r"""The sparse posterior for a fitted guide.
+
+        For a sparse prior the observations are already summarised in the
+        fitted guide $q(u) = \mathcal{N}(m_q, S_q)$, so `condition` takes the
+        guide rather than ``y``; the result is
+
+        $$
+        q(f) = \int p(f \mid u)\, q(u)\, du,
+        $$
+
+        whose ``predict(t_star)`` gives the SVGP predictive marginals.
+
+        Args:
+            guide: The fitted guide over the inducing values, any
+                `pyrox.likelihoods.Guide` with ``predict(K_xz, K_zz_op,
+                K_xx_diag)`` (pyrox-gp's `FullRankGuide`, `WhitenedGuide`,
+                …).
+
+        Returns:
+            The `ConditionedSparseMarkovGP` holding this prior and the guide.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> from pyrox_gp import FullRankGuide
+            >>> from pyrox_ssm import MaternSDE, SparseMarkovGPPrior
+            >>> prior = SparseMarkovGPPrior(
+            ...     MaternSDE(1.0, 0.6, order=1), jnp.linspace(0.0, 5.0, 6)
+            ... )
+            >>> guide = FullRankGuide.init(prior.num_inducing, scale=0.3)
+            >>> mean, var = prior.condition(guide).predict(jnp.array([0.5, 6.0]))
+        """
+        return ConditionedSparseMarkovGP(prior=self, guide=guide)
+
 
 # --- result type for predictions -----------------------------------------
 
@@ -213,7 +247,8 @@ class SparseMarkovGPPrior(eqx.Module):
 class ConditionedSparseMarkovGP(eqx.Module):
     """Sparse Markov GP fitted to a guide.
 
-    Bundles the `SparseMarkovGPPrior` and a fitted
+    Returned by `SparseMarkovGPPrior.condition`. Bundles the
+    `SparseMarkovGPPrior` and a fitted
     `pyrox_gp.Guide` so that ``predict(t_star)`` can be called
     against arbitrary test times. The math is the standard SVGP
     predictive

@@ -373,6 +373,8 @@ Sparse variational GP over an SDE kernel and an inducing *time* grid:
 the variational family lives on the inducing times while predictions
 exploit the Markov structure between them.
 
+Fit a guide over the inducing values with `sparse_markov_factor` or `sparse_markov_elbo`, then [`prior.condition(guide)`][pyrox_ssm.SparseMarkovGPPrior.condition] returns the `ConditionedSparseMarkovGP`, whose `predict(t_star)` gives the SVGP predictive mean and variance at any times. The observations are already summarised in the guide, so `condition` takes the guide rather than `y`.
+
 ::: pyrox_ssm.SparseMarkovGPPrior
 ::: pyrox_ssm.ConditionedSparseMarkovGP
 ::: pyrox_ssm.sparse_markov_elbo
