@@ -373,3 +373,34 @@ class TestLiveLambdaAndIntegrated:
         counts = jax.vmap(lambda k: op2.sample(k, max_candidates=256)[2])(keys)
         mean_count = jnp.mean(counts.astype(jnp.float32))
         assert jnp.abs(mean_count - 50.0) < 3.0
+
+
+class TestRenewalPredictCountOrigin:
+    """The renewal count on ``[s, e]`` is ``m(e) - m(s)``.
+
+    Regression (jejjohnson/pyrox#463): ``predict_count`` evaluated
+    ``m(e - s)``, restarting the process at ``s``, which is right only for
+    exponential gaps.
+    """
+
+    def test_near_deterministic_gaps(self):
+        import numpyro.distributions as dist
+        from pyrox_xtreme.point_processes.operators import RenewalProcess
+
+        # Gaps ~ Gamma(400, 400): mean 1, sd 0.05, so events sit near 1, 2, ...
+        proc = RenewalProcess(dist.Gamma(400.0, 400.0), 3.0, n_integration_points=800)
+        # One event in [0.6, 1.2]; restarting at 0.6 would give m(0.6) ≈ 0.
+        assert float(proc.predict_count(0.6, 1.2)) == pytest.approx(1.0, abs=1e-2)
+        assert float(proc.predict_count(1.5, 2.5)) == pytest.approx(1.0, abs=1e-2)
+
+    def test_exponential_gaps_are_unchanged(self):
+        import numpyro.distributions as dist
+        from pyrox_xtreme.point_processes.operators import RenewalProcess
+
+        proc = RenewalProcess(dist.Exponential(2.0), 5.0)
+        # Memoryless: the count on [1, 3] is λ·2 = 4 either way.
+        assert float(proc.predict_count(1.0, 3.0)) == pytest.approx(4.0, rel=1e-2)
+        # Equal up to the 200-point quadrature error of each m evaluation.
+        assert float(proc.predict_count(0.0, 2.0)) == pytest.approx(
+            float(proc.predict_count(1.0, 3.0)), rel=1e-2
+        )

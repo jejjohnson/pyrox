@@ -118,13 +118,27 @@ class RenewalProcess(GoodnessOfFitMixin, eqx.Module):
         start_time: Float[Array, ...] | float = 0.0,
         end_time: Float[Array, ...] | None = None,
     ) -> Float[Array, ...]:
-        r"""Expected event count on ``[start, end]`` via renewal equation."""
+        r"""Expected event count on ``[start, end]``: :math:`m(end) - m(start)`.
+
+        The process starts at time 0, so the count on a later interval is
+        the difference of the renewal function :math:`m` at its ends, not
+        :math:`m(end - start)`, which would restart the process at ``start``
+        (the same thing only for memoryless, exponential gaps).
+        """
         if end_time is None:
             end_time = self.observation_window
-        T = jnp.asarray(end_time) - jnp.asarray(start_time)
-        return renewal_expected_count(
-            T, self.inter_event_dist, n_points=self.n_integration_points
-        )
+        start = jnp.asarray(start_time)
+        end = jnp.asarray(end_time)
+
+        def m(t: Array) -> Array:
+            return renewal_expected_count(
+                t, self.inter_event_dist, n_points=self.n_integration_points
+            )
+
+        # m(0) = 0 exactly; the zero-length grid would divide 0 by 0 for a
+        # density that is infinite at 0, so evaluate a safe horizon instead.
+        m_start = jnp.where(start > 0, m(jnp.where(start > 0, start, 1.0)), 0.0)
+        return m(end) - m_start
 
     # ------------------------------------------------------------
     # Diagnostics — residuals/goodness_of_fit/compensator_curve come
