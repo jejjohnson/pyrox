@@ -6,7 +6,6 @@ import jax
 import jax.numpy as jnp
 import pytest
 from jax import random
-
 from pyrox_xtreme.point_processes import RectangularDomain
 from pyrox_xtreme.point_processes.primitives import (
     ipp_spatial_intensity,

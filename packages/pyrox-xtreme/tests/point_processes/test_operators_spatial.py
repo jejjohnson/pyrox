@@ -7,7 +7,6 @@ import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
 from jax import random
-
 from pyrox_xtreme.point_processes import RectangularDomain
 from pyrox_xtreme.point_processes.operators import (
     HomogeneousSpatialPP,

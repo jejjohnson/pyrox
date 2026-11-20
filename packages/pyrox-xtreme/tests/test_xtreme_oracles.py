@@ -23,7 +23,6 @@ import jax
 import numpy as np
 import pytest
 import scipy.stats as st
-
 from pyrox_xtreme.distributions import (
     FrechetType2GEVD,
     GeneralizedExtremeValueDistribution,

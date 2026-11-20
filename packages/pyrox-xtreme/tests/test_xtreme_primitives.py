@@ -11,7 +11,6 @@ import jax
 import jax.numpy as jnp
 import pytest
 import scipy.stats as st
-
 from pyrox_xtreme import (
     frechet_cdf,
     frechet_icdf,

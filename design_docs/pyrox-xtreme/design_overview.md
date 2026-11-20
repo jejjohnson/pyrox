@@ -10,7 +10,7 @@ version: 0.1.0
 ## Structure
 
 ```
-xtremax/
+pyrox-xtreme/
 ├── design_overview.md          # This file
 ├── vision.md              # Motivation, user stories, design principles, identity
 ├── architecture.md        # Layer stack, package layout, dependencies

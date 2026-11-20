@@ -6,7 +6,6 @@ import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
 from jax import random
-
 from pyrox_xtreme.point_processes.primitives import (
     sample_spatial_marks_at_locations,
     spatial_marks_log_prob,

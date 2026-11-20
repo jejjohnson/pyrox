@@ -51,7 +51,8 @@ class HomogeneousSpatioTemporalPP(dist.Distribution):
                 "produces variable-length point patterns and is not batch-safe "
                 "at the distribution layer — vmap over `rate` at the operator "
                 "layer "
-                "(`pyrox_xtreme.point_processes.operators.HomogeneousSpatioTemporalPP`) "
+                "(`pyrox_xtreme.point_processes.operators."
+                "HomogeneousSpatioTemporalPP`) "
                 "if you need batched draws."
             )
         self.spatial = spatial

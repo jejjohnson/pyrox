@@ -217,7 +217,10 @@ class GeneralizedParetoDistribution(dist.Distribution):
 
     @validate_sample
     def log_prob(self, value: jnp.ndarray) -> jnp.ndarray:
-        """Log PDF. Thin wrapper for :func:`~pyrox_xtreme.primitives.gpd.gpd_log_prob`."""
+        """Log PDF.
+
+        Thin wrapper for :func:`~pyrox_xtreme.primitives.gpd.gpd_log_prob`.
+        """
         return gpd_log_prob(value, self.scale, self.concentration)
 
     def cdf(self, value: jnp.ndarray) -> jnp.ndarray:

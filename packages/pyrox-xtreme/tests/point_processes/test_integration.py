@@ -5,7 +5,6 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import pytest
-
 from pyrox_xtreme.point_processes._integration import (
     cumulative_log_intensity,
     integrate_log_intensity,

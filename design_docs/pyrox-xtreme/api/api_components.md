@@ -783,7 +783,7 @@ Real extreme value analysis needs real data. `pyrox_xtreme.datasets` provides do
 - Quality flags preserved as a coordinate variable (`qc_flag`)
 - Source metadata in `attrs` (dataset name, version, citation, license)
 
-**Lazy download + local cache.** Data is downloaded on first access and cached locally (`~/.cache/xtremax/` by default, configurable via `XTREMAX_DATA_DIR`). Subsequent calls read from cache. No data ships with the package.
+**Lazy download + local cache.** Data is downloaded on first access and cached locally (`~/.cache/pyrox_xtreme/` by default, configurable via `PYROX_XTREME_DATA_DIR`). Subsequent calls read from cache. No data ships with the package.
 
 **Thin wrappers.** Each loader is a thin wrapper around the provider's API or FTP. We don't reprocess or grid the data — we fetch, parse, normalize units/coordinates, and return. The user applies their own masks and extraction.
 

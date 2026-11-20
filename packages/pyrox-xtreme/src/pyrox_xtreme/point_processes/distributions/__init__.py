@@ -13,7 +13,9 @@ from pyrox_xtreme.point_processes.distributions.hpp_spatial import HomogeneousSp
 from pyrox_xtreme.point_processes.distributions.hpp_spatiotemporal import (
     HomogeneousSpatioTemporalPP,
 )
-from pyrox_xtreme.point_processes.distributions.ipp_spatial import InhomogeneousSpatialPP
+from pyrox_xtreme.point_processes.distributions.ipp_spatial import (
+    InhomogeneousSpatialPP,
+)
 from pyrox_xtreme.point_processes.distributions.ipp_spatiotemporal import (
     InhomogeneousSpatioTemporalPP,
 )

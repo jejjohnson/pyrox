@@ -11,7 +11,6 @@ import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
-
 from pyrox_xtreme.point_processes import EventHistory
 from pyrox_xtreme.point_processes.operators import (
     ExponentialHawkes,
@@ -729,7 +728,6 @@ class TestStppHawkesSampleNoOOB:
         # Without the clip-to-(n_max-1) guard this would scatter at
         # ``n_max`` repeatedly.
         from jax import random
-
         from pyrox_xtreme.point_processes import RectangularDomain, TemporalDomain
         from pyrox_xtreme.point_processes.primitives import stpp_hawkes_sample
 
@@ -763,7 +761,6 @@ class TestStppHawkesSampleZeroBaselineDoesNotDivByZero:
 
     def test_mu_zero_buffer_finite(self) -> None:
         from jax import random
-
         from pyrox_xtreme.point_processes import RectangularDomain, TemporalDomain
         from pyrox_xtreme.point_processes.primitives import stpp_hawkes_sample
 

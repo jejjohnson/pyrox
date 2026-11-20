@@ -36,7 +36,9 @@ def test_no_source_file_imports_a_pyrox_package():
 
 
 def test_importing_every_module_does_not_load_a_pyrox_package():
-    modules = [m.name for m in pkgutil.walk_packages([str(SRC)], prefix="pyrox_xtreme.")]
+    modules = [
+        m.name for m in pkgutil.walk_packages([str(SRC)], prefix="pyrox_xtreme.")
+    ]
     code = (
         "import importlib, sys\n"
         "importlib.import_module('pyrox_xtreme')\n"

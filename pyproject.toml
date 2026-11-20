@@ -106,7 +106,7 @@ extend-exclude = [
     # The spatial-extremes tutorials ship pre-executed on CDS data that CI
     # cannot fetch; reformatting their sources would desynchronise code from
     # the committed outputs. Their `_helpers/` modules are linted as normal.
-    "docs/notebooks/xtreme/spatial_extremes/**/*.ipynb",
+    "docs/xtreme/tutorials/spatial_extremes/**/*.ipynb",
 ]
 # Honour the exclude even when pre-commit passes the files explicitly.
 force-exclude = true
@@ -149,6 +149,16 @@ ignore = ["E402", "E721", "E731", "E741"]
 "packages/pyrox-gauss/tests/**" = ["F722", "RUF001", "RUF002", "RUF003"]
 "packages/pyrox-xtreme/tests/**" = ["F722", "RUF001", "RUF002", "RUF003", "RUF012"]
 "docs/notebooks/**" = [
+    "F722",
+    "B905",
+    "B007",
+    "E702",
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    "E501",
+]
+"docs/xtreme/**" = [
     "F722",
     "B905",
     "B007",

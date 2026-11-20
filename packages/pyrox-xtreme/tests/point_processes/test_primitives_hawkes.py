@@ -5,7 +5,6 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import pytest
-
 from pyrox_xtreme.point_processes.primitives.hawkes import (
     exp_hawkes_cumulative_intensity,
     exp_hawkes_intensity,

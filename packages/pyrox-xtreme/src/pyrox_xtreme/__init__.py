@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from pyrox_xtreme import distributions, extraction, point_processes, primitives, simulations
+from pyrox_xtreme import (
+    distributions,
+    extraction,
+    point_processes,
+    primitives,
+    simulations,
+)
 from pyrox_xtreme.distributions import (
     FrechetType2GEVD,
     GeneralizedExtremeValueDistribution,

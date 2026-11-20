@@ -6,7 +6,6 @@ import jax
 import jax.numpy as jnp
 import pytest
 from jax import random
-
 from pyrox_xtreme.point_processes._integration import integrate_log_intensity
 from pyrox_xtreme.point_processes.primitives import (
     ipp_cumulative_hazard,

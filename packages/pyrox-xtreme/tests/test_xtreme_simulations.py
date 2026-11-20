@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from pyrox_xtreme.simulations import (
     compute_climate_signal,
     generate_fractal_terrain,

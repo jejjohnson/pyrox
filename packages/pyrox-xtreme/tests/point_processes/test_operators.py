@@ -7,7 +7,6 @@ import jax
 import jax.numpy as jnp
 import pytest
 from jax import random
-
 from pyrox_xtreme.point_processes.operators import (
     GoodnessOfFit,
     HomogeneousPoissonProcess,
@@ -232,7 +231,6 @@ class TestRegressionsFromPrReview:
         # closure, hiding `bin_edges`/`rates` from the PyTree. They
         # should now appear as leaves.
         import equinox as eqx
-
         from pyrox_xtreme.point_processes.operators import PiecewiseConstantLogIntensity
 
         op = InhomogeneousPoissonProcess.from_piecewise_constant(

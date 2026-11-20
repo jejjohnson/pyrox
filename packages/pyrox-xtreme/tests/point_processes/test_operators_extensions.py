@@ -12,7 +12,6 @@ import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
-
 from pyrox_xtreme.point_processes import (
     EventHistory,
     constant_mark_distribution,

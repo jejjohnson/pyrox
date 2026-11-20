@@ -16,6 +16,7 @@ trace time.
 from __future__ import annotations
 
 import jax
+import jax.core
 import numpy as np
 from jaxtyping import ArrayLike
 

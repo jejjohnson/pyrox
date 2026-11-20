@@ -16,7 +16,6 @@ from __future__ import annotations
 import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
-
 from pyrox_xtreme.point_processes import constant_mark_distribution, constant_retention
 from pyrox_xtreme.point_processes.operators import (
     ExponentialHawkes,

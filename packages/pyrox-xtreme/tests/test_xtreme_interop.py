@@ -15,7 +15,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-
 from pyrox_xtreme.distributions import (
     GeneralizedExtremeValueDistribution,
     GeneralizedParetoDistribution,

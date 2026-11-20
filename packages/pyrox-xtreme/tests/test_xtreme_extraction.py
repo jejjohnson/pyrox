@@ -6,7 +6,6 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
-
 from pyrox_xtreme.extraction import (
     constant_threshold,
     decluster_runs,

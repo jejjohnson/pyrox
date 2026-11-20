@@ -12,7 +12,9 @@ from jaxtyping import Array, Bool, Float, PRNGKeyArray
 from numpyro.distributions import constraints
 
 from pyrox_xtreme._rng import check_prng_key
-from pyrox_xtreme.point_processes.operators.thinning import ThinningProcess as _ThinningOp
+from pyrox_xtreme.point_processes.operators.thinning import (
+    ThinningProcess as _ThinningOp,
+)
 
 
 class ThinningProcess(dist.Distribution):

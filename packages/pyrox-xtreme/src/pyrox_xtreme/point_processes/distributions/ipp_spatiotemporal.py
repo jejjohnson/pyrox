@@ -11,7 +11,9 @@ from numpyro.distributions import constraints
 
 from pyrox_xtreme._rng import check_prng_key
 from pyrox_xtreme.point_processes._domain import RectangularDomain, TemporalDomain
-from pyrox_xtreme.point_processes._integration_spatiotemporal import SpatiotemporalMethod
+from pyrox_xtreme.point_processes._integration_spatiotemporal import (
+    SpatiotemporalMethod,
+)
 from pyrox_xtreme.point_processes.operators.ipp_spatiotemporal import (
     InhomogeneousSpatioTemporalPP as _IppStOp,
 )

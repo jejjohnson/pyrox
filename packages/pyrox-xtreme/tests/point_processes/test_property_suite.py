@@ -14,7 +14,6 @@ import jax.numpy as jnp
 import numpy as np
 import numpyro.distributions as dist
 import pytest
-
 from pyrox_xtreme.point_processes import SampleResult
 from pyrox_xtreme.point_processes.distributions.temporal import (
     HomogeneousPoissonProcess as HppDist,

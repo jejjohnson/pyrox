@@ -10,7 +10,6 @@ import jax
 import jax.numpy as jnp
 import numpyro.distributions as dist
 import pytest
-
 from pyrox_xtreme.point_processes import constant_mark_distribution, constant_retention
 from pyrox_xtreme.point_processes.distributions import (
     ExponentialHawkes,

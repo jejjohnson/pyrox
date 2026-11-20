@@ -8,7 +8,6 @@ import numpyro.distributions as dist
 import pytest
 from jax import random
 from numpyro.infer import MCMC, NUTS
-
 from pyrox_xtreme.point_processes.distributions import (
     HomogeneousPoissonProcess,
     InhomogeneousPoissonProcess,

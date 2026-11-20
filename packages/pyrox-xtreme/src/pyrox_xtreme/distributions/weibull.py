@@ -191,7 +191,10 @@ class WeibullType3GEVD(dist.Distribution):
         return weibull_log_prob(value, self.loc, self.scale, self.concentration)
 
     def cdf(self, value: jnp.ndarray) -> jnp.ndarray:
-        """CDF. Thin wrapper for :func:`~pyrox_xtreme.primitives.weibull.weibull_cdf`."""
+        """CDF.
+
+        Thin wrapper for :func:`~pyrox_xtreme.primitives.weibull.weibull_cdf`.
+        """
         return weibull_cdf(value, self.loc, self.scale, self.concentration)
 
     def icdf(self, q: jnp.ndarray) -> jnp.ndarray:
@@ -239,7 +242,10 @@ class WeibullType3GEVD(dist.Distribution):
 
     @property
     def mean(self) -> jnp.ndarray:
-        """Mean. Thin wrapper for :func:`~pyrox_xtreme.primitives.weibull.weibull_mean`."""
+        """Mean.
+
+        Thin wrapper for :func:`~pyrox_xtreme.primitives.weibull.weibull_mean`.
+        """
         return weibull_mean(self.loc, self.scale, self.concentration)
 
     @property

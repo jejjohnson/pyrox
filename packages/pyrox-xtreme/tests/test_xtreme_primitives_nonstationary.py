@@ -12,7 +12,6 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 import pytest
-
 from pyrox_xtreme import (
     assemble_nonstationary_gev_fields,
     design_matrix,
