@@ -30,6 +30,7 @@ from pyrox_xtreme.primitives.frechet import (
     frechet_mean,
     frechet_return_level,
 )
+from pyrox_xtreme.primitives.gev import gev_log_survival, gev_survival
 
 
 class FrechetType2GEVD(dist.Distribution):
@@ -345,20 +346,7 @@ class FrechetType2GEVD(dist.Distribution):
         Returns:
             Survival probabilities (power-law tail behavior)
         """
-        # Computed as ``-expm1(log F)`` rather than ``1 - F`` so the
-        # far right tail stays resolvable: once ``F ≈ 1 - 1e-8``, float32
-        # rounds ``1 - F`` to zero while ``-expm1(-t^(-1/ξ))`` preserves
-        # the tail mass down to subnormals, keeping
-        # ``exceedance_probability`` / ``hazard_rate`` finite.
-        loc, scale, shape = self.loc, self.scale, self.concentration
-        z = (value - loc) / scale
-        t = 1.0 + shape * z
-        valid = t > 0.0
-        log_cdf = -jnp.power(jnp.where(valid, t, 1.0), -1.0 / shape)
-        surv_inside = -jnp.expm1(log_cdf)
-        # Below the lower support bound (t ≤ 0 with ξ > 0), F(x) = 0 so
-        # S(x) = 1.
-        return jnp.where(valid, surv_inside, 1.0)
+        return gev_survival(value, self.loc, self.scale, self.concentration)
 
     def log_survival_function(self, value: jnp.ndarray) -> jnp.ndarray:
         """
@@ -373,17 +361,7 @@ class FrechetType2GEVD(dist.Distribution):
         Returns:
             Log survival probabilities
         """
-        loc, scale, shape = self.loc, self.scale, self.concentration
-        z = (value - loc) / scale
-        t = 1.0 + shape * z
-
-        valid = t > 0.0
-        # With F(x) = exp(-t^(-1/ξ)), log F(x) = -t^(-1/ξ). The survival
-        # is 1 - F(x) = -expm1(-t^(-1/ξ)), and log S = log(-expm1(...)).
-        log_f = -jnp.power(jnp.where(valid, t, 1.0), -1.0 / shape)
-        log_surv_inside = jnp.log(-jnp.expm1(log_f))
-        # Below the lower bound (t <= 0), F(x) = 0 so log S = 0.
-        return jnp.where(valid, log_surv_inside, 0.0)
+        return gev_log_survival(value, self.loc, self.scale, self.concentration)
 
     def hazard_rate(self, value: jnp.ndarray) -> jnp.ndarray:
         """

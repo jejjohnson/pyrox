@@ -23,6 +23,7 @@ from pyrox_xtreme.primitives._moments import (
     gev_skewness,
     gev_variance,
 )
+from pyrox_xtreme.primitives.gev import gev_log_survival, gev_survival
 from pyrox_xtreme.primitives.weibull import (
     weibull_cdf,
     weibull_icdf,
@@ -353,20 +354,7 @@ class WeibullType3GEVD(dist.Distribution):
         Returns:
             Survival probabilities
         """
-        # Computed as ``-expm1(log F)`` rather than ``1 - F`` so the
-        # near-upper-endpoint regime stays resolvable: once
-        # ``F ≈ 1 - 1e-8``, float32 rounds ``1 - F`` to zero and
-        # downstream ``log(S)`` in hazard_rate/cumulative_hazard_rate
-        # returns ``-inf``/``nan`` even for valid in-support inputs.
-        loc, scale, shape = self.loc, self.scale, self.concentration
-        z = (value - loc) / scale
-        t = 1.0 + shape * z
-        valid = t > 0.0
-        log_cdf = -jnp.power(jnp.where(valid, t, 1.0), -1.0 / shape)
-        surv_inside = -jnp.expm1(log_cdf)
-        # Above the upper support bound (t ≤ 0 with ξ < 0), F(x) = 1 so
-        # S(x) = 0.
-        return jnp.where(valid, surv_inside, 0.0)
+        return gev_survival(value, self.loc, self.scale, self.concentration)
 
     def log_survival_function(self, value: jnp.ndarray) -> jnp.ndarray:
         """
@@ -382,14 +370,7 @@ class WeibullType3GEVD(dist.Distribution):
         Returns:
             Log survival probabilities
         """
-        loc, scale, shape = self.loc, self.scale, self.concentration
-        z = (value - loc) / scale
-        t = 1.0 + shape * z
-        valid = t > 0.0
-        log_cdf = -jnp.power(jnp.where(valid, t, 1.0), -1.0 / shape)
-        log_surv_inside = jnp.log(-jnp.expm1(log_cdf))
-        # Above the upper support bound, S(x) = 0 ⇒ log S = -∞.
-        return jnp.where(valid, log_surv_inside, -jnp.inf)
+        return gev_log_survival(value, self.loc, self.scale, self.concentration)
 
     def hazard_rate(self, value: jnp.ndarray) -> jnp.ndarray:
         """

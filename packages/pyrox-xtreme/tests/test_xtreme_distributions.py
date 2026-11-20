@@ -1314,3 +1314,27 @@ class TestConditionalExcessMeanFarTail:
         # mean is (σ + ξ(u - μ)) / (1 - ξ).
         limit = (1.0 + xi * u) / (1.0 - xi)
         assert float(me) == pytest.approx(limit, rel=2e-2)
+
+
+class TestRestrictedFamilySurvivalNearGumbel:
+    """Fréchet and Weibull survival goes through the GEV primitives.
+
+    Regression (jejjohnson/pyrox#463): the classes formed ``1 + ξ z`` by hand,
+    which rounds to exactly 1 in float32 at ``|ξ| = 1e-8``, so ``S(2)`` came
+    out as ``1 - exp(-1) = 0.632`` instead of the Gumbel value 0.127.
+    """
+
+    @pytest.mark.parametrize(
+        ("cls", "xi"), [(FrechetType2GEVD, 1e-8), (WeibullType3GEVD, -1e-8)]
+    )
+    def test_matches_gumbel_limit_and_cdf(self, cls, xi):
+        d = cls(loc=0.0, scale=1.0, concentration=xi)
+        x = jnp.asarray(2.0, dtype=jnp.float32)
+        gumbel_sf = float(-jnp.expm1(-jnp.exp(-2.0)))  # 0.12657698
+        assert float(d.survival_function(x)) == pytest.approx(gumbel_sf, rel=1e-5)
+        assert float(jnp.exp(d.log_survival_function(x))) == pytest.approx(
+            gumbel_sf, rel=1e-5
+        )
+        assert float(d.survival_function(x)) == pytest.approx(
+            1.0 - float(d.cdf(x)), abs=1e-6
+        )
