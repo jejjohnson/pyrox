@@ -14,8 +14,8 @@ files (figures render inline with `plt.show()`).
 
 - One question per notebook, using the public API (`pyrox._core`,
   `pyrox.inference`, `pyrox_gp`, `pyrox_nn`, `pyrox_lgm`); check the existing
-  notebooks in `mkdocs.yml` ("Examples", "Tutorials") so you extend one
-  rather than duplicate it.
+  notebooks in the `toc` of `docs/myst.yml` (one section per package) so
+  you extend one rather than duplicate it.
 - Show the model and its sites (the trace's site names), fit it (SVI / NUTS /
   `inla`), and check the answer against the truth or a reference.
 
@@ -46,6 +46,8 @@ Commit the `.ipynb`. To change an existing notebook, regenerate the `.py`
 
 ## 4. Publish it
 
-- Add it to `nav` in `mkdocs.yml` ("Examples" or "Tutorials").
-- `make docs` must build (mkdocs-jupyter renders the executed notebook with
-  `execute: false`; the build is slow, give it several minutes).
+- Add it to the `toc` in `docs/myst.yml`, under its package's section. Its
+  file name must be unique across the prose tree, because mystmd serves every
+  page at a flat URL built from the file name.
+- `make docs` must build and be link-clean (mystmd renders the executed
+  notebook as committed, without running it; the build takes a few minutes).

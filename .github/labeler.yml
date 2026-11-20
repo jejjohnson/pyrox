@@ -26,6 +26,7 @@
     - any-glob-to-any-file:
       - "docs/**"
       - "mkdocs.yml"
+      - "scripts/build_docs.py"
       - "notebooks/**"
       - "*.md"
 

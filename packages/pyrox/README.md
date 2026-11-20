@@ -18,8 +18,8 @@
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 
 📖 [Documentation](https://jejjohnson.github.io/pyrox/) ·
-📚 [Core API](https://jejjohnson.github.io/pyrox/api/core/) ·
-🧮 [Inference API](https://jejjohnson.github.io/pyrox/api/inference/) ·
+📚 [Core API](https://jejjohnson.github.io/pyrox/reference/core/) ·
+🧮 [Inference API](https://jejjohnson.github.io/pyrox/reference/inference/) ·
 🗂️ [Capability index](https://jejjohnson.github.io/pyrox/capabilities/)
 
 </div>
@@ -266,7 +266,7 @@ log_joints = [
 print(list(scoped), [round(float(value), 3) for value in log_joints])
 ```
 
-This prints `['mlp.hidden_weight', 'mlp.hidden_bias', 'mlp.output_weight', 'mlp.output_bias'] [-3549.83, -3549.83, -3549.83]`: the site names B and C record, and the same log joint from all three models (low, because the initial weights do not fit the data yet). The regression masterclass fits a model with each pattern: [A](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_treeat/), [B](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_pyrox_sample/) and [C](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_parameterized/).
+This prints `['mlp.hidden_weight', 'mlp.hidden_bias', 'mlp.output_weight', 'mlp.output_bias'] [-3549.83, -3549.83, -3549.83]`: the site names B and C record, and the same log joint from all three models (low, because the initial weights do not fit the data yet). The regression masterclass fits a model with each pattern: [A](https://jejjohnson.github.io/pyrox/regression-masterclass-treeat/), [B](https://jejjohnson.github.io/pyrox/regression-masterclass-pyrox-sample/) and [C](https://jejjohnson.github.io/pyrox/regression-masterclass-parameterized/).
 
 ## 👥 A deep ensemble of the same MLP
 
@@ -345,17 +345,17 @@ The package has three public namespaces, each with its own `__all__`; `pyrox` it
 
 | # | Tutorial | What it shows |
 |---|---|---|
-| 1 | [Regression masterclass, pattern A](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_treeat/) | plain NumPyro sites spliced into Equinox modules with `eqx.tree_at` |
-| 2 | [Regression masterclass, pattern B](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_pyrox_sample/) | the same models as `PyroxModule`s that own their sites |
-| 3 | [Regression masterclass, pattern C](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_parameterized/) | the same models as `Parameterized` modules with priors, constraints and guides |
-| 4 | [Ensemble primitives](https://jejjohnson.github.io/pyrox/notebooks/ensemble_primitives_tutorial/) | a training loop of your own from `ensemble_init`, `ensemble_loss` and `ensemble_step` |
-| 5 | [Ensemble runners](https://jejjohnson.github.io/pyrox/notebooks/ensemble_runner_tutorial/) | `EnsembleMAP` and `EnsembleVI` with the `init`, `update` and `run` methods |
+| 1 | [Regression masterclass, pattern A](https://jejjohnson.github.io/pyrox/regression-masterclass-treeat/) | plain NumPyro sites spliced into Equinox modules with `eqx.tree_at` |
+| 2 | [Regression masterclass, pattern B](https://jejjohnson.github.io/pyrox/regression-masterclass-pyrox-sample/) | the same models as `PyroxModule`s that own their sites |
+| 3 | [Regression masterclass, pattern C](https://jejjohnson.github.io/pyrox/regression-masterclass-parameterized/) | the same models as `Parameterized` modules with priors, constraints and guides |
+| 4 | [Ensemble primitives](https://jejjohnson.github.io/pyrox/ensemble-primitives-tutorial/) | a training loop of your own from `ensemble_init`, `ensemble_loss` and `ensemble_step` |
+| 5 | [Ensemble runners](https://jejjohnson.github.io/pyrox/ensemble-runner-tutorial/) | `EnsembleMAP` and `EnsembleVI` with the `init`, `update` and `run` methods |
 
 ## 📖 Documentation
 
 - **[Documentation](https://jejjohnson.github.io/pyrox/)**: the whole workspace, with the tutorials and examples of every package.
-- **[Core API](https://jejjohnson.github.io/pyrox/api/core/)**: `PyroxModule`, `Parameterized` and the call contexts, generated from the docstrings.
-- **[Inference API](https://jejjohnson.github.io/pyrox/api/inference/)**: the three layers of the ensemble runners and `param_group_optimizer`.
+- **[Core API](https://jejjohnson.github.io/pyrox/reference/core/)**: `PyroxModule`, `Parameterized` and the call contexts, generated from the docstrings.
+- **[Inference API](https://jejjohnson.github.io/pyrox/reference/inference/)**: the three layers of the ensemble runners and `param_group_optimizer`.
 - **[Capability index](https://jejjohnson.github.io/pyrox/capabilities/)**: every public name in the workspace and in the libraries it builds on, to check before writing something new.
 - **[`AGENTS.md`](AGENTS.md)**: the contracts this package keeps (site semantics, stable scope names, the duplicate-param guard) and the tests that hold them.
 

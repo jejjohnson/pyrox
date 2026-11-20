@@ -17,8 +17,8 @@
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 
 📖 [Documentation](https://jejjohnson.github.io/pyrox/) ·
-📚 [NN API](https://jejjohnson.github.io/pyrox/api/nn/) ·
-🗺️ [Estimator API](https://jejjohnson.github.io/pyrox/api/api/) ·
+📚 [NN API](https://jejjohnson.github.io/pyrox/reference/nn/) ·
+🗺️ [Estimator API](https://jejjohnson.github.io/pyrox/reference/api/) ·
 🗂️ [Capability index](https://jejjohnson.github.io/pyrox/capabilities/)
 
 </div>
@@ -307,7 +307,7 @@ features [0.07 1.03 0.13] [0.08 0.1  0.25]
  laplace [ 0.03  0.99 -1.44] [0.02 0.03 0.25]
 ```
 
-that is, for each route, the mean of $`f`$ at $`x = 0`$, 0.5 and 2 and its standard deviation. Inside the data all three come within 0.1 of $`\sin(0) = 0`$ and $`\sin(1.5) = 1.00`$. At $`x = 2`$ they part ways. The random-feature GP reverts towards its prior mean of zero, within two standard deviations of $`\sin(6) = -0.28`$. The Bayesian network and the Laplace posterior extrapolate the trend of the data to $`-0.83`$ and $`-1.44`$, and their standard deviations of 0.14 and 0.25 are far smaller than how far off they are, which is the known weakness of weight-space posteriors away from the data. The [kernel approximation](https://jejjohnson.github.io/pyrox/notebooks/kernel_approximation/) and [random features as networks](https://jejjohnson.github.io/pyrox/notebooks/rff_as_neural_networks/) tutorials go further with the feature layers.
+that is, for each route, the mean of $`f`$ at $`x = 0`$, 0.5 and 2 and its standard deviation. Inside the data all three come within 0.1 of $`\sin(0) = 0`$ and $`\sin(1.5) = 1.00`$. At $`x = 2`$ they part ways. The random-feature GP reverts towards its prior mean of zero, within two standard deviations of $`\sin(6) = -0.28`$. The Bayesian network and the Laplace posterior extrapolate the trend of the data to $`-0.83`$ and $`-1.44`$, and their standard deviations of 0.14 and 0.25 are far smaller than how far off they are, which is the known weakness of weight-space posteriors away from the data. The [kernel approximation](https://jejjohnson.github.io/pyrox/kernel-approximation/) and [random features as networks](https://jejjohnson.github.io/pyrox/rff-as-neural-networks/) tutorials go further with the feature layers.
 
 ## 🗺️ A neural field in one call
 
@@ -337,7 +337,7 @@ mean, (lower, upper) = fitted.predict(test_inputs, quantiles=(0.05, 0.95))
 print(mean.round(2), lower.round(2), upper.round(2))
 ```
 
-This prints `[-0.02  0.95  0.01] [-0.28  0.75 -0.45] [0.2  1.14 0.41]`: the mean at $`x = 0`$, 0.5 and 2 and its 90 % interval. Inside the data the interval is about $`\pm 0.2`$, twice the noise, and at $`x = 2`$ it widens to $`[-0.45, 0.41]`$, which covers $`\sin(6) = -0.28`$. `first_omega=3.0` lowers the frequency of the SIREN's first layer from its default of 30, to suit a slow signal on $`[-1, 1]`$. The same estimator takes an `encoder` for longitude and latitude, per-row noise and a mask for padded rows, and `fit_xarray` fits a gridded `xarray.Dataset`; the [SIREN tutorial](https://jejjohnson.github.io/pyrox/notebooks/siren_inr/) calibrates the Bayesian SIREN's prior and fits an ensemble of MAP fits by hand.
+This prints `[-0.02  0.95  0.01] [-0.28  0.75 -0.45] [0.2  1.14 0.41]`: the mean at $`x = 0`$, 0.5 and 2 and its 90 % interval. Inside the data the interval is about $`\pm 0.2`$, twice the noise, and at $`x = 2`$ it widens to $`[-0.45, 0.41]`$, which covers $`\sin(6) = -0.28`$. `first_omega=3.0` lowers the frequency of the SIREN's first layer from its default of 30, to suit a slow signal on $`[-1, 1]`$. The same estimator takes an `encoder` for longitude and latitude, per-row noise and a mask for padded rows, and `fit_xarray` fits a gridded `xarray.Dataset`; the [SIREN tutorial](https://jejjohnson.github.io/pyrox/siren-inr/) calibrates the Bayesian SIREN's prior and fits an ensemble of MAP fits by hand.
 
 ## 🔬 What else is in the box
 
@@ -371,19 +371,19 @@ The geonnax row lists 14 of the 33 deterministic names re-exported from geonnax;
 
 | # | Tutorial | What it shows |
 |---|---|---|
-| 1 | [SIREN](https://jejjohnson.github.io/pyrox/notebooks/siren_inr/) | `SIREN` against a ReLU network in 1-D and 2-D, then `BayesianSIREN` with a calibrated prior and an ensemble of MAP fits |
-| 2 | [Kernel approximation](https://jejjohnson.github.io/pyrox/notebooks/kernel_approximation/) | the random Fourier and cosine feature layers against their exact kernels |
-| 3 | [Spectral kernel models](https://jejjohnson.github.io/pyrox/notebooks/spectral_kernel_models/) | RBF, Matérn, Laplace and arc-cosine features as priors for Earth-system fields |
-| 4 | [Random features as neural networks](https://jejjohnson.github.io/pyrox/notebooks/rff_as_neural_networks/) | random features fixed, learned and in an ensemble |
-| 5 | [Deep random feature expansions](https://jejjohnson.github.io/pyrox/notebooks/deep_random_fourier_features/) | stacked spectral GPs with `DeepVSSGP` |
-| 6 | [Conditional neural fields](https://jejjohnson.github.io/pyrox/notebooks/conditioning/) | FiLM, hypernetworks and conditioned random-feature networks |
-| 7 | [Spatiotemporal preprocessing](https://jejjohnson.github.io/pyrox/notebooks/spatiotemporal_preprocessing/) | geographic encoders, seasonal features and `fit_spatiotemporal` on a pandas table |
+| 1 | [SIREN](https://jejjohnson.github.io/pyrox/siren-inr/) | `SIREN` against a ReLU network in 1-D and 2-D, then `BayesianSIREN` with a calibrated prior and an ensemble of MAP fits |
+| 2 | [Kernel approximation](https://jejjohnson.github.io/pyrox/kernel-approximation/) | the random Fourier and cosine feature layers against their exact kernels |
+| 3 | [Spectral kernel models](https://jejjohnson.github.io/pyrox/spectral-kernel-models/) | RBF, Matérn, Laplace and arc-cosine features as priors for Earth-system fields |
+| 4 | [Random features as neural networks](https://jejjohnson.github.io/pyrox/rff-as-neural-networks/) | random features fixed, learned and in an ensemble |
+| 5 | [Deep random feature expansions](https://jejjohnson.github.io/pyrox/deep-random-fourier-features/) | stacked spectral GPs with `DeepVSSGP` |
+| 6 | [Conditional neural fields](https://jejjohnson.github.io/pyrox/conditioning/) | FiLM, hypernetworks and conditioned random-feature networks |
+| 7 | [Spatiotemporal preprocessing](https://jejjohnson.github.io/pyrox/spatiotemporal-preprocessing/) | geographic encoders, seasonal features and `fit_spatiotemporal` on a pandas table |
 
 ## 📖 Documentation
 
 - **[Documentation](https://jejjohnson.github.io/pyrox/)**: the whole workspace, with the tutorials and examples of every package.
-- **[NN API](https://jejjohnson.github.io/pyrox/api/nn/)**: every layer, generated from the docstrings, with the pages on [geo encoders](https://jejjohnson.github.io/pyrox/api/nn/geo_encoders/), [conditioning](https://jejjohnson.github.io/pyrox/api/nn/conditioning/) and [multiplicative filter networks](https://jejjohnson.github.io/pyrox/api/nn/mfn/).
-- **[Estimator API](https://jejjohnson.github.io/pyrox/api/api/)** and **[Preprocessing API](https://jejjohnson.github.io/pyrox/api/preprocessing/)**: `pyrox_nn.api` and `pyrox_nn.preprocessing`.
+- **[NN API](https://jejjohnson.github.io/pyrox/reference/nn/)**: every layer, generated from the docstrings, with the pages on [geo encoders](https://jejjohnson.github.io/pyrox/reference/nn/geo_encoders/), [conditioning](https://jejjohnson.github.io/pyrox/reference/nn/conditioning/) and [multiplicative filter networks](https://jejjohnson.github.io/pyrox/reference/nn/mfn/).
+- **[Estimator API](https://jejjohnson.github.io/pyrox/reference/api/)** and **[Preprocessing API](https://jejjohnson.github.io/pyrox/reference/preprocessing/)**: `pyrox_nn.api` and `pyrox_nn.preprocessing`.
 - **[Capability index](https://jejjohnson.github.io/pyrox/capabilities/)**: every public name in the workspace and in the libraries it builds on, to check before writing something new.
 - **[`AGENTS.md`](AGENTS.md)**: the contracts every layer keeps (the two shapes of layer, static fields, no pyrox-gp import) and the tests that hold them.
 

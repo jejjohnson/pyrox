@@ -16,10 +16,10 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 
-📖 [Documentation](https://jejjohnson.github.io/pyrox/xtreme/) ·
-📓 [Examples](https://jejjohnson.github.io/pyrox/xtreme/notebooks/evt_distributions_overview/) ·
-🗺️ [Spatial extremes tutorials](https://jejjohnson.github.io/pyrox/xtreme/tutorials/spatial_extremes/) ·
-📚 [API reference](https://jejjohnson.github.io/pyrox/api/xtreme/) ·
+📖 [Documentation](https://jejjohnson.github.io/pyrox/extremes/) ·
+📓 [Examples](https://jejjohnson.github.io/pyrox/evt-distributions-overview/) ·
+🗺️ [Spatial extremes tutorials](https://jejjohnson.github.io/pyrox/spatial-extremes/) ·
+📚 [API reference](https://jejjohnson.github.io/pyrox/reference/xtreme/) ·
 🧭 [Design](https://github.com/jejjohnson/pyrox/blob/main/design_docs/pyrox-xtreme/design_overview.md)
 
 </div>
@@ -92,7 +92,7 @@ and the third route fits event times $`t_1 < \ldots < t_n`$ on a window $`[0, t_
 \log L = \sum_{i=1}^{n} \log \lambda(t_i) - \int_0^{t_{\max}} \lambda(t) \mathrm{d}t
 ```
 
-whose integral, the compensator, every family computes in closed form or by the quadrature in `integrate_log_intensity`. The [EVT distributions tour](https://jejjohnson.github.io/pyrox/xtreme/notebooks/evt_distributions_overview/) derives the first two and the [Poisson notebook](https://jejjohnson.github.io/pyrox/xtreme/notebooks/hpp_from_scratch_and_numpyro/) the third.
+whose integral, the compensator, every family computes in closed form or by the quadrature in `integrate_log_intensity`. The [EVT distributions tour](https://jejjohnson.github.io/pyrox/evt-distributions-overview/) derives the first two and the [Poisson notebook](https://jejjohnson.github.io/pyrox/hpp-from-scratch-and-numpyro/) the third.
 
 ## 📥 Install
 
@@ -175,7 +175,7 @@ This prints
 xi -0.06  z100 41.7 [38.2, 47.8]  truth 41.0
 ```
 
-that is, the posterior mean of $`\xi`$, close to the true 0 of a Gumbel, and the posterior mean of $`z_{100}`$ with its 90 % interval, which covers the true 41.0. The interval is wide because forty maxima say little about $`\xi`$, and that width is the honest answer a point estimate hides. `init_to_median` matters: NumPyro's default start puts $`\mu`$ near zero, far below the data, and the chain can strand at $`\xi < -1`$, where the GEV likelihood is unbounded. The same data can go the peaks-over-threshold route with `quantile_threshold`, `decluster_runs` and `GeneralizedParetoDistribution`, which the [GPD notebook](https://jejjohnson.github.io/pyrox/xtreme/notebooks/evt_gpd_pot/) works through, and a trend in $`\mu`$ turns `return_level` into `nonstationary_return_level`, which the [parametric-trend notebook](https://jejjohnson.github.io/pyrox/xtreme/notebooks/evt_nonstat_parametric/) uses.
+that is, the posterior mean of $`\xi`$, close to the true 0 of a Gumbel, and the posterior mean of $`z_{100}`$ with its 90 % interval, which covers the true 41.0. The interval is wide because forty maxima say little about $`\xi`$, and that width is the honest answer a point estimate hides. `init_to_median` matters: NumPyro's default start puts $`\mu`$ near zero, far below the data, and the chain can strand at $`\xi < -1`$, where the GEV likelihood is unbounded. The same data can go the peaks-over-threshold route with `quantile_threshold`, `decluster_runs` and `GeneralizedParetoDistribution`, which the [GPD notebook](https://jejjohnson.github.io/pyrox/evt-gpd-pot/) works through, and a trend in $`\mu`$ turns `return_level` into `nonstationary_return_level`, which the [parametric-trend notebook](https://jejjohnson.github.io/pyrox/evt-nonstat-parametric/) uses.
 
 ## ⏱️ Events in time: a Hawkes process, simulated, fitted and checked
 
@@ -233,7 +233,7 @@ print(
 )
 ```
 
-This prints `events 165  proposals 13946  mu 0.59  alpha/beta 0.30  KS 0.064`. The process is stationary with mean rate $`\mu / (1 - \alpha/\beta) = 0.83`$, so 165 events on $`[0, 200]`$ is what it should give, and the 13 946 proposals stayed below the cap of 32 768, so the buffer was not cut short. The posterior means of the baseline $`\mu`$ and the branching ratio $`\alpha / \beta`$ sit near the true 0.5 and 0.4, and a KS distance of 0.064 between the rescaled residuals and Exp(1) is below the 5 % critical value of about 0.106 for 165 events. The thinning sampler bounds the intensity by $`\mu + \alpha k`$ after $`k`$ events, which is loose, so a long window needs a generous `max_candidates`; the default of four proposals per buffer slot truncates this process near $`t = 73`$. The [Hawkes notebook](https://jejjohnson.github.io/pyrox/xtreme/notebooks/hawkes_from_scratch_and_numpyro/) builds the same process from the primitives up.
+This prints `events 165  proposals 13946  mu 0.59  alpha/beta 0.30  KS 0.064`. The process is stationary with mean rate $`\mu / (1 - \alpha/\beta) = 0.83`$, so 165 events on $`[0, 200]`$ is what it should give, and the 13 946 proposals stayed below the cap of 32 768, so the buffer was not cut short. The posterior means of the baseline $`\mu`$ and the branching ratio $`\alpha / \beta`$ sit near the true 0.5 and 0.4, and a KS distance of 0.064 between the rescaled residuals and Exp(1) is below the 5 % critical value of about 0.106 for 165 events. The thinning sampler bounds the intensity by $`\mu + \alpha k`$ after $`k`$ events, which is loose, so a long window needs a generous `max_candidates`; the default of four proposals per buffer slot truncates this process near $`t = 73`$. The [Hawkes notebook](https://jejjohnson.github.io/pyrox/hawkes-from-scratch-and-numpyro/) builds the same process from the primitives up.
 
 ## 🔬 What else is in the box
 
@@ -267,21 +267,21 @@ Each public name sits on one rung of the GeoStack role ladder, by the job it doe
 
 | # | Tutorial | What it shows |
 |---|---|---|
-| 1 | [EVT distributions tour](https://jejjohnson.github.io/pyrox/xtreme/notebooks/evt_distributions_overview/) | the five distributions, their tails, and how the GEV and the GPD share $`\xi`$ |
-| 2 | [GEV on block maxima](https://jejjohnson.github.io/pyrox/xtreme/notebooks/evt_gevd_block_maxima/), [Fréchet](https://jejjohnson.github.io/pyrox/xtreme/notebooks/evt_frechet_heavy_tails/), [Weibull](https://jejjohnson.github.io/pyrox/xtreme/notebooks/evt_weibull_bounded/) | annual maxima fitted by NUTS, with heavy and with bounded tails |
-| 3 | [GPD on peaks over threshold](https://jejjohnson.github.io/pyrox/xtreme/notebooks/evt_gpd_pot/), [quantile-regression thresholds](https://jejjohnson.github.io/pyrox/xtreme/notebooks/evt_quantile_regression_gpd/) | thresholds, declustering and GPD fits, then a threshold that moves with the covariates |
-| 4 | [Parametric trend](https://jejjohnson.github.io/pyrox/xtreme/notebooks/evt_nonstat_parametric/), [P-splines](https://jejjohnson.github.io/pyrox/xtreme/notebooks/evt_nonstat_splines/), [neural ODE](https://jejjohnson.github.io/pyrox/xtreme/notebooks/evt_nonstat_neural_ode/) | a non-stationary GEV whose location $`\mu(t)`$ changes in three ways |
-| 5 | Temporal processes: [Poisson](https://jejjohnson.github.io/pyrox/xtreme/notebooks/hpp_from_scratch_and_numpyro/), [inhomogeneous Poisson](https://jejjohnson.github.io/pyrox/xtreme/notebooks/ipp_from_scratch_and_numpyro/), [renewal](https://jejjohnson.github.io/pyrox/xtreme/notebooks/renewal_from_scratch_and_numpyro/), [Hawkes](https://jejjohnson.github.io/pyrox/xtreme/notebooks/hawkes_from_scratch_and_numpyro/), [marked](https://jejjohnson.github.io/pyrox/xtreme/notebooks/marked_from_scratch_and_numpyro/), [thinning](https://jejjohnson.github.io/pyrox/xtreme/notebooks/thinning_from_scratch_and_numpyro/) | each process written from scratch, then fitted through its NumPyro wrapper |
-| 6 | Spatial processes: [Poisson](https://jejjohnson.github.io/pyrox/xtreme/notebooks/hpp_spatial_from_scratch_and_numpyro/), [inhomogeneous Poisson](https://jejjohnson.github.io/pyrox/xtreme/notebooks/ipp_spatial_from_scratch_and_numpyro/), [marked](https://jejjohnson.github.io/pyrox/xtreme/notebooks/marked_spatial_from_scratch_and_numpyro/) | the same build-up in a rectangle |
-| 7 | Spatiotemporal processes: [Poisson](https://jejjohnson.github.io/pyrox/xtreme/notebooks/hpp_spatiotemporal_from_scratch_and_numpyro/), [inhomogeneous Poisson](https://jejjohnson.github.io/pyrox/xtreme/notebooks/ipp_spatiotemporal_from_scratch_and_numpyro/), [marked](https://jejjohnson.github.io/pyrox/xtreme/notebooks/marked_spatiotemporal_from_scratch_and_numpyro/), [Hawkes](https://jejjohnson.github.io/pyrox/xtreme/notebooks/hawkes_spatiotemporal_from_scratch_and_numpyro/) | space and time together, up to an ETAS-style Hawkes process |
-| 8 | [Latent ODE intensity](https://jejjohnson.github.io/pyrox/xtreme/notebooks/latent_ode_ipp/) | an inhomogeneous Poisson process observed irregularly, with a neural ODE for its intensity |
-| 9 | [Spatial extremes](https://jejjohnson.github.io/pyrox/xtreme/tutorials/spatial_extremes/) (15 notebooks) | station temperatures over Iberia from the Copernicus Climate Data Store: block maxima, a GEV at one station, pooling across stations, GEV parameters as Gaussian-process fields with pyrox-gp, and non-stationary trends |
+| 1 | [EVT distributions tour](https://jejjohnson.github.io/pyrox/evt-distributions-overview/) | the five distributions, their tails, and how the GEV and the GPD share $`\xi`$ |
+| 2 | [GEV on block maxima](https://jejjohnson.github.io/pyrox/evt-gevd-block-maxima/), [Fréchet](https://jejjohnson.github.io/pyrox/evt-frechet-heavy-tails/), [Weibull](https://jejjohnson.github.io/pyrox/evt-weibull-bounded/) | annual maxima fitted by NUTS, with heavy and with bounded tails |
+| 3 | [GPD on peaks over threshold](https://jejjohnson.github.io/pyrox/evt-gpd-pot/), [quantile-regression thresholds](https://jejjohnson.github.io/pyrox/evt-quantile-regression-gpd/) | thresholds, declustering and GPD fits, then a threshold that moves with the covariates |
+| 4 | [Parametric trend](https://jejjohnson.github.io/pyrox/evt-nonstat-parametric/), [P-splines](https://jejjohnson.github.io/pyrox/evt-nonstat-splines/), [neural ODE](https://jejjohnson.github.io/pyrox/evt-nonstat-neural-ode/) | a non-stationary GEV whose location $`\mu(t)`$ changes in three ways |
+| 5 | Temporal processes: [Poisson](https://jejjohnson.github.io/pyrox/hpp-from-scratch-and-numpyro/), [inhomogeneous Poisson](https://jejjohnson.github.io/pyrox/ipp-from-scratch-and-numpyro/), [renewal](https://jejjohnson.github.io/pyrox/renewal-from-scratch-and-numpyro/), [Hawkes](https://jejjohnson.github.io/pyrox/hawkes-from-scratch-and-numpyro/), [marked](https://jejjohnson.github.io/pyrox/marked-from-scratch-and-numpyro/), [thinning](https://jejjohnson.github.io/pyrox/thinning-from-scratch-and-numpyro/) | each process written from scratch, then fitted through its NumPyro wrapper |
+| 6 | Spatial processes: [Poisson](https://jejjohnson.github.io/pyrox/hpp-spatial-from-scratch-and-numpyro/), [inhomogeneous Poisson](https://jejjohnson.github.io/pyrox/ipp-spatial-from-scratch-and-numpyro/), [marked](https://jejjohnson.github.io/pyrox/marked-spatial-from-scratch-and-numpyro/) | the same build-up in a rectangle |
+| 7 | Spatiotemporal processes: [Poisson](https://jejjohnson.github.io/pyrox/hpp-spatiotemporal-from-scratch-and-numpyro/), [inhomogeneous Poisson](https://jejjohnson.github.io/pyrox/ipp-spatiotemporal-from-scratch-and-numpyro/), [marked](https://jejjohnson.github.io/pyrox/marked-spatiotemporal-from-scratch-and-numpyro/), [Hawkes](https://jejjohnson.github.io/pyrox/hawkes-spatiotemporal-from-scratch-and-numpyro/) | space and time together, up to an ETAS-style Hawkes process |
+| 8 | [Latent ODE intensity](https://jejjohnson.github.io/pyrox/latent-ode-ipp/) | an inhomogeneous Poisson process observed irregularly, with a neural ODE for its intensity |
+| 9 | [Spatial extremes](https://jejjohnson.github.io/pyrox/spatial-extremes/) (15 notebooks) | station temperatures over Iberia from the Copernicus Climate Data Store: block maxima, a GEV at one station, pooling across stations, GEV parameters as Gaussian-process fields with pyrox-gp, and non-stationary trends |
 
 ## 📖 Documentation
 
-- **[Documentation](https://jejjohnson.github.io/pyrox/xtreme/)**: the extremes section of the pyrox site, with the examples and the tutorials above.
-- **[API reference](https://jejjohnson.github.io/pyrox/api/xtreme/)**: every public name, generated from the docstrings, on one page per subpackage.
-- **[Interop](https://jejjohnson.github.io/pyrox/xtreme/interop/)**: how the GEV and GPD satisfy pipekit's observation-noise protocol and `XarrayQuantileRegressor` its predictor protocol, without importing pipekit.
+- **[Documentation](https://jejjohnson.github.io/pyrox/extremes/)**: the extremes section of the pyrox site, with the examples and the tutorials above.
+- **[API reference](https://jejjohnson.github.io/pyrox/reference/xtreme/)**: every public name, generated from the docstrings, on one page per subpackage.
+- **[Interop](https://jejjohnson.github.io/pyrox/interop/)**: how the GEV and GPD satisfy pipekit's observation-noise protocol and `XarrayQuantileRegressor` its predictor protocol, without importing pipekit.
 - **[Design docs](https://github.com/jejjohnson/pyrox/blob/main/design_docs/pyrox-xtreme/design_overview.md)**: the vision, boundaries, architecture and decisions; they also describe parts that are not built (a model zoo, max-stable processes), and the code wins where they disagree.
 - **[Capability index](https://jejjohnson.github.io/pyrox/capabilities/)**: every public name in the workspace, to check before writing something new.
 - **[`AGENTS.md`](AGENTS.md)**: the contracts of each layer (stable forms, supports, padded buffers, xarray in and out) and the tests that hold them.

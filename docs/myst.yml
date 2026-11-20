@@ -25,6 +25,7 @@ project:
   references:
     api: http://127.0.0.1:8910/
   exclude:
+    - README.md
     - templates/**
     - api/**
     - xtreme/tutorials/spatial_extremes/_helpers/**

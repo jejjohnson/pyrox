@@ -238,7 +238,8 @@ make lint                 # ruff check .   (entire repo)
 make format               # ruff format . && ruff check --fix .
 make typecheck            # ty check on all four package src dirs
 make capabilities         # regenerate docs/capabilities.md
-make docs-serve           # local MkDocs preview
+make docs                 # build the docs site into public/ and check its links
+make docs-serve           # build, then serve it at http://127.0.0.1:8000
 ```
 
 Run tests from the repo root (the root `conftest.py` and pytest config apply).
@@ -290,7 +291,7 @@ All of these must pass, from the repo root:
    locally.
 5. After changing a public API: `make capabilities`, and the `docs/api` page.
 6. After changing a dependency: `uv lock`, and commit `uv.lock`.
-7. After changing docs: `make docs` (it must build; CI deploys from `main`).
+7. After changing docs: `make docs` (it must build and be link-clean; CI checks it on the pull request and deploys from `main`).
 
 ## Coding principles
 
@@ -367,11 +368,11 @@ operations.
 
 ## Documentation
 
-MkDocs + Material + mkdocstrings + mkdocs-jupyter, one site for the workspace
-(`mkdocs.yml`); `pages.yml` deploys on every push to `main`.
+Two tools, one site for the workspace (`docs/README.md` explains the split): mystmd builds the prose, the explainers and the executed notebooks from `docs/myst.yml`, and Zensical + mkdocstrings builds the API reference from `mkdocs.yml` into `/reference/`. `scripts/build_docs.py` (`make docs`) builds both, assembles them into `public/` and fails on any broken link, including links between the halves; `docs.yml` runs it on every pull request and `pages.yml` deploys `public/` on every push to `main`. mystmd is a Node CLI (`npm install -g mystmd`).
 
-- **API pages** (`docs/api/*.md`, `docs/api/nn/*.md`) list members by hand,
-  one `::: package.Name` per symbol under prose headings.
+- **The table of contents** is the `toc` in `docs/myst.yml`, grouped by package; a page missing from it is not built. Page URLs are flat (from the file name), so keep file names unique across the prose tree.
+- **Prose is MyST Markdown**: `:::{note}` directives rather than `!!! note`, `(label)=` before a heading to link to it, and API links as ``[`GPPrior`](xref:api#pyrox_gp.GPPrior)``, which `myst build --strict` checks against the API inventory.
+- **API pages** (`docs/api/*.md`, `docs/api/nn/*.md`, `docs/api/xtreme/*.md`) list members by hand, one `::: package.Name` per symbol under prose headings, and join the `nav` in `mkdocs.yml`.
 - **Notebooks** in `docs/notebooks/` are committed as **executed `.ipynb`
   only**; the jupytext `.py` you author from is a local artefact
   (`docs/notebooks/*.py` is gitignored). Figures render inline with

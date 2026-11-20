@@ -17,32 +17,32 @@ Claude Code users can install the `pyrox` plugin: `/plugin marketplace add jejjo
 - [Home](https://jejjohnson.github.io/pyrox/): the packages, installation, the quick start and the three modelling patterns
 - [Capability index](https://jejjohnson.github.io/pyrox/capabilities/): every public name, grouped by module, with a summary; then gaussx, kernellib, geonnax and functax
 - [Building with agents](https://jejjohnson.github.io/pyrox/agents/): the Claude Code plugin, this file, and rules to paste into your project's AGENTS.md
-- [Regression masterclass: eqx.tree_at](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_treeat/), [PyroxModule](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_pyrox_sample/), [Parameterized](https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_parameterized/): one model, three patterns
+- [Regression masterclass: eqx.tree_at](https://jejjohnson.github.io/pyrox/regression-masterclass-treeat/), [PyroxModule](https://jejjohnson.github.io/pyrox/regression-masterclass-pyrox-sample/), [Parameterized](https://jejjohnson.github.io/pyrox/regression-masterclass-parameterized/): one model, three patterns
 
 ## API reference
 
-- [Overview](https://jejjohnson.github.io/pyrox/api/reference/)
-- [Core](https://jejjohnson.github.io/pyrox/api/core/): `PyroxModule`, `pyrox_method`, `Parameterized`
-- [Inference](https://jejjohnson.github.io/pyrox/api/inference/): ensemble MAP / VI, parameter-group optimisers
-- [GP](https://jejjohnson.github.io/pyrox/api/gp/): kernels, guides, likelihoods, exact / sparse / multi-output GPs, non-Gaussian inference, pathwise sampling
-- [SSM](https://jejjohnson.github.io/pyrox/api/ssm/): Markov (Kalman) GPs, SDE kernels, sparse and non-Gaussian Markov GPs, the normalizing Kalman filter (`pyrox-ssm`)
-- [NN](https://jejjohnson.github.io/pyrox/api/nn/): Bayesian dense layers, random features, SIREN / MFN, SNGP, deep VSSGP, conditioning
-- [LGM](https://jejjohnson.github.io/pyrox/api/lgm/): components, PC priors, `inla()`
-- [Estimator](https://jejjohnson.github.io/pyrox/api/api/) and [Preprocessing](https://jejjohnson.github.io/pyrox/api/preprocessing/): the BNF estimator (`pyrox-nn[bnf]`)
-- [Xtreme](https://jejjohnson.github.io/pyrox/api/xtreme/): EVT distributions and primitives, extraction, point processes (primitives, operators, NumPyro wrappers), simulations (`pyrox-xtreme`)
+- [Overview](https://jejjohnson.github.io/pyrox/reference/)
+- [Core](https://jejjohnson.github.io/pyrox/reference/core/): `PyroxModule`, `pyrox_method`, `Parameterized`
+- [Inference](https://jejjohnson.github.io/pyrox/reference/inference/): ensemble MAP / VI, parameter-group optimisers
+- [GP](https://jejjohnson.github.io/pyrox/reference/gp/): kernels, guides, likelihoods, exact / sparse / multi-output GPs, non-Gaussian inference, pathwise sampling
+- [SSM](https://jejjohnson.github.io/pyrox/reference/ssm/): Markov (Kalman) GPs, SDE kernels, sparse and non-Gaussian Markov GPs, the normalizing Kalman filter (`pyrox-ssm`)
+- [NN](https://jejjohnson.github.io/pyrox/reference/nn/): Bayesian dense layers, random features, SIREN / MFN, SNGP, deep VSSGP, conditioning
+- [LGM](https://jejjohnson.github.io/pyrox/reference/lgm/): components, PC priors, `inla()`
+- [Estimator](https://jejjohnson.github.io/pyrox/reference/api/) and [Preprocessing](https://jejjohnson.github.io/pyrox/reference/preprocessing/): the BNF estimator (`pyrox-nn[bnf]`)
+- [Xtreme](https://jejjohnson.github.io/pyrox/reference/xtreme/): EVT distributions and primitives, extraction, point processes (primitives, operators, NumPyro wrappers), simulations (`pyrox-xtreme`)
 
 ## Extremes (pyrox-xtreme)
 
-- [Overview](https://jejjohnson.github.io/pyrox/xtreme/): installation, quick start, the example notebooks
-- [GEV on annual block maxima](https://jejjohnson.github.io/pyrox/xtreme/notebooks/evt_gevd_block_maxima/)
-- [GPD via peaks over threshold](https://jejjohnson.github.io/pyrox/xtreme/notebooks/evt_gpd_pot/)
-- [Spatial extremes tutorials](https://jejjohnson.github.io/pyrox/xtreme/tutorials/spatial_extremes/): CDS station data over Spain, from block maxima to spatial GEV fields
+- [Overview](https://jejjohnson.github.io/pyrox/extremes/): installation, quick start, the example notebooks
+- [GEV on annual block maxima](https://jejjohnson.github.io/pyrox/evt-gevd-block-maxima/)
+- [GPD via peaks over threshold](https://jejjohnson.github.io/pyrox/evt-gpd-pot/)
+- [Spatial extremes tutorials](https://jejjohnson.github.io/pyrox/spatial-extremes/): CDS station data over Spain, from block maxima to spatial GEV fields
 
 ## Optional
 
-- [Exact GP regression](https://jejjohnson.github.io/pyrox/notebooks/exact_gp_regression/)
-- [Markov GP with a Kalman filter](https://jejjohnson.github.io/pyrox/notebooks/ssm/markov_gp_kalman/)
-- [Latent GP classification](https://jejjohnson.github.io/pyrox/notebooks/latent_gp_classification/)
-- [INLA against NUTS](https://jejjohnson.github.io/pyrox/notebooks/lgm_mcmc_inla/)
-- [Ensembles](https://jejjohnson.github.io/pyrox/notebooks/ensemble_runner_tutorial/)
+- [Exact GP regression](https://jejjohnson.github.io/pyrox/exact-gp-regression/)
+- [Markov GP with a Kalman filter](https://jejjohnson.github.io/pyrox/markov-gp-kalman/)
+- [Latent GP classification](https://jejjohnson.github.io/pyrox/latent-gp-classification/)
+- [INLA against NUTS](https://jejjohnson.github.io/pyrox/lgm-mcmc-inla/)
+- [Ensembles](https://jejjohnson.github.io/pyrox/ensemble-runner-tutorial/)
 - [Source code](https://github.com/jejjohnson/pyrox)

@@ -121,5 +121,5 @@ venv.bak/
 .plans/
 
 # Jupytext .py sources for tutorial notebooks — local-only dev artefacts.
-# The committed source of truth is the executed .ipynb (mkdocs-jupyter renders it).
+# The committed source of truth is the executed .ipynb (mystmd renders it).
 docs/notebooks/**/*.py

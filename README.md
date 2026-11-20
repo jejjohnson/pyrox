@@ -15,8 +15,8 @@
 
 <p align="center">
   <a href="https://jejjohnson.github.io/pyrox/"><b>Docs</b></a> ·
-  <a href="https://jejjohnson.github.io/pyrox/api/reference/"><b>API</b></a> ·
-  <a href="https://jejjohnson.github.io/pyrox/notebooks/regression_masterclass_treeat/"><b>Tutorials</b></a> ·
+  <a href="https://jejjohnson.github.io/pyrox/reference/"><b>API</b></a> ·
+  <a href="https://jejjohnson.github.io/pyrox/regression-masterclass-treeat/"><b>Tutorials</b></a> ·
   <a href="#gallery"><b>Gallery</b></a>
 </p>
 
@@ -406,14 +406,14 @@ pyrox-gp priors can be built to look like the field being modelled: here the ker
 
 <table>
   <tr>
-    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/notebooks/gp_pathwise/"><img src="docs/images/readme/pathwise_samples.png" alt="32 pathwise posterior samples of an exact GP against the analytic mean and two-sigma band"></a><br><b>Pathwise posterior samples</b><br><code>pyrox-gp</code></td>
-    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/notebooks/ssm/markov_gp_kalman/"><img src="docs/images/readme/markov_vs_dense.png" alt="Wall-clock of the log marginal likelihood: the Kalman path grows linearly in N, the dense Cholesky cubically"></a><br><b>Markov GP: linear in N, not cubic</b><br><code>pyrox-ssm</code></td>
-    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/notebooks/multioutput_gp/"><img src="docs/images/readme/multioutput_gap.png" alt="A multi-output GP reconstructs a held-out gap in one output from a fully observed, correlated output"></a><br><b>Multi-output GP fills a gap</b><br><code>pyrox-gp</code></td>
+    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/gp-pathwise/"><img src="docs/images/readme/pathwise_samples.png" alt="32 pathwise posterior samples of an exact GP against the analytic mean and two-sigma band"></a><br><b>Pathwise posterior samples</b><br><code>pyrox-gp</code></td>
+    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/markov-gp-kalman/"><img src="docs/images/readme/markov_vs_dense.png" alt="Wall-clock of the log marginal likelihood: the Kalman path grows linearly in N, the dense Cholesky cubically"></a><br><b>Markov GP: linear in N, not cubic</b><br><code>pyrox-ssm</code></td>
+    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/multioutput-gp/"><img src="docs/images/readme/multioutput_gap.png" alt="A multi-output GP reconstructs a held-out gap in one output from a fully observed, correlated output"></a><br><b>Multi-output GP fills a gap</b><br><code>pyrox-gp</code></td>
   </tr>
   <tr>
-    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/notebooks/rff_as_neural_networks/"><img src="docs/images/readme/ensemble_gap.png" alt="An ensemble of 16 random-feature models: the predictive band widens across a held-out gap"></a><br><b>Ensemble band opens across a gap</b><br><code>pyrox.inference</code></td>
-    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/notebooks/lgm_mcmc_inla/"><img src="docs/images/readme/inla_vs_nuts.png" alt="Hyperparameter and coefficient marginals: the NUTS histogram against the INLA estimate, both near the truth"></a><br><b>INLA against NUTS</b><br><code>pyrox-lgm</code></td>
-    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/notebooks/spectral_kernel_models/"><img src="docs/images/readme/five_kernels.png" alt="2-D GP prior draws for RBF, Matérn-5/2, Matérn-3/2, Matérn-1/2 and ArcCosine kernels at one lengthscale"></a><br><b>Five kernels, one grid</b><br><code>pyrox-gp</code></td>
+    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/rff-as-neural-networks/"><img src="docs/images/readme/ensemble_gap.png" alt="An ensemble of 16 random-feature models: the predictive band widens across a held-out gap"></a><br><b>Ensemble band opens across a gap</b><br><code>pyrox.inference</code></td>
+    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/lgm-mcmc-inla/"><img src="docs/images/readme/inla_vs_nuts.png" alt="Hyperparameter and coefficient marginals: the NUTS histogram against the INLA estimate, both near the truth"></a><br><b>INLA against NUTS</b><br><code>pyrox-lgm</code></td>
+    <td width="33%"><a href="https://jejjohnson.github.io/pyrox/spectral-kernel-models/"><img src="docs/images/readme/five_kernels.png" alt="2-D GP prior draws for RBF, Matérn-5/2, Matérn-3/2, Matérn-1/2 and ArcCosine kernels at one lengthscale"></a><br><b>Five kernels, one grid</b><br><code>pyrox-gp</code></td>
   </tr>
 </table>
 

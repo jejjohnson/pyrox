@@ -18,7 +18,7 @@ This package imports nothing from pyrox-gp.
 | Model and inference | `LGM`, `FixedEffects`, `inla()`, `INLAResult`, `Summary` |
 | Diagnostics and formulas | `diagnostics`, `Diagnostics`, the `f(...)` formula sugar |
 
-The [`lgm_mcmc_inla`](https://jejjohnson.github.io/pyrox/notebooks/lgm_mcmc_inla/) notebook compares `inla()` against NUTS on the same model.
+The [`lgm_mcmc_inla`](https://jejjohnson.github.io/pyrox/lgm-mcmc-inla/) notebook compares `inla()` against NUTS on the same model.
 
 ## Install
 
