@@ -60,6 +60,8 @@ None of it is new machinery. Each layer is a [`pyrox`](../pyrox) module, so its 
 
 pyrox-nn is one package of the pyrox workspace; the [workspace README](../../README.md) introduces the others.
 
+<p align="center"><img src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_nn_overview/pyrox_nn_overview.png" alt="pyrox-nn in one picture: you supply data, a stack of layers, a NumPyro model or a fitted network; the network writes one joint density with a prior per layer, whose sites are named by pyrox_name; pyrox-nn puts the uncertainty in the weights, in random features, in the output noise or after the fit, and fits fields in one call; out come a posterior over the weights, a Laplace posterior, the spread of f at new inputs and a fitted field; pyrox, geonnax, functax and kernellib, and argminax and gaussx underneath" width="100%"></p>
+
 ## 🌟 Highlights
 
 - 🧱 **Layers that own their weights**: every layer is a `PyroxModule` that registers its weights as `<pyrox_name>.<site>`, so a stack of layers is one NumPyro model and NUTS, SVI and `Predictive` need no adapter.
@@ -339,6 +341,15 @@ This prints `[-0.02  0.95  0.01] [-0.28  0.75 -0.45] [0.2  1.14 0.41]`: the mean
 
 ## 🔬 What else is in the box
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_nn_roles/pyrox_nn_roles-dark.svg">
+    <img alt="pyrox-nn on the GeoStack role ladder: last_layer_laplace and the estimators' fit as algorithms; the dense, random-feature, neural-field, conditioning, ensemble and head layers and the fitted posteriors and fields as models; the estimators as strategies; the feature functions, the table helpers and the fitted objects' methods as primitives; no structure of its own; geonnax's re-exported cores and pyrox's site verbs beside the ladder" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_nn_roles/pyrox_nn_roles-light.svg" width="100%">
+  </picture>
+</p>
+
+Each public name sits on one rung of the GeoStack role ladder, by the job it does; the figure shows a few names per group, and the table below lists them all.
+
 `pyrox_nn` holds the layers, and two namespaces behind the `bnf` extra hold the estimators and the preprocessing; each has its own `__all__`.
 
 | Area | Symbols | Notes |
@@ -377,6 +388,13 @@ The geonnax row lists 14 of the 33 deterministic names re-exported from geonnax;
 - **[`AGENTS.md`](AGENTS.md)**: the contracts every layer keeps (the two shapes of layer, static fields, no pyrox-gp import) and the tests that hold them.
 
 ## 🧩 Ecosystem
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_nn_ecosystem/pyrox_nn_ecosystem-dark.svg">
+    <img alt="No package imports pyrox-nn; the pyrox core's pyrox.inference looks it up lazily, only to serve two deprecated names, drawn dashed in the GeoML layer; pyrox-nn builds on pyrox, geonnax, functax, kernellib, argminax, gaussx, lineax, JAX, Equinox, NumPyro and einx, and on optax, pandas and xarray through extras" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_nn_ecosystem/pyrox_nn_ecosystem-light.svg" width="100%">
+  </picture>
+</p>
 
 pyrox-nn is a package of the pyrox [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/), in the GeoML tier of the [GeoStack](https://github.com/jejjohnson/geostack). It owns the probabilistic wrappers, and composes the rest in:
 
