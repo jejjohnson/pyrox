@@ -26,7 +26,8 @@ the package whose inference recurses in time. ``pyrox_ssm`` never imports
   `noncentred_log_normal` draws per-site hyperparameters non-centred.
 * Shared plus per-site GPs: `SharedPlusSiteMarkovGPPrior` builds a shared
   GP and one GP per site as one linear-Gaussian SSM on the merged time grid.
-  `ConditionedSharedPlusSiteMarkovGP` is its conditioned form.
+  `ConditionedSharedPlusSiteMarkovGP` is its conditioned form and
+  `shared_plus_site_factor` its NumPyro factor.
 * The gaussx SDE kernels (`MaternSDE`, `SumSDE`, …) and the `SDEKernel`
   protocol, re-exported for convenience.
 
@@ -62,6 +63,7 @@ from gaussx import (
 from pyrox_ssm._hierarchical import (
     ConditionedSharedPlusSiteMarkovGP,
     SharedPlusSiteMarkovGPPrior,
+    shared_plus_site_factor,
 )
 from pyrox_ssm._inference_nongauss_markov import (
     ConditionedNonGaussMarkovGP,
@@ -158,6 +160,7 @@ __all__ = [
     "noncentred_log_normal",
     "nonlinear_ssm_factor",
     "pad_sites",
+    "shared_plus_site_factor",
     "sparse_markov_elbo",
     "sparse_markov_factor",
 ]
