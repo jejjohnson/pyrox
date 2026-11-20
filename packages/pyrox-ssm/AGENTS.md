@@ -16,7 +16,7 @@ One facade, `pyrox_ssm` (`__init__.py` re-exports; implementation in private `_*
 | Ragged sites (padding + observation mask) | `_sites.py` | `pad_sites` |
 | Shared GP plus one GP per site on a merged grid (block-diagonal LGSSM) | `_hierarchical.py` | `SharedPlusSiteMarkovGPPrior`, `ConditionedSharedPlusSiteMarkovGP`, `shared_plus_site_factor` |
 | Per-site numerics (private) | `_markov_sites.py` | `as_gaussx_likelihood`, `_cavity_site_derivatives`, `_check_scalar_latent`, `_require_gauss_hermite`, `_pushforward_moments` |
-| Normalizing Kalman filter (`[flows]`) | `flows/_markov_flow.py` | `pyrox_ssm.flows.NormalizingKalmanPrior`, `normalizing_kalman_factor` |
+| Normalizing Kalman filter (`[flows]`) | `flows/_markov_flow.py` | `pyrox_ssm.flows.NormalizingKalmanPrior`, `ConditionedNormalizingKalman`, `normalizing_kalman_factor` |
 | Ensemble Kalman log likelihood of a filterax run (`[ensemble]`) | `ensemble.py` | `pyrox_ssm.ensemble.ensemble_factor` |
 | SDE kernels (re-exported from gaussx) | `__init__.py` | `SDEKernel`, `SDEParams`, `MaternSDE`, `SumSDE`, `ProductSDE`, … |
 

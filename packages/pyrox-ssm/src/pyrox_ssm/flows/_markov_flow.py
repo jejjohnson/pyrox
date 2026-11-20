@@ -37,6 +37,7 @@ over a masked base.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable
 from types import ModuleType
 
@@ -111,10 +112,10 @@ class NormalizingKalmanPrior(eqx.Module):
             ``cond_shape``) are rejected. A channel-mixing warp is
             usable with `log_marginal` on an unmasked base, but nothing
             else: ``gauss_flows`` refuses it over a masked base (masking
-            and a non-diagonal Jacobian do not commute), and `predict`
-            refuses it because its per-channel quadrature would be wrong
-            (see there). Put cross-channel structure in ``H`` and ``R``
-            instead.
+            and a non-diagonal Jacobian do not commute), and
+            `ConditionedNormalizingKalman.predict` refuses it because its
+            per-channel quadrature would be wrong (see there). Put
+            cross-channel structure in ``H`` and ``R`` instead.
         mean_fn: Optional callable ``times -> (T, M)`` evaluated on the
             integer grid ``0, ..., T-1`` of the base. The mean acts in
             **observation space** — it is subtracted from ``y`` before
@@ -133,7 +134,7 @@ class NormalizingKalmanPrior(eqx.Module):
         >>> y = base.sample(jr.key(0))
         >>> prior.log_marginal(y).shape
         ()
-        >>> mean, var = prior.predict(y, n_ahead=3)
+        >>> mean, var = prior.condition(y).predict(n_ahead=3)
         >>> mean.shape
         (15, 2)
     """
@@ -331,10 +332,142 @@ class NormalizingKalmanPrior(eqx.Module):
             return nkf.log_prob(residual)
         return nkf.log_prob(residual, condition=mask_eff)
 
+    def condition(
+        self,
+        y: Float[Array, "T M"],
+        mask: Bool[Array, "T M"] | None = None,
+    ) -> ConditionedNormalizingKalman:
+        r"""Condition on ``y``: inverse-warp it, filter once and smooth.
+
+        Each observation is mapped to the warped space,
+        $z_t = G^{-1}(y_t - m(t))$, and the Kalman filter and RTS smoother
+        run once over $z$. The result holds the smoothed moments and the
+        last filtered state, so `ConditionedNormalizingKalman.predict` can
+        be called several times (in-sample, then a forecast) without
+        filtering again.
+
+        Args:
+            y: Observations, shape ``(T, M)``. Masked entries are never
+                read and may be ``NaN``.
+            mask: Optional observation mask, shape ``(T, M)``; ``True``
+                marks an observed entry. Overrides a
+                `pyrox_gauss.MaskedLGSSM` base's own mask when both are
+                present.
+
+        Returns:
+            The `ConditionedNormalizingKalman`.
+
+        Raises:
+            ValueError: If ``y`` or ``mask`` does not match the base event
+                shape.
+
+        Examples:
+            >>> import jax.numpy as jnp, jax.random as jr
+            >>> from pyrox_gauss import LGSSM
+            >>> from pyrox_ssm.flows import NormalizingKalmanPrior
+            >>> base = LGSSM(0.9 * jnp.eye(2), jnp.eye(2), 0.1 * jnp.eye(2),
+            ...              0.2 * jnp.eye(2), jnp.zeros(2), jnp.eye(2), n_steps=12)
+            >>> y = base.sample(jr.key(0))
+            >>> cond = NormalizingKalmanPrior(base).condition(y)
+            >>> mean, var = cond.predict(n_ahead=3)
+            >>> mean.shape
+            (15, 2)
+        """
+        y = jnp.asarray(y)
+        mask_eff = self._effective_mask(mask)
+        self._check_shapes(y, mask_eff)
+        residual = y - self._mean_grid(self.n_steps, y.dtype)
+
+        if self.warp is None:
+            z = residual
+        else:
+            _require_flows()
+            if mask_eff is not None:
+                # Unobserved slots hold junk (often NaN); substitute an
+                # in-support reference before the inverse warp. The
+                # filter never reads those entries afterwards.
+                reference = self.warp.transform(
+                    jnp.zeros(self.n_channels, dtype=y.dtype)
+                )
+                residual = jnp.where(mask_eff, residual, reference)
+            z = jax.vmap(self.warp.inverse)(residual)  # (T, M)
+
+        state = gaussx.kalman_filter(
+            self.base.A,
+            self.base.H,
+            self.base.Q,
+            self.base.R,
+            z,
+            self.base.m0,
+            self.base.P0,
+            mask=mask_eff,
+        )
+        m_smooth, P_smooth = gaussx.rts_smoother(state, self.base.A)
+        return ConditionedNormalizingKalman(
+            prior=self,
+            y=y if mask_eff is None else jnp.where(mask_eff, y, jnp.zeros_like(y)),
+            mask=mask_eff,
+            smoothed_means=m_smooth,
+            smoothed_covs=P_smooth,
+            last_filtered_mean=state.filtered_means[-1],
+            last_filtered_cov=state.filtered_covs[-1],
+        )
+
     def predict(
         self,
         y: Float[Array, "T M"],
         mask: Bool[Array, "T M"] | None = None,
+        *,
+        n_ahead: int = 0,
+        order: int = 32,
+    ) -> tuple[Float[Array, "Tp M"], Float[Array, "Tp M"]]:
+        """Deprecated: use ``prior.condition(y, mask).predict(...)``.
+
+        Conditions on ``y`` and predicts in one call, filtering every time.
+        Returns exactly what
+        ``self.condition(y, mask).predict(n_ahead=n_ahead, order=order)``
+        returns, with a `DeprecationWarning`.
+        """
+        warnings.warn(
+            "NormalizingKalmanPrior.predict(y, mask, ...) is deprecated; use "
+            "prior.condition(y, mask).predict(n_ahead=..., order=...).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.condition(y, mask).predict(n_ahead=n_ahead, order=order)
+
+
+class ConditionedNormalizingKalman(eqx.Module):
+    r"""A `NormalizingKalmanPrior` conditioned on observations.
+
+    Returned by `NormalizingKalmanPrior.condition`. Holds the RTS-smoothed
+    moments of the state in the warped space and the last filtered state,
+    so `predict` runs no filter: in-sample and forecast predictions come
+    from one filtering pass.
+
+    Attributes:
+        prior: The originating `NormalizingKalmanPrior`.
+        y: Observations, ``(T, M)``, with masked entries set to zero.
+        mask: The effective ``(T, M)`` observation mask, or ``None`` when
+            everything was observed.
+        smoothed_means: Smoothed state means, ``(T, D)``.
+        smoothed_covs: Smoothed state covariances, ``(T, D, D)``.
+        last_filtered_mean: Filtered state mean at the last step, ``(D,)``,
+            where a forecast starts.
+        last_filtered_cov: Filtered state covariance at the last step,
+            ``(D, D)``.
+    """
+
+    prior: NormalizingKalmanPrior
+    y: Float[Array, "T M"]
+    mask: Bool[Array, "T M"] | None
+    smoothed_means: Float[Array, "T D"]
+    smoothed_covs: Float[Array, "T D D"]
+    last_filtered_mean: Float[Array, " D"]
+    last_filtered_cov: Float[Array, "D D"]
+
+    def predict(
+        self,
         *,
         n_ahead: int = 0,
         order: int = 32,
@@ -366,8 +499,8 @@ class NormalizingKalmanPrior(eqx.Module):
         a channel-mixing warp's outputs depend on the full joint
         Gaussian, cross-channel covariances included, and per-channel
         moments would be silently wrong rather than merely imprecise.
-        `log_marginal` carries no such restriction: it stays exact for
-        any unmasked warp.
+        `NormalizingKalmanPrior.log_marginal` carries no such
+        restriction: it stays exact for any unmasked warp.
 
         Gauss-Hermite converges spectrally only for analytic
         integrands. A piecewise rational-quadratic spline warp is not
@@ -377,11 +510,6 @@ class NormalizingKalmanPrior(eqx.Module):
         the order is not a convergence diagnostic.
 
         Args:
-            y: Observations, shape ``(T, M)``. Masked entries are never
-                read and may be ``NaN``.
-            mask: Optional observation mask, shape ``(T, M)``; ``True``
-                marks an observed entry. Same semantics as in
-                `log_marginal`.
             n_ahead: Number of forecast steps appended after the
                 training grid.
             order: Gauss-Hermite order for the warped pushforward, in
@@ -393,48 +521,33 @@ class NormalizingKalmanPrior(eqx.Module):
             so ``sqrt`` on them is always safe.
 
         Raises:
-            ValueError: If ``y`` or ``mask`` does not match the base
-                event shape, if the warp is not elementwise, or if ``order``
-                is outside ``[2, 256]`` with a warp.
-        """
-        y = jnp.asarray(y)
-        n_steps, n_channels = self.n_steps, self.n_channels
-        mask_eff = self._effective_mask(mask)
-        self._check_shapes(y, mask_eff)
-        mean_grid = self._mean_grid(n_steps + n_ahead, y.dtype)
-        residual = y - mean_grid[:n_steps]
+            ValueError: If the warp is not elementwise, or if ``order`` is
+                outside ``[2, 256]`` with a warp.
 
-        if self.warp is None:
-            z = residual
-        else:
-            flows = _require_flows()
+        Examples:
+            >>> import jax.numpy as jnp, jax.random as jr
+            >>> from pyrox_gauss import LGSSM
+            >>> from pyrox_ssm.flows import NormalizingKalmanPrior
+            >>> base = LGSSM(0.9 * jnp.eye(2), jnp.eye(2), 0.1 * jnp.eye(2),
+            ...              0.2 * jnp.eye(2), jnp.zeros(2), jnp.eye(2), n_steps=12)
+            >>> cond = NormalizingKalmanPrior(base).condition(base.sample(jr.key(0)))
+            >>> in_sample, _ = cond.predict()
+            >>> forecast, _ = cond.predict(n_ahead=5)   # no second filter pass
+            >>> in_sample.shape, forecast.shape
+            ((12, 2), (17, 2))
+        """
+        prior = self.prior
+        if prior.warp is not None:
             # The scalar per-channel quadrature below is only the right
             # integral for an elementwise warp, so predict requires one
             # even when log_marginal would not.
-            self._require_elementwise_warp(flows)
-            if mask_eff is not None:
-                # Unobserved slots hold junk (often NaN); substitute an
-                # in-support reference before the inverse warp. The
-                # filter never reads those entries afterwards.
-                reference = self.warp.transform(jnp.zeros(n_channels, dtype=y.dtype))
-                residual = jnp.where(mask_eff, residual, reference)
-            z = jax.vmap(self.warp.inverse)(residual)  # (T, M)
-
-        state = gaussx.kalman_filter(
-            self.base.A,
-            self.base.H,
-            self.base.Q,
-            self.base.R,
-            z,
-            self.base.m0,
-            self.base.P0,
-            mask=mask_eff,
-        )
-        m_smooth, P_smooth = gaussx.rts_smoother(state, self.base.A)
+            prior._require_elementwise_warp(_require_flows())
+        mean_grid = prior._mean_grid(prior.n_steps + n_ahead, self.y.dtype)
+        m_smooth, P_smooth = self.smoothed_means, self.smoothed_covs
 
         if n_ahead > 0:
-            A_dense = _dense(self.base.A)
-            Q_dense = _dense(self.base.Q)
+            A_dense = _dense(prior.base.A)
+            Q_dense = _dense(prior.base.Q)
 
             def step(carry, _):
                 m, P = carry
@@ -442,13 +555,13 @@ class NormalizingKalmanPrior(eqx.Module):
                 P_next = A_dense @ P @ A_dense.T + Q_dense
                 return (m_next, P_next), (m_next, P_next)
 
-            last = (state.filtered_means[-1], state.filtered_covs[-1])
+            last = (self.last_filtered_mean, self.last_filtered_cov)
             _, (m_ahead, P_ahead) = jax.lax.scan(step, last, None, length=n_ahead)
             m_smooth = jnp.concatenate([m_smooth, m_ahead], axis=0)
             P_smooth = jnp.concatenate([P_smooth, P_ahead], axis=0)
 
-        H_dense = _dense(self.base.H)
-        R_diag = jnp.diagonal(_dense(self.base.R))
+        H_dense = _dense(prior.base.H)
+        R_diag = jnp.diagonal(_dense(prior.base.R))
         # z-space marginals: mean H m_t, variance diag(H P_t H^T + R).
         mz = m_smooth @ H_dense.T  # (T', M)
         # einx.dot is typed as possibly returning a tuple (multi-output
@@ -462,11 +575,11 @@ class NormalizingKalmanPrior(eqx.Module):
             0.0,
         )
 
-        if self.warp is None:
+        if prior.warp is None:
             return mz + mean_grid, vz
 
         first_moment, variance = _pushforward_moments(
-            jax.vmap(self.warp.transform), mz, vz, order=order
+            jax.vmap(prior.warp.transform), mz, vz, order=order
         )
         return first_moment + mean_grid, variance
 
