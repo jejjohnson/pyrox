@@ -12,12 +12,14 @@ except ImportError as exc:
     ) from exc
 
 from pyrox_ssm.flows._markov_flow import (
+    ConditionedNormalizingKalman,
     NormalizingKalmanPrior,
     normalizing_kalman_factor,
 )
 
 
 __all__ = [
+    "ConditionedNormalizingKalman",
     "NormalizingKalmanPrior",
     "normalizing_kalman_factor",
 ]

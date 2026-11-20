@@ -319,7 +319,10 @@ def nkf_model(y, warp=None, mask=None):
     normalizing_kalman_factor("nkf", prior, y, mask)
 ```
 
+After fitting, `prior.condition(y, mask)` filters once and returns the `ConditionedNormalizingKalman`, whose `predict(n_ahead=..., order=...)` gives the observation-space mean and variance on the training grid and `n_ahead` steps beyond it, pushed through the warp by Gauss-Hermite quadrature. Calling `predict` again, for a forecast after an in-sample fit, runs no second filter. `NormalizingKalmanPrior.predict(y, mask, ...)` is deprecated and returns the same numbers with a `DeprecationWarning`.
+
 ::: pyrox_ssm.flows.NormalizingKalmanPrior
+::: pyrox_ssm.flows.ConditionedNormalizingKalman
 ::: pyrox_ssm.flows.normalizing_kalman_factor
 
 ## Ensemble Kalman log likelihood

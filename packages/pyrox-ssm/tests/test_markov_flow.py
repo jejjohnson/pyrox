@@ -35,7 +35,11 @@ import pytest
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.infer.autoguide import AutoNormal
 from pyrox_gauss import LGSSM, MaskedLGSSM
-from pyrox_ssm.flows import NormalizingKalmanPrior, normalizing_kalman_factor
+from pyrox_ssm.flows import (
+    ConditionedNormalizingKalman,
+    NormalizingKalmanPrior,
+    normalizing_kalman_factor,
+)
 
 
 T, M = 8, 2
@@ -320,12 +324,12 @@ def test_predict_identity_warp_equals_rts_moments():
     y = base.sample(jr.key(12))
     mz, vz = _rts_reference(base, y)
 
-    mean_none, var_none = NormalizingKalmanPrior(base).predict(y)
+    mean_none, var_none = NormalizingKalmanPrior(base).condition(y).predict()
     assert jnp.max(jnp.abs(mean_none - mz)) < 1e-13
     assert jnp.max(jnp.abs(var_none - vz)) < 1e-13
 
     prior = NormalizingKalmanPrior(base, warp=Identity(shape=(M,)))
-    mean_id, var_id = prior.predict(y)
+    mean_id, var_id = prior.condition(y).predict()
     assert jnp.max(jnp.abs(mean_id - mz)) < 1e-12
     assert jnp.max(jnp.abs(var_id - vz)) < 1e-12
 
@@ -339,7 +343,7 @@ def test_predict_is_pushforward_mean_not_warp_of_mean():
     y = jax.vmap(warp.transform)(base.sample(jr.key(13)))
     prior = NormalizingKalmanPrior(base, warp=warp)
 
-    mean, var = prior.predict(y)
+    mean, var = prior.condition(y).predict()
     mz, vz = _rts_reference(base, jax.vmap(warp.inverse)(y))
     warp_of_mean = jax.vmap(warp.transform)(mz)
 
@@ -379,7 +383,7 @@ def test_unwarped_path_works_without_gauss_flows(monkeypatch):
 
     prior = NormalizingKalmanPrior(base)  # constructs fine
     assert jnp.isfinite(prior.log_marginal(y))
-    mean, var = prior.predict(y, n_ahead=2)
+    mean, var = prior.condition(y).predict(n_ahead=2)
     assert mean.shape == (T + 2, M)
     assert jnp.all(jnp.isfinite(mean)) and jnp.all(jnp.isfinite(var))
 
@@ -406,7 +410,7 @@ def test_mismatched_shapes_raise_instead_of_broadcasting():
     with pytest.raises(ValueError, match=r"y has shape \(4, 2\)"):
         prior.log_marginal(y[:4])
     with pytest.raises(ValueError, match=r"y has shape \(8, 1\)"):
-        prior.predict(y[:, :1])
+        prior.condition(y[:, :1])
     with pytest.raises(ValueError, match=r"mask has shape"):
         prior.log_marginal(y, jnp.ones((T, M + 1), dtype=bool))
 
@@ -442,12 +446,14 @@ def test_predict_rejects_channel_mixing_warps():
     assert jnp.abs(got - want) < 1e-13
 
     with pytest.raises(ValueError, match="elementwise warp"):
-        prior.predict(y)
+        prior.condition(y).predict()
 
     # An elementwise warp of the same event shape is still accepted.
     warp = _exp_warp()
-    mean, var = NormalizingKalmanPrior(base, warp=warp).predict(
-        jax.vmap(warp.transform)(base.sample(jr.key(18)))
+    mean, var = (
+        NormalizingKalmanPrior(base, warp=warp)
+        .condition(jax.vmap(warp.transform)(base.sample(jr.key(18))))
+        .predict()
     )
     assert jnp.all(jnp.isfinite(mean)) and jnp.all(var >= 0.0)
 
@@ -468,7 +474,7 @@ def test_predict_variances_are_non_negative():
     )
     warp = _exp_warp()
     y = jax.vmap(warp.transform)(base.sample(jr.key(19)))
-    _, var = NormalizingKalmanPrior(tiny, warp=warp).predict(y)
+    _, var = NormalizingKalmanPrior(tiny, warp=warp).condition(y).predict()
     assert jnp.all(var >= 0.0)
     assert jnp.all(jnp.isfinite(jnp.sqrt(var)))
 
@@ -492,8 +498,8 @@ def test_predict_keeps_the_variance_of_a_large_offset_warp_in_float32():
     warp = _float32(Affine(loc=offset, scale=jnp.ones(M)))
     z = jnp.asarray(base.sample(jr.key(23)), dtype=jnp.float32)
     # The warp shifts by the offset alone, so the variance is the unwarped one.
-    _, expected = NormalizingKalmanPrior(base).predict(z)
-    _, var = NormalizingKalmanPrior(base, warp=warp).predict(z + offset)
+    _, expected = NormalizingKalmanPrior(base).condition(z).predict()
+    _, var = NormalizingKalmanPrior(base, warp=warp).condition(z + offset).predict()
     assert var.dtype == jnp.float32
     assert jnp.allclose(var, expected, rtol=2e-2, atol=0.0)
 
@@ -504,7 +510,7 @@ def test_predict_returns_the_input_dtype():
     z = jnp.asarray(base.sample(jr.key(29)), dtype=jnp.float32)
     y = jax.vmap(warp.transform)(z)
     assert y.dtype == jnp.float32
-    mean, var = NormalizingKalmanPrior(base, warp=warp).predict(y)
+    mean, var = NormalizingKalmanPrior(base, warp=warp).condition(y).predict()
     assert mean.dtype == var.dtype == jnp.float32
 
 
@@ -514,4 +520,57 @@ def test_predict_rejects_an_order_out_of_range(order):
     warp = _exp_warp()
     y = jax.vmap(warp.transform)(base.sample(jr.key(31)))
     with pytest.raises(ValueError, match="order must be in"):
-        NormalizingKalmanPrior(base, warp=warp).predict(y, order=order)
+        NormalizingKalmanPrior(base, warp=warp).condition(y).predict(order=order)
+
+
+# --- condition: one filter pass, several predictions ---------------------
+
+
+def test_condition_holds_the_smoothed_moments_and_the_last_filtered_state():
+    base = _base()
+    y = base.sample(jr.key(40))
+    cond = NormalizingKalmanPrior(base).condition(y)
+    assert isinstance(cond, ConditionedNormalizingKalman)
+    state = gaussx.kalman_filter(
+        base.A, base.H, base.Q, base.R, y, base.m0, base.P0, mask=None
+    )
+    m_smooth, P_smooth = gaussx.rts_smoother(state, base.A)
+    assert jnp.array_equal(cond.smoothed_means, m_smooth)
+    assert jnp.array_equal(cond.smoothed_covs, P_smooth)
+    assert jnp.array_equal(cond.last_filtered_mean, state.filtered_means[-1])
+    assert jnp.array_equal(cond.last_filtered_cov, state.filtered_covs[-1])
+
+
+def test_a_forecast_extends_the_in_sample_prediction_from_one_condition():
+    """The first T rows of a forecast are the in-sample prediction."""
+    base = _base()
+    warp = _exp_warp()
+    y = jax.vmap(warp.transform)(base.sample(jr.key(41)))
+    cond = NormalizingKalmanPrior(base, warp=warp).condition(y)
+    mean, var = cond.predict()
+    mean_ahead, var_ahead = cond.predict(n_ahead=4)
+    assert mean_ahead.shape == (T + 4, M)
+    # The same smoothed moments; the longer grid only changes how the matrix
+    # products are vectorised, which moves the last bit (~1e-15 here).
+    assert jnp.allclose(mean_ahead[:T], mean, rtol=1e-12, atol=1e-14)
+    assert jnp.allclose(var_ahead[:T], var, rtol=1e-12, atol=1e-14)
+
+
+def test_masked_condition_zeroes_the_unobserved_entries():
+    base = _base()
+    y = base.sample(jr.key(42))
+    mask = jnp.ones((T, M), dtype=bool).at[3, 1].set(False)
+    cond = NormalizingKalmanPrior(base).condition(jnp.where(mask, y, jnp.nan), mask)
+    assert cond.mask is not None and jnp.array_equal(cond.mask, mask)
+    assert cond.y[3, 1] == 0.0 and jnp.all(jnp.isfinite(cond.y))
+
+
+@pytest.mark.parametrize("n_ahead", [0, 3])
+def test_the_deprecated_prior_predict_warns_and_equals_condition_predict(n_ahead):
+    base = _base()
+    y = base.sample(jr.key(43))
+    prior = NormalizingKalmanPrior(base)
+    with pytest.warns(DeprecationWarning, match=r"condition\(y, mask\)\.predict"):
+        mean_old, var_old = prior.predict(y, n_ahead=n_ahead)
+    mean, var = prior.condition(y).predict(n_ahead=n_ahead)
+    assert jnp.array_equal(mean_old, mean) and jnp.array_equal(var_old, var)

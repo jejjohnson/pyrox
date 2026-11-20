@@ -324,7 +324,7 @@ Each public name sits on one rung of the GeoStack role ladder, by the job it doe
 | Non-Gaussian likelihoods | `LaplaceMarkovInference`, `GaussNewtonMarkovInference`, `PosteriorLinearizationMarkov`, `ExpectationPropagationMarkov`, `ConditionedNonGaussMarkovGP`, `markov_laplace_factor`, `markov_implicit_adjoint` | Strategies for `condition_nongauss`, the approximate evidence as a factor, and the adjoint that makes its gradient safe inside NUTS |
 | Sparse Markov GP | `SparseMarkovGPPrior`, `ConditionedSparseMarkovGP`, `sparse_markov_elbo`, `sparse_markov_factor` | Inducing times and a variational guide |
 | Many sites | `pad_sites`, `markov_gp_sites_factor`, `noncentred_log_normal`, `SharedPlusSiteMarkovGPPrior`, `ConditionedSharedPlusSiteMarkovGP`, `shared_plus_site_factor` | Ragged series on one grid, pooled hyperparameters, and a shared GP plus one per site |
-| `pyrox_ssm.flows` | `NormalizingKalmanPrior`, `normalizing_kalman_factor` | The normalizing Kalman filter (the `flows` extra) |
+| `pyrox_ssm.flows` | `NormalizingKalmanPrior`, `ConditionedNormalizingKalman`, `normalizing_kalman_factor` | The normalizing Kalman filter (the `flows` extra) |
 | `pyrox_ssm.ensemble` | `ensemble_factor` | The ensemble Kalman log likelihood of a filterax run (the `ensemble` extra) |
 
 The Markov GPs moved here from pyrox-gp with every name and signature unchanged; `from pyrox_gp import MarkovGPPrior` now raises an `ImportError` that names `pyrox_ssm`.
