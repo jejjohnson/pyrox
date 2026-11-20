@@ -50,8 +50,8 @@ wheels = [
 
 [[package]]
 name = "argminax"
-version = "0.0.7"
-source = { git = "https://github.com/jejjohnson/argminax.git?rev=089d61f33344a269694f345765f918675d323d1e#089d61f33344a269694f345765f918675d323d1e" }
+version = "0.0.8"
+source = { git = "https://github.com/jejjohnson/argminax.git?tag=v0.0.8#2e0952a723b1ef4b1aec5c2a3624c578c7e7985e" }
 dependencies = [
     { name = "einx" },
     { name = "equinox" },
@@ -2517,7 +2517,7 @@ xarray = [
 
 [package.metadata]
 requires-dist = [
-    { name = "argminax", extras = ["numpyro"], git = "https://github.com/jejjohnson/argminax.git?rev=089d61f33344a269694f345765f918675d323d1e" },
+    { name = "argminax", extras = ["numpyro"], git = "https://github.com/jejjohnson/argminax.git?tag=v0.0.8" },
     { name = "einx", specifier = ">=0.4.3" },
     { name = "functax", extras = ["jax"], git = "https://github.com/jejjohnson/functax.git?rev=v0.0.7" },
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.7.0" },
@@ -2648,7 +2648,7 @@ xarray = [
 
 [package.metadata]
 requires-dist = [
-    { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?rev=089d61f33344a269694f345765f918675d323d1e" },
+    { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?tag=v0.0.8" },
     { name = "einx", specifier = ">=0.4.3" },
     { name = "functax", extras = ["jax"], git = "https://github.com/jejjohnson/functax.git?rev=v0.0.7" },
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.7.0" },
@@ -2695,7 +2695,7 @@ flows = [
 
 [package.metadata]
 requires-dist = [
-    { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?rev=089d61f33344a269694f345765f918675d323d1e" },
+    { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?tag=v0.0.8" },
     { name = "einx", specifier = ">=0.4.3" },
     { name = "equinox", specifier = ">=0.13.8" },
     { name = "filterax", marker = "extra == 'ensemble'", git = "https://github.com/jejjohnson/filterax?rev=v0.0.8" },
