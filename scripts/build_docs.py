@@ -24,6 +24,7 @@ rendering the MyST theme, which needs network access to fetch the template.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -305,6 +306,68 @@ def verify_links(root: Path, base_url: str = "") -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Source links into folders mystmd does not build
+# ---------------------------------------------------------------------------
+
+#: prose folders whose files mystmd never renders as pages
+UNBUILT_DIRS = ("api", "templates")
+_SOURCE_LINK = re.compile(r"\]\(([^)\s]+)")
+# fenced blocks and inline code, whose links are examples rather than links
+_CODE = re.compile(r"```.*?```|`[^`\n]*`", re.DOTALL)
+
+
+def _prose_texts(root: Path) -> list[tuple[Path, str]]:
+    """The Markdown of every prose page: ``.md`` files and notebook cells."""
+    texts = []
+    for page in sorted(root.rglob("*")):
+        rel = page.relative_to(root)
+        skipped = rel.parts[0] in ("_build", *UNBUILT_DIRS) or rel == Path("README.md")
+        if skipped or page.suffix not in (".md", ".ipynb") or not page.is_file():
+            continue
+        if page.suffix == ".md":
+            texts.append((page, page.read_text(encoding="utf-8")))
+        else:
+            cells = json.loads(page.read_text(encoding="utf-8"))["cells"]
+            markdown = [
+                "".join(c["source"]) for c in cells if c["cell_type"] == "markdown"
+            ]
+            texts.append((page, "\n".join(markdown)))
+    return texts
+
+
+def source_link_problems(root: Path) -> list[str]:
+    """Relative prose links into a folder mystmd does not build.
+
+    mystmd publishes a linked file it does not render, such as an API page
+    under ``docs/api/``, as a download. The link then resolves, so
+    ``verify_links`` passes it, but the reader gets a raw Markdown file. Link
+    to an API object with ``xref:api#<name>`` and to an API page by its
+    deployed ``/reference/`` URL instead.
+
+    Args:
+        root: The MyST project directory (``docs/``).
+
+    Returns:
+        One message per offending link.
+    """
+    problems = []
+    for page, text in _prose_texts(root):
+        for target in _SOURCE_LINK.findall(_CODE.sub("", text)):
+            path = target.split("#", 1)[0]
+            if not path or ":" in path.split("/", 1)[0]:
+                continue
+            resolved = (page.parent / path).resolve()
+            for name in UNBUILT_DIRS:
+                if resolved.is_relative_to((root / name).resolve()):
+                    where = page.relative_to(root)
+                    problems.append(
+                        f"{where}: links to {target!r} in docs/{name}/, "
+                        "which mystmd publishes as a raw download"
+                    )
+    return problems
+
+
+# ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
 
@@ -421,6 +484,13 @@ def main(*, check: bool = False) -> int:
         ``0`` on success, ``1`` if the assembled site has broken links.
     """
     base_url = os.environ.get("BASE_URL", "").rstrip("/")
+
+    unbuilt = source_link_problems(MYST_DIR)
+    if unbuilt:
+        logger.error("{} prose link(s) into unbuilt folders:", len(unbuilt))
+        for problem in unbuilt:
+            logger.error("  - {}", problem)
+        return 1
 
     build_api()
     build_prose(html=not check)

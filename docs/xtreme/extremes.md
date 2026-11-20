@@ -4,7 +4,7 @@
 
 Built on [JAX](https://github.com/jax-ml/jax), [NumPyro](https://github.com/pyro-ppl/numpyro), [equinox](https://github.com/patrick-kidger/equinox), and [xarray](https://github.com/pydata/xarray).
 
-**New here?** Start with the [Vision](https://github.com/jejjohnson/pyrox/blob/main/design_docs/pyrox-xtreme/vision.md) to understand why pyrox-xtreme exists. The [Architecture](https://github.com/jejjohnson/pyrox/blob/main/design_docs/pyrox-xtreme/architecture.md) design doc is a draft roadmap — it sketches where the library is headed, not the current module layout; the [API reference](../api/xtreme/index.md) reflects what ships today.
+**New here?** Start with the [Vision](https://github.com/jejjohnson/pyrox/blob/main/design_docs/pyrox-xtreme/vision.md) to understand why pyrox-xtreme exists. The [Architecture](https://github.com/jejjohnson/pyrox/blob/main/design_docs/pyrox-xtreme/architecture.md) design doc is a draft roadmap — it sketches where the library is headed, not the current module layout; the [API reference](https://jejjohnson.github.io/pyrox/reference/xtreme/) reflects what ships today.
 
 ## Installation
 
@@ -91,7 +91,7 @@ peaks = xtx.decluster_runs(da, threshold=u)
 
 ## Links
 
-- [API reference](../api/xtreme/index.md)
+- [API reference](https://jejjohnson.github.io/pyrox/reference/xtreme/)
 - [Design docs](https://github.com/jejjohnson/pyrox/blob/main/design_docs/pyrox-xtreme/design_overview.md)
 - [Interop](interop.md)
 - [Changelog](https://github.com/jejjohnson/pyrox/blob/main/packages/pyrox-xtreme/CHANGELOG.md)
