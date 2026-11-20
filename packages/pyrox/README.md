@@ -360,7 +360,7 @@ pyrox is the core of a [uv workspace](https://docs.astral.sh/uv/concepts/project
 | Array programming, `jit`, `vmap` and `grad` | [`jax`](https://github.com/jax-ml/jax) |
 | Named-axis contractions | [`einx`](https://github.com/fferflo/einx) |
 
-Dependencies point one way. Four packages of the workspace import the core: [pyrox-gp](../pyrox-gp) (`_core`, `likelihoods` and `param_group_optimizer`), [pyrox-nn](../pyrox-nn) (`_core` and the ensemble runners), [pyrox-lgm](../pyrox-lgm) (`AbstractObservation`) and [pyrox-ssm](../pyrox-ssm) (`likelihoods`). xtremax installs it in its `tutorials` dependency group. The core imports none of them, and no gaussx, lineax, kernellib or geonnax either, which [`test_core_import_guard.py`](tests/test_core_import_guard.py) checks.
+Dependencies point one way. Four packages of the workspace import the core: [pyrox-gp](../pyrox-gp) (`_core` and `likelihoods`), [pyrox-nn](../pyrox-nn) (`_core` and the ensemble runners), [pyrox-lgm](../pyrox-lgm) (`AbstractObservation`) and [pyrox-ssm](../pyrox-ssm) (`likelihoods`); the sixth, pyrox-gauss, does not. The core imports none of them, and no gaussx, lineax, kernellib or geonnax either, which [`test_core_import_guard.py`](tests/test_core_import_guard.py) checks.
 
 ## 🌳 Repository layout
 
