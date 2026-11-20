@@ -16,7 +16,8 @@ observes the sum of the $g$ block and its own block.
 `SharedPlusSiteMarkovGPPrior` builds that model as a
 `pyrox_ssm.LinearGaussianSSMPrior` with a ``(T, S)`` observation mask, so
 the marginal likelihood and the posterior split into $g$ and $h_s$ are
-exact Kalman filtering and RTS smoothing.
+exact Kalman filtering and RTS smoothing. `shared_plus_site_factor` adds
+the marginal likelihood to a NumPyro model.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpyro
 from gaussx import SDEKernel
 from jaxtyping import Array, ArrayLike, Bool, Float
 
@@ -743,3 +745,55 @@ class ConditionedSharedPlusSiteMarkovGP(eqx.Module):
         )
         test_rows = jnp.argsort(order, stable=True)[n_steps:]
         return g_mean[test_rows], h_mean[test_rows], g_var[test_rows], h_var[test_rows]
+
+
+def shared_plus_site_factor(
+    name: str,
+    prior: SharedPlusSiteMarkovGPPrior,
+    y: Float[Array, "T S"],
+    noise_var: Float[Array, ""] | Float[Array, " S"],
+) -> None:
+    r"""Register the log marginal of a shared GP plus one GP per site.
+
+    Adds ``numpyro.factor(name, prior.log_marginal(y, noise_var))``, the
+    shared path and every site path marginalised out by one Kalman filter
+    over the merged grid,
+
+    $$
+    \log p(y_{\mathrm{obs}} \mid \theta) = \sum_{k=1}^{T}
+      \log \mathcal{N}\!\left(y_{k, o_k};\, H_{o_k} m_k^-,\,
+      H_{o_k} P_k^- H_{o_k}^\top + R_{o_k o_k}\right),
+    $$
+
+    with $o_k$ the sites observed at $t_k$. The mask is the prior's own
+    (from `SharedPlusSiteMarkovGPPrior.from_sites`), so the factor takes
+    none, as `SharedPlusSiteMarkovGPPrior.log_marginal` takes none.
+
+    Registers the one site ``name``.
+
+    Args:
+        name: The factor site name.
+        prior: The `SharedPlusSiteMarkovGPPrior` on the merged grid.
+        y: Observations, shaped ``(T, S)``; unobserved entries may be
+            ``NaN`` and reach neither the value nor a gradient.
+        noise_var: Observation noise variance, scalar or ``(S,)``.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> import numpyro
+        >>> import numpyro.distributions as dist
+        >>> import pyrox_ssm as pss
+        >>> times = jnp.arange(3.0)
+        >>> mask = jnp.array([[True, False], [True, True], [False, True]])
+        >>> y = jnp.array([[0.3, jnp.nan], [0.1, -0.2], [jnp.nan, 0.4]])
+        >>> def model(y):
+        ...     ell = numpyro.sample("lengthscale", dist.LogNormal(0.0, 1.0))
+        ...     shared = pss.MaternSDE(variance=1.0, lengthscale=ell, order=0)
+        ...     site = pss.MaternSDE(variance=0.5, lengthscale=1.0, order=0)
+        ...     prior = pss.SharedPlusSiteMarkovGPPrior(shared, site, times, mask)
+        ...     pss.shared_plus_site_factor("y", prior, y, jnp.asarray(0.1))
+        >>> trace = numpyro.handlers.trace(numpyro.handlers.seed(model, 0)).get_trace(y)
+        >>> sorted(trace)
+        ['lengthscale', 'y']
+    """
+    numpyro.factor(name, prior.log_marginal(y, noise_var))
