@@ -44,7 +44,7 @@ Each one installs on its own and pulls in what it needs.
 | <img src="docs/assets/icon-gp.svg" width="28" alt=""> | [`pyrox-gp`](packages/pyrox-gp) | `pyrox_gp` | Kernels, guides and likelihoods; exact, sparse and multi-output GPs; pathwise sampling |
 | <img src="docs/assets/icon-nn.svg" width="28" alt=""> | [`pyrox-nn`](packages/pyrox-nn) | `pyrox_nn` | Bayesian dense layers, SIREN and MFN, SNGP, deep VSSGP, and the Bayesian Neural Field estimator |
 | <img src="docs/assets/icon-lgm.svg" width="28" alt=""> | [`pyrox-lgm`](packages/pyrox-lgm) | `pyrox_lgm` | Latent Gaussian models in precision form: GMRF components, PC priors and `inla()` |
-|  | [`pyrox-ssm`](packages/pyrox-ssm) | `pyrox_ssm` | State-space models as NumPyro models, whose inference recurses in time: Markov (Kalman) GPs, SDE kernels, sparse and non-Gaussian Markov GPs |
+| <img src="docs/assets/icon-ssm.svg" width="28" alt=""> | [`pyrox-ssm`](packages/pyrox-ssm) | `pyrox_ssm` | State-space models as NumPyro models, whose inference recurses in time: Markov (Kalman) GPs, SDE kernels, sparse and non-Gaussian Markov GPs |
 |  | [`pyrox-gauss`](packages/pyrox-gauss) | `pyrox_gauss` | Gaussian NumPyro distributions on gaussx operators: multivariate normals, `LGSSM`, `MarkovGaussian`, and `GMRFDistribution` for gaussx's GMRF fields |
 |  | [`pyrox-xtreme`](packages/pyrox-xtreme) | `pyrox_xtreme` | Extreme value distributions (GEV, GPD, Gumbel, Fréchet, Weibull) as NumPyro likelihoods, temporal / spatial / spatiotemporal point processes, and xarray block maxima, thresholds and declustering; formerly xtremax |
 

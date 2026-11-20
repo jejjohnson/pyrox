@@ -9,6 +9,7 @@ ember gradient; each package gets its own glyph:
     pyrox-nn   a small network with a distribution over its weights
     pyrox-lgm  a GMRF lattice with one node's neighbourhood ringed
     pyrox-xtreme  a long-tailed density, its return level and one event past it
+    pyrox-ssm  a Markov chain of states, each observed below, one observation missing
 
 Diagrams come in a light and a dark variant for GitHub's
 ``<picture>`` / ``prefers-color-scheme`` switch.
@@ -137,12 +138,44 @@ def glyph_tail() -> str:
     )
 
 
+def glyph_chain() -> str:
+    """Three latent states in a Markov chain, each observed below; one gap."""
+    xs = (26, 64, 102)
+    states = "".join(
+        f'<circle cx="{x}" cy="44" r="9.5" fill="none" stroke="{W}" '
+        'stroke-width="4.5"/>'
+        for x in xs
+    )
+    arrows = "".join(
+        f'<path d="M{x0} 44 L{x0 + 13} 44" stroke="{W}" stroke-width="4" '
+        'stroke-linecap="round"/>'
+        f'<path d="M{x0 + 7} 38.5 L{x0 + 13} 44 L{x0 + 7} 49.5" fill="none" '
+        f'stroke="{W}" stroke-width="4" stroke-linecap="round" '
+        'stroke-linejoin="round"/>'
+        for x0 in (39, 77)
+    )
+    links = "".join(
+        f'<path d="M{x} 56 L{x} 76" stroke="{W}" stroke-opacity="0.6" '
+        'stroke-width="3.5" stroke-linecap="round"/>'
+        for x in xs
+    )
+    observed = "".join(
+        f'<circle cx="{x}" cy="88" r="8.5" fill="{W}"/>' for x in (xs[0], xs[2])
+    )
+    missing = (
+        f'<circle cx="{xs[1]}" cy="88" r="8.5" fill="none" stroke="{W}" '
+        'stroke-width="3" stroke-dasharray="4 4"/>'
+    )
+    return states + arrows + links + observed + missing
+
+
 GLYPHS = {
     "pyrox": glyph_plate,
     "pyrox-gp": glyph_band,
     "pyrox-nn": glyph_network,
     "pyrox-lgm": glyph_lattice,
     "pyrox-xtreme": glyph_tail,
+    "pyrox-ssm": glyph_chain,
 }
 
 
