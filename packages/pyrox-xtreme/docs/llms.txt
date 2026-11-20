@@ -1,0 +1,43 @@
+# xtremax
+
+> Extreme value modelling for JAX and NumPyro. NumPyro-native EVT distributions (GEV, GPD, Gumbel, Fréchet, Weibull) whose maths lives in pure JAX primitives that stay accurate and differentiable through the Gumbel limit ξ → 0 and in the far tail; stable quantiles, return levels and non-stationary return levels; temporal, spatial and spatiotemporal point processes (Poisson, renewal, Hawkes, marked, thinned) as pure functions, equinox operators and NumPyro likelihoods; and xarray-native block maxima, thresholds, declustering and extremal-index estimates. Use these instead of hand-writing EVT densities, return-level formulas, Poisson likelihoods or extraction loops.
+
+One package, `xtremax`, installed from GitHub: `uv add "xtremax @ git+https://github.com/jejjohnson/xtremax.git"`; extra `[threshold]` (scikit-learn, for the quantile-regression threshold). Inference (MCMC, SVI, `Predictive`) is NumPyro's; GP priors on spatially varying parameters come from a GP library. Before writing a helper, search the capability index — every public name with a one-line summary. Code you add should keep three rules:
+
+- **Distributions are NumPyro sites:** `numpyro.sample("obs", xtremax.GeneralizedExtremeValueDistribution(loc, scale, concentration), obs=y)`; start NUTS with `init_strategy=init_to_median`, since the default init can strand a GEV fit at ξ < -1, where the likelihood is unbounded.
+- **Stable forms:** return levels from `xtremax.primitives.gev_return_level` / `gpd_return_level` (or `d.return_level(T)` on a GEV or GPD), tails from `*_survival`, never `icdf(1 - 1/T)` or `1 - cdf`; scipy's `genextreme` takes `c = -ξ`.
+- **Padded events, explicit keys:** point-process events are a fixed-size `times` buffer plus a mask whose `True` entries come first; every sampler takes a PRNG key and a static buffer size (`max_events`, or `max_candidates` for thinning samplers).
+
+Claude Code users can install the `xtremax` plugin: `/plugin marketplace add jejjohnson/xtremax`, then `/plugin install xtremax@xtremax`.
+
+## Start here
+
+- [Home](https://jejjohnson.github.io/xtremax/): what xtremax is, installation, a quickstart
+- [Capability index](https://jejjohnson.github.io/xtremax/reference/capabilities/): every public name, grouped by module, with a summary
+- [Building with agents](https://jejjohnson.github.io/xtremax/agents/): the Claude Code plugin, this file, and rules to paste into your project's AGENTS.md
+- [Interop](https://jejjohnson.github.io/xtremax/interop/): how xtremax composes with NumPyro and pipekit without depending on pipekit
+- [EVT distributions overview](https://jejjohnson.github.io/xtremax/evt-distributions-overview/): the five families side by side
+
+## API reference
+
+- [Overview](https://jejjohnson.github.io/xtremax/reference/)
+- [Distributions](https://jejjohnson.github.io/xtremax/reference/distributions/): NumPyro GEV, GPD, Gumbel, Fréchet, Weibull with return levels, survival and moments
+- [Primitives](https://jejjohnson.github.io/xtremax/reference/primitives/): pure JAX densities, CDFs, quantiles, return levels; non-stationary and spatial helpers
+- [Extraction](https://jejjohnson.github.io/xtremax/reference/extraction/): block maxima, thresholds, declustering, extremal index on xarray
+- [Point processes — overview](https://jejjohnson.github.io/xtremax/reference/point-processes/): domains, event histories, sample results, quadrature
+- [Point processes — primitives](https://jejjohnson.github.io/xtremax/reference/point-process-primitives/): intensities, compensators, log-likelihoods, samplers, diagnostics
+- [Point processes — operators](https://jejjohnson.github.io/xtremax/reference/point-process-operators/): equinox process objects with goodness of fit
+- [Point processes — distributions](https://jejjohnson.github.io/xtremax/reference/point-process-distributions/): NumPyro wrappers for MCMC / SVI
+- [Simulations](https://jejjohnson.github.io/xtremax/reference/simulations/): synthetic temperature, precipitation and wind extremes, GMST trajectories
+
+## Optional
+
+- [GEV for block maxima](https://jejjohnson.github.io/xtremax/evt-gevd-block-maxima/)
+- [GPD for peaks over threshold](https://jejjohnson.github.io/xtremax/evt-gpd-pot/)
+- [Quantile-regression thresholds with a GPD](https://jejjohnson.github.io/xtremax/evt-quantile-regression-gpd/)
+- [Non-stationary GEV with parametric trends](https://jejjohnson.github.io/xtremax/evt-nonstat-parametric/)
+- [Homogeneous Poisson process from scratch and in NumPyro](https://jejjohnson.github.io/xtremax/hpp-from-scratch-and-numpyro/)
+- [Hawkes process from scratch and in NumPyro](https://jejjohnson.github.io/xtremax/hawkes-from-scratch-and-numpyro/)
+- [Spatial extremes tutorial](https://jejjohnson.github.io/xtremax/spatial-extremes/)
+- [Vision](https://jejjohnson.github.io/xtremax/vision/)
+- [Source code](https://github.com/jejjohnson/xtremax)

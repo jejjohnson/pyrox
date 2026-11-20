@@ -1,0 +1,14 @@
+{
+  "name": "xtremax",
+  "owner": {
+    "name": "jejjohnson"
+  },
+  "description": "Claude Code plugins for extreme value analysis in JAX and NumPyro on xtremax.",
+  "plugins": [
+    {
+      "name": "xtremax",
+      "source": "./plugins/xtremax",
+      "description": "Build extreme value analyses on xtremax (NumPyro GEV / GPD / Gumbel / Fréchet / Weibull distributions, stable pure-JAX primitives, return levels, point processes, xarray block maxima, thresholds and declustering) instead of re-implementing them: an extreme-value-analysis skill and a reuse reviewer."
+    }
+  ]
+}
