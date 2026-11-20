@@ -53,6 +53,10 @@ PACKAGES: dict[str, tuple[str, tuple[str, ...]]] = {
         "packages/pyrox-ssm/pyproject.toml",
         ("packages/pyrox-ssm/src/pyrox_ssm",),
     ),
+    "pyrox-xtreme": (
+        "packages/pyrox-xtreme/pyproject.toml",
+        ("packages/pyrox-xtreme/src/pyrox_xtreme",),
+    ),
 }
 
 #: stack libraries pyrox may not use: import name -> distribution
@@ -98,6 +102,7 @@ ALLOWED: dict[str, str] = {
     "pyrox_lgm": "pyrox-lgm",
     "pyrox_nn": "pyrox-nn",
     "pyrox_ssm": "pyrox-ssm",
+    "pyrox_xtreme": "pyrox-xtreme",
     "spectraldiffx": "spectraldiffx",
     "xrops": "xrtoolz-ops",
     "xrproducts": "xrtoolz-products",

@@ -111,6 +111,23 @@
           "jsonpath": "$.package[?(@.name.value=='pyrox-gauss')].version"
         }
       ]
+    },
+    "packages/pyrox-xtreme": {
+      "release-type": "python",
+      "package-name": "pyrox-xtreme",
+      "component": "pyrox-xtreme",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": true,
+      "last-release-sha": "233cc5bec55bd20202ccdb5d4c09f166f715b17f",
+      "extra-files": [
+        "src/pyrox_xtreme/__init__.py",
+        {
+          "type": "toml",
+          "path": "/uv.lock",
+          "jsonpath": "$.package[?(@.name.value=='pyrox-xtreme')].version"
+        }
+      ]
     }
   }
 }

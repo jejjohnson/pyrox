@@ -59,6 +59,8 @@ create "pkg:gp"   "1d76db" "pyrox-gp package"
 create "pkg:nn"   "fbca04" "pyrox-nn package"
 create "pkg:lgm"  "0e8a16" "pyrox-lgm package"
 create "pkg:ssm"  "d93f0b" "pyrox-ssm package"
+create "pkg:gauss" "c5def5" "pyrox-gauss package"
+create "pkg:xtreme" "b60205" "pyrox-xtreme package"
 
 echo "Creating Dependabot / misc labels..."
 create "dependencies" "ededed" "Pull requests that update a dependency file"

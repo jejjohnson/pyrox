@@ -7,7 +7,7 @@ adds its own rules in `packages/<package>/AGENTS.md`.
 
 ## What this repo is
 
-pyrox is a uv workspace of four packages for probabilistic modelling with
+pyrox is a uv workspace of seven packages for probabilistic modelling with
 Equinox and NumPyro. Its core is a **bridge**: an Equinox module that owns
 NumPyro sample and param sites, so the same module runs under `handlers.trace`,
 NUTS, SVI and `Predictive` unchanged. People build models on top of it, so
@@ -22,6 +22,7 @@ the next person will find and reuse it.
 | `pyrox-nn` | `pyrox_nn` (+ `pyrox_nn.api`, `pyrox_nn.preprocessing` behind `[bnf]`) | Bayesian / uncertainty-aware layers on geonnax cores, the Bayesian Neural Field estimator, last-layer Laplace | pyrox (**never** pyrox-gp) |
 | `pyrox-lgm` | `pyrox_lgm` | Latent Gaussian models in precision form: GMRF components, PC priors, `inla()` | pyrox (**never** pyrox-gp) |
 | `pyrox-ssm` | `pyrox_ssm` (+ `pyrox_ssm.flows` behind `[flows]`, `pyrox_ssm.ensemble` behind `[ensemble]`) | State-space models: Markov (Kalman) GPs over SDE kernels, sparse and non-Gaussian Markov GPs, the normalizing Kalman filter | pyrox (**never** pyrox-gp, pyrox-lgm or pyrox-nn) |
+| `pyrox-xtreme` | `pyrox_xtreme` (+ quantile-regression thresholds behind `[threshold]`) | Extreme value distributions as NumPyro likelihoods, point processes, xarray extraction (formerly xtremax) | none: it **never** imports `pyrox` or a sibling (`test_xtreme_import_guard.py`) |
 
 Dependencies point one way: nothing imports upward. `pyrox-gp`, `pyrox-nn` and
 `pyrox-lgm` are siblings over `pyrox`, so `pyrox-nn` and `pyrox-lgm` never import
@@ -57,7 +58,7 @@ fails under a handler, a transform or a second instance.
 ## Reuse before you write
 
 1. **Search the capability index.** [`docs/capabilities.md`](docs/capabilities.md)
-   lists every public name in the four packages, grouped by the module that
+   lists every public name in the packages, grouped by the module that
    defines it, with a one-line summary; then the public API of gaussx,
    kernellib, geonnax and functax. It is generated (`make capabilities`) and checked
    by `packages/pyrox/tests/test_capabilities.py`.
@@ -251,7 +252,8 @@ uv run pytest --no-cov packages/pyrox-gp/tests/gp/test_kernel_classes.py -v
 ### Test tiers
 
 - CI ("Tests", `ci.yml`) runs the fast tier (`-m "not slow"`) as one parallel
-  job per package, each gating its own package's coverage at 80 %. On a pull
+  job per package, each gating its own package's coverage at 80 % (75 % for
+  pyrox-xtreme, whose `integration` tests run in a job of their own). On a pull
   request it runs only the packages the change can affect, on Python 3.13: the
   core or shared config (`pyproject.toml`, `uv.lock`, `conftest.py`) runs every
   package, pyrox-gp also runs pyrox-nn (whose tests import it), any package
@@ -265,8 +267,9 @@ uv run pytest --no-cov packages/pyrox-gp/tests/gp/test_kernel_classes.py -v
   locally (`uv run pytest --no-cov -m slow packages/<pkg>/tests/...`).
 - Keep one unmarked, tiny smoke test per feature so the fast tier still
   exercises it.
-- The root `conftest.py` enables x64 for the whole session and turns
-  `GaussxDeprecationWarning` into an error.
+- The root `conftest.py` enables x64 for the whole session (unless
+  `PYROX_TEST_X64=0`, which CI sets for pyrox-xtreme, whose contracts are
+  float32) and turns `GaussxDeprecationWarning` into an error.
 - Seed NumPyro with `handlers.seed(rng_seed=0)` and assert site names under
   `handlers.trace()`; keys come from `jr.key(n)`; compare against a dense or
   closed-form reference, and say in a comment where a tolerance comes from.
@@ -315,6 +318,7 @@ that enforce them. Read it before changing that package:
 - [`packages/pyrox-nn/AGENTS.md`](packages/pyrox-nn/AGENTS.md) — Bayesian layers on geonnax cores, the `[bnf]` estimator
 - [`packages/pyrox-lgm/AGENTS.md`](packages/pyrox-lgm/AGENTS.md) — components, PC priors, `inla()`, R-INLA fixtures
 - [`packages/pyrox-ssm/AGENTS.md`](packages/pyrox-ssm/AGENTS.md) — Markov GPs, the Kalman-based non-Gaussian and sparse strategies, the `[flows]` NKF
+- [`packages/pyrox-xtreme/AGENTS.md`](packages/pyrox-xtreme/AGENTS.md) — EVT primitives and distributions, point processes in three layers, extraction; its suite runs in float32 in CI
 
 ## Git, commits and pull requests
 

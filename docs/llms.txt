@@ -8,7 +8,9 @@ Five packages, installed separately from GitHub subdirectories (the name `pyrox`
 - **Don't rebuild a `Parameterized` module:** its params, priors and guides live outside the pytree; `eqx.tree_at` or a `jit` argument yields an empty copy.
 - **Linear algebra through gaussx:** `GPPrior` / `gp_factor` carry a pluggable `solver=`; don't `cho_solve` a Gram by hand.
 
-Claude Code users can install the `pyrox` plugin: `/plugin marketplace add jejjohnson/pyrox`, then `/plugin install pyrox@pyrox`.
+pyrox-xtreme (`pyrox_xtreme`, formerly xtremax) is the workspace's extreme value package: GEV, GPD, Gumbel, Fréchet and Weibull distributions as NumPyro likelihoods, stable return levels through ξ = 0, temporal / spatial / spatiotemporal point processes, and xarray block maxima, thresholds and declustering. It imports nothing from `pyrox`.
+
+Claude Code users can install the `pyrox` plugin: `/plugin marketplace add jejjohnson/pyrox`, then `/plugin install pyrox@pyrox`; for extremes, also `/plugin install pyrox-xtreme@pyrox`.
 
 ## Start here
 
@@ -27,6 +29,14 @@ Claude Code users can install the `pyrox` plugin: `/plugin marketplace add jejjo
 - [NN](https://jejjohnson.github.io/pyrox/api/nn/): Bayesian dense layers, random features, SIREN / MFN, SNGP, deep VSSGP, conditioning
 - [LGM](https://jejjohnson.github.io/pyrox/api/lgm/): components, PC priors, `inla()`
 - [Estimator](https://jejjohnson.github.io/pyrox/api/api/) and [Preprocessing](https://jejjohnson.github.io/pyrox/api/preprocessing/): the BNF estimator (`pyrox-nn[bnf]`)
+- [Xtreme](https://jejjohnson.github.io/pyrox/api/xtreme/): EVT distributions and primitives, extraction, point processes (primitives, operators, NumPyro wrappers), simulations (`pyrox-xtreme`)
+
+## Extremes (pyrox-xtreme)
+
+- [Overview](https://jejjohnson.github.io/pyrox/xtreme/): installation, quick start, the example notebooks
+- [GEV on annual block maxima](https://jejjohnson.github.io/pyrox/xtreme/notebooks/evt_gevd_block_maxima/)
+- [GPD via peaks over threshold](https://jejjohnson.github.io/pyrox/xtreme/notebooks/evt_gpd_pot/)
+- [Spatial extremes tutorials](https://jejjohnson.github.io/pyrox/xtreme/tutorials/spatial_extremes/): CDS station data over Spain, from block maxima to spatial GEV fields
 
 ## Optional
 

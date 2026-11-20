@@ -1,0 +1,11 @@
+{
+  "name": "pyrox-xtreme",
+  "description": "Write extreme value analyses in JAX and NumPyro on pyrox-xtreme — GEV, GPD, Gumbel, Fréchet and Weibull as NumPyro distributions that work in NUTS and SVI, stable densities, quantiles and return levels through ξ = 0, non-stationary return levels, temporal / spatial / spatiotemporal point processes (Poisson, renewal, Hawkes, marked, thinned) as equinox operators and NumPyro likelihoods, and xarray block maxima, thresholds and declustering — instead of hand-rolling EVT formulas, Poisson likelihoods and extraction code.",
+  "author": {
+    "name": "jejjohnson"
+  },
+  "homepage": "https://jejjohnson.github.io/pyrox/agents/",
+  "repository": "https://github.com/jejjohnson/pyrox",
+  "license": "MIT",
+  "keywords": ["jax", "numpyro", "extreme-value-theory", "gev", "gpd", "return-levels", "point-processes", "xarray"]
+}

@@ -1,0 +1,88 @@
+[project]
+name = "pyrox-xtreme"
+version = "0.0.4"
+description = "Extreme value modelling in JAX and NumPyro: GEV, GPD, Gumbel, Fréchet and Weibull distributions, temporal, spatial and spatiotemporal point processes, and xarray extraction of block maxima and threshold exceedances."
+authors = [
+    {name="J. Emmanuel Johnson", email="jemanjohnson34@gmail.com"},
+]
+license = "MIT"
+license-files = ["LICENSE"]
+readme = "README.md"
+keywords = ["jax", "numpyro", "extreme-value-theory", "gev", "gpd", "point-processes", "xarray"]
+requires-python = ">=3.12"
+classifiers = [
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Natural Language :: English",
+    "Intended Audience :: Science/Research",
+    "Development Status :: 2 - Pre-Alpha",
+]
+# No pyrox: the distributions and point processes use nothing from the bridge
+# (tests/test_xtreme_import_guard.py). The version continues xtremax's (0.0.4).
+dependencies = [
+    # numpyro >= 0.21 restored support for the jax internals that moved in
+    # jax 0.7; keep the ceiling below the next major as a guard rail.
+    "jax>=0.4,<0.13",
+    "jaxlib>=0.4,<0.13",
+    "numpyro>=0.21",
+    "xarray>=2024.0",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pandas>=2",
+    "jaxtyping>=0.2",
+    "einops>=0.7",
+    "equinox>=0.11",
+]
+
+[project.optional-dependencies]
+threshold = [
+    "scikit-learn>=1.3",
+]
+
+[project.urls]
+Repository = "https://github.com/jejjohnson/pyrox"
+
+[dependency-groups]
+# Re-executes the example notebooks in docs/xtreme/notebooks (they ship
+# pre-executed; the docs build never runs them). The latent-ODE notebook uses
+# diffrax, interpax and optax. `uv sync --package pyrox-xtreme --group notebooks`.
+notebooks = [
+    "diffrax>=0.7.2",
+    "interpax>=0.3.14",
+    "optax>=0.2.8",
+    "matplotlib>=3.8",
+    "watermark>=2.4",
+    "ipykernel>=7.2.0",
+    "nbconvert>=7.16.6",
+]
+# Re-runs the spatial-extremes tutorials in docs/xtreme/tutorials/spatial_extremes,
+# which also ship pre-executed and need CDS credentials and data (see the
+# tutorial index). pyrox resolves to the workspace member.
+tutorials = [
+    "xrreader[cds-insitu]",
+    "pyrox",
+    "optax>=0.2",
+    "diffrax>=0.7.2",
+    "cartopy>=0.22",
+    "shapely>=2.0",
+    "pyproj>=3.6",
+    "matplotlib>=3.8",
+    "pandas>=2.0",
+    "seaborn>=0.13",
+    "loguru>=0.7",
+    "ipykernel>=7.2.0",
+    "nbconvert>=7.16.6",
+]
+
+[tool.uv.sources]
+# xrreader is not on PyPI; the tutorials group resolves it from GitHub.
+xrreader = { git = "https://github.com/jejjohnson/xrreader.git" }
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pyrox_xtreme"]

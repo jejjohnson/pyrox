@@ -41,7 +41,8 @@ PKGROOTS ?= packages/pyrox/src/pyrox \
             packages/pyrox-nn/src/pyrox_nn \
             packages/pyrox-lgm/src/pyrox_lgm \
             packages/pyrox-ssm/src/pyrox_ssm \
-            packages/pyrox-gauss/src/pyrox_gauss
+            packages/pyrox-gauss/src/pyrox_gauss \
+            packages/pyrox-xtreme/src/pyrox_xtreme
 
 # ---------------------------------------------------------------------------
 # ANSI colours

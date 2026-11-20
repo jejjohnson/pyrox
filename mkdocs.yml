@@ -33,7 +33,7 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
-          paths: [packages/pyrox/src, packages/pyrox-gp/src, packages/pyrox-nn/src, packages/pyrox-lgm/src, packages/pyrox-ssm/src, packages/pyrox-gauss/src]
+          paths: [packages/pyrox/src, packages/pyrox-gp/src, packages/pyrox-nn/src, packages/pyrox-lgm/src, packages/pyrox-ssm/src, packages/pyrox-gauss/src, packages/pyrox-xtreme/src]
           options:
             docstring_style: google
             docstring_section_style: table
@@ -82,6 +82,16 @@ nav:
       - LGM: api/lgm.md
       - SSM: api/ssm.md
       - Gauss: api/gauss.md
+      - Xtreme:
+          - Overview: api/xtreme/index.md
+          - Distributions: api/xtreme/distributions.md
+          - Primitives: api/xtreme/primitives.md
+          - Extraction: api/xtreme/extraction.md
+          - "Point Processes — Overview": api/xtreme/point-processes.md
+          - "Point Processes — Primitives": api/xtreme/point-process-primitives.md
+          - "Point Processes — Operators": api/xtreme/point-process-operators.md
+          - "Point Processes — Distributions": api/xtreme/point-process-distributions.md
+          - Simulations: api/xtreme/simulations.md
       - Inference: api/inference.md
       - Preprocessing: api/preprocessing.md
       - Estimator: api/api.md
@@ -116,6 +126,63 @@ nav:
           - "Non-Gaussian Markov GP Inference — Laplace, Gauss–Newton, Posterior Linearisation and EP": notebooks/ssm/markov_gp_nongauss.ipynb
           - "Training a Markov GP — Maximum Likelihood, NUTS, Variational Inference and Identifiability": notebooks/ssm/markov_gp_training.ipynb
           - "Sparse Variational Markov GP — Inducing Times, Non-Gaussian Likelihoods and NumPyro": notebooks/ssm/sparse_markov_gp.ipynb
+  - Extremes (pyrox-xtreme):
+      - Overview: xtreme/index.md
+      - "Examples":
+          - "Extreme Value Distributions":
+              - "EVT Distributions: A Visual & Physical Tour": xtreme/notebooks/evt_distributions_overview.ipynb
+              - "GEVD: Annual Maxima from Block-Maxima": xtreme/notebooks/evt_gevd_block_maxima.ipynb
+              - "Fréchet (Type II): Heavy-Tailed Block Maxima": xtreme/notebooks/evt_frechet_heavy_tails.ipynb
+              - "Weibull (Type III): Bounded Extremes": xtreme/notebooks/evt_weibull_bounded.ipynb
+          - "Peaks Over Threshold":
+              - "GPD via Peaks-Over-Threshold": xtreme/notebooks/evt_gpd_pot.ipynb
+              - "Non-Stationary Thresholds: Quantile Regression → GPD": xtreme/notebooks/evt_quantile_regression_gpd.ipynb
+          - "Non-stationary EVT":
+              - "Non-Stationary GEVD: Parametric Trend in μ(t)": xtreme/notebooks/evt_nonstat_parametric.ipynb
+              - "Non-Stationary GEVD: Non-Parametric μ(t) via P-Splines": xtreme/notebooks/evt_nonstat_splines.ipynb
+              - "Non-Stationary GEVD: Neural ODE on μ(t)": xtreme/notebooks/evt_nonstat_neural_ode.ipynb
+          - "Point Processes: Temporal":
+              - "Homogeneous Poisson Process — From Scratch and With NumPyro": xtreme/notebooks/hpp_from_scratch_and_numpyro.ipynb
+              - "Inhomogeneous Poisson Process — From Scratch and With NumPyro": xtreme/notebooks/ipp_from_scratch_and_numpyro.ipynb
+              - "Renewal Temporal Point Process — From Scratch and With NumPyro": xtreme/notebooks/renewal_from_scratch_and_numpyro.ipynb
+              - "Self-exciting Hawkes Process — From Scratch and With NumPyro": xtreme/notebooks/hawkes_from_scratch_and_numpyro.ipynb
+              - "Marked Temporal Point Process — From Scratch and With NumPyro": xtreme/notebooks/marked_from_scratch_and_numpyro.ipynb
+              - "Thinning / Observation-Operator TPP — From Scratch and With NumPyro": xtreme/notebooks/thinning_from_scratch_and_numpyro.ipynb
+          - "Point Processes: Spatial":
+              - "Homogeneous Spatial Poisson Process — From Scratch and With NumPyro": xtreme/notebooks/hpp_spatial_from_scratch_and_numpyro.ipynb
+              - "Inhomogeneous Spatial Poisson Process — From Scratch and With NumPyro": xtreme/notebooks/ipp_spatial_from_scratch_and_numpyro.ipynb
+              - "Marked Spatial Point Process — From Scratch and With NumPyro": xtreme/notebooks/marked_spatial_from_scratch_and_numpyro.ipynb
+          - "Point Processes: Spatiotemporal":
+              - "Homogeneous Spatiotemporal Poisson Process — From Scratch and With NumPyro": xtreme/notebooks/hpp_spatiotemporal_from_scratch_and_numpyro.ipynb
+              - "Inhomogeneous Spatiotemporal Poisson Process — From Scratch and With NumPyro": xtreme/notebooks/ipp_spatiotemporal_from_scratch_and_numpyro.ipynb
+              - "Marked Spatiotemporal Poisson Process — From Scratch and With NumPyro": xtreme/notebooks/marked_spatiotemporal_from_scratch_and_numpyro.ipynb
+              - "Spatiotemporal Hawkes (ETAS-style) — From Scratch and With NumPyro": xtreme/notebooks/hawkes_spatiotemporal_from_scratch_and_numpyro.ipynb
+          - "Neural / Advanced":
+              - "Latent ODE for irregularly-observed Inhomogeneous Poisson Processes": xtreme/notebooks/latent_ode_ipp.ipynb
+      - "Tutorials":
+          - "Spatial Extremes":
+              - Overview: xtreme/tutorials/spatial_extremes.md
+              - "Data":
+                  - "Iberian station data": xtreme/tutorials/spatial_extremes/00_data/00_cds_insitu_iberia.ipynb
+              - "EVT Foundations":
+                  - "From daily series to block maxima": xtreme/tutorials/spatial_extremes/01_evt_foundations/01_block_maxima.ipynb
+                  - "The GEV distribution at one station": xtreme/tutorials/spatial_extremes/01_evt_foundations/02_gev_one_station.ipynb
+                  - "The three faces of the GEV": xtreme/tutorials/spatial_extremes/01_evt_foundations/03_extremal_types.ipynb
+                  - "03 · Return levels and return periods": xtreme/tutorials/spatial_extremes/01_evt_foundations/03_return_levels.ipynb
+              - "Pooling & GPs":
+                  - "Every station on its own": xtreme/tutorials/spatial_extremes/02_pooling/04_many_stations_independent.ipynb
+                  - "Independent fits, fast: a Laplace approximation": xtreme/tutorials/spatial_extremes/02_pooling/04_many_stations_laplace.ipynb
+                  - "Borrowing strength across stations": xtreme/tutorials/spatial_extremes/02_pooling/05_hierarchical_pooling.ipynb
+                  - "A Gaussian-process primer (with `pyrox`)": xtreme/tutorials/spatial_extremes/02_pooling/06_gp_primer.ipynb
+              - "Spatial GEV":
+                  - "A spatial GEV: location as a Gaussian process": xtreme/tutorials/spatial_extremes/03_spatial_gev/07_spatial_gp_mu.ipynb
+                  - "Two fields: a spatial location *and* a spatial scale": xtreme/tutorials/spatial_extremes/03_spatial_gev/08_spatial_gp_mu_sigma.ipynb
+                  - "Three fields: a fully non-stationary spatial GEV": xtreme/tutorials/spatial_extremes/03_spatial_gev/09_spatial_gp_mu_sigma_xi.ipynb
+              - "Non-stationary":
+                  - "Non-stationary extremes: a parametric trend": xtreme/tutorials/spatial_extremes/04_nonstationary/10_nonstationary_parametric.ipynb
+                  - "Non-stationary extremes: a mechanistic ODE": xtreme/tutorials/spatial_extremes/04_nonstationary/11_nonstationary_ode.ipynb
+                  - "Non-stationary extremes: a state-space Gaussian process": xtreme/tutorials/spatial_extremes/04_nonstationary/12_nonstationary_gp.ipynb
+      - "Ecosystem interop: pipekit & NumPyro": xtreme/interop.md
   - Explainers:
       - "Averaging kernel vs KISS-GP": explainers/averaging_kernel_kiss_gp.md
   - Contributing: contributing.md
