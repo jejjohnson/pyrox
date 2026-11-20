@@ -54,6 +54,8 @@ None of it is new machinery. Every log-determinant, solve, sample, Kalman filter
 
 pyrox-gauss is one package of the pyrox workspace; the [workspace README](../../README.md) introduces the others.
 
+<p align="center"><img src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_gauss_overview/pyrox_gauss_overview.png" alt="pyrox-gauss in one picture: you supply a mean and a covariance or precision as a lineax operator, a state-space model, or a gaussx GMRF field; one Gaussian log density whose cost is set by the structure, where a Kronecker covariance factorises its two small factors, a precision needs a product and no solve, and a series sums one-step prediction errors by a Kalman filter; pyrox-gauss offers the multivariate normals, the state-space densities, the Gauss-Markov chain and the GMRF distribution, with KL in closed form; out comes a NumPyro site with its exact log density, samples and moments, and a closed-form KL; gaussx and lineax, NumPyro, JAX and Equinox, and einx and jaxtyping underneath" width="100%"></p>
+
 ## 🌟 Highlights
 
 - 🧮 **Any operator as a covariance or a precision**: `MultivariateNormal` takes $`\boldsymbol{\Sigma}`$ and `MultivariateNormalPrecision` takes $`\boldsymbol{\Lambda}`$ as any lineax operator (Kronecker, block-diagonal, low-rank, diagonal, tridiagonal, dense), and both accept a gaussx solver strategy.
@@ -203,6 +205,15 @@ that is, the log density of each draw under its structured distribution, and how
 
 ## 🔬 What else is in the box
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_gauss_roles/pyrox_gauss_roles-dark.svg">
+    <img alt="pyrox-gauss on the GeoStack role ladder: the log density, a sample and the KL between two Gaussians as algorithms; the multivariate normals in covariance and precision form, the linear-Gaussian state-space models and their factory, the Gauss-Markov chain, the GMRF distribution and the abstract normal as models; gaussx's solver strategies, borrowed, as strategies; the moments, matrices and chain forms read off a density as primitives; lineax's and gaussx's operators and gaussx's GMRF fields, borrowed, as structure; the NumPyro calls every distribution is used through beside the ladder" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_gauss_roles/pyrox_gauss_roles-light.svg" width="100%">
+  </picture>
+</p>
+
+Each public name sits on one rung of the GeoStack role ladder, by the job it does; the table below lists them by area.
+
 `pyrox_gauss` is one namespace; its `__all__` holds every name below.
 
 | Area | Symbols | Notes |
@@ -223,6 +234,13 @@ Importing `pyrox_gauss` also registers the closed-form `kl_divergence` between i
 
 ## 🧩 Ecosystem
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_gauss_ecosystem/pyrox_gauss_ecosystem-dark.svg">
+    <img alt="Packages that import pyrox-gauss: pyrox-gp (MultivariateNormal and MultivariateNormalPrecision), pyrox-ssm (MultivariateNormal, and LGSSM, MaskedLGSSM and LGSSMFactory through its flows extra) and pyrox-lgm (GMRFDistribution), all in the pyrox workspace; pyrox-gauss builds on gaussx, lineax, NumPyro, JAX, Equinox, einx and jaxtyping" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_gauss_ecosystem/pyrox_gauss_ecosystem-light.svg" width="100%">
+  </picture>
+</p>
+
 pyrox-gauss is a package of the pyrox [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/), in the GeoML tier of the [GeoStack](https://github.com/jejjohnson/geostack), and sits at its floor beside the pyrox core. It owns the NumPyro face of gaussx's Gaussians, and composes the rest in:
 
 | Concern | Owner |
@@ -233,7 +251,7 @@ pyrox-gauss is a package of the pyrox [uv workspace](https://docs.astral.sh/uv/c
 | Distributions as pytrees | [`equinox`](https://github.com/patrick-kidger/equinox) |
 | Axis-naming array operations and shape annotations | [`einx`](https://github.com/fferflo/einx) and [`jaxtyping`](https://github.com/patrick-kidger/jaxtyping) |
 
-Dependencies point one way. pyrox-gauss imports neither the pyrox core nor a sibling ([`test_gauss_import_guard.py`](tests/test_gauss_import_guard.py) checks it). Three siblings import it: pyrox-gp takes `MultivariateNormal` for its GP priors and `MultivariateNormalPrecision` for `NaturalGuide`; pyrox-ssm takes `MultivariateNormal` for its sparse prior and, in `pyrox_ssm.flows` (its `flows` extra), `LGSSM` and `MaskedLGSSM`; pyrox-lgm takes `GMRFDistribution` for each component's NumPyro face. Nothing outside the workspace imports it.
+Dependencies point one way. pyrox-gauss imports neither the pyrox core nor a sibling ([`test_gauss_import_guard.py`](tests/test_gauss_import_guard.py) checks it). Three siblings import it: pyrox-gp takes `MultivariateNormal` for its GP priors and `MultivariateNormalPrecision` for `NaturalGuide`; pyrox-ssm takes `MultivariateNormal` for its sparse prior and, in `pyrox_ssm.flows` (its `flows` extra), `LGSSM`, `MaskedLGSSM` and `LGSSMFactory`; pyrox-lgm takes `GMRFDistribution` for each component's NumPyro face. Nothing outside the workspace imports it.
 
 ## 🌳 Repository layout
 
