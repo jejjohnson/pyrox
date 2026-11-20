@@ -8,6 +8,7 @@ ember gradient; each package gets its own glyph:
     pyrox-gp   GP mean with a credible band and data
     pyrox-nn   a small network with a distribution over its weights
     pyrox-lgm  a GMRF lattice with one node's neighbourhood ringed
+    pyrox-xtreme  a long-tailed density, its return level and one event past it
 
 Diagrams come in a light and a dark variant for GitHub's
 ``<picture>`` / ``prefers-color-scheme`` switch.
@@ -123,11 +124,25 @@ def glyph_lattice() -> str:
     )
 
 
+def glyph_tail() -> str:
+    """A long-tailed density, its return level and one event past it."""
+    curve = "M16 100 C30 100 36 34 50 34 C62 34 70 78 86 90 C96 97 104 99 112 100"
+    return (
+        f'<path d="{curve} Z" fill="{W}" fill-opacity="0.28"/>'
+        f'<path d="{curve}" fill="none" stroke="{W}" stroke-width="4.5" '
+        'stroke-linecap="round"/>'
+        f'<path d="M92 28 L92 100" stroke="{W}" stroke-width="3.5" '
+        'stroke-dasharray="6 5" stroke-linecap="round"/>'
+        f'<circle cx="104" cy="44" r="7" fill="{W}"/>'
+    )
+
+
 GLYPHS = {
     "pyrox": glyph_plate,
     "pyrox-gp": glyph_band,
     "pyrox-nn": glyph_network,
     "pyrox-lgm": glyph_lattice,
+    "pyrox-xtreme": glyph_tail,
 }
 
 
