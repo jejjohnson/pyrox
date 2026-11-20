@@ -1,6 +1,6 @@
 ---
 name: distribution-reviewer
-description: Read-only reviewer that checks an pyrox-xtreme diff for extreme-value and point-process numerical defects — hard branches or 0/0 at the ξ → 0 Gumbel / exponential limit, catastrophic cancellation in tails, quantiles, return levels and moments, wrong behaviour outside the support or at its endpoint, supports that break biject_to / NUTS, broken NumPyro Distribution contracts (batch shapes, validate_args, expand, sample keys), NaN gradients from discarded jnp.where branches or padded slots, wrong compensators or thinning bounds, float32 failures, and Monte Carlo tolerances without provenance. Use proactively on any change to src/pyrox_xtreme or its tests, before committing or during code review.
+description: Read-only reviewer that checks an pyrox-xtreme diff for extreme-value and point-process numerical defects — hard branches or 0/0 at the ξ → 0 Gumbel / exponential limit, catastrophic cancellation in tails, quantiles, return levels and moments, wrong behaviour outside the support or at its endpoint, supports that break biject_to / NUTS, broken NumPyro Distribution contracts (batch shapes, validate_args, expand, sample keys), NaN gradients from discarded jnp.where branches or padded slots, wrong compensators or thinning bounds, float32 failures, and Monte Carlo tolerances without provenance. Use proactively on any change to packages/pyrox-xtreme/src/pyrox_xtreme or its tests, before committing or during code review.
 tools: Read, Grep, Glob, Bash
 ---
 

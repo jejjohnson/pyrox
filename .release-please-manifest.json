@@ -4,5 +4,6 @@
   "packages/pyrox-nn": "0.2.0",
   "packages/pyrox-lgm": "0.1.3",
   "packages/pyrox-ssm": "0.2.0",
-  "packages/pyrox-gauss": "0.0.0"
+  "packages/pyrox-gauss": "0.0.0",
+  "packages/pyrox-xtreme": "0.0.4"
 }

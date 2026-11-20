@@ -1,17 +1,17 @@
 ---
 name: add-point-process
-description: Add a point-process family to pyrox-xtreme — or a missing layer of one — across the three layers in src/pyrox_xtreme/point_processes (pure primitives → equinox operator → NumPyro Distribution wrapper), keeping the padded contiguous-mask buffers, typed NamedTuple sample results, explicit keys, the shared operator mixins and the cross-family invariants. Use when asked to add, port or fix a temporal, spatial, spatiotemporal, marked, self-exciting (Hawkes / ETAS), renewal, Cox or thinned point process, its intensity, compensator, log-likelihood, sampler or goodness-of-fit diagnostics.
+description: Add a point-process family to pyrox-xtreme — or a missing layer of one — across the three layers in packages/pyrox-xtreme/src/pyrox_xtreme/point_processes (pure primitives → equinox operator → NumPyro Distribution wrapper), keeping the padded contiguous-mask buffers, typed NamedTuple sample results, explicit keys, the shared operator mixins and the cross-family invariants. Use when asked to add, port or fix a temporal, spatial, spatiotemporal, marked, self-exciting (Hawkes / ETAS), renewal, Cox or thinned point process, its intensity, compensator, log-likelihood, sampler or goodness-of-fit diagnostics.
 ---
 
 # Add a point process
 
 Read "3. Point processes" under "The contracts" in `AGENTS.md` and the
-package docstring of `src/pyrox_xtreme/point_processes/__init__.py` (the
+package docstring of `packages/pyrox-xtreme/src/pyrox_xtreme/point_processes/__init__.py` (the
 padded-buffer invariant and the sample-result convention) first.
 
 ## 1. Make sure it does not exist yet
 
-- `docs/api/capabilities.md`, sections `pyrox_xtreme.point_processes*`: HPP,
+- `docs/capabilities.md`, sections `pyrox_xtreme.point_processes*`: HPP,
   IPP, renewal (any NumPyro inter-event law), exponential and general
   Hawkes, spatiotemporal (ETAS-style) Hawkes, marked (temporal, spatial,
   spatiotemporal), thinning; quadrature (`integrate_log_intensity*`),
@@ -26,7 +26,7 @@ padded-buffer invariant and the sample-result convention) first.
   `eqx.Module` passed to `GeneralHawkesProcess` (as `ExponentialKernel`
   is).
 
-## 2. Primitives (`src/pyrox_xtreme/point_processes/primitives/<family>.py`)
+## 2. Primitives (`packages/pyrox-xtreme/src/pyrox_xtreme/point_processes/primitives/<family>.py`)
 
 - Pure functions, no equinox, no NumPyro base-class machinery (a NumPyro
   distribution may be passed in as a law): `<family>_intensity`,
@@ -50,7 +50,7 @@ padded-buffer invariant and the sample-result convention) first.
   `EventHistory` (`_history.py`).
 - Export from `primitives/__init__.py` (import + `__all__`).
 
-## 3. Operator (`src/pyrox_xtreme/point_processes/operators/<family>.py`)
+## 3. Operator (`packages/pyrox-xtreme/src/pyrox_xtreme/point_processes/operators/<family>.py`)
 
 Exemplar: `RenewalProcess` (`renewal.py`); temporal IPP for the mixins
 (`temporal.py`).
@@ -71,7 +71,7 @@ Exemplar: `RenewalProcess` (`renewal.py`); temporal IPP for the mixins
   wrapper operators dispatch on the sample-result **type**.
 - Export from `operators/__init__.py`.
 
-## 4. NumPyro wrapper (`src/pyrox_xtreme/point_processes/distributions/<family>.py`)
+## 4. NumPyro wrapper (`packages/pyrox-xtreme/src/pyrox_xtreme/point_processes/distributions/<family>.py`)
 
 Exemplar: `distributions/temporal.py` (temporal),
 `distributions/hpp_spatial.py` (spatial).
@@ -93,13 +93,13 @@ Exemplar: `distributions/temporal.py` (temporal),
 
 ## 5. Docs and capability index
 
-`members:` entries on `docs/api/point-process-primitives.md`,
+`members:` entries on `docs/api/xtreme/point-process-primitives.md`,
 `point-process-operators.md` and `point-process-distributions.md` (shared
 types on `point-processes.md`); `make capabilities`. A from-scratch
 notebook, if wanted, follows the `add-notebook` skill (the existing ones
-are `docs/notebooks/<family>_from_scratch_and_numpyro.ipynb`).
+are `docs/xtreme/notebooks/<family>_from_scratch_and_numpyro.ipynb`).
 
-## 6. Tests (`tests/point_processes/`)
+## 6. Tests (`packages/pyrox-xtreme/tests/point_processes/`)
 
 - `test_primitives_<family>.py`: closed forms (counts, compensators,
   log-likelihoods) on hand-built sequences; padded slots inert, including
@@ -122,8 +122,8 @@ are `docs/notebooks/<family>_from_scratch_and_numpyro.ipynb`).
 ## 7. Verify
 
 ```bash
-uv run pytest -n auto tests/point_processes   # every lane: no addopts filter
-uv run pytest tests/test_docs_api_coverage.py tests/test_capabilities.py
+uv run pytest --no-cov tests/point_processes   # every lane: no addopts filter
+uv run pytest packages/pyrox-xtreme/tests/test_xtreme_docs_api_coverage.py packages/pyrox/tests/test_capabilities.py
 ```
 
 then the `pre-pr-check` skill.

@@ -72,7 +72,7 @@ fails under `jit`, `grad`, NUTS, float32 or a batch.
 | Library | pyrox-xtreme uses it for | The rule it brings |
 |---|---|---|
 | **NumPyro** | `Distribution` base, constraints, `biject_to`, `promote_shapes`, `validate_sample`, inference | Distributions declare `arg_constraints`, a `support` whose bijector works for half-unbounded supports, a `batch_shape`, and take `validate_args`; samples come from an explicit key. |
-| **jax** | All maths: `jit`, `grad`, `vmap`, PRNG keys | Pure functions, explicit keys, no Python control flow on traced values. The suite runs with x64 **off** (float32), so float32 accuracy is a requirement, not a bonus. |
+| **jax** | All maths: `jit`, `grad`, `vmap`, PRNG keys | Pure functions, explicit keys, no Python control flow on traced values. CI runs this suite with x64 **off** (float32), so float32 accuracy is a requirement, not a bonus. |
 | **equinox** | Point-process operators, domains, `EventHistory` | Operators are immutable `eqx.Module` pytrees; parameters are array leaves (so a gradient update flows into sampling and log-probs without rebuilding); sizes and flags are static. |
 | **jaxtyping** | Shape annotations (`Float[Array, ...]`, `PRNGKeyArray`) | Annotate public array arguments and returns. |
 | **xarray** (+ NumPy, dask) | The extraction interface | Take and return `xr.DataArray`; keep coordinates, dims and attrs; stay dask-friendly (`xr.apply_ufunc(..., dask="parallelized")`). |
@@ -287,7 +287,7 @@ The `[threshold]` extra (scikit-learn) is in the dev group, so `tests/test_xtrem
 | `slow` | samplers, Monte Carlo, `jit` + `grad` sweeps | no workflow; run the slow tests of what you touched locally |
 
 - Add `@pytest.mark.slow` to any new test that draws point-process realisations or does a statistical check; sampler-heavy modules set `pytestmark` at module level instead. Mark by behaviour, not by stopwatch.
-X64_NOTE
+- **x64 is off in CI.** The root `conftest.py` turns x64 on for the workspace; CI runs this package with `PYROX_TEST_X64=0`, so the float32 contract stays tested, and the suite also passes with x64 on (a whole-workspace run). Reproduce a CI job with `PYROX_TEST_X64=0 uv run pytest -m "not slow and not integration" -o addopts="" --cov=packages/pyrox-xtreme/src --cov-fail-under=75 packages/pyrox-xtreme/tests`; its coverage gate is 75 %, below the workspace's 80 % (it was 40 % in xtremax). Never call `jax.config.update("jax_enable_x64", …)` in a test; a float64 check runs in a subprocess, as `TestFloat64Isolation` in `tests/test_xtreme_oracles.py` does.
 
 ### Tests that assert on random draws
 

@@ -5,7 +5,7 @@
     "name": "jejjohnson"
   },
   "homepage": "https://jejjohnson.github.io/pyrox/agents/",
-  "repository": "https://github.com/jejjohnson/xtremax",
+  "repository": "https://github.com/jejjohnson/pyrox",
   "license": "MIT",
   "keywords": ["jax", "numpyro", "extreme-value-theory", "gev", "gpd", "return-levels", "point-processes", "xarray"]
 }

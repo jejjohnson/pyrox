@@ -45,7 +45,7 @@ threshold = [
 Repository = "https://github.com/jejjohnson/pyrox"
 
 [dependency-groups]
-# Re-executes the example notebooks in docs/notebooks/xtreme (they ship
+# Re-executes the example notebooks in docs/xtreme/notebooks (they ship
 # pre-executed; the docs build never runs them). The latent-ODE notebook uses
 # diffrax, interpax and optax. `uv sync --package pyrox-xtreme --group notebooks`.
 notebooks = [
@@ -57,7 +57,7 @@ notebooks = [
     "ipykernel>=7.2.0",
     "nbconvert>=7.16.6",
 ]
-# Re-runs the spatial-extremes tutorials in docs/notebooks/xtreme/spatial_extremes,
+# Re-runs the spatial-extremes tutorials in docs/xtreme/tutorials/spatial_extremes,
 # which also ship pre-executed and need CDS credentials and data (see the
 # tutorial index). pyrox resolves to the workspace member.
 tutorials = [

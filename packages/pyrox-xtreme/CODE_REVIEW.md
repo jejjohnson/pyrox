@@ -43,13 +43,13 @@ git --no-pager diff --no-prefix --unified=100000 --minimal "$BASE_BRANCH"...HEAD
 ## Review Checklist
 
 Skip anything ruff, ty or the tests already enforce (formatting, import
-order, a public name missing from `docs/api/`); review what they cannot
+order, a public name missing from `docs/api/xtreme/`); review what they cannot
 see.
 
 ### 1. Reuse and boundaries
 
 - Every function, class or module the diff **adds** has been checked
-  against [`docs/api/capabilities.md`](docs/api/capabilities.md) and the
+  against [`../../docs/capabilities.md`](../../docs/capabilities.md) and the
   shared helpers (`primitives/_common.py`, `primitives/_moments.py`,
   `distributions/_support.py`, `_rng.py`, `point_processes/operators/_base.py`,
   the point-process `_domain` / `_history` / `_results` / `_integration*`
@@ -137,15 +137,16 @@ see.
 
 - New names: in their subpackage `__all__` (and the top-level
   `src/pyrox_xtreme/__init__.py` for distributions and `pyrox_xtreme.primitives`), in
-  the `members:` list of the right section of their `docs/api/*.md` page,
-  and `docs/api/capabilities.md` regenerated (`make capabilities`).
+  the `members:` list of the right section of their `docs/api/xtreme/*.md` page,
+  and `../../docs/capabilities.md` regenerated (`make capabilities`).
 - Docstrings: Google style (NumPy style in `extraction/`); the formula, the
   parameterisation and its relation to scipy's sign convention, a
   reference for a published method, and an `Examples:` block that is
   correct (no test runs it).
-- Prose pages use MyST directives and `xref:api#pyrox-xtreme.<module>.<name>`;
-  notebook basenames stay unique; new notebooks join the `docs/myst.yml`
-  toc and are committed executed.
+- Prose pages are MkDocs Markdown (admonitions as `!!! note`, API links as
+  `[name][pyrox_xtreme.<module>.<name>]`); notebook basenames stay unique;
+  new notebooks join the `mkdocs.yml` nav under "Extremes" and are
+  committed executed.
 
 ### 7. Tests
 
@@ -174,7 +175,7 @@ see.
 
 ---
 
-## xtremax-Specific Checks
+## pyrox-xtreme-Specific Checks
 
 ### Smooth through the Gumbel limit
 

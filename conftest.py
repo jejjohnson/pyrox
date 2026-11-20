@@ -20,13 +20,17 @@ before collection begins.
 
 from __future__ import annotations
 
+import os
 import warnings
 
 import jax
 import pytest
 
 
-jax.config.update("jax_enable_x64", True)
+# PYROX_TEST_X64=0 leaves x64 off: CI runs pyrox-xtreme that way, because
+# float32 accuracy is one of its contracts (packages/pyrox-xtreme/AGENTS.md).
+if os.environ.get("PYROX_TEST_X64", "1") != "0":
+    jax.config.update("jax_enable_x64", True)
 
 
 @pytest.fixture(autouse=True)

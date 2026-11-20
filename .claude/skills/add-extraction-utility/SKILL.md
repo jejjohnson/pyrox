@@ -1,6 +1,6 @@
 ---
 name: add-extraction-utility
-description: Add an xarray-native extremes extraction utility to pyrox-xtreme — block maxima (temporal, spatial, sliding, r-largest, declustered), a threshold-selection rule, a declustering method or extremal-index estimator — in src/pyrox_xtreme/extraction, keeping DataArray in / DataArray out, coordinates and attrs, missing-data rules and dask support, with NumPy-style docstrings, tests and docs. Use when asked to add, port or fix block-maxima extraction, peaks-over-threshold thresholds, declustering, run lengths or extremal-index estimation on xarray data.
+description: Add an xarray-native extremes extraction utility to pyrox-xtreme — block maxima (temporal, spatial, sliding, r-largest, declustered), a threshold-selection rule, a declustering method or extremal-index estimator — in packages/pyrox-xtreme/src/pyrox_xtreme/extraction, keeping DataArray in / DataArray out, coordinates and attrs, missing-data rules and dask support, with NumPy-style docstrings, tests and docs. Use when asked to add, port or fix block-maxima extraction, peaks-over-threshold thresholds, declustering, run lengths or extremal-index estimation on xarray data.
 ---
 
 # Add an extraction utility
@@ -9,7 +9,7 @@ Read "4. Extraction and simulations" under "The contracts" in `AGENTS.md`.
 
 ## 1. Make sure it does not exist yet
 
-`docs/api/capabilities.md`, section `pyrox_xtreme.extraction`:
+`docs/capabilities.md`, section `pyrox_xtreme.extraction`:
 `temporal_block_maxima`, `spatial_block_maxima`, `sliding_block_maxima`,
 `r_largest_block_maxima`, `declustered_block_maxima`; `constant_threshold`,
 `quantile_threshold`, `temporal_threshold`, `seasonal_threshold`,
@@ -21,7 +21,7 @@ option of one of these (`keep_time=` records where each maximum occurred,
 Plain xarray (`resample`, `rolling`, `quantile`, `groupby`) is fine inside
 them; don't wrap a one-liner in a new public function.
 
-## 2. Write it (`src/pyrox_xtreme/extraction/<module>.py`)
+## 2. Write it (`packages/pyrox-xtreme/src/pyrox_xtreme/extraction/<module>.py`)
 
 - Take an `xr.DataArray` first; name the dimension it acts on as a
   parameter (`dim="time"` / `time_dim="time"`, or `dims=` for several);
@@ -49,9 +49,9 @@ them; don't wrap a one-liner in a new public function.
 `extraction/__init__.py` (import + `__all__`); the `members:` list of the
 right section (Block maxima / Threshold selection / Declustering & the
 extremal index / Quantile-regression thresholds) on
-`docs/api/extraction.md`; `make capabilities`.
+`docs/api/xtreme/extraction.md`; `make capabilities`.
 
-## 4. Tests (`tests/test_extraction.py`)
+## 4. Tests (`packages/pyrox-xtreme/tests/test_xtreme_extraction.py`)
 
 - A small synthetic `DataArray` with known maxima / exceedances (see the
   fixture at the top of the file); results checked value by value, plus
@@ -65,14 +65,14 @@ extremal index / Quantile-regression thresholds) on
   so run it locally with `uv run --with dask pytest …` — CI skips it.
 - Every parameter has an effect (`TestIgnoredParameters` pins ones that
   used to be silently ignored).
-- Anything needing scikit-learn goes in `tests/test_quantile_regression.py`
+- Anything needing scikit-learn goes in `packages/pyrox-xtreme/tests/test_xtreme_quantile_regression.py`
   (module-level `pytest.importorskip("sklearn")`).
 
 ## 5. Verify
 
 ```bash
-uv run --with dask pytest -n auto tests/test_extraction.py tests/test_quantile_regression.py
-uv run pytest tests/test_docs_api_coverage.py tests/test_capabilities.py
+uv run --with dask pytest --no-cov packages/pyrox-xtreme/tests/test_xtreme_extraction.py packages/pyrox-xtreme/tests/test_xtreme_quantile_regression.py
+uv run pytest packages/pyrox-xtreme/tests/test_xtreme_docs_api_coverage.py packages/pyrox/tests/test_capabilities.py
 ```
 
 then the `pre-pr-check` skill.

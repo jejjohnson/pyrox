@@ -9,7 +9,7 @@ structure. pyrox ships three things that let them find it.
 
 ## The capability index
 
-The [capability index](capabilities.md) lists every public name in the four
+The [capability index](capabilities.md) lists every public name in the
 packages, grouped by the module that defines it, with a one-line summary;
 then the public API of gaussx, kernellib and geonnax, which pyrox builds on.
 It is regenerated from the code and checked in the test suite, so it never
@@ -34,6 +34,19 @@ The plugin adds:
   "don't write it — use pyrox" table.
 - **`pyrox-reuse-reviewer`** (subagent) — a read-only check of a diff for
   modelling code pyrox already provides, and for bridge misuse.
+
+For extreme value analysis, install the second plugin, `pyrox-xtreme@pyrox`
+(`/plugin install pyrox-xtreme@pyrox`). It adds:
+
+- **`extreme-value-analysis-with-pyrox-xtreme`** (skill) — loads whenever a
+  task fits a GEV or GPD, computes a return level, models exceedances or
+  event times as a point process, or extracts block maxima or peaks over
+  threshold: what lives where, the rules (distributions as NumPyro sites,
+  initialise NUTS inside the data, scipy's sign convention, stable return
+  levels, padded event buffers, explicit keys), a worked example, and a
+  "don't write it — use pyrox-xtreme" table.
+- **`pyrox-xtreme-reuse-reviewer`** (subagent) — a read-only check of a diff
+  for extreme value code pyrox-xtreme already provides, and for misuse.
 
 ## llms.txt
 
@@ -68,6 +81,31 @@ ensemble loop or a latent Gaussian model, search the capability index
 - Check every model's site names under
   `numpyro.handlers.trace(numpyro.handlers.seed(model, 0))`, and that it
   recovers known parameters on simulated data.
+```
+
+For a project that builds on pyrox-xtreme, paste this as well:
+
+```markdown
+## Extreme values: build on pyrox-xtreme
+
+This project uses pyrox-xtreme for extreme value analysis (NumPyro EVT
+distributions, stable return levels, point processes, xarray extraction).
+Before writing a GEV / GPD density, a quantile or return level, a Poisson or
+Hawkes likelihood, or block-maxima / threshold / declustering code, search
+the capability index (https://jejjohnson.github.io/pyrox/capabilities/) or
+the subpackages' `__all__`, and compose what exists:
+
+- Likelihoods are `numpyro.sample(..., pyrox_xtreme.GeneralizedExtremeValueDistribution(loc, scale, concentration), obs=y)`
+  (or `GeneralizedParetoDistribution`); ragged records use `.mask(m)`.
+- Return levels and tails come from `pyrox_xtreme.primitives.gev_return_level` /
+  `gpd_return_level` (or `d.return_level(T)` on a GEV or GPD) and
+  `*_survival`, never `icdf(1 - 1/T)` or `1 - cdf`.
+- Start NUTS with `init_strategy=init_to_median` and data-scale priors; the
+  default init can strand a GEV fit at ξ < -1.
+- scipy's `genextreme` takes `c = -ξ`.
+- Block maxima, thresholds and declustering come from `pyrox_xtreme.extraction`;
+  event-time models from `pyrox_xtreme.point_processes`.
+- Pass an explicit, freshly split PRNG key to every random routine.
 ```
 
 ## Working on pyrox itself

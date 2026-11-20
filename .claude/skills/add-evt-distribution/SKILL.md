@@ -1,6 +1,6 @@
 ---
 name: add-evt-distribution
-description: Add an extreme value distribution to pyrox-xtreme — or a new quantity (a moment, a tail function, a return level variant) to an existing one — as a pure-JAX primitive in src/pyrox_xtreme/primitives plus a NumPyro Distribution class in src/pyrox_xtreme/distributions that routes to it, smooth through the ξ → 0 limit, with a support NUTS can use, scipy-oracle and gradient tests, docs and the capability index. Use when asked to add, port or fix an EVT family (GEV, GPD, Gumbel, Fréchet, Weibull, a new one), a density / CDF / quantile / moment / return-level computation, or a non-stationary or spatial EVT primitive.
+description: Add an extreme value distribution to pyrox-xtreme — or a new quantity (a moment, a tail function, a return level variant) to an existing one — as a pure-JAX primitive in packages/pyrox-xtreme/src/pyrox_xtreme/primitives plus a NumPyro Distribution class in packages/pyrox-xtreme/src/pyrox_xtreme/distributions that routes to it, smooth through the ξ → 0 limit, with a support NUTS can use, scipy-oracle and gradient tests, docs and the capability index. Use when asked to add, port or fix an EVT family (GEV, GPD, Gumbel, Fréchet, Weibull, a new one), a density / CDF / quantile / moment / return-level computation, or a non-stationary or spatial EVT primitive.
 ---
 
 # Add an EVT distribution or quantity
@@ -10,7 +10,7 @@ Read "1. Primitives" and "2. EVT distributions" under "The contracts" in
 
 ## 1. Make sure it does not exist yet
 
-- Search `docs/api/capabilities.md` (`pyrox_xtreme.primitives`,
+- Search `docs/capabilities.md` (`pyrox_xtreme.primitives`,
   `pyrox_xtreme.distributions`). Fréchet and Weibull are the GEV restricted to
   ξ > 0 / ξ < 0, Gumbel the ξ = 0 limit and the exponential the GPD's: a
   re-parameterisation of an existing family is a thin wrapper over its
@@ -29,7 +29,7 @@ Read "1. Primitives" and "2. EVT distributions" under "The contracts" in
   `primitives/nonstationary.py` and `primitives/spatial.py`; GP priors on
   parameters belong to a GP library, not here.
 
-## 2. The primitive first (`src/pyrox_xtreme/primitives/<family>.py`)
+## 2. The primitive first (`packages/pyrox-xtreme/src/pyrox_xtreme/primitives/<family>.py`)
 
 - Pure functions, value first, then parameters:
   `<family>_log_prob(x, loc, scale, shape)` (drop `loc` if the family has
@@ -52,7 +52,7 @@ Read "1. Primitives" and "2. EVT distributions" under "The contracts" in
 - Module docstring with the parameterisation (and scipy's, if its sign
   differs); a one-line summary per function (the capability index uses it).
 
-## 3. The class (`src/pyrox_xtreme/distributions/<family>.py`)
+## 3. The class (`packages/pyrox-xtreme/src/pyrox_xtreme/distributions/<family>.py`)
 
 Exemplar: `GeneralizedExtremeValueDistribution` (`gevd.py`).
 
@@ -79,26 +79,26 @@ Exemplar: `GeneralizedExtremeValueDistribution` (`gevd.py`).
 ## 4. Export, docs, capability index
 
 - Primitive: `primitives/__init__.py` (import + `__all__`) and
-  `src/pyrox_xtreme/__init__.py` (import + `__all__`); the `members:` list of
-  the family's section on `docs/api/primitives.md`.
-- Class: `distributions/__init__.py`, `src/pyrox_xtreme/__init__.py`, a section
-  on `docs/api/distributions.md`, and a row in the table on
-  `docs/api/index.md` if it changes a subpackage's summary.
+  `packages/pyrox-xtreme/src/pyrox_xtreme/__init__.py` (import + `__all__`); the `members:` list of
+  the family's section on `docs/api/xtreme/primitives.md`.
+- Class: `distributions/__init__.py`, `packages/pyrox-xtreme/src/pyrox_xtreme/__init__.py`, a section
+  on `docs/api/xtreme/distributions.md`, and a row in the table on
+  `docs/api/xtreme/index.md` if it changes a subpackage's summary.
 - `make capabilities`.
 
 ## 5. Tests
 
-- `tests/test_oracles.py`: pin every quantity to `scipy.stats`
+- `packages/pyrox-xtreme/tests/test_xtreme_oracles.py`: pin every quantity to `scipy.stats`
   (`genextreme(c=-ξ)`, `genpareto(c=ξ)`, …) across `XI_GRID`, which
   straddles 0 — add the family to `_class_and_frozen`, `CLASS_CASES` and
   `SAMPLE_CASES`; a float64 tail check goes into `TestFloat64Isolation`'s
   subprocess script.
-- `tests/test_gradients.py`: finite-difference gradients against scipy in
+- `packages/pyrox-xtreme/tests/test_xtreme_gradients.py`: finite-difference gradients against scipy in
   the small-ξ band; add a batched instance to `_batched_distributions()` so
   every method in `NULLARY` / `UNARY_X` runs with batched parameters.
-- `tests/test_primitives.py`: round trips, the limit at ξ = 0, `jit` /
+- `packages/pyrox-xtreme/tests/test_xtreme_primitives.py`: round trips, the limit at ξ = 0, `jit` /
   `vmap`, class ↔ primitive parity (`TestClassPrimitiveParity`).
-- `tests/test_distributions.py`: add the class to `TestBijectToSupport._dists`
+- `packages/pyrox-xtreme/tests/test_xtreme_distributions.py`: add the class to `TestBijectToSupport._dists`
   (and the NUTS latent-site parametrisation) and to the PRNG-key checks in
   `TestPRNGKeyValidation`; the `shape=` alias (`TestShapeParameterAlias`).
 - Monte Carlo checks bounded by the statistic's sampling distribution with
@@ -109,9 +109,9 @@ Exemplar: `GeneralizedExtremeValueDistribution` (`gevd.py`).
 
 ```bash
 # no addopts marker filter: a bare pytest runs every lane of these files
-uv run pytest -n auto tests/test_oracles.py tests/test_gradients.py \
-  tests/test_primitives.py tests/test_distributions.py
-uv run pytest tests/test_docs_api_coverage.py tests/test_capabilities.py
+uv run pytest --no-cov packages/pyrox-xtreme/tests/test_xtreme_oracles.py packages/pyrox-xtreme/tests/test_xtreme_gradients.py \
+  packages/pyrox-xtreme/tests/test_xtreme_primitives.py packages/pyrox-xtreme/tests/test_xtreme_distributions.py
+uv run pytest packages/pyrox-xtreme/tests/test_xtreme_docs_api_coverage.py packages/pyrox/tests/test_capabilities.py
 ```
 
 then the `pre-pr-check` skill.

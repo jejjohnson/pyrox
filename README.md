@@ -35,7 +35,7 @@ Write one `__call__` and it runs unchanged under `handlers.trace`, NUTS, SVI wit
 
 ## The packages
 
-pyrox is a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) of four packages under [`packages/`](packages).
+pyrox is a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) of seven packages under [`packages/`](packages).
 Each one installs on its own and pulls in what it needs.
 
 | | Package | Import | What it holds |
@@ -46,6 +46,7 @@ Each one installs on its own and pulls in what it needs.
 | <img src="docs/assets/icon-lgm.svg" width="28" alt=""> | [`pyrox-lgm`](packages/pyrox-lgm) | `pyrox_lgm` | Latent Gaussian models in precision form: GMRF components, PC priors and `inla()` |
 |  | [`pyrox-ssm`](packages/pyrox-ssm) | `pyrox_ssm` | State-space models as NumPyro models, whose inference recurses in time: Markov (Kalman) GPs, SDE kernels, sparse and non-Gaussian Markov GPs |
 |  | [`pyrox-gauss`](packages/pyrox-gauss) | `pyrox_gauss` | Gaussian NumPyro distributions on gaussx operators: multivariate normals, `LGSSM`, `MarkovGaussian`, and `GMRFDistribution` for gaussx's GMRF fields |
+|  | [`pyrox-xtreme`](packages/pyrox-xtreme) | `pyrox_xtreme` | Extreme value distributions (GEV, GPD, Gumbel, Fréchet, Weibull) as NumPyro likelihoods, temporal / spatial / spatiotemporal point processes, and xarray block maxima, thresholds and declustering; formerly xtremax |
 
 <p align="center">
   <picture>
