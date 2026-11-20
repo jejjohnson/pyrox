@@ -22,8 +22,10 @@ the package whose inference recurses in time. ``pyrox_ssm`` never imports
   UKF, CKF, Gauss-Hermite or Monte Carlo) as a NumPyro factor.
 * Ragged sites: `pad_sites` pads per-site series to one shape and returns
   the observation mask every Markov entry point takes;
-  `markov_gp_sites_factor` scores the padded sites as one factor, and
-  `noncentred_log_normal` draws per-site hyperparameters non-centred.
+  `MarkovGPSitesPrior` holds the padded sites as one prior, with `condition`
+  returning `ConditionedMarkovGPSites`, whose `predict` gives every site at
+  any times; `markov_gp_sites_factor` scores the padded sites as one factor,
+  and `noncentred_log_normal` draws per-site hyperparameters non-centred.
 * Shared plus per-site GPs: `SharedPlusSiteMarkovGPPrior` builds a shared
   GP and one GP per site as one linear-Gaussian SSM on the merged time grid.
   `ConditionedSharedPlusSiteMarkovGP` is its conditioned form and
@@ -89,6 +91,8 @@ from pyrox_ssm._markov import (
 )
 from pyrox_ssm._nonlinear import nonlinear_ssm_factor
 from pyrox_ssm._sites import (
+    ConditionedMarkovGPSites,
+    MarkovGPSitesPrior,
     markov_gp_sites_factor,
     noncentred_log_normal,
     pad_sites,
@@ -127,6 +131,7 @@ def __getattr__(name: str):
 __all__ = [
     "ConditionedLinearGaussianSSM",
     "ConditionedMarkovGP",
+    "ConditionedMarkovGPSites",
     "ConditionedNonGaussMarkovGP",
     "ConditionedSharedPlusSiteMarkovGP",
     "ConditionedSparseMarkovGP",
@@ -138,6 +143,7 @@ __all__ = [
     "LaplaceMarkovInference",
     "LinearGaussianSSMPrior",
     "MarkovGPPrior",
+    "MarkovGPSitesPrior",
     "MaternSDE",
     "PeriodicSDE",
     "PosteriorLinearizationMarkov",

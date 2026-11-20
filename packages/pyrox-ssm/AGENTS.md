@@ -13,7 +13,7 @@ One facade, `pyrox_ssm` (`__init__.py` re-exports; implementation in private `_*
 | Markov GP (Kalman filter, RTS smoother) | `_markov.py` | `MarkovGPPrior`, `ConditionedMarkovGP`, `markov_gp_factor`, `markov_gp_sample`, `markov_gp_from_innovations`, `markov_gp_innovations_sample` |
 | Sparse Markov GP | `_sparse_markov.py` | `SparseMarkovGPPrior`, `ConditionedSparseMarkovGP`, `sparse_markov_elbo`, `sparse_markov_factor` |
 | Non-Gaussian likelihoods | `_inference_nongauss_markov.py` | `LaplaceMarkovInference`, `GaussNewtonMarkovInference`, `PosteriorLinearizationMarkov`, `ExpectationPropagationMarkov`, `ConditionedNonGaussMarkovGP`, `markov_laplace_factor`, `markov_implicit_adjoint` |
-| Ragged sites (padding + observation mask) | `_sites.py` | `pad_sites` |
+| Ragged sites (padding + observation mask, one prior over the padded sites) | `_sites.py` | `pad_sites`, `MarkovGPSitesPrior`, `ConditionedMarkovGPSites`, `markov_gp_sites_factor`, `noncentred_log_normal` |
 | Shared GP plus one GP per site on a merged grid (block-diagonal LGSSM) | `_hierarchical.py` | `SharedPlusSiteMarkovGPPrior`, `ConditionedSharedPlusSiteMarkovGP`, `shared_plus_site_factor` |
 | Per-site numerics (private) | `_markov_sites.py` | `as_gaussx_likelihood`, `_cavity_site_derivatives`, `_check_scalar_latent`, `_require_gauss_hermite`, `_pushforward_moments` |
 | Normalizing Kalman filter (`[flows]`) | `flows/_markov_flow.py` | `pyrox_ssm.flows.NormalizingKalmanPrior`, `ConditionedNormalizingKalman`, `normalizing_kalman_factor` |
