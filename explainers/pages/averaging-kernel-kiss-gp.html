@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="How KISS-GP interpolation weights and the methane column averaging kernel relate: the shared H K H^T algebra, orthogonal axes, and the averaging kernel as a posterior smoother.">
+<title>Averaging Kernel vs KISS-GP</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;500&display=swap">
+<script>
+window.MathJax = {
+  tex: { inlineMath: [['\\(', '\\)']], displayMath: [['\\[', '\\]']], tags: 'none',
+    macros: { vect: ['\\mathbf{#1}', 1], mat: ['\\mathbf{#1}', 1], gvect: ['\\boldsymbol{#1}', 1], gmat: ['\\boldsymbol{#1}', 1], op: ['\\mathrm{#1}', 1] } },
+  svg: { fontCache: 'global' },
+  options: { skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'] }
+};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-svg-full.js" defer></script>
+<style>
+/* Layout: one 46rem reading column, GeoStack hydrographic palette (explainer kit, draft 4). */
+:root {
+  --paper: #F1F5F6; --panel: #E4ECEF; --ink: #0E1E28; --muted: #4E616C; --rule: #C6D3D9;
+  --sea: #0A6B68; --sea-soft: #D3E7E5; --oracle: #985710; --oracle-soft: #F3E4CF;
+  --code-bg: #E9EFF1; --unit: #5B4A9A; --unit-soft: #E6E2F3; --ex: #2F5E8C; --ex-soft: #DCE7F2;
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body: "Source Serif 4", "Iowan Old Style", Georgia, serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --step: clamp(15.5px, 1.05vw + 12px, 17.5px);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0A141A; --panel: #12212A; --ink: #DAE5EA; --muted: #8DA1AB; --rule: #23353F;
+    --sea: #52B9B1; --sea-soft: #12302F; --oracle: #E2A65C; --oracle-soft: #33240F; --code-bg: #0F1C23;
+    --unit: #B3A6EC; --unit-soft: #221D3A; --ex: #86B4E2; --ex-soft: #132536; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0A141A; --panel: #12212A; --ink: #DAE5EA; --muted: #8DA1AB; --rule: #23353F;
+  --sea: #52B9B1; --sea-soft: #12302F; --oracle: #E2A65C; --oracle-soft: #33240F; --code-bg: #0F1C23;
+  --unit: #B3A6EC; --unit-soft: #221D3A; --ex: #86B4E2; --ex-soft: #132536; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--paper); color: var(--ink); font-family: var(--body); font-size: var(--step); line-height: 1.62;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+main { max-width: 46rem; margin: 0 auto; padding-block: 2.5rem 5rem; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; line-height: 1.15; margin: 0; }
+h1 { font-size: clamp(2rem, 4vw + 1rem, 2.9rem); font-weight: 700; letter-spacing: -0.015em; }
+h2 { font-size: 1.5rem; font-weight: 700; margin-top: 3.2rem; margin-bottom: 0.9rem; }
+h3 { font-size: 1.08rem; font-weight: 600; margin-top: 2rem; margin-bottom: 0.5rem; }
+p { margin: 0 0 1rem; }
+a { color: var(--sea); text-underline-offset: 2px; }
+a:focus-visible { outline: 2px solid var(--sea); outline-offset: 3px; border-radius: 4px; }
+.eyebrow { font-family: var(--display); font-size: 0.74rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--sea); }
+.lede { font-size: 1.12rem; color: var(--muted); margin-top: 0.9rem; }
+.tag { font-family: var(--display); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+mjx-container[display="true"] { overflow-x: auto; overflow-y: hidden; padding-block: 0.25rem; margin: 0.8rem 0 !important; }
+mjx-container { color: var(--ink); }
+code { font-family: var(--mono); font-size: 0.86em; }
+.tldr { border-top: 2px solid var(--ink); padding-top: 1rem; margin-top: 2rem; }
+.tldr ul { margin: 0.6rem 0 1rem; padding-left: 1.2rem; display: grid; gap: 0.35rem; }
+.chart { display: grid; }
+.box { display: grid; grid-template-columns: 2.6rem minmax(0, 1fr); gap: 0 0.9rem; border: 1px solid var(--rule); background: var(--paper); border-radius: 6px; padding: 0.85rem 1rem; color: inherit; text-decoration: none; }
+.box:hover { border-color: var(--sea); }
+.box .num { font-family: var(--display); font-weight: 700; font-size: 1.15rem; color: var(--sea); line-height: 1.25; }
+.box .name { font-family: var(--display); font-weight: 600; font-size: 1rem; }
+.box.focus { background: var(--oracle-soft); border-color: var(--oracle); }
+.box.focus .num { color: var(--oracle); }
+.box .sig { grid-column: 1 / -1; display: grid; grid-template-columns: 2.4rem 1.15rem max-content minmax(0, 1fr); column-gap: 0.55rem; row-gap: 0.2rem; align-items: center; margin-top: 0.6rem; padding-top: 0.55rem; border-top: 1px dashed var(--rule); font-size: 0.86rem; }
+.box .sig .d { font-family: var(--display); font-weight: 600; font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.box .sig .n { white-space: nowrap; }
+.box .sig .s { display: flex; flex-wrap: wrap; gap: 0.2rem 0.4rem; align-items: center; min-width: 0; }
+.box .sig code { font-size: 0.78rem; color: var(--muted); overflow-wrap: anywhere; }
+.link { display: grid; grid-template-columns: 2.6rem 1fr; gap: 0 0.9rem; padding: 0.15rem 1rem; }
+.link span:first-child { justify-self: center; width: 1px; background: var(--rule); min-height: 1.6rem; }
+.link span:last-child { font-family: var(--display); font-size: 0.76rem; color: var(--muted); align-self: center; }
+svg.g { width: 1.15rem; height: 1.15rem; color: var(--sea); flex: none; }
+.u { display: inline-block; font-family: var(--mono); font-size: 0.74rem; line-height: 1.5; padding: 0 0.4rem; border-radius: 4px; background: var(--unit-soft); color: var(--unit); white-space: nowrap; }
+.tbl { overflow-x: auto; margin: 1rem 0 1.4rem; border-top: 1px solid var(--rule); }
+table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+th, td { text-align: left; vertical-align: top; padding: 0.55rem 0.7rem 0.55rem 0; border-bottom: 1px solid var(--rule); }
+th { font-family: var(--display); font-weight: 600; font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+td.k { font-family: var(--display); font-weight: 600; }
+td code { font-size: 0.8rem; white-space: nowrap; }
+.ex { border: 1px solid var(--ex); border-radius: 6px; overflow: hidden; margin: 1rem 0 1.4rem; }
+.ex-h { background: var(--ex-soft); padding: 0.6rem 1rem; display: flex; flex-wrap: wrap; gap: 0.2rem 0.7rem; align-items: baseline; border-bottom: 1px solid var(--ex); }
+.ex-h .tag { color: var(--ex); }
+.ex-h strong { font-family: var(--display); font-weight: 600; }
+.ex-b { padding: 0.7rem 1rem 0.3rem; font-size: 0.95rem; }
+.ex-b .tbl { margin: 0.4rem 0 0.6rem; border-top: 0; }
+.ex.mini { border-left: 3px solid var(--ex); border-top: 0; border-right: 0; border-bottom: 0; border-radius: 0 6px 6px 0; background: var(--ex-soft); padding: 0.7rem 1rem; font-size: 0.96rem; }
+.ex.mini .tag { color: var(--ex); display: block; margin-bottom: 0.25rem; }
+.ex.mini p:last-child { margin-bottom: 0; }
+.def { background: var(--panel); border-radius: 6px; padding: 0.9rem 1rem; margin: 1rem 0 1.4rem; font-size: 0.97rem; }
+.def .tag { color: var(--sea); display: block; margin-bottom: 0.3rem; }
+.def h3 { margin: 0 0 0.6rem; }
+.def p:last-child { margin-bottom: 0; }
+.where { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 0.8rem; row-gap: 0.45rem; align-items: baseline; margin: 0.4rem 0; padding-top: 0.6rem; border-top: 1px dashed var(--rule); font-size: 0.92rem; }
+.where .wl { grid-column: 1 / -1; font-family: var(--display); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.where .me { min-width: 0; }
+.where .meta { display: inline-flex; flex-wrap: wrap; gap: 0.25rem 0.45rem; align-items: baseline; margin-left: 0.5rem; }
+.where .meta .sh { font-size: 0.86rem; color: var(--muted); }
+.uc { border: 1px solid var(--unit); border-radius: 6px; margin: 1rem 0 1.4rem; overflow: hidden; }
+.uc-h { background: var(--unit-soft); padding: 0.55rem 1rem; border-bottom: 1px solid var(--unit); display: flex; flex-wrap: wrap; gap: 0.2rem 0.7rem; align-items: baseline; }
+.uc-h .tag { color: var(--unit); }
+.uc-h strong { font-family: var(--display); font-weight: 600; font-size: 0.95rem; }
+.uc-rows { padding: 0.4rem 1rem 0.6rem; display: grid; }
+.uc-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.2rem 1rem; align-items: center; padding: 0.35rem 0; border-bottom: 1px dashed var(--rule); font-size: 0.93rem; }
+.uc-row:last-child { border-bottom: 0; }
+.uc-row > div { min-width: 0; overflow-x: auto; }
+.uc-row .r { color: var(--muted); }
+.uc-row.ok .r { color: var(--sea); font-weight: 600; font-family: var(--display); font-size: 0.86rem; }
+pre { font-family: var(--mono); font-size: 0.8rem; line-height: 1.55; background: var(--code-bg); border: 1px solid var(--rule); border-radius: 6px; padding: 0.9rem 1rem; overflow-x: auto; margin: 1rem 0 1.4rem; }
+pre .c { color: var(--sea); }
+pre .mk { color: var(--oracle); }
+pre .un { color: var(--unit); }
+pre.diagram { background: var(--paper); }
+.case { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 0.8rem; margin: 1rem 0 1.4rem; }
+.case > div { border: 1px solid var(--rule); border-radius: 6px; padding: 0.8rem 1rem; font-size: 0.94rem; min-width: 0; overflow-x: auto; }
+.case .lin { border-top: 3px solid var(--sea); }
+.case .non { border-top: 3px solid var(--oracle); }
+.case .tag { display: block; margin-bottom: 0.2rem; }
+.note { border-left: 3px solid var(--oracle); background: var(--oracle-soft); padding: 0.85rem 1rem; border-radius: 0 6px 6px 0; margin: 1.2rem 0 1.4rem; font-size: 0.97rem; }
+.note .tag { color: var(--oracle); display: block; margin-bottom: 0.3rem; }
+.note p:last-child { margin-bottom: 0; }
+.series a { text-decoration: none; }
+.series { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; font-family: var(--display); font-size: 0.82rem; color: var(--muted); margin-bottom: 1.4rem; }
+footer { margin-top: 3rem; font-size: 0.88rem; color: var(--muted); border-top: 1px solid var(--rule); padding-top: 1rem; }
+footer ul { padding-left: 1.1rem; }
+.box .sig .d.par { color: var(--oracle); }
+.box .sig .d.exo { color: var(--ex); }
+.box .sig .d.est { color: var(--muted); font-style: italic; }
+.box .sig .none { color: var(--muted); font-style: italic; font-size: 0.78rem; }
+.eqs { display: grid; gap: 0.2rem; margin-top: 0.35rem; font-size: 0.95rem; min-width: 0; }
+.eqs > div { display: grid; grid-template-columns: 1.3rem minmax(0, 1fr); align-items: baseline; min-width: 0; overflow-x: auto; overflow-y: hidden; }
+.eqs .ln { font-family: var(--mono); font-size: 0.72rem; color: var(--muted); }
+.mstep { display: flex; align-items: baseline; gap: 0.5rem; margin: 1.3rem 0 0.4rem; padding-top: 0.6rem; border-top: 1px solid var(--rule); }
+.mstep:first-of-type { border-top: 0; padding-top: 0; margin-top: 0.6rem; }
+.mstep .mn { font-family: var(--display); font-weight: 700; color: var(--sea); font-size: 0.95rem; }
+.mstep .ml { font-family: var(--display); font-weight: 600; font-size: 0.95rem; }
+.mstep .mu { font-family: var(--mono); font-size: 0.72rem; color: var(--oracle); }
+.asm { display: grid; gap: 0.55rem; margin: 0.4rem 0 0.6rem; }
+.asm .a { display: grid; grid-template-columns: 2.1rem minmax(0, 1fr); gap: 0.5rem; align-items: start; background: var(--paper); border: 1px solid var(--rule); border-radius: 6px; padding: 0.55rem 0.75rem; }
+.asm .a > div { min-width: 0; }
+.asm .aid { font-family: var(--mono); font-weight: 500; font-size: 0.82rem; color: var(--oracle); padding-top: 0.15rem; }
+.asm small { display: block; color: var(--muted); font-size: 0.84rem; line-height: 1.45; margin-top: 0.2rem; }
+.asm mjx-container[display="true"] { margin: 0.35rem 0 !important; }
+@media (max-width: 560px) {
+  .uc-row { grid-template-columns: minmax(0, 1fr); }
+  .where .meta { display: flex; margin-left: 0; margin-top: 0.1rem; }
+}
+</style>
+
+<style>html { -webkit-text-size-adjust: 100%; } body { margin: 0; } img { max-width: 100%; }</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="g-scalar" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="currentColor"/></symbol>
+    <symbol id="g-vector" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="9" width="6" height="6"/><rect x="9" y="9" width="6" height="6"/><rect x="15" y="9" width="6" height="6"/></g></symbol>
+    <symbol id="g-field" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="16"/><path d="M4 9.3h16M4 14.6h16M9.3 4v16M14.6 4v16" stroke-width="0.8"/></g></symbol>
+    <symbol id="g-cube" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6"><rect x="8" y="2" width="13" height="13"/><rect x="5.5" y="5.5" width="13" height="13" fill="var(--paper)"/><rect x="3" y="9" width="13" height="13" fill="var(--paper)"/></g></symbol>
+    <symbol id="g-matrix" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="16"/><path d="M4 4l16 16" stroke-width="1"/></g></symbol>
+    <symbol id="g-weights" viewBox="0 0 24 24"><g stroke="currentColor" stroke-width="1"><path d="M5 6l7 6M5 18l7-6M12 5l7 7M12 12l7 0M12 19l7-7" fill="none"/></g><g fill="currentColor"><circle cx="5" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/><circle cx="19" cy="12" r="2"/></g></symbol>
+  </defs>
+</svg>
+
+<main>
+
+<nav class="series" aria-label="Docs navigation"><a href="../../">pyrox docs</a><span>›</span><span>Explainers</span><span>›</span><a href="../averaging_kernel_kiss_gp/">← Landing page</a></nav>
+<div class="eyebrow">Kernels &amp; GPs · L2 column → inversion row</div>
+<h1>Is the averaging kernel a KISS-GP interpolation?</h1>
+<p class="lede">Half yes. Both are a linear map \(\mat{H}\) from a GP on a regular grid to the things you observe, so both give an observation covariance \(\mat{H} \mat{K} \mat{H}^\top\). But they act on different axes, they play different roles, and the averaging kernel has a second identity that KISS-GP's weights do not: it is the smoother matrix of the retrieval.</p>
+
+<section class="tldr" aria-label="TL;DR">
+  <span class="tag">TL;DR</span>
+  <h2>Same algebra, different job</h2>
+  <ul>
+    <li><strong>The shared core is real.</strong> Any linear map of a Gaussian field is Gaussian, with covariance \(\mat{H} \mat{K} \mat{H}^\top\). KISS-GP's \(\mat{W} \mat{K}_{UU} \mat{W}^\top\) and a column operator's \(\tilde{\mat{A}} \mat{K}_z \tilde{\mat{A}}^\top\) are both instances.</li>
+    <li><strong>KISS-GP's \(\mat{W}\) is horizontal and approximate.</strong> It interpolates a grid to a point: 16 nonzeros per row in 2-D, rows sum to 1, and the error vanishes as the grid gets finer. It is a computational trick.</li>
+    <li><strong>The column averaging kernel \(\tilde{\vect{a}}_n\) is vertical and exact.</strong> It collapses the layer dimension to one XCH₄ number: dense over all layers, not summing to 1, and set by the instrument's physics. You cannot refine it away.</li>
+    <li><strong>In a methane inversion they compose.</strong> One observation row is \(\tilde{\vect{a}}_n^\top \otimes \vect{w}_n^\top\). With a separable prior \(\mat{K}_z \otimes \mat{K}_s\), the column covariance is \((\tilde{\mat{A}} \mat{K}_z \tilde{\mat{A}}^\top) \circ (\mat{W} \mat{K}_s \mat{W}^\top)\).</li>
+    <li><strong>What you were missing:</strong> the averaging kernel comes from the retrieval's <em>posterior</em>. With an identity Jacobian it is exactly the GP smoother matrix \(\mat{K}(\mat{K} + \sigma^2 \mat{I})^{-1}\), and its trace, the DOFS, is the GP's effective degrees of freedom. \(\mat{W}\) lives in the prior and has no such meaning.</li>
+    <li><strong>Notation trap:</strong> in Rodgers' notation \(\mat{K}\) is the Jacobian, so "\(\mat{A} \mat{K} \mat{A}^\top\)" reads two ways. On this page \(\mat{J}\) is a Jacobian and every \(\mat{K}\) is a covariance.</li>
+  </ul>
+</section>
+
+<h2>Four operators from the model grid to XCH₄ covariance</h2>
+<p>Read top to bottom: a 3-D methane prior on the model grid, KISS-GP-style interpolation to each TROPOMI pixel, the column averaging kernel collapsing height, and the covariance of the resulting columns.</p>
+<div class="chart">
+  <a class="box" href="#s1"><span class="num">K</span><div><div class="name">Separable prior on the model grid</div>
+    <div class="eqs">
+      <div><span class="ln">1</span>\([\mat{K}_z]_{lk} = \sigma_z^2 \exp(-(p_l - p_k)^2 / 2 \ell_z^2)\)</div>
+      <div><span class="ln">2</span>\([\mat{K}_s]_{gg'} = \exp(-\Vert \vect{g}_g - \vect{g}_{g'} \Vert^2 / 2 \ell_s^2)\)</div>
+      <div><span class="ln">3</span>\(\vect{x} \sim \mathcal{N}(\gvect{\mu}_x, \mat{K}_z \otimes \mat{K}_s)\)</div>
+    </div></div>
+    <div class="sig">
+      <span class="d exo">u</span><svg class="g"><use href="#g-cube"/></svg><span class="n">\(\gvect{\mu}_x\)</span><span class="s"><code>(layer, cell)</code><span class="u">ppb</span><span class="none">model background</span></span>
+      <span class="d par">θ</span><svg class="g"><use href="#g-scalar"/></svg><span class="n">\(\sigma_z, \ell_z, \ell_s\)</span><span class="s"><code>(), (), ()</code><span class="u">ppb</span><span class="u">hPa</span><span class="u">km</span></span>
+      <span class="d">const</span><svg class="g"><use href="#g-vector"/></svg><span class="n">\(p_l\), \(\vect{g}_g\)</span><span class="s"><code>(layer,), (cell, 2)</code><span class="u">hPa</span><span class="u">km</span></span>
+      <span class="d est">est</span><svg class="g"><use href="#g-matrix"/></svg><span class="n">\(\mat{K}_z\)</span><span class="s"><code>(layer, layer)</code><span class="u">ppb²</span><span class="none">eq. 1</span></span>
+      <span class="d est"></span><svg class="g"><use href="#g-matrix"/></svg><span class="n">\(\mat{K}_s\)</span><span class="s"><code>(cell, cell)</code><span class="u">—</span><span class="none">eq. 2</span></span>
+      <span class="d">out</span><svg class="g"><use href="#g-cube"/></svg><span class="n">\(\vect{x}\)</span><span class="s"><code>(layer, cell)</code><span class="u">ppb</span><span class="none">eq. 3</span></span>
+    </div></a>
+  <div class="link"><span></span><span>interpolate each layer to the pixel centre</span></div>
+  <a class="box" href="#s2"><span class="num">W</span><div><div class="name">Horizontal: KISS-GP interpolation</div>
+    <div class="eqs">
+      <div><span class="ln">1</span>\([\mat{W}]_{ng} = c((s_{n,1} - g_{g,1}) / \Delta s) c((s_{n,2} - g_{g,2}) / \Delta s)\)</div>
+      <div><span class="ln">2</span>\(\vect{x}_n = (\mat{I}_L \otimes \vect{w}_n^\top) \vect{x}\)</div>
+    </div></div>
+    <div class="sig">
+      <span class="d">in</span><svg class="g"><use href="#g-cube"/></svg><span class="n">\(\vect{x}\)</span><span class="s"><code>(layer, cell)</code><span class="u">ppb</span></span>
+      <span class="d exo">u</span><svg class="g"><use href="#g-vector"/></svg><span class="n">\(\vect{s}_n\)</span><span class="s"><code>(pixel, 2)</code><span class="u">km</span><span class="none">pixel centres</span></span>
+      <span class="d par">θ</span><svg class="g"><use href="#g-weights"/></svg><span class="n">none</span><span class="s"><span class="none">nothing fitted</span></span>
+      <span class="d">const</span><svg class="g"><use href="#g-scalar"/></svg><span class="n">\(\Delta s\), \(c\), \(\vect{g}_g\)</span><span class="s"><code>(), fn, (cell, 2)</code><span class="u">km</span><span class="u">—</span><span class="u">km</span></span>
+      <span class="d est">est</span><svg class="g"><use href="#g-matrix"/></svg><span class="n">\(\mat{W}\)</span><span class="s"><code>(pixel, cell)</code><span class="u">—</span><span class="none">eq. 1 · 16 nnz/row</span></span>
+      <span class="d">out</span><svg class="g"><use href="#g-field"/></svg><span class="n">\(\vect{x}_n\)</span><span class="s"><code>(pixel, layer)</code><span class="u">ppb</span><span class="none">eq. 2</span></span>
+    </div></a>
+  <div class="link"><span></span><span>collapse height with the column averaging kernel</span></div>
+  <a class="box" href="#s3"><span class="num">Ã</span><div><div class="name">Vertical: column averaging kernel</div>
+    <div class="eqs">
+      <div><span class="ln">1</span>\(\tilde{\vect{a}}_n = \vect{h} \odot \vect{a}_n\)</div>
+      <div><span class="ln">2</span>\(y_n = \vect{h}^\top \vect{x}_{a,n} + \tilde{\vect{a}}_n^\top (\vect{x}_n - \vect{x}_{a,n})\)</div>
+    </div></div>
+    <div class="sig">
+      <span class="d">in</span><svg class="g"><use href="#g-field"/></svg><span class="n">\(\vect{x}_n\)</span><span class="s"><code>(pixel, layer)</code><span class="u">ppb</span></span>
+      <span class="d exo">u</span><svg class="g"><use href="#g-field"/></svg><span class="n">\(\vect{a}_n\)</span><span class="s"><code>(pixel, layer)</code><span class="u">—</span><span class="none">from the L2 file</span></span>
+      <span class="d exo"></span><svg class="g"><use href="#g-field"/></svg><span class="n">\(\vect{x}_{a,n}\)</span><span class="s"><code>(pixel, layer)</code><span class="u">ppb</span><span class="none">retrieval prior</span></span>
+      <span class="d par">θ</span><svg class="g"><use href="#g-weights"/></svg><span class="n">none</span><span class="s"><span class="none">nothing fitted</span></span>
+      <span class="d">const</span><svg class="g"><use href="#g-vector"/></svg><span class="n">\(\vect{h}\)</span><span class="s"><code>(layer,)</code><span class="u">—</span><span class="none">pressure weights, sum 1</span></span>
+      <span class="d est">est</span><svg class="g"><use href="#g-field"/></svg><span class="n">\(\tilde{\vect{a}}_n\)</span><span class="s"><code>(pixel, layer)</code><span class="u">—</span><span class="none">eq. 1</span></span>
+      <span class="d">out</span><svg class="g"><use href="#g-vector"/></svg><span class="n">\(y_n\)</span><span class="s"><code>(pixel,)</code><span class="u">ppb</span><span class="none">eq. 2</span></span>
+    </div></a>
+  <div class="link"><span></span><span>push the prior through both maps</span></div>
+  <a class="box focus" href="#s4"><span class="num">Cov</span><div><div class="name">Covariance of the observed columns</div>
+    <div class="eqs">
+      <div><span class="ln">1</span>\(\mat{C}_z = \tilde{\mat{A}} \mat{K}_z \tilde{\mat{A}}^\top\)</div>
+      <div><span class="ln">2</span>\(\mat{C}_s = \mat{W} \mat{K}_s \mat{W}^\top\)</div>
+      <div><span class="ln">3</span>\(\op{Cov}(\vect{y}) = \mat{C}_z \circ \mat{C}_s + \mat{R}\)</div>
+    </div></div>
+    <div class="sig">
+      <span class="d">in</span><svg class="g"><use href="#g-field"/></svg><span class="n">\(\tilde{\mat{A}}\), \(\mat{W}\)</span><span class="s"><code>(pixel, layer), (pixel, cell)</code><span class="u">—</span></span>
+      <span class="d"></span><svg class="g"><use href="#g-matrix"/></svg><span class="n">\(\mat{K}_z\), \(\mat{K}_s\)</span><span class="s"><code>(layer, layer), (cell, cell)</code><span class="u">ppb²</span><span class="u">—</span></span>
+      <span class="d exo">u</span><svg class="g"><use href="#g-matrix"/></svg><span class="n">\(\mat{R}\)</span><span class="s"><code>(pixel, pixel)</code><span class="u">ppb²</span><span class="none">retrieval error</span></span>
+      <span class="d par">θ</span><svg class="g"><use href="#g-weights"/></svg><span class="n">none</span><span class="s"><span class="none">inherits θ of box K</span></span>
+      <span class="d est">est</span><svg class="g"><use href="#g-matrix"/></svg><span class="n">\(\mat{C}_z\)</span><span class="s"><code>(pixel, pixel)</code><span class="u">ppb²</span><span class="none">eq. 1</span></span>
+      <span class="d est"></span><svg class="g"><use href="#g-matrix"/></svg><span class="n">\(\mat{C}_s\)</span><span class="s"><code>(pixel, pixel)</code><span class="u">—</span><span class="none">eq. 2</span></span>
+      <span class="d">out</span><svg class="g"><use href="#g-matrix"/></svg><span class="n">\(\op{Cov}(\vect{y})\)</span><span class="s"><code>(pixel, pixel)</code><span class="u">ppb²</span><span class="none">eq. 3</span></span>
+    </div></a>
+</div>
+
+<div class="ex">
+  <div class="ex-h"><span class="tag">Running example</span><strong>Three TROPOMI pixels over a 25 km model grid</strong></div>
+  <div class="ex-b">
+    <p>A regional methane inversion: a model on a 25 km grid with 12 retrieval layers, observed by TROPOMI XCH₄. Two pixels are along-track neighbours, the third is 60 km away. The averaging-kernel shape and prior values are illustrative but consistent; every number on this page was computed from them.</p>
+    <div class="tbl"><table>
+      <thead><tr><th>Quantity</th><th>Symbol</th><th>Role</th><th style="text-align:right">Value</th><th>Unit</th></tr></thead>
+      <tbody>
+        <tr><td>Pixel footprint</td><td>—</td><td>size</td><td class="num">7 × 5.5</td><td>km</td></tr>
+        <tr><td>Retrieval layers, equal Δp</td><td>\(L\)</td><td>size</td><td class="num">12</td><td>—</td></tr>
+        <tr><td>Layer thickness</td><td>\(\Delta p\)</td><td>size</td><td class="num">84.4</td><td>hPa</td></tr>
+        <tr><td>Pressure weight per layer</td><td>\(h_l\)</td><td>const</td><td class="num">1/12</td><td>—</td></tr>
+        <tr><td>Column AK, surface → top</td><td>\(a_{n,l}\)</td><td>u</td><td class="num">0.85 … 1.03 … 0.75</td><td>—</td></tr>
+        <tr><td>Sum of weighted AK</td><td>\(\sum_l \tilde{a}_{n,l}\)</td><td>est</td><td class="num">0.949</td><td>—</td></tr>
+        <tr><td>Vertical prior std, length</td><td>\(\sigma_z, \ell_z\)</td><td>θ</td><td class="num">20, 250</td><td>ppb, hPa</td></tr>
+        <tr><td>Model grid spacing</td><td>\(\Delta s\)</td><td>const</td><td class="num">25</td><td>km</td></tr>
+        <tr><td>Horizontal length scale</td><td>\(\ell_s\)</td><td>θ</td><td class="num">50</td><td>km</td></tr>
+        <tr><td>Pixel separations</td><td>\(\Vert \vect{s}_1 - \vect{s}_2 \Vert\), \(\Vert \vect{s}_1 - \vect{s}_3 \Vert\)</td><td>u</td><td class="num">7, 60</td><td>km</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</div>
+
+<p>\(n = 1, \ldots, N\) indexes pixels; \(l, k = 1, \ldots, L\) index layers, surface first; \(g, g' = 1, \ldots, G\) index horizontal grid cells. The state \(\vect{x}\) stacks layers outermost, so \(\mat{K}_z \otimes \mat{K}_s\) is its covariance.</p>
+<div class="tbl"><table>
+  <thead><tr><th>Symbol</th><th>Role</th><th>Shape</th><th>Unit</th></tr></thead>
+  <tbody>
+    <tr><td>\(\vect{x}\)</td><td>state · CH₄ mole fraction on the model grid</td><td>\(\mathbb{R}^{L G}\) <code>(layer, cell)</code></td><td><span class="u">ppb</span></td></tr>
+    <tr><td>\(\vect{x}_n\)</td><td>est · profile at pixel \(n\)</td><td>\(\mathbb{R}^{L}\) <code>(layer,)</code></td><td><span class="u">ppb</span></td></tr>
+    <tr><td>\(y_n\)</td><td>out · modelled XCH₄ at pixel \(n\)</td><td>\(\mathbb{R}\)</td><td><span class="u">ppb</span></td></tr>
+    <tr><td>\(\mat{K}_z\), \(\mat{K}_s\)</td><td>θ-derived · vertical covariance, horizontal correlation</td><td>\(\mathbb{R}^{L \times L}\), \(\mathbb{R}^{G \times G}\)</td><td><span class="u">ppb²</span> <span class="u">—</span></td></tr>
+    <tr><td>\(\mat{W}\), \(\vect{w}_n\)</td><td>est · interpolation matrix, its row \(n\)</td><td>\(\mathbb{R}^{N \times G}\), \(\mathbb{R}^{G}\)</td><td><span class="u">—</span></td></tr>
+    <tr><td>\(\vect{h}\)</td><td>const · pressure weighting function</td><td>\(\mathbb{R}^{L}\)</td><td><span class="u">—</span></td></tr>
+    <tr><td>\(\vect{a}_n\), \(\tilde{\vect{a}}_n\)</td><td>u · column AK, and pressure-weighted AK</td><td>\(\mathbb{R}^{L}\)</td><td><span class="u">—</span></td></tr>
+    <tr><td>\(\tilde{\mat{A}}\)</td><td>est · rows \(\tilde{\vect{a}}_n^\top\) stacked</td><td>\(\mathbb{R}^{N \times L}\)</td><td><span class="u">—</span></td></tr>
+    <tr><td>\(\vect{x}_{a,n}\)</td><td>u · the retrieval's own prior profile</td><td>\(\mathbb{R}^{L}\)</td><td><span class="u">ppb</span></td></tr>
+    <tr><td>\(\mat{A}\)</td><td>profile averaging kernel \(\partial \hat{\vect{x}} / \partial \vect{x}\) (§5)</td><td>\(\mathbb{R}^{L \times L}\)</td><td><span class="u">—</span></td></tr>
+    <tr><td>\(\mat{J}\)</td><td>Jacobian of the radiance forward model (Rodgers' \(\mat{K}\))</td><td>\(\mathbb{R}^{M \times L}\)</td><td><span class="u">[L] ppb⁻¹</span></td></tr>
+    <tr><td>\(\mat{R}\)</td><td>u · XCH₄ retrieval error covariance</td><td>\(\mathbb{R}^{N \times N}\)</td><td><span class="u">ppb²</span></td></tr>
+  </tbody>
+</table></div>
+
+<!-- ============ §1 ============ -->
+<h2 id="s1">1 · The shared core: looking at a GP through a linear map</h2>
+<p>The real problem: the model carries a 3-D field \(\vect{x}\) with \(L G\) numbers, and TROPOMI reports one XCH₄ number per footprint. Anything that connects them is an observation operator \(\mat{H}\). The question you are asking is about the shape of \(\mat{H}\), and the one fact that makes both KISS-GP and the averaging kernel tick is this.</p>
+<div class="def">
+  <span class="tag">Concept</span>
+  <h3>Linear maps of a Gaussian stay Gaussian</h3>
+  \[ \vect{x} \sim \mathcal{N}(\gvect{\mu}_x, \mat{K}) \]
+  \[ \vect{y} = \mat{H} \vect{x} \]
+  \[ \vect{y} \sim \mathcal{N}(\mat{H} \gvect{\mu}_x, \mat{H} \mat{K} \mat{H}^\top) \]
+  <p>Every row of \(\mat{H}\) is a linear functional: point evaluation, interpolation, a footprint average, a weighted vertical integral. The covariance between two observations is the kernel "integrated twice", once against each row.</p>
+  <div class="where">
+    <span class="wl">Where</span>
+    <span class="sy">\(\mat{H}\)</span><span class="me">observation operator<span class="meta"><span class="sh">\(\mathbb{R}^{N \times L G}\)</span><span class="u">—</span></span></span>
+    <span class="sy">\(\mat{K}\)</span><span class="me">prior covariance of the state<span class="meta"><span class="sh">\(\mathbb{R}^{L G \times L G}\)</span><span class="u">ppb²</span></span></span>
+  </div>
+</div>
+<p>So your instinct is right at this level: \(\mat{W} \mat{K}_{UU} \mat{W}^\top\) and \(\tilde{\mat{A}} \mat{K}_z \tilde{\mat{A}}^\top\) are the same sandwich. What differs is which rows \(\mat{H}\) has and why.</p>
+<div class="ex mini"><span class="tag">Running example</span><p>\(L G\) is 12 layers times every grid cell in the domain; \(N = 3\) pixels. \(\mat{H}\) is \(3 \times 12 G\), and almost every entry is zero.</p></div>
+
+<!-- ============ §2 ============ -->
+<h2 id="s2">2 · KISS-GP: \(\mat{W}\) stands in for point evaluation</h2>
+<p>In ordinary GP regression the observation is \(f(\vect{s}_n)\), a point evaluation, and the Gram matrix \(\mat{K}_{XX}\) is dense, costing \(\mathcal{O}(N^3)\). KISS-GP (structured kernel interpolation) replaces each point evaluation by interpolation from a regular grid of inducing points \(U\).</p>
+<div class="def">
+  <span class="tag">Concept</span>
+  <h3>Structured kernel interpolation</h3>
+  \[ k(\vect{s}_n, \vect{s}_m) \approx \vect{w}_n^\top \mat{K}_{UU} \vect{w}_m \]
+  \[ \mat{K}_{XX} \approx \mat{W} \mat{K}_{UU} \mat{W}^\top \]
+  <p>\(\vect{w}_n\) holds local cubic convolution weights \(c(\cdot)\): 4 per axis, so 16 nonzeros in 2-D, summing to 1. \(\mat{K}_{UU}\) on a regular grid with a stationary separable kernel is Kronecker of Toeplitz, so a matrix–vector product costs \(\mathcal{O}(N + G \log G)\).</p>
+  <div class="where">
+    <span class="wl">Where</span>
+    <span class="sy">\(\mat{K}_{UU}\)</span><span class="me">kernel on the grid; here \(\mat{K}_s\)<span class="meta"><span class="sh">\(\mathbb{R}^{G \times G}\)</span><span class="u">—</span></span></span>
+    <span class="sy">\(c\)</span><span class="me">Keys cubic convolution kernel, support \([-2, 2]\)<span class="meta"><span class="sh">\(\mathbb{R} \to \mathbb{R}\)</span><span class="u">—</span></span></span>
+  </div>
+</div>
+<p>The point to hold on to: the "true" row of \(\mat{H}\) is a delta at \(\vect{s}_n\). \(\vect{w}_n\) is an approximation to that delta, chosen because it makes \(\mat{K}\) cheap. Refine the grid and \(\vect{w}_n^\top \mat{K}_{UU} \vect{w}_m \to k(\vect{s}_n, \vect{s}_m)\).</p>
+<div class="ex mini"><span class="tag">Running example</span><p>With \(\Delta s = 25\) km and \(\ell_s = 50\) km: exact correlation between the 7 km neighbours is 0.990; KISS-GP gives 0.984. For the 60 km pair, 0.487 against 0.487. The diagonal comes out at 0.997, not 1.</p></div>
+<div class="note"><span class="tag">Watch out</span><p>Cubic weights can be negative and the interpolated diagonal sits slightly below the true variance. That small variance deflation is harmless for regression but matters if you read \(\op{diag}(\mat{W} \mat{K}_{UU} \mat{W}^\top)\) as a prior uncertainty; add the diagonal correction if you do.</p></div>
+
+<!-- ============ §3 ============ -->
+<h2 id="s3">3 · The column averaging kernel collapses height</h2>
+<p>Yes: the column averaging kernel collapses the layer dimension. The retrieved XCH₄ is not the true pressure-weighted column \(\vect{h}^\top \vect{x}_n\). It responds to each layer with sensitivity \(a_{n,l}\) and falls back to the retrieval's prior \(\vect{x}_{a,n}\) where it is blind. To compare a model with TROPOMI you apply the same filter to the model profile.</p>
+<div class="def">
+  <span class="tag">Concept</span>
+  <h3>Column observation operator</h3>
+  \[ \tilde{\vect{a}}_n = \vect{h} \odot \vect{a}_n \]
+  \[ y_n = \vect{h}^\top \vect{x}_{a,n} + \tilde{\vect{a}}_n^\top (\vect{x}_n - \vect{x}_{a,n}) \]
+  \[ \op{Var}(y_n) = \tilde{\vect{a}}_n^\top \mat{K}_z \tilde{\vect{a}}_n \]
+  <p>If \(\vect{a}_n = \vect{1}\), the retrieval sees every layer perfectly and \(y_n = \vect{h}^\top \vect{x}_n\). Deviations from 1 are the instrument: SWIR sensitivity drops near the surface over dark scenes and in the stratosphere.</p>
+  <div class="where">
+    <span class="wl">Where</span>
+    <span class="sy">\(\vect{h}\)</span><span class="me">dry-air pressure weights, \(\sum_l h_l = 1\)<span class="meta"><span class="sh">\(\mathbb{R}^{L}\)</span><span class="u">—</span></span></span>
+    <span class="sy">\(\vect{a}_n\)</span><span class="me">column averaging kernel, reported per pixel<span class="meta"><span class="sh">\(\mathbb{R}^{L}\)</span><span class="u">—</span></span></span>
+    <span class="sy">\(\vect{x}_{a,n}\)</span><span class="me">prior profile used by the retrieval<span class="meta"><span class="sh">\(\mathbb{R}^{L}\)</span><span class="u">ppb</span></span></span>
+  </div>
+</div>
+<p>Compare it with \(\vect{w}_n\). \(\tilde{\vect{a}}_n\) is dense over all 12 layers, its entries sum to 0.949 rather than 1, and it varies from pixel to pixel with albedo, geometry and aerosol. Above all, it is not an approximation to anything: in the linear regime it is the exact response of the retrieval. A finer vertical grid does not make it go away.</p>
+<div class="uc">
+  <div class="uc-h"><span class="tag">Units check</span><strong>One column variance</strong></div>
+  <div class="uc-rows">
+    <div class="uc-row"><div>\(\tilde{\vect{a}}_n = \vect{h} \odot \vect{a}_n\)</div><div class="r">— ⊙ — = — → sum 0.949</div></div>
+    <div class="uc-row"><div>\(\tilde{\vect{a}}_n^\top \mat{K}_z \tilde{\vect{a}}_n\)</div><div class="r">— · ppb² · — = ppb² → 184.9 ppb²</div></div>
+    <div class="uc-row"><div>\(\vect{h}^\top \mat{K}_z \vect{h}\)</div><div class="r">— · ppb² · — = ppb² → 199.2 ppb²</div></div>
+    <div class="uc-row ok"><div>\(\op{sd}(y_n)\)</div><div class="r">✓ 13.6 ppb with the AK, 14.1 ppb without</div></div>
+  </div>
+</div>
+<div class="ex mini"><span class="tag">Running example</span><p>A 20 ppb per-layer prior becomes a 13.6 ppb column prior. The vertical correlation does most of the collapse (20 → 14.1 ppb); the averaging kernel removes another 0.5 ppb by down-weighting the surface and top layers.</p></div>
+
+<!-- ============ §4 ============ -->
+<h2 id="s4">4 · Where they meet: one row, two factors</h2>
+<p>A real observation operator for XCH₄ does both jobs. Interpolate each layer to the pixel, then collapse the layers. Row \(n\) of \(\mat{H}\) is therefore a Kronecker product of a vertical and a horizontal row vector, and stacking such rows is the face-splitting (row-wise Kronecker) product.</p>
+<div class="def">
+  <span class="tag">Concept</span>
+  <h3>Separable prior, row-Kronecker operator</h3>
+  \[ \vect{H}_n = \tilde{\vect{a}}_n^\top \otimes \vect{w}_n^\top \]
+  \[ \vect{H}_n (\mat{K}_z \otimes \mat{K}_s) \vect{H}_m^\top = (\tilde{\vect{a}}_n^\top \mat{K}_z \tilde{\vect{a}}_m)(\vect{w}_n^\top \mat{K}_s \vect{w}_m) \]
+  \[ \op{Cov}(\vect{y}) = (\tilde{\mat{A}} \mat{K}_z \tilde{\mat{A}}^\top) \circ (\mat{W} \mat{K}_s \mat{W}^\top) + \mat{R} \]
+  <p>The second line is the mixed-product rule \((\mat{P} \otimes \mat{Q})(\mat{S} \otimes \mat{T}) = \mat{P} \mat{S} \otimes \mat{Q} \mat{T}\) applied to a 1-row and 1-column factor. The column covariance is a Hadamard product: a vertical AK sandwich times a KISS-GP sandwich.</p>
+  <div class="where">
+    <span class="wl">Where</span>
+    <span class="sy">\(\vect{H}_n\)</span><span class="me">row \(n\) of the observation operator<span class="meta"><span class="sh">\(\mathbb{R}^{1 \times L G}\)</span><span class="u">—</span></span></span>
+    <span class="sy">\(\circ\)</span><span class="me">elementwise (Hadamard) product<span class="meta"><span class="sh">\((N, N) \times (N, N)\)</span></span></span>
+  </div>
+</div>
+<p>This is the clean statement of your hunch: the averaging kernel is to height what KISS-GP's interpolation weights are to the horizontal. Both sit in \(\mat{H}\), on orthogonal axes, and with a separable prior they factor apart exactly.</p>
+<div class="case">
+  <div class="lin"><span class="tag">Simple · one AK for all pixels</span>
+    <p>\(\tilde{\vect{a}}_n = \tilde{\vect{a}}\) for every \(n\). The vertical factor is one scalar:</p>
+    \[ \op{Cov}(\vect{y}) = (\tilde{\vect{a}}^\top \mat{K}_z \tilde{\vect{a}}) \mat{W} \mat{K}_s \mat{W}^\top + \mat{R} \]
+    <p>The column field is just a scaled 2-D KISS-GP. All the fast structure survives.</p></div>
+  <div class="non"><span class="tag">General · AK varies per pixel</span>
+    <p>\(\mat{C}_z\) is a dense \(N \times N\) matrix, generally rank \(\le L\):</p>
+    \[ \op{Cov}(\vect{y}) = \mat{C}_z \circ \mat{C}_s + \mat{R} \]
+    <p>MVMs still work: \((\mat{C}_z \circ \mat{C}_s) \vect{v} = \sum_r \op{diag}(\vect{u}_r) \mat{C}_s \op{diag}(\vect{u}_r) \vect{v}\) for a rank-\(r\) factor \(\mat{C}_z = \sum_r \vect{u}_r \vect{u}_r^\top\), i.e. at most \(L\) KISS-GP MVMs.</p></div>
+</div>
+<pre class="diagram">  x : model field
+      (layer, cell)          ppb
+          │
+          │  W  (KISS-GP, horizontal)
+          │  16 nnz per row
+          ▼
+  x_n : profiles at pixels
+      (pixel, layer)         ppb
+          │
+          │  ã_n = h ⊙ a_n  (vertical)
+          │  dense over layers
+          ▼
+  y_n : XCH₄ columns
+      (pixel,)               ppb
+          │
+          ▼
+  Cov(y) = (Ã K_z Ãᵀ) ∘ (W K_s Wᵀ) + R
+      (pixel, pixel)         ppb²</pre>
+<p>Prose before the sketch: \(\tilde{\mat{A}}\) stacks the weighted kernels, \(\mat{W}\) the cubic weights, \(\mat{K}_z\) the vertical covariance, \(\mat{K}_s\) the horizontal correlation on the grid, \(\mat{R}\) the retrieval error covariance. Helper names are defined on this page; nothing is claimed for a stack package.</p>
+<pre><span class="c"># Shapes: N pixels; L = 12 layers; G grid cells</span>
+<span class="c"># Units: [c] = ppb</span>
+
+<span class="mk"># user</span>
+<span class="c"># [W]_ng = c((s_n,1 − g_g,1)/Δs) · c((s_n,2 − g_g,2)/Δs)</span>
+interp_w = cubic_interp_weights(pixel_xy, grid_axes)      <span class="c"># (N, 2) → (N, G) sparse</span> <span class="un">[—]</span>
+
+<span class="mk"># user</span>
+<span class="c"># K_s = k_s(g, g′), Kronecker of 1-D Toeplitz</span>
+grid_corr = rbf_kronecker(grid_axes, length_scale_s)      <span class="c"># → (G, G) PSD op</span> <span class="un">[—]</span>
+
+<span class="mk"># not pinned (einx)</span>
+<span class="c"># ã_n = h ⊙ a_n</span>
+weighted_ak = einx.multiply("n l, l", col_ak, press_w)    <span class="c"># (N, L) → (N, L)</span> <span class="un">[—]</span>
+
+<span class="mk"># not pinned (einx)</span>
+<span class="c"># C_z = Ã K_z Ãᵀ</span>
+vert_term = einx.dot(                                     <span class="c"># → (N, N)</span> <span class="un">[c]²</span>
+    "n l, l k, m k -> n m", weighted_ak, vert_cov, weighted_ak
+)
+
+<span class="mk"># user</span>
+<span class="c"># C_s = W K_s Wᵀ</span>
+horiz_term = sandwich(interp_w, grid_corr)                <span class="c"># → (N, N)</span> <span class="un">[—]</span>
+
+<span class="c"># Cov(y) = C_z ∘ C_s + R</span>
+obs_cov = vert_term * horiz_term + noise_cov              <span class="c"># → (N, N)</span> <span class="un">[c]²</span></pre>
+<div class="ex mini"><span class="tag">Running example</span><p>With per-pixel kernels set equal, the three columns have \(\op{Cov}(\vect{y}) - \mat{R}\) of 184.2 ppb² on the diagonal, 181.9 ppb² between the 7 km neighbours (correlation 0.98) and 90.0 ppb² to the pixel 60 km away (0.49). That is the 184.9 ppb² vertical factor times the KISS-GP correlations from §2.</p></div>
+
+<!-- ============ §5 ============ -->
+<h2 id="s5">5 · What you were missing: the AK is a posterior smoother</h2>
+<p>So far the averaging kernel looks like just another row in \(\mat{H}\). Its name says more. Go one level down, to the L1B → L2 retrieval that produced it. There the observation is a radiance spectrum \(\vect{r}\) with \(M\) channels and the unknown is the profile \(\vect{x}\).</p>
+<div class="def model">
+  <span class="tag">Model</span>
+  <h3>The averaging kernel is the Jacobian of a MAP estimate</h3>
+  <div class="mstep"><span class="mn">1</span><span class="ml">Joint</span></div>
+  \[ p(\vect{r}, \vect{x}) = p(\vect{x}) p(\vect{r} \mid \vect{x}) \]
+  <div class="mstep"><span class="mn">2</span><span class="ml">Factorisation</span></div>
+  <p>One pixel, one profile, so the joint is already the product of a prior and a likelihood; nothing further to factor.</p>
+  <div class="mstep"><span class="mn">3</span><span class="ml">Objective</span></div>
+  \[ \mathcal{J}(\vect{x}) = -\log p(\vect{r} \mid \vect{x}) - \log p(\vect{x}) \]
+  \[ \hat{\vect{x}} = \op{argmin}_{\vect{x}} \mathcal{J}(\vect{x}) \]
+  <div class="mstep"><span class="mn">4</span><span class="ml">Assumptions</span></div>
+  <div class="asm">
+    <div class="a"><span class="aid">A1</span><div><b>Gaussian prior.</b>
+      \[ p(\vect{x}) = \mathcal{N}(\vect{x}; \vect{x}_a, \mat{S}_a) \]
+      <small>The retrieval's own prior; it differs from the inversion's \(\mat{K}_z\). Double counting them is a classic error.</small></div></div>
+    <div class="a"><span class="aid">A2</span><div><b>Linear forward model.</b>
+      \[ F(\vect{x}) \approx F(\vect{x}_a) + \mat{J} (\vect{x} - \vect{x}_a) \]
+      <small>Breaks for strong absorption or scattering; iterating Gauss–Newton gives the AK at the solution.</small></div></div>
+    <div class="a"><span class="aid">A3</span><div><b>Gaussian noise.</b>
+      \[ p(\vect{r} \mid \vect{x}) = \mathcal{N}(\vect{r}; F(\vect{x}), \mat{S}_\epsilon) \]
+      <small>Spectroscopic and model errors are not white; they enter \(\mat{S}_\epsilon\) only approximately.</small></div></div>
+  </div>
+  <div class="mstep"><span class="mn">5</span><span class="ml">Result</span><span class="mu">uses A1–A3</span></div>
+  \[ \hat{\mat{S}} = (\mat{J}^\top \mat{S}_\epsilon^{-1} \mat{J} + \mat{S}_a^{-1})^{-1} \]
+  \[ \mat{G} = \hat{\mat{S}} \mat{J}^\top \mat{S}_\epsilon^{-1} \]
+  \[ \hat{\vect{x}} = \vect{x}_a + \mat{A} (\vect{x} - \vect{x}_a) + \mat{G} \gvect{\epsilon} \]
+  \[ \mat{A} = \mat{G} \mat{J} = \mat{I} - \hat{\mat{S}} \mat{S}_a^{-1} \]
+  <p>The column AK of §3 is the pressure-weighted collapse of this matrix, \(\tilde{\vect{a}} = \mat{A}^\top \vect{h}\), so \(\vect{h}^\top \hat{\vect{x}} = \vect{h}^\top \vect{x}_a + \tilde{\vect{a}}^\top (\vect{x} - \vect{x}_a)\) plus noise. TROPOMI fits a scaled profile with other state elements, but its reported AK has this meaning.</p>
+  <div class="where">
+    <span class="wl">Where</span>
+    <span class="sy">\(\vect{r}\)</span><span class="me">radiance spectrum<span class="meta"><span class="sh">\(\mathbb{R}^{M}\)</span><span class="u">[L]</span></span></span>
+    <span class="sy">\(\mat{S}_a\), \(\mat{S}_\epsilon\)</span><span class="me">retrieval prior and noise covariances<span class="meta"><span class="sh">\(\mathbb{R}^{L \times L}\), \(\mathbb{R}^{M \times M}\)</span><span class="u">ppb²</span><span class="u">[L]²</span></span></span>
+    <span class="sy">\(\mat{J}\)</span><span class="me">Jacobian \(\partial F / \partial \vect{x}\) (Rodgers writes \(\mat{K}\))<span class="meta"><span class="sh">\(\mathbb{R}^{M \times L}\)</span><span class="u">[L] ppb⁻¹</span></span></span>
+    <span class="sy">\(\hat{\mat{S}}\)</span><span class="me">posterior covariance<span class="meta"><span class="sh">\(\mathbb{R}^{L \times L}\)</span><span class="u">ppb²</span></span></span>
+    <span class="sy">\(\mat{G}\)</span><span class="me">gain<span class="meta"><span class="sh">\(\mathbb{R}^{L \times M}\)</span><span class="u">ppb [L]⁻¹</span></span></span>
+    <span class="sy">\(\mat{A}\)</span><span class="me">profile averaging kernel \(\partial \hat{\vect{x}} / \partial \vect{x}\)<span class="meta"><span class="sh">\(\mathbb{R}^{L \times L}\)</span><span class="u">—</span></span></span>
+  </div>
+</div>
+<p>Now take the case GP people know. Observe the state directly with white noise: \(\mat{J} = \mat{I}\), \(\mat{S}_a = \mat{K}\), \(\mat{S}_\epsilon = \sigma^2 \mat{I}\).</p>
+<div class="case">
+  <div class="lin"><span class="tag">Simple · direct observation</span>
+    \[ \mat{A} = (\sigma^{-2} \mat{I} + \mat{K}^{-1})^{-1} \sigma^{-2} \]
+    \[ \mat{A} = \mat{K} (\mat{K} + \sigma^2 \mat{I})^{-1} \]
+    <p>This is the GP smoother (hat) matrix: the posterior mean at the data is \(\mat{A} \vect{y}\). Its rows are the "equivalent kernel" of spline and GP regression, and \(\op{tr}(\mat{A})\) is the effective degrees of freedom. Rodgers' DOFS is the same trace.</p></div>
+  <div class="non"><span class="tag">General · any Jacobian</span>
+    \[ \mat{A} = \mat{I} - \hat{\mat{S}} \mat{S}_a^{-1} \]
+    <p>Read it as "how much of the prior variance the data removed". Where the instrument is blind, \(\hat{\mat{S}} \approx \mat{S}_a\) and the row of \(\mat{A}\) goes to zero: the estimate stays at \(\vect{x}_a\).</p></div>
+</div>
+<div class="ex mini"><span class="tag">Running example</span><p>Take the 12-layer prior \(\mat{K}_z\) (20 ppb, 250 hPa) and observe each layer directly with \(\sigma = 15\) ppb. Then \(\op{tr}(\mat{A}) = 3.18\): twelve noisy numbers carry about three independent pieces of information. The surface row of \(\mat{A}\) is 0.40, 0.28, 0.14, 0.04, then near zero; it sums to 0.79. A local, smooth bump that sums to less than 1, with the remainder taken from the prior. Swap "layer" for "location" and you have a GP equivalent kernel.</p></div>
+<div class="note"><span class="tag">Watch out</span><p>So "averaging kernel" and "kernel" in "kernel method" share a word for a reason, but not the one KISS-GP uses. The AK is a <em>posterior</em> smoother that already contains a prior and a noise model; \(\mat{W}\) is a <em>prior-side</em> approximation with no noise in it. If your inversion also puts a GP prior on \(\vect{x}\), the column you assimilate has been smoothed once by the retrieval and will be smoothed again by your GP.</p></div>
+
+<h2>Side by side</h2>
+<div class="tbl"><table>
+  <thead><tr><th></th><th>KISS-GP \(\vect{w}_n\)</th><th>Column AK \(\tilde{\vect{a}}_n\)</th><th>Profile AK \(\mat{A}\)</th></tr></thead>
+  <tbody>
+    <tr><td class="k">Axis</td><td>horizontal (cells)</td><td>vertical (layers)</td><td>vertical (layers)</td></tr>
+    <tr><td class="k">Map</td><td>grid → point</td><td>profile → column</td><td>profile → profile</td></tr>
+    <tr><td class="k">Collapses a dim?</td><td>no, re-indexes it</td><td>yes, layer → scalar</td><td>no, smooths it</td></tr>
+    <tr><td class="k">Nonzeros per row</td><td class="num">16</td><td class="num">12 of 12</td><td class="num">12 of 12</td></tr>
+    <tr><td class="k">Row sum (example)</td><td class="num">1.000</td><td class="num">0.949</td><td class="num">0.79 (surface)</td></tr>
+    <tr><td class="k">Origin</td><td>numerical choice</td><td>instrument + retrieval</td><td>posterior of retrieval</td></tr>
+    <tr><td class="k">Exact?</td><td>no; error → 0 with \(\Delta s\)</td><td>yes, in the linear regime</td><td>yes, in the linear regime</td></tr>
+    <tr><td class="k">Sits in</td><td>the prior</td><td>the observation operator</td><td>the retrieval posterior</td></tr>
+    <tr><td class="k">GP analogue</td><td>inducing-point interpolation</td><td>a linear functional of \(f\)</td><td>smoother matrix, equivalent kernel</td></tr>
+  </tbody>
+</table></div>
+
+<footer>
+  <p>Numbers come from a 12-layer toy with equal pressure layers, a Gaussian vertical kernel and Keys cubic interpolation on a 25 km grid; the AK shape is illustrative, not a real TROPOMI pixel.</p>
+  <p>Sources</p>
+  <ul>
+    <li>Wilson &amp; Nickisch (2015), Kernel interpolation for scalable structured Gaussian processes (KISS-GP), ICML.</li>
+    <li>Rodgers (2000), <em>Inverse Methods for Atmospheric Sounding</em>, ch. 2–3: averaging kernel, DOFS.</li>
+    <li>Rasmussen &amp; Williams (2006), <em>Gaussian Processes for Machine Learning</em>, §2.6: smoothing, equivalent kernel, effective degrees of freedom.</li>
+    <li>Silverman (1984), Spline smoothing: the equivalent variable kernel method, <em>Annals of Statistics</em>.</li>
+    <li>Hasekamp et al., TROPOMI CH₄ ATBD: column averaging kernel and observation operator.</li>
+  </ul>
+</footer>
+</main>
+</body>
+</html>
