@@ -58,6 +58,8 @@ None of it is new machinery. The SDE kernels (`MaternSDE`, `PeriodicSDE`, `SumSD
 
 pyrox-ssm is one package of the pyrox workspace; the [workspace README](../../README.md) introduces the others.
 
+<p align="center"><img src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_ssm_overview/pyrox_ssm_overview.png" alt="pyrox-ssm in one picture: you supply a series with gaps, an SDE kernel with priors, a likelihood, or the state-space matrices; the model writes one state-space joint density, whose SDE step works on any grid, whose likelihood is one Kalman pass and whose masked steps run the predict only; pyrox-ssm offers Markov GPs, linear-Gaussian and nonlinear state-space models, non-Gaussian likelihoods, and sparse and many-site models; out come the hyperparameters, the posterior through the gaps, the smoothed states and a Gaussian approximation for counts; pyrox and pyrox-gauss, gaussx and lineax, optimistix, and flowjax and filterax underneath" width="100%"></p>
+
 ## 🌟 Highlights
 
 - ⏱️ **Temporal GPs in linear time**: `MarkovGPPrior` turns any gaussx SDE kernel (Matérn, periodic, quasi-periodic, cosine, constant, integrated Wiener, and their sums and products) into a Kalman filter for the marginal likelihood and an RTS smoother for the posterior, both $`\mathcal{O}(N d^3)`$.
@@ -80,6 +82,15 @@ Every model in the package is a Kalman recursion over some state, and they diffe
 | Non-Gaussian | `.condition_nongauss()`, `markov_laplace_factor` | an SDE kernel's state; a Gaussian site per observation | counts, labels or heavy tails |
 | Sparse | `SparseMarkovGPPrior`, `sparse_markov_elbo` | inducing times; any likelihood, through a guide | a variational fit with fewer inducing times than steps |
 | Many sites | `pad_sites`, `markov_gp_sites_factor`, `SharedPlusSiteMarkovGP` | one state per site, or a shared state plus one per site | a network of stations |
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_ssm_hub/pyrox_ssm_hub-dark.svg">
+    <img alt="One MarkovGPPrior fans out to five uses: markov_gp_factor as a NumPyro factor for NUTS and SVI, log_marginal by one Kalman pass under jit and grad, condition and predict for smoothed marginals at any times, condition_nongauss with Laplace, Gauss-Newton, posterior linearisation and EP, and filter, smooth and as_lgssm for the Kalman moments and the general state-space form" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_ssm_hub/pyrox_ssm_hub-light.svg" width="100%">
+  </picture>
+</p>
+
+The figure draws the Markov GP, the one model with a prior, a factor, `condition` and `predict` today; [#480](https://github.com/jejjohnson/pyrox/issues/480) tracks giving every other model the same parts.
 
 For an SDE kernel $`\mathrm{d}\mathbf{x} = \mathbf{F} \mathbf{x} \ \mathrm{d}t + \mathbf{L} \ \mathrm{d}\boldsymbol{\beta}`$ with stationary covariance $`\mathbf{P}_\infty`$, the step from $`t_{k-1}`$ to $`t_k`$ is
 
@@ -291,6 +302,15 @@ Laplace converges in 10 iterations and expectation propagation in 24, and their 
 
 ## 🔬 What else is in the box
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_ssm_roles/pyrox_ssm_roles-dark.svg">
+    <img alt="pyrox-ssm on the GeoStack role ladder: conditioning, the evidence factors, the Kalman recursions and the path samplers as algorithms; the priors and their conditioned results as models; the non-Gaussian strategies and the implicit adjoint as strategies; prediction, the linear-Gaussian form, the site padding and a non-centred site helper as primitives; no structure of its own; gaussx's SDE kernels beside the ladder" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_ssm_roles/pyrox_ssm_roles-light.svg" width="100%">
+  </picture>
+</p>
+
+Each public name sits on one rung of the GeoStack role ladder, by the job it does; the table below lists them by area.
+
 `pyrox_ssm` is one namespace, and two modules behind extras hold the rest; each has its own `__all__`.
 
 | Area | Symbols | Notes |
@@ -332,6 +352,13 @@ The Markov GPs moved here from pyrox-gp with every name and signature unchanged;
 - **[`AGENTS.md`](AGENTS.md)**: the contracts every model keeps (no import of pyrox-gp, pyrox-lgm or pyrox-nn, gaussx for the linear algebra, the extras) and the tests that hold them.
 
 ## 🧩 Ecosystem
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_ssm_ecosystem/pyrox_ssm_ecosystem-dark.svg">
+    <img alt="No package imports pyrox-ssm; pyrox-gauss and pyrox-xtreme forbid importing it in their import-guard tests; pyrox-ssm builds on pyrox, pyrox-gauss, gaussx, lineax, optimistix, JAX, Equinox, NumPyro and einx, and on flowjax, gauss-flows and filterax through extras" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_ssm_ecosystem/pyrox_ssm_ecosystem-light.svg" width="100%">
+  </picture>
+</p>
 
 pyrox-ssm is a package of the pyrox [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/), in the GeoML tier of the [GeoStack](https://github.com/jejjohnson/geostack). It owns the state-space models and their NumPyro surface, and composes the rest in:
 
