@@ -326,7 +326,7 @@ def _site_corrected_log_marginal(
 # --- result type ---------------------------------------------------------
 
 
-class NonGaussConditionedMarkovGP(eqx.Module):
+class ConditionedNonGaussMarkovGP(eqx.Module):
     """Markov GP conditioned on a non-Gaussian likelihood via a site-based strategy.
 
     Equivalent role to `pyrox_ssm.ConditionedMarkovGP` but the
@@ -595,7 +595,7 @@ class LaplaceMarkovInference(eqx.Module):
         y: Float[Array, " N"],
         *,
         mask: Bool[Array, " N"] | None = None,
-    ) -> NonGaussConditionedMarkovGP:
+    ) -> ConditionedNonGaussMarkovGP:
         r"""Fit the sites by Newton steps on the smoothed posterior mean.
 
         Args:
@@ -607,7 +607,7 @@ class LaplaceMarkovInference(eqx.Module):
                 $(\lambda_n, \Lambda_n) = (0, 0)$ and the filter skips it.
 
         Returns:
-            The `NonGaussConditionedMarkovGP` with the fitted sites.
+            The `ConditionedNonGaussMarkovGP` with the fitted sites.
 
         Examples:
             >>> import jax
@@ -663,7 +663,7 @@ class LaplaceMarkovInference(eqx.Module):
             log_marg, q_mean, nat1, nat2, site_lik, observed
         )
 
-        return NonGaussConditionedMarkovGP(
+        return ConditionedNonGaussMarkovGP(
             prior=prior,
             y=y,
             site_nat1=nat1,
@@ -713,7 +713,7 @@ class GaussNewtonMarkovInference(eqx.Module):
         y: Float[Array, " N"],
         *,
         mask: Bool[Array, " N"] | None = None,
-    ) -> NonGaussConditionedMarkovGP:
+    ) -> ConditionedNonGaussMarkovGP:
         r"""Fit the sites by Gauss-Newton steps, as `LaplaceMarkovInference`.
 
         Args:
@@ -725,7 +725,7 @@ class GaussNewtonMarkovInference(eqx.Module):
                 $(\lambda_n, \Lambda_n) = (0, 0)$ and the filter skips it.
 
         Returns:
-            The `NonGaussConditionedMarkovGP` with the fitted sites.
+            The `ConditionedNonGaussMarkovGP` with the fitted sites.
 
         Examples:
             >>> import jax.numpy as jnp
@@ -789,7 +789,7 @@ def _fit_cavity_sites(
     likelihood: Likelihood,
     y: Float[Array, " N"],
     mask: Bool[Array, " N"] | None,
-) -> NonGaussConditionedMarkovGP:
+) -> ConditionedNonGaussMarkovGP:
     """The fit shared by PL and EP, which differ only in their site update.
 
     The first iteration forms its cavities from the prior marginals; every
@@ -804,7 +804,7 @@ def _fit_cavity_sites(
         mask: Optional ``(N,)`` boolean mask, ``True`` where observed.
 
     Returns:
-        The `NonGaussConditionedMarkovGP` with the fitted sites.
+        The `ConditionedNonGaussMarkovGP` with the fitted sites.
     """
     # The masked likelihood even for mask=None; see LaplaceMarkovInference.fit.
     observed = _observation_mask(mask, prior.times)
@@ -839,7 +839,7 @@ def _fit_cavity_sites(
         log_marg, q_mean, nat1, nat2, site_lik, observed
     )
 
-    return NonGaussConditionedMarkovGP(
+    return ConditionedNonGaussMarkovGP(
         prior=prior,
         y=y,
         site_nat1=nat1,
@@ -939,7 +939,7 @@ class PosteriorLinearizationMarkov(eqx.Module):
         y: Float[Array, " N"],
         *,
         mask: Bool[Array, " N"] | None = None,
-    ) -> NonGaussConditionedMarkovGP:
+    ) -> ConditionedNonGaussMarkovGP:
         r"""Fit the sites by posterior linearization.
 
         Args:
@@ -951,7 +951,7 @@ class PosteriorLinearizationMarkov(eqx.Module):
                 $(\lambda_n, \Lambda_n) = (0, 0)$ and the filter skips it.
 
         Returns:
-            The `NonGaussConditionedMarkovGP` with the fitted sites.
+            The `ConditionedNonGaussMarkovGP` with the fitted sites.
 
         Examples:
             >>> import jax.numpy as jnp
@@ -1072,7 +1072,7 @@ class ExpectationPropagationMarkov(eqx.Module):
         y: Float[Array, " N"],
         *,
         mask: Bool[Array, " N"] | None = None,
-    ) -> NonGaussConditionedMarkovGP:
+    ) -> ConditionedNonGaussMarkovGP:
         r"""Fit the sites by parallel expectation propagation.
 
         Args:
@@ -1084,7 +1084,7 @@ class ExpectationPropagationMarkov(eqx.Module):
                 $(\lambda_n, \Lambda_n) = (0, 0)$ and the filter skips it.
 
         Returns:
-            The `NonGaussConditionedMarkovGP` with the fitted sites.
+            The `ConditionedNonGaussMarkovGP` with the fitted sites.
 
         Examples:
             >>> import jax.numpy as jnp

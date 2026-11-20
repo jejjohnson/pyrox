@@ -1,4 +1,4 @@
-"""Tests for `SharedPlusSiteMarkovGP`, a shared GP plus one GP per site.
+"""Tests for `SharedPlusSiteMarkovGPPrior`, a shared GP plus one GP per site.
 
 The contracts:
 
@@ -36,7 +36,7 @@ from pyrox_ssm import (
     IntegratedWienerSDE,
     MarkovGPPrior,
     MaternSDE,
-    SharedPlusSiteMarkovGP,
+    SharedPlusSiteMarkovGPPrior,
     lgssm_factor,
 )
 from ssm_reference import matern_kernel
@@ -100,7 +100,7 @@ def _dense_cov(shared, site, t_obs, s_obs, noise, n_sites: int):
     return K_g + K_h + jnp.diag(noise)
 
 
-def _observed_pairs(model: SharedPlusSiteMarkovGP, y_grid):
+def _observed_pairs(model: SharedPlusSiteMarkovGPPrior, y_grid):
     """Times, site indices and values of the observed (t, s) pairs."""
     rows, cols = np.nonzero(np.asarray(model.mask))
     return model.times[rows], jnp.asarray(cols), y_grid[rows, cols]
@@ -117,7 +117,7 @@ def _dataset(key, site=POOLED_SITE, noise=NOISE):
     k_t, k_y = jr.split(key)
     times = _ragged_times(k_t)
     placeholder = [jnp.zeros_like(t) for t in times]
-    model, _ = SharedPlusSiteMarkovGP.from_sites(SHARED, site, times, placeholder)
+    model, _ = SharedPlusSiteMarkovGPPrior.from_sites(SHARED, site, times, placeholder)
     t_obs, s_obs, _ = _observed_pairs(model, jnp.zeros(model.mask.shape))
     K = _dense_cov(SHARED, site, t_obs, s_obs, noise, N_SITES)
     y_obs = jnp.linalg.cholesky(K) @ jr.normal(k_y, t_obs.shape)
@@ -140,7 +140,7 @@ def _dataset(key, site=POOLED_SITE, noise=NOISE):
 )
 def test_log_marginal_matches_dense(site, noise):
     times, ys = _dataset(jr.key(0), site, noise)
-    model, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, site, times, ys)
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(SHARED, site, times, ys)
     assert model.mask.sum() == sum(t.shape[0] for t in times)
     assert model.times.shape[0] < sum(t.shape[0] for t in times)  # overlapping days
 
@@ -150,7 +150,7 @@ def test_log_marginal_matches_dense(site, noise):
 
 
 def test_lgssm_layout():
-    model, _ = SharedPlusSiteMarkovGP.from_sites(
+    model, _ = SharedPlusSiteMarkovGPPrior.from_sites(
         SHARED, PER_SITE, *_dataset(jr.key(1), PER_SITE)
     )
     lgssm = model.as_lgssm(NOISE_PER_SITE)
@@ -180,7 +180,7 @@ def test_lgssm_layout():
 
 
 def test_lgssm_factor_on_as_lgssm_matches_log_marginal():
-    model, y_grid = SharedPlusSiteMarkovGP.from_sites(
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(
         SHARED, POOLED_SITE, *_dataset(jr.key(2))
     )
 
@@ -211,7 +211,9 @@ def test_one_site_with_zero_site_variance_is_markov_gp_on_g():
     reference = MarkovGPPrior(SHARED, times)
 
     zero_site = MaternSDE(variance=jnp.asarray(0.0), lengthscale=1.0, order=0)
-    model, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, zero_site, [times], [y])
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(
+        SHARED, zero_site, [times], [y]
+    )
     np.testing.assert_allclose(
         model.log_marginal(y_grid, NOISE),
         reference.log_marginal(y, NOISE),
@@ -219,7 +221,9 @@ def test_one_site_with_zero_site_variance_is_markov_gp_on_g():
     )
 
     tiny_site = MaternSDE(variance=jnp.asarray(1e-12), lengthscale=1.0, order=0)
-    model, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, tiny_site, [times], [y])
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(
+        SHARED, tiny_site, [times], [y]
+    )
     g_mean, h_mean = model.decompose(y_grid, NOISE)
     m_ref, _, _ = reference.smooth(y, NOISE)
     np.testing.assert_allclose(g_mean, m_ref[:, 0], atol=1e-9)
@@ -236,7 +240,7 @@ def test_one_site_with_zero_site_variance_is_markov_gp_on_g():
 )
 def test_decompose_matches_smoother_and_dense(site, noise):
     times, ys = _dataset(jr.key(5), site, noise)
-    model, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, site, times, ys)
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(SHARED, site, times, ys)
     g_mean, h_mean = model.decompose(y_grid, noise)
     assert g_mean.shape == (model.times.shape[0],)
     assert h_mean.shape == (model.times.shape[0], N_SITES)
@@ -269,7 +273,7 @@ def test_decompose_matches_smoother_and_dense(site, noise):
 def test_decompose_variances_match_the_dense_conditional(site, noise):
     """V[g | y] and V[h_s | y] against the dense joint Gaussian."""
     times, ys = _dataset(jr.key(6), site, noise)
-    model, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, site, times, ys)
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(SHARED, site, times, ys)
     g_mean, h_mean, g_var, h_var = model.decompose(y_grid, noise, return_var=True)
     g_mean_0, h_mean_0 = model.decompose(y_grid, noise)
     np.testing.assert_array_equal(g_mean, g_mean_0)
@@ -309,10 +313,10 @@ def test_mean_fn_equals_the_anomaly_model():
     ys_raw = [
         y + mean_fn(t)[:, s] for s, (t, y) in enumerate(zip(times, ys, strict=True))
     ]
-    model, y_raw = SharedPlusSiteMarkovGP.from_sites(
+    model, y_raw = SharedPlusSiteMarkovGPPrior.from_sites(
         SHARED, POOLED_SITE, times, ys_raw, mean_fn=mean_fn
     )
-    anomaly_model, y_anom = SharedPlusSiteMarkovGP.from_sites(
+    anomaly_model, y_anom = SharedPlusSiteMarkovGPPrior.from_sites(
         SHARED, POOLED_SITE, times, ys
     )
     np.testing.assert_allclose(
@@ -330,10 +334,12 @@ def test_mean_fn_equals_the_anomaly_model():
 
 def test_gradients_flow_to_the_mean_parameters():
     times, ys = _dataset(jr.key(8))
-    model, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, POOLED_SITE, times, ys)
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(
+        SHARED, POOLED_SITE, times, ys
+    )
 
     def with_mean(level):
-        with_mu = SharedPlusSiteMarkovGP(
+        with_mu = SharedPlusSiteMarkovGPPrior(
             model.shared, model.site, model.times, model.mask, _climatology(level)
         )
         return with_mu.log_marginal(y_grid, NOISE)
@@ -373,7 +379,7 @@ def _dense_component_posterior(model, y_grid, noise, site, t_star):
 def test_predict_matches_the_dense_conditional(site, noise):
     """At observed, gap and forecast times, unsorted, with a repeated time."""
     times, ys = _dataset(jr.key(9), site, noise)
-    model, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, site, times, ys)
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(SHARED, site, times, ys)
     gap = 0.5 * (model.times[5] + model.times[6])  # between grid days: no site
     t_star = jnp.array(
         [
@@ -395,14 +401,16 @@ def test_predict_matches_the_dense_conditional(site, noise):
 def test_predict_matches_the_extended_grid_workaround():
     """The same numbers as building the model on grid ∪ test times by hand."""
     times, ys = _dataset(jr.key(10))
-    model, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, POOLED_SITE, times, ys)
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(
+        SHARED, POOLED_SITE, times, ys
+    )
     t_star = jnp.array([N_DAYS + 0.5, N_DAYS + 2.0])
     got = model.condition(y_grid, NOISE).predict(t_star)
 
     ext_times = jnp.concatenate([model.times, t_star])
     ext_mask = jnp.concatenate([model.mask, jnp.zeros((2, N_SITES), dtype=bool)])
     ext_y = jnp.concatenate([y_grid, jnp.full((2, N_SITES), jnp.nan)])
-    extended = SharedPlusSiteMarkovGP(SHARED, POOLED_SITE, ext_times, ext_mask)
+    extended = SharedPlusSiteMarkovGPPrior(SHARED, POOLED_SITE, ext_times, ext_mask)
     want = extended.decompose(ext_y, NOISE, return_var=True)
     for g, w in zip(got, want, strict=True):
         np.testing.assert_allclose(g, w[-2:], rtol=1e-12, atol=1e-14)
@@ -410,13 +418,15 @@ def test_predict_matches_the_extended_grid_workaround():
 
 def test_predict_jits_given_a_precomputed_grid():
     times, ys = _dataset(jr.key(11))
-    grid, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, POOLED_SITE, times, ys)
+    grid, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(
+        SHARED, POOLED_SITE, times, ys
+    )
     t_star = jnp.array([0.5, N_DAYS + 1.0])
 
     @jax.jit
     def predict(lengthscale):
         shared = MaternSDE(variance=SHARED.variance, lengthscale=lengthscale, order=1)
-        model = SharedPlusSiteMarkovGP(shared, POOLED_SITE, grid.times, grid.mask)
+        model = SharedPlusSiteMarkovGPPrior(shared, POOLED_SITE, grid.times, grid.mask)
         return model.condition(y_grid, NOISE).predict(t_star)
 
     got = predict(SHARED.lengthscale)
@@ -432,7 +442,9 @@ def test_predict_rejects_a_backcast_with_a_non_stationary_kernel():
     wiener = IntegratedWienerSDE(
         diffusion=jnp.asarray(0.5), order=1, P_0=4.0 * jnp.eye(2)
     )
-    model, y_grid = SharedPlusSiteMarkovGP.from_sites(wiener, POOLED_SITE, times, ys)
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(
+        wiener, POOLED_SITE, times, ys
+    )
     cond = model.condition(y_grid, NOISE)
     inside = jnp.array([model.times[0], model.times[3] + 0.5, N_DAYS + 2.0])
     g_mean, *_ = cond.predict(inside)
@@ -445,7 +457,9 @@ def test_predict_rejects_a_backcast_with_a_non_stationary_kernel():
 
 def test_condition_checks_shapes():
     times, ys = _dataset(jr.key(12))
-    model, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, POOLED_SITE, times, ys)
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(
+        SHARED, POOLED_SITE, times, ys
+    )
     with pytest.raises(ValueError, match="mask's shape"):
         model.condition(y_grid[:, :-1], NOISE)
     with pytest.raises(ValueError, match="noise_var"):
@@ -460,7 +474,9 @@ def test_condition_checks_shapes():
 def test_from_sites_merges_grid_mask_and_nan():
     times = [jnp.array([0.0, 2.0, 5.0]), jnp.array([2.0, 3.0]), jnp.array([1.0, 5.0])]
     ys = [jnp.array([1.0, 2.0, 3.0]), jnp.array([4.0, 5.0]), jnp.array([6.0, 7.0])]
-    model, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, POOLED_SITE, times, ys)
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(
+        SHARED, POOLED_SITE, times, ys
+    )
 
     assert model.times.tolist() == [0.0, 1.0, 2.0, 3.0, 5.0]
     want_mask = [
@@ -477,11 +493,13 @@ def test_from_sites_merges_grid_mask_and_nan():
 
 def test_nan_placeholders_keep_value_and_gradient_finite():
     times, ys = _dataset(jr.key(6))
-    model, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, POOLED_SITE, times, ys)
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(
+        SHARED, POOLED_SITE, times, ys
+    )
     assert jnp.isnan(y_grid).any()
 
     def loss(log_ell_g, log_var_h, log_noise):
-        m = SharedPlusSiteMarkovGP(
+        m = SharedPlusSiteMarkovGPPrior(
             MaternSDE(1.0, jnp.exp(log_ell_g), order=1),
             MaternSDE(jnp.exp(log_var_h), 2.0, order=0),
             model.times,
@@ -504,23 +522,23 @@ def test_nan_placeholders_keep_value_and_gradient_finite():
 def test_validation_errors():
     mask = jnp.ones((4, 3), dtype=bool)
     with pytest.raises(ValueError, match="strictly increasing"):
-        SharedPlusSiteMarkovGP(
+        SharedPlusSiteMarkovGPPrior(
             SHARED, POOLED_SITE, jnp.array([0.0, 2.0, 1.0, 3.0]), mask
         )
     with pytest.raises(ValueError, match=r"mask must have shape \(T, S\)"):
-        SharedPlusSiteMarkovGP(SHARED, POOLED_SITE, jnp.arange(5.0), mask)
+        SharedPlusSiteMarkovGPPrior(SHARED, POOLED_SITE, jnp.arange(5.0), mask)
     two_sites = MaternSDE(variance=jnp.array([0.3, 0.5]), lengthscale=1.0, order=0)
     with pytest.raises(ValueError, match="leading axis of length S = 3"):
-        SharedPlusSiteMarkovGP(SHARED, two_sites, jnp.arange(4.0), mask)
-    model = SharedPlusSiteMarkovGP(SHARED, POOLED_SITE, jnp.arange(4.0), mask)
+        SharedPlusSiteMarkovGPPrior(SHARED, two_sites, jnp.arange(4.0), mask)
+    model = SharedPlusSiteMarkovGPPrior(SHARED, POOLED_SITE, jnp.arange(4.0), mask)
     with pytest.raises(ValueError, match="noise_var must be a scalar or have shape"):
         model.as_lgssm(jnp.array([0.1, 0.2]))
     with pytest.raises(ValueError, match="strictly increasing"):
-        SharedPlusSiteMarkovGP.from_sites(
+        SharedPlusSiteMarkovGPPrior.from_sites(
             SHARED, POOLED_SITE, [jnp.array([1.0, 0.0])], [jnp.zeros(2)]
         )
     with pytest.raises(ValueError, match="needs one time"):
-        SharedPlusSiteMarkovGP.from_sites(
+        SharedPlusSiteMarkovGPPrior.from_sites(
             SHARED, POOLED_SITE, [jnp.array([0.0, 1.0])], [jnp.zeros(3)]
         )
 
@@ -538,19 +556,19 @@ def _loss_and_dense(model, y_grid):
 
     def kalman(*log_params):
         shared, site = kernels(*log_params)
-        m = SharedPlusSiteMarkovGP(shared, site, model.times, model.mask)
+        m = SharedPlusSiteMarkovGPPrior(shared, site, model.times, model.mask)
         return m.log_marginal(y_grid, NOISE_PER_SITE)
 
     def dense(*log_params):
         shared, site = kernels(*log_params)
-        m = SharedPlusSiteMarkovGP(shared, site, model.times, model.mask)
+        m = SharedPlusSiteMarkovGPPrior(shared, site, model.times, model.mask)
         return _dense_log_marginal(m, y_grid, NOISE_PER_SITE)
 
     return kalman, dense
 
 
 def test_jit_grad_matches_dense_gradient():
-    model, y_grid = SharedPlusSiteMarkovGP.from_sites(
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(
         SHARED, PER_SITE, *_dataset(jr.key(7), PER_SITE, NOISE_PER_SITE)
     )
     kalman, dense = _loss_and_dense(model, y_grid)
@@ -573,7 +591,7 @@ def _nuts_model(model, y_grid):
     log_ell_g = numpyro.sample("log_ell_g", dist.Normal(jnp.log(8.0), 0.5))
     with numpyro.plate("site", model.n_sites):
         log_var_h = numpyro.sample("log_var_h", dist.Normal(jnp.log(0.3), 0.5))
-    m = SharedPlusSiteMarkovGP(
+    m = SharedPlusSiteMarkovGPPrior(
         MaternSDE(1.0, jnp.exp(log_ell_g), order=1),
         MaternSDE(jnp.exp(log_var_h), 2.0, order=0),
         model.times,
@@ -583,7 +601,7 @@ def _nuts_model(model, y_grid):
 
 
 def _run_nuts(n_warmup: int, n_samples: int, key: int):
-    model, y_grid = SharedPlusSiteMarkovGP.from_sites(
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(
         SHARED, POOLED_SITE, *_dataset(jr.key(8))
     )
     mcmc = MCMC(
@@ -626,7 +644,7 @@ def test_log_marginal_matches_dense_many_sites():
         order=0,
     )
     noise = jnp.linspace(0.02, 0.1, n_sites)
-    model, y_grid = SharedPlusSiteMarkovGP.from_sites(SHARED, site, times, ys)
+    model, y_grid = SharedPlusSiteMarkovGPPrior.from_sites(SHARED, site, times, ys)
     np.testing.assert_allclose(
         model.log_marginal(y_grid, noise),
         _dense_log_marginal(model, y_grid, noise),

@@ -41,12 +41,18 @@ MOVED_TO_SSM = [
     "sparse_markov_factor",
 ]
 MOVED_TO_SSM_FLOWS = ["NormalizingKalmanPrior", "normalizing_kalman_factor"]
+# pyrox-ssm renamed these after the move (pyrox#481); the error names the new class.
+SSM_RENAMED = {
+    "NonGaussConditionedMarkovGP": "ConditionedNonGaussMarkovGP",
+    "SparseConditionedMarkovGP": "ConditionedSparseMarkovGP",
+}
 
 
 @pytest.mark.parametrize("name", MOVED_TO_SSM + MOVED_TO_SSM_FLOWS)
 def test_importing_a_moved_name_raises_an_import_error_naming_pyrox_ssm(name) -> None:
     home = "pyrox_ssm.flows" if name in MOVED_TO_SSM_FLOWS else "pyrox_ssm"
-    with pytest.raises(ImportError, match=rf"`from {home} import {name}`"):
+    new = SSM_RENAMED.get(name, name)
+    with pytest.raises(ImportError, match=rf"`from {home} import {new}`"):
         exec(f"from pyrox_gp import {name}", {})
     with pytest.raises(ImportError, match="moved to pyrox-ssm"):
         getattr(pyrox_gp, name)
@@ -55,7 +61,8 @@ def test_importing_a_moved_name_raises_an_import_error_naming_pyrox_ssm(name) ->
 
 @pytest.mark.parametrize("name", MOVED_TO_SSM)
 def test_the_new_home_exports_the_name(name) -> None:
-    assert hasattr(importlib.import_module("pyrox_ssm"), name)
+    pyrox_ssm = importlib.import_module("pyrox_ssm")
+    assert SSM_RENAMED.get(name, name) in pyrox_ssm.__all__
 
 
 @pytest.mark.parametrize("name", MOVED_TO_SSM_FLOWS)

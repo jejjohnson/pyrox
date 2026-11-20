@@ -24,7 +24,7 @@ ELBO that exploits the Markov factorisation of ``q(u)`` is a follow-up
 foundation it will build on.
 
 Predictions at arbitrary test times use the same dense SVGP formula via
-`SparseConditionedMarkovGP.predict`. For mean-only predictions
+`ConditionedSparseMarkovGP.predict`. For mean-only predictions
 on a long evaluation grid, the merged-grid Kalman trick from
 `pyrox_ssm._markov` is asymptotically cheaper, but is not yet
 wired in here.
@@ -210,7 +210,7 @@ class SparseMarkovGPPrior(eqx.Module):
 # --- result type for predictions -----------------------------------------
 
 
-class SparseConditionedMarkovGP(eqx.Module):
+class ConditionedSparseMarkovGP(eqx.Module):
     """Sparse Markov GP fitted to a guide.
 
     Bundles the `SparseMarkovGPPrior` and a fitted

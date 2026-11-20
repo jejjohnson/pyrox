@@ -67,7 +67,7 @@ pyrox-ssm is one package of the pyrox workspace; the [workspace README](../../RE
 - 🧮 **Any linear-Gaussian model**: `LinearGaussianSSMPrior` takes the transition, observation and noise matrices directly, and `nonlinear_ssm_factor` scores a nonlinear model by an extended, unscented, cubature, Gauss-Hermite or Monte Carlo Kalman filter.
 - 🎲 **Non-Gaussian likelihoods**: Laplace, Gauss-Newton, posterior linearisation and expectation propagation behind `condition_nongauss`, each iteration one Kalman pass, and `markov_laplace_factor` puts the approximate evidence in a NumPyro model for NUTS over the hyperparameters.
 - 🪶 **Sparse Markov GPs**: `SparseMarkovGPPrior` with inducing times and `sparse_markov_elbo`, taking any guide with the pyrox `Guide` protocol.
-- 🗺️ **Many sites**: `pad_sites` pads ragged per-site series to one shape with the mask that skips the padding, `markov_gp_sites_factor` scores them as one factor, and `SharedPlusSiteMarkovGP` fits a shared GP plus one GP per site as one state-space model.
+- 🗺️ **Many sites**: `pad_sites` pads ragged per-site series to one shape with the mask that skips the padding, `markov_gp_sites_factor` scores them as one factor, and `SharedPlusSiteMarkovGPPrior` fits a shared GP plus one GP per site as one state-space model.
 - 🌊 **Beyond Gaussian states**: `pyrox_ssm.flows` warps the observations with a normalizing flow over a Gaussian state (the `flows` extra), and `pyrox_ssm.ensemble.ensemble_factor` adds the ensemble Kalman log likelihood of a filterax run (the `ensemble` extra).
 
 ## 📐 One recursion, many models
@@ -81,7 +81,7 @@ Every model in the package is a Kalman recursion over some state, and they diffe
 | Nonlinear SSM | `nonlinear_ssm_factor` | dynamics $`f`$ and observation $`h`$, moment-matched | nonlinear dynamics, at the cost of a surrogate likelihood |
 | Non-Gaussian | `.condition_nongauss()`, `markov_laplace_factor` | an SDE kernel's state; a Gaussian site per observation | counts, labels or heavy tails |
 | Sparse | `SparseMarkovGPPrior`, `sparse_markov_elbo` | inducing times; any likelihood, through a guide | a variational fit with fewer inducing times than steps |
-| Many sites | `pad_sites`, `markov_gp_sites_factor`, `SharedPlusSiteMarkovGP` | one state per site, or a shared state plus one per site | a network of stations |
+| Many sites | `pad_sites`, `markov_gp_sites_factor`, `SharedPlusSiteMarkovGPPrior` | one state per site, or a shared state plus one per site | a network of stations |
 
 <p align="center">
   <picture>
@@ -321,9 +321,9 @@ Each public name sits on one rung of the GeoStack role ladder, by the job it doe
 | Markov GP | `MarkovGPPrior`, `ConditionedMarkovGP`, `markov_gp_factor`, `markov_gp_sample`, `markov_gp_from_innovations`, `markov_gp_innovations_sample` | The filter's marginal likelihood, the smoothed posterior, and latent paths in linear time |
 | Linear-Gaussian SSM | `LinearGaussianSSMPrior`, `ConditionedLinearGaussianSSM`, `lgssm_factor` | A state-space model given by its matrices, with per-step or per-entry masks |
 | Nonlinear SSM | `nonlinear_ssm_factor` | The moment-matched log likelihood of gaussx's nonlinear Kalman filter |
-| Non-Gaussian likelihoods | `LaplaceMarkovInference`, `GaussNewtonMarkovInference`, `PosteriorLinearizationMarkov`, `ExpectationPropagationMarkov`, `NonGaussConditionedMarkovGP`, `markov_laplace_factor`, `markov_implicit_adjoint` | Strategies for `condition_nongauss`, the approximate evidence as a factor, and the adjoint that makes its gradient safe inside NUTS |
-| Sparse Markov GP | `SparseMarkovGPPrior`, `SparseConditionedMarkovGP`, `sparse_markov_elbo`, `sparse_markov_factor` | Inducing times and a variational guide |
-| Many sites | `pad_sites`, `markov_gp_sites_factor`, `noncentred_log_normal`, `SharedPlusSiteMarkovGP`, `ConditionedSharedPlusSiteMarkovGP` | Ragged series on one grid, pooled hyperparameters, and a shared GP plus one per site |
+| Non-Gaussian likelihoods | `LaplaceMarkovInference`, `GaussNewtonMarkovInference`, `PosteriorLinearizationMarkov`, `ExpectationPropagationMarkov`, `ConditionedNonGaussMarkovGP`, `markov_laplace_factor`, `markov_implicit_adjoint` | Strategies for `condition_nongauss`, the approximate evidence as a factor, and the adjoint that makes its gradient safe inside NUTS |
+| Sparse Markov GP | `SparseMarkovGPPrior`, `ConditionedSparseMarkovGP`, `sparse_markov_elbo`, `sparse_markov_factor` | Inducing times and a variational guide |
+| Many sites | `pad_sites`, `markov_gp_sites_factor`, `noncentred_log_normal`, `SharedPlusSiteMarkovGPPrior`, `ConditionedSharedPlusSiteMarkovGP` | Ragged series on one grid, pooled hyperparameters, and a shared GP plus one per site |
 | `pyrox_ssm.flows` | `NormalizingKalmanPrior`, `normalizing_kalman_factor` | The normalizing Kalman filter (the `flows` extra) |
 | `pyrox_ssm.ensemble` | `ensemble_factor` | The ensemble Kalman log likelihood of a filterax run (the `ensemble` extra) |
 
@@ -335,7 +335,7 @@ The Markov GPs moved here from pyrox-gp with every name and signature unchanged;
 |---|---|---|
 | 1 | [One site, end to end](https://jejjohnson.github.io/pyrox/ssm-one-site/) | a station record with gaps, NUTS and SVI over the hyperparameters, and prediction through an outage |
 | 2 | [Many sites, pooled hyperparameters](https://jejjohnson.github.io/pyrox/ssm-hierarchical-sites/) | ragged records padded with `pad_sites` and scored as one factor |
-| 3 | [A regional signal plus a local signal per site](https://jejjohnson.github.io/pyrox/ssm-shared-plus-site/) | `SharedPlusSiteMarkovGP` |
+| 3 | [A regional signal plus a local signal per site](https://jejjohnson.github.io/pyrox/ssm-shared-plus-site/) | `SharedPlusSiteMarkovGPPrior` |
 | 4 | [A spatial field, per-facility paths and Poisson counts](https://jejjohnson.github.io/pyrox/ssm-spatial-hierarchical/) | a hierarchical count model with NUTS and SVI |
 | 5 | [A non-Gaussian likelihood, collapsed and latent](https://jejjohnson.github.io/pyrox/ssm-nongauss/) | `markov_laplace_factor` against a latent path, with a cross-check |
 | 6 | [An ensemble Kalman likelihood](https://jejjohnson.github.io/pyrox/ssm-ensemble/) | `ensemble_factor` and an ensemble of variational fits |
