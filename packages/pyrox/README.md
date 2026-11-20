@@ -196,7 +196,7 @@ from pyrox._core import PyroxModule, pyrox_method
 
 class BayesianMLP(PyroxModule):
     net: eqx.nn.MLP
-    pyrox_name: str = "mlp"
+    pyrox_name: str = eqx.field(static=True, default="mlp")
 
     @pyrox_method
     def __call__(self, inputs: Float[Array, "N D_x"]) -> Float[Array, " N"]:
@@ -221,7 +221,7 @@ from pyrox._core import Parameterized
 
 class ParameterizedMLP(Parameterized):
     net: eqx.nn.MLP
-    pyrox_name: str = "mlp"
+    pyrox_name: str = eqx.field(static=True, default="mlp")
 
     def setup(self) -> None:
         for name, value in zip(NAMES, weights_of(self.net), strict=True):
