@@ -72,9 +72,9 @@ def glyph_plate() -> str:
         f'<rect x="24" y="54" width="80" height="56" rx="10" fill="none" '
         f'stroke="{W}" stroke-width="4.5"/>'
         f'<circle cx="64" cy="31" r="12" fill="none" stroke="{W}" stroke-width="4.5"/>'
-        f'<path d="M64 44 L64 63" stroke="{W}" stroke-width="4" '
+        f'<path d="M64 44 L64 69" stroke="{W}" stroke-width="4" '
         f'stroke-linecap="round"/>'
-        f'<path d="M58 58 L64 65 L70 58" fill="none" stroke="{W}" '
+        f'<path d="M58 63 L64 69 L70 63" fill="none" stroke="{W}" '
         f'stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>'
         f'<circle cx="64" cy="82" r="12" fill="{W}"/>'
     )
