@@ -1,5 +1,7 @@
 <div align="center">
 
+<img alt="pyrox-gauss" src="../../docs/assets/icon-gauss.svg" width="120">
+
 # pyrox-gauss
 
 **Gaussian NumPyro distributions for JAX on gaussx's structured operators: multivariate normals in covariance or precision form, linear-Gaussian state-space models, Gauss-Markov chains and GMRF fields, on gaussx and lineax.**

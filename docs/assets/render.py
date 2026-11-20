@@ -10,6 +10,7 @@ ember gradient; each package gets its own glyph:
     pyrox-lgm  a GMRF lattice with one node's neighbourhood ringed
     pyrox-xtreme  a long-tailed density, its return level and one event past it
     pyrox-ssm  a Markov chain of states, each observed below, one observation missing
+    pyrox-gauss  a bell curve over a banded (tridiagonal) precision matrix
 
 Diagrams come in a light and a dark variant for GitHub's
 ``<picture>`` / ``prefers-color-scheme`` switch.
@@ -19,6 +20,7 @@ Run from the repo root:
     uv run --no-project python docs/assets/render.py
 """
 
+import math
 from pathlib import Path
 
 
@@ -169,6 +171,39 @@ def glyph_chain() -> str:
     return states + arrows + links + observed + missing
 
 
+def glyph_bell_band() -> str:
+    """A Gaussian density over a 5-by-5 tridiagonal precision, zeros as dots."""
+    pts = []
+    for k in range(41):
+        t = -3 + 6 * k / 40
+        pts.append(f"{64 + 13 * t:.1f} {44 - 27 * math.exp(-0.5 * t * t):.1f}")
+    curve = "M" + " L".join(pts)
+    cells = []
+    for i in range(5):
+        for j in range(5):
+            x, y = 35.25 + 12 * j, 52 + 12 * i
+            if i == j:
+                cells.append(
+                    f'<rect x="{x}" y="{y}" width="9.5" height="9.5" rx="2" '
+                    f'fill="{W}"/>'
+                )
+            elif abs(i - j) == 1:
+                cells.append(
+                    f'<rect x="{x}" y="{y}" width="9.5" height="9.5" rx="2" '
+                    f'fill="{W}" fill-opacity="0.55"/>'
+                )
+            else:
+                cells.append(
+                    f'<circle cx="{x + 4.75}" cy="{y + 4.75}" r="1.7" fill="{W}" '
+                    'fill-opacity="0.45"/>'
+                )
+    return (
+        f'<path d="{curve} Z" fill="{W}" fill-opacity="0.28"/>'
+        f'<path d="{curve}" fill="none" stroke="{W}" stroke-width="4.5" '
+        'stroke-linecap="round" stroke-linejoin="round"/>' + "".join(cells)
+    )
+
+
 GLYPHS = {
     "pyrox": glyph_plate,
     "pyrox-gp": glyph_band,
@@ -176,6 +211,7 @@ GLYPHS = {
     "pyrox-lgm": glyph_lattice,
     "pyrox-xtreme": glyph_tail,
     "pyrox-ssm": glyph_chain,
+    "pyrox-gauss": glyph_bell_band,
 }
 
 
