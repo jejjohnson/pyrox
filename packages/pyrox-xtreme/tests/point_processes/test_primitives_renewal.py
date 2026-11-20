@@ -104,3 +104,44 @@ class TestRenewalHazard:
         for tau in (0.0, 0.5, 1.0, 5.0, 10.0):
             s = float(renewal_survival(jnp.asarray(tau), d))
             assert 0.0 <= s <= 1.0
+
+
+class TestBatchedInterEventLaw:
+    """A batched inter-event law gives one sequence per process.
+
+    Regression (jejjohnson/pyrox#463): the gaps were drawn as
+    ``(max_events, *batch)`` and accumulated along the batch axis, mixing
+    processes, and ``renewal_log_prob`` could not broadcast a batched law
+    against ``(*batch, max_events)`` gaps.
+    """
+
+    def test_sample_layout_and_per_process_log_prob(self):
+        law = dist.Exponential(jnp.array([1.0, 2.0]))
+        res = renewal_sample(jax.random.PRNGKey(0), law, 5.0, 30)
+        assert res.times.shape == res.mask.shape == (2, 30)
+        assert res.n_events.shape == (2,)
+        # Event times increase along the event axis within each process.
+        assert bool(jnp.all(jnp.diff(res.times, axis=-1) >= 0.0))
+
+        lp = renewal_log_prob(res.times, res.mask, 5.0, law)
+        assert lp.shape == (2,)
+        for b, rate in enumerate((1.0, 2.0)):
+            single = renewal_log_prob(
+                res.times[b], res.mask[b], 5.0, dist.Exponential(rate)
+            )
+            assert float(lp[b]) == pytest.approx(float(single), rel=1e-5)
+            # Exponential gaps: the homogeneous Poisson likelihood n log λ - λT.
+            n = float(res.n_events[b])
+            assert float(lp[b]) == pytest.approx(
+                n * jnp.log(rate) - rate * 5.0, rel=1e-5
+            )
+
+    def test_unbatched_draw_is_unchanged(self):
+        key = jax.random.PRNGKey(3)
+        res = renewal_sample(key, dist.Exponential(1.5), 4.0, 20)
+        gaps = dist.Exponential(1.5).sample(key, sample_shape=(20,))
+        expected = jnp.cumsum(gaps)
+        assert res.times.shape == (20,)
+        assert jnp.allclose(
+            jnp.where(res.mask, res.times, 0.0), jnp.where(res.mask, expected, 0.0)
+        )

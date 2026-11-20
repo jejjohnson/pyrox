@@ -66,7 +66,11 @@ def renewal_log_prob(
     gaps = event_times - prev_times
     # Guard padding positions from producing NaN-producing log_probs.
     safe_gaps = jnp.where(mask, gaps, jnp.ones_like(gaps))
-    log_f = inter_event_dist.log_prob(safe_gaps)
+    # The event axis is last; a batched inter-event law broadcasts against
+    # the leading axes, so evaluate it with the event axis first.
+    log_f = jnp.moveaxis(
+        inter_event_dist.log_prob(jnp.moveaxis(safe_gaps, -1, 0)), 0, -1
+    )
     log_density_sum = jnp.sum(jnp.where(mask, log_f, 0.0), axis=-1)
 
     # Tail survival from the last real event to the window edge.
@@ -111,8 +115,14 @@ def renewal_sample(
         ``max_events * E[Δt] >> T``.
     """
     T_arr = jnp.asarray(T)
-    gaps = inter_event_dist.sample(key, sample_shape=(max_events,))
+    # One sequence per element of the joint batch of the law and the window,
+    # laid out as ``batch + (max_events,)`` so the gaps accumulate along the
+    # event axis, not across processes.
+    batch = jnp.broadcast_shapes(inter_event_dist.batch_shape, T_arr.shape)
+    gaps = inter_event_dist.expand(batch).sample(key, sample_shape=(max_events,))
+    gaps = jnp.moveaxis(gaps, 0, -1)
     times = jnp.cumsum(gaps, axis=-1)
+    T_arr = T_arr[..., None]
     mask = times < T_arr
     n_events = jnp.sum(mask, axis=-1).astype(jnp.int32)
     # Pad out-of-window positions to T so downstream intensity evaluations stay safe.
