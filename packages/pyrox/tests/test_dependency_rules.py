@@ -5,7 +5,9 @@ pyrox sits in GeoML, tier 3 (probabilistic models and variational assimilation
 radtrax, sesmax, vardax: they sit above it, or beside it in the same tier.
 Every import of a stack library is declared, as a dependency or an extra, and
 what importing a package runs needs a dependency. Its packages form no cycle.
-Dev, docs and tutorial dependency groups are not checked.
+Dev, docs and tutorial dependency groups are not checked. Inside pyrox, pyrox-
+gauss, pyrox-xtreme sit in tier 1, so no pyrox package of a lower tier may
+import or depend on them.
 
 The rules: https://github.com/jejjohnson/geostack/blob/main/docs/api/dependency_graph.md
 
@@ -107,12 +109,26 @@ ALLOWED: dict[str, str] = {
     "xrops": "xrtoolz-ops",
     "xrproducts": "xrtoolz-products",
     "xrtoolz": "xrtoolz",
-    "xtremax": "xtremax",
 }
 
 #: packages of pyrox that one of its packages may not use, because they sit in
 #: a higher package tier: distribution -> {import name: distribution}
-FORBIDDEN_INSIDE: dict[str, dict[str, str]] = {}
+FORBIDDEN_INSIDE: dict[str, dict[str, str]] = {
+    "pyrox-gauss": {
+        "pyrox": "pyrox",
+        "pyrox_gp": "pyrox-gp",
+        "pyrox_lgm": "pyrox-lgm",
+        "pyrox_nn": "pyrox-nn",
+        "pyrox_ssm": "pyrox-ssm",
+    },
+    "pyrox-xtreme": {
+        "pyrox": "pyrox",
+        "pyrox_gp": "pyrox-gp",
+        "pyrox_lgm": "pyrox-lgm",
+        "pyrox_nn": "pyrox-nn",
+        "pyrox_ssm": "pyrox-ssm",
+    },
+}
 
 #: imports left undeclared on purpose, kept in step with geostack:
 #: distribution -> reason
