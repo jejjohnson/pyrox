@@ -45,6 +45,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import lineax as lx
+import numpyro
 import optimistix as optx
 from argminax.solve import laplace_mode_covariance
 from gaussx import (
@@ -887,3 +888,61 @@ class QuasiNewtonInference(eqx.Module):
 
 
 # --- module-level conveniences ------------------------------------------
+
+
+def gp_laplace_factor(
+    name: str,
+    prior: GPPrior,
+    likelihood: Likelihood,
+    y: Float[Array, " N"],
+    *,
+    strategy: LaplaceInference | GaussNewtonInference | None = None,
+) -> None:
+    r"""Register the Laplace approximate GP evidence with NumPyro.
+
+    Adds ``numpyro.factor(name, strategy.fit(prior, likelihood, y)
+    .log_marginal_approx)``, the non-Gaussian analogue of `gp_factor`: the
+    latent function is marginalised by the Laplace approximation at the
+    mode $\hat f$,
+
+    $$
+    \log p(y \mid \theta) \approx \sum_n \log p(y_n \mid \hat f_n)
+      - \tfrac12 (\hat f - \mu)^\top K^{-1} (\hat f - \mu)
+      - \tfrac12 \log \lvert I + \Lambda^{1/2} K \Lambda^{1/2} \rvert ,
+    $$
+
+    with $\Lambda$ the site precisions. The Newton loop is
+    `argminax.solve.laplace_mode_covariance` with an implicitly
+    differentiable mode, so the factor traces under NUTS and its gradient in
+    the kernel hyperparameters $\theta$ flows through $\hat f$ without
+    unrolling the loop. Registers the one factor site ``name``, plus the
+    kernel's hyperparameter sites, drawn once.
+
+    The value is that of a fit that may not have converged; check
+    ``strategy.fit(...).converged`` at the hyperparameters you care about.
+
+    Args:
+        name: The factor site name.
+        prior: The `GPPrior`.
+        likelihood: A scalar-latent `Likelihood`.
+        y: Observations, shape ``(N,)``.
+        strategy: `LaplaceInference` (the default) or `GaussNewtonInference`.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> import numpyro.distributions as dist
+        >>> from numpyro import handlers
+        >>> from pyrox_gp import RBF, BernoulliLikelihood, GPPrior, gp_laplace_factor
+        >>> X = jnp.linspace(-2.0, 2.0, 10)[:, None]
+        >>> y = (X[:, 0] > 0.0).astype(X.dtype)
+        >>> kernel = RBF()
+        >>> kernel.set_prior("lengthscale", dist.LogNormal(0.0, 0.5))
+        >>> prior = GPPrior(kernel=kernel, X=X)
+        >>> def model():
+        ...     gp_laplace_factor("y", prior, BernoulliLikelihood(), y)
+        >>> trace = handlers.trace(handlers.seed(model, 0)).get_trace()
+        >>> sorted(trace)
+        ['RBF.lengthscale', 'RBF.variance', 'y']
+    """
+    strategy = LaplaceInference() if strategy is None else strategy
+    numpyro.factor(name, strategy.fit(prior, likelihood, y).log_marginal_approx)

@@ -80,6 +80,7 @@ from pyrox_gp._inference_nongauss import (
     LaplaceInference,
     PosteriorLinearization,
     QuasiNewtonInference,
+    gp_laplace_factor,
 )
 from pyrox_gp._kernels import (
     RBF,
@@ -294,6 +295,7 @@ __all__ = [
     "decoder_posterior",
     "funk_hecke_coefficients",
     "gp_factor",
+    "gp_laplace_factor",
     "gp_sample",
     "init_inducing",
     "latent_init",

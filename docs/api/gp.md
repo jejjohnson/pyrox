@@ -49,6 +49,8 @@ def latent_model(X):
 
 `prior.log_marginal(y, noise_var)` returns the collapsed log marginal likelihood that `gp_factor` registers, for use outside a NumPyro model (an optimiser's loss, a model comparison); `MultiOutputGPPrior.log_marginal(Y, noise_var)` is the same for `mo_gp_factor`, Kronecker-exact where the Gram allows, and `OILMMGPPrior.log_marginal(Y, noise_var)` is the same for `oilmm_factor`, exact at the projected cost under isotropic noise.
 
+For a non-Gaussian likelihood, `gp_laplace_factor(name, prior, likelihood, y)` registers the Laplace approximate evidence instead, the `log_marginal_approx` of a `LaplaceInference` (or `GaussNewtonInference`) fit. The mode is implicitly differentiable, so NUTS or SVI can run over the kernel hyperparameters with the latent function marginalised, as `pyrox_ssm.markov_laplace_factor` does on a Markov prior.
+
 The conditioned results (`ConditionedGP`, `ConditionedMultiOutputGP`, `ConditionedOILMMGP`) predict the latent function by default; `predict(X_star, include_noise=True)` adds the noise variance they were conditioned on, for a band on a new observation.
 
 Swap the solver strategy at construction time:
@@ -66,6 +68,7 @@ prior = GPPrior(
 ::: pyrox_gp.GPPrior
 ::: pyrox_gp.ConditionedGP
 ::: pyrox_gp.gp_factor
+::: pyrox_gp.gp_laplace_factor
 ::: pyrox_gp.gp_sample
 ::: pyrox_gp.preconditioned_cg_solver
 
