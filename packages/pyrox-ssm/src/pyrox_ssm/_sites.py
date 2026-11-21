@@ -5,15 +5,19 @@ Markov-GP factor per site under `jax.vmap`, which needs every site on a grid
 of the same length $N$. `pad_sites` pads each site's series after its last
 observation and returns the mask that the `pyrox_ssm.MarkovGPPrior` methods
 take, so the padded steps run the Kalman predict only and the log marginal of
-every site is unchanged. `markov_gp_sites_factor` then scores all the padded
-sites as one factor, and `noncentred_log_normal` draws per-site kernel
-hyperparameters around a population value without NUTS's funnel.
+every site is unchanged. `MarkovGPSitesPrior` holds the padded sites as one
+prior, with a summed log marginal and a `condition` whose result predicts every
+site at any times; `markov_gp_sites_factor` scores all the padded sites as one
+factor, and `noncentred_log_normal` draws per-site kernel hyperparameters
+around a population value without NUTS's funnel.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from typing import Any
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpyro
@@ -22,7 +26,7 @@ from gaussx import SDEKernel
 from jaxtyping import Array, Bool, Float
 
 from pyrox_ssm._hierarchical import _site_axes
-from pyrox_ssm._markov import MarkovGPPrior
+from pyrox_ssm._markov import ConditionedMarkovGP, MarkovGPPrior, _observation_mask
 
 
 def pad_sites(
@@ -169,6 +173,384 @@ def pad_sites(
     return jnp.stack(t_rows), jnp.stack(y_rows), jnp.stack(mask_rows)
 
 
+class MarkovGPSitesPrior(eqx.Module):
+    r"""A Markov GP prior over $S$ padded sites that share one SDE kernel.
+
+    Site $s$ is an independent Markov GP over its own row of ``times``, with
+    kernel $\theta_s$ and noise variance $\sigma_s^2$, so the log marginal of
+    the sites is the sum of theirs,
+
+    $$
+    \log p(Y \mid \theta) = \sum_{s=1}^{S} \log p(y_s \mid \theta_s, \sigma_s^2),
+    $$
+
+    each term `pyrox_ssm.MarkovGPPrior.log_marginal` over the site's masked
+    padded series. ``times`` and ``mask`` are the ``(S, N)`` arrays that
+    `pyrox_ssm.pad_sites` returns; padding after a site's last observation
+    adds predict-only steps, so it changes neither the site's log marginal
+    nor its predictions.
+
+    One kernel per site is one kernel whose array leaves carry a leading
+    ``(S,)`` axis, such as ``MaternSDE(variance, lengthscale, order=1)`` with
+    ``(S,)`` arrays; a 0-d leaf is shared by every site. The mean function
+    follows the same rule: a plain function, or a module whose array leaves
+    are 0-d, is shared, and a module (an ``eqx.Module``) whose array leaves
+    carry a leading ``(S,)`` axis gives each site its own mean.
+    ``obs_noise_floor`` is shared by every site. The prior registers no
+    NumPyro sites; `markov_gp_sites_factor` adds its log marginal as one
+    factor.
+
+    Attributes:
+        sde_kernel: An `SDEKernel` whose non-scalar array leaves have a
+            leading site axis of length ``S``.
+        times: ``(S, N)`` padded times, strictly increasing along each row.
+        mask: Optional ``(S, N)`` boolean mask, ``True`` where observed.
+        mean_fn: Optional mean function ``times -> (N,)``, as in
+            `pyrox_ssm.MarkovGPPrior`; shared, or one per site through array
+            leaves with a leading ``(S,)`` axis.
+        obs_noise_floor: Extra observation variance, as in
+            `pyrox_ssm.MarkovGPPrior`.
+
+    Raises:
+        ValueError: If ``times`` is not ``(S, N)``, ``mask`` is not shaped
+            like it, or a non-scalar array leaf of the kernel or the mean
+            function has a leading axis whose length is not ``S``.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> import pyrox_ssm as pss
+        >>> t, y, mask = pss.pad_sites(
+        ...     [jnp.arange(5.0), jnp.arange(3.0)], [jnp.ones(5), jnp.zeros(3)]
+        ... )
+        >>> kernel = pss.MaternSDE(1.0, jnp.array([0.5, 2.0]), order=1)
+        >>> prior = pss.MarkovGPSitesPrior(kernel, t, mask=mask)
+        >>> log_marg = prior.log_marginal(y, jnp.asarray(0.1))
+        >>> cond = prior.condition(y, jnp.asarray(0.1))
+        >>> mean, var = cond.predict(jnp.array([1.5, 6.0]))
+        >>> mean.shape
+        (2, 2)
+    """
+
+    sde_kernel: SDEKernel
+    times: Float[Array, "S N"]
+    mask: Bool[Array, "S N"] | None = None
+    mean_fn: Callable[[Float[Array, " N"]], Float[Array, " N"]] | None = None
+    obs_noise_floor: float = eqx.field(static=True, default=0.0)
+
+    def __init__(
+        self,
+        sde_kernel: SDEKernel,
+        times: Float[Array, "S N"],
+        mask: Bool[Array, "S N"] | None = None,
+        mean_fn: Callable[[Float[Array, " N"]], Float[Array, " N"]] | None = None,
+        obs_noise_floor: float = 0.0,
+    ) -> None:
+        times = jnp.asarray(times, dtype=jnp.result_type(times, 0.0))
+        if times.ndim != 2:
+            raise ValueError(
+                "times must be (S, N), one row per site, got shape "
+                f"{tuple(times.shape)!r}."
+            )
+        if mask is not None:
+            if jnp.shape(mask) != times.shape:
+                raise ValueError(
+                    f"mask has shape {tuple(jnp.shape(mask))!r} but times has "
+                    f"{tuple(times.shape)!r}."
+                )
+            mask = jnp.asarray(mask).astype(bool)
+        # Validate the site axis of the kernel's and the mean's leaves now.
+        _site_axes(sde_kernel, times.shape[0])
+        _site_axes(eqx.filter(mean_fn, eqx.is_array), times.shape[0])
+        if obs_noise_floor < 0:
+            raise ValueError(
+                f"obs_noise_floor must be non-negative, got {obs_noise_floor!r}"
+            )
+        self.sde_kernel = sde_kernel
+        self.times = times
+        self.mask = mask
+        self.mean_fn = mean_fn
+        self.obs_noise_floor = float(obs_noise_floor)
+
+    @property
+    def n_sites(self) -> int:
+        """Number of sites $S$."""
+        return self.times.shape[0]
+
+    def _mean_parts(self) -> tuple[Any, Any, Any]:
+        """The mean's array leaves, their vmap axes, and the rest of it."""
+        dynamic, static = eqx.partition(self.mean_fn, eqx.is_array)
+        return dynamic, _site_axes(dynamic, self.n_sites), static
+
+    def _site_prior(
+        self, kernel_s: SDEKernel, t_s: Float[Array, " N"], mean_s: Any, static: Any
+    ) -> MarkovGPPrior:
+        mean_fn = None if self.mean_fn is None else eqx.combine(mean_s, static)
+        return MarkovGPPrior(
+            kernel_s, t_s, mean_fn=mean_fn, obs_noise_floor=self.obs_noise_floor
+        )
+
+    def _check_y(self, y: Float[Array, "S N"]) -> Float[Array, "S N"]:
+        y = jnp.asarray(y)
+        if y.shape != self.times.shape:
+            raise ValueError(
+                f"y has shape {tuple(y.shape)!r} but times has "
+                f"{tuple(self.times.shape)!r}."
+            )
+        return y
+
+    def _noise(
+        self, noise_var: Float[Array, ""] | Float[Array, " S"]
+    ) -> tuple[Float[Array, ""] | Float[Array, " S"], int | None]:
+        """``noise_var`` as an array and its vmap axis, validated against S."""
+        noise_var = jnp.asarray(noise_var)
+        if noise_var.ndim not in (0, 1) or (
+            noise_var.ndim == 1 and noise_var.shape[0] != self.n_sites
+        ):
+            raise ValueError(
+                f"noise_var must be () or (S,)=({self.n_sites},), got shape "
+                f"{tuple(noise_var.shape)!r}."
+            )
+        return noise_var, None if noise_var.ndim == 0 else 0
+
+    def _site_log_marginals(
+        self,
+        y: Float[Array, "S N"],
+        noise_var: Float[Array, ""] | Float[Array, " S"],
+    ) -> Float[Array, " S"]:
+        y = self._check_y(y)
+        noise_var, noise_axis = self._noise(noise_var)
+        mean_dynamic, mean_axes, mean_static = self._mean_parts()
+
+        def site(kernel_s, mean_s, t_s, y_s, m_s, noise_s):
+            prior_s = self._site_prior(kernel_s, t_s, mean_s, mean_static)
+            return prior_s.log_marginal(y_s, noise_s, mask=m_s)
+
+        in_axes = (
+            _site_axes(self.sde_kernel, self.n_sites),
+            mean_axes,
+            0,
+            0,
+            None if self.mask is None else 0,
+            noise_axis,
+        )
+        return jax.vmap(site, in_axes=in_axes)(
+            self.sde_kernel, mean_dynamic, self.times, y, self.mask, noise_var
+        )
+
+    def log_marginal(
+        self,
+        y: Float[Array, "S N"],
+        noise_var: Float[Array, ""] | Float[Array, " S"],
+    ) -> Float[Array, ""]:
+        r"""Summed log marginal of the sites' observed steps.
+
+        $$
+        \log p(Y \mid \theta) = \sum_{s=1}^{S} \log p(y_s \mid \theta_s, \sigma_s^2).
+        $$
+
+        Args:
+            y: ``(S, N)`` observations; masked entries may be ``NaN``.
+            noise_var: Observation noise variance, shared ``()`` or per site
+                ``(S,)``.
+
+        Returns:
+            The scalar log marginal.
+
+        Raises:
+            ValueError: If ``y`` is not shaped like ``times``, or
+                ``noise_var`` is neither ``()`` nor ``(S,)``.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> import pyrox_ssm as pss
+            >>> t, y, mask = pss.pad_sites(
+            ...     [jnp.arange(5.0), jnp.arange(3.0)], [jnp.ones(5), jnp.zeros(3)]
+            ... )
+            >>> prior = pss.MarkovGPSitesPrior(pss.MaternSDE(1.0, 1.0), t, mask=mask)
+            >>> log_marg = prior.log_marginal(y, jnp.array([0.1, 0.2]))
+        """
+        return jnp.sum(self._site_log_marginals(y, noise_var))
+
+    def condition(
+        self,
+        y: Float[Array, "S N"],
+        noise_var: Float[Array, ""] | Float[Array, " S"],
+    ) -> ConditionedMarkovGPSites:
+        """Condition every site on its observations, by its filter and smoother.
+
+        Args:
+            y: ``(S, N)`` observations; masked entries may be ``NaN``.
+            noise_var: Observation noise variance, shared ``()`` or per site
+                ``(S,)``.
+
+        Returns:
+            The `ConditionedMarkovGPSites`, holding each site's smoothed
+            moments, with ``y``'s masked entries set to zero.
+
+        Raises:
+            ValueError: If ``y`` is not shaped like ``times``, or
+                ``noise_var`` is neither ``()`` nor ``(S,)``.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> import pyrox_ssm as pss
+            >>> t, y, mask = pss.pad_sites(
+            ...     [jnp.arange(5.0), jnp.arange(3.0)], [jnp.ones(5), jnp.zeros(3)]
+            ... )
+            >>> prior = pss.MarkovGPSitesPrior(pss.MaternSDE(1.0, 1.0), t, mask=mask)
+            >>> cond = prior.condition(y, jnp.asarray(0.1))
+            >>> cond.smoothed_means.shape
+            (2, 5, 1)
+        """
+        y = self._check_y(y)
+        noise_arr, noise_axis = self._noise(noise_var)
+        mean_dynamic, mean_axes, mean_static = self._mean_parts()
+
+        def site(kernel_s, mean_s, t_s, y_s, m_s, noise_s):
+            prior_s = self._site_prior(kernel_s, t_s, mean_s, mean_static)
+            cond = prior_s.condition(y_s, noise_s, mask=m_s)
+            return cond.y, cond.smoothed_means, cond.smoothed_covs, cond.log_marginal
+
+        in_axes = (
+            _site_axes(self.sde_kernel, self.n_sites),
+            mean_axes,
+            0,
+            0,
+            None if self.mask is None else 0,
+            noise_axis,
+        )
+        y_clean, m_smooth, P_smooth, site_lml = jax.vmap(site, in_axes=in_axes)(
+            self.sde_kernel, mean_dynamic, self.times, y, self.mask, noise_arr
+        )
+        return ConditionedMarkovGPSites(
+            prior=self,
+            y=y_clean,
+            noise_var=noise_arr,
+            smoothed_means=m_smooth,
+            smoothed_covs=P_smooth,
+            site_log_marginals=site_lml,
+        )
+
+
+class ConditionedMarkovGPSites(eqx.Module):
+    r"""A `MarkovGPSitesPrior` conditioned on every site's observations.
+
+    Returned by `MarkovGPSitesPrior.condition`. Holds each site's smoothed
+    moments on its padded grid; `predict` gives every site's marginal mean and
+    variance at any times, as `pyrox_ssm.ConditionedMarkovGP.predict` does for
+    one site.
+
+    Attributes:
+        prior: The originating `MarkovGPSitesPrior`.
+        y: ``(S, N)`` observations, with masked entries set to zero.
+        noise_var: The noise variance conditioned on, ``()`` or ``(S,)``.
+        smoothed_means: ``(S, N, d)`` smoothed state means.
+        smoothed_covs: ``(S, N, d, d)`` smoothed state covariances.
+        site_log_marginals: ``(S,)`` log marginal of each site.
+    """
+
+    prior: MarkovGPSitesPrior
+    y: Float[Array, "S N"]
+    noise_var: Float[Array, ""] | Float[Array, " S"]
+    smoothed_means: Float[Array, "S N d"]
+    smoothed_covs: Float[Array, "S N d d"]
+    site_log_marginals: Float[Array, " S"]
+
+    @property
+    def log_marginal(self) -> Float[Array, ""]:
+        """The summed log marginal, equal to `MarkovGPSitesPrior.log_marginal`."""
+        return jnp.sum(self.site_log_marginals)
+
+    def predict(
+        self,
+        t_star: Float[Array, " M"] | Float[Array, "S M"],
+        *,
+        include_noise: bool = False,
+    ) -> tuple[Float[Array, "S M"], Float[Array, "S M"]]:
+        r"""Every site's predictive marginals ``(mean, var)`` at ``t_star``.
+
+        Site $s$ is predicted as `pyrox_ssm.ConditionedMarkovGP.predict`
+        predicts one site: its filter and smoother rerun over the merged grid
+        of its padded times and the test times, with the test times
+        unobserved. With ``include_noise=True`` the variance is that of a new
+        observation, $\sigma_*^2 + \sigma_s^2$ plus ``obs_noise_floor``.
+
+        Args:
+            t_star: Test times, ``(M,)`` for the same times at every site or
+                ``(S, M)`` for one row per site.
+            include_noise: Add the site's observation variance.
+
+        Returns:
+            ``(mean, var)``, each ``(S, M)``.
+
+        Raises:
+            ValueError: If ``t_star`` is neither ``(M,)`` nor ``(S, M)``.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> import pyrox_ssm as pss
+            >>> t, y, mask = pss.pad_sites(
+            ...     [jnp.arange(5.0), jnp.arange(3.0)], [jnp.ones(5), jnp.zeros(3)]
+            ... )
+            >>> prior = pss.MarkovGPSitesPrior(pss.MaternSDE(1.0, 1.0), t, mask=mask)
+            >>> cond = prior.condition(y, jnp.asarray(0.1))
+            >>> mean, var = cond.predict(jnp.linspace(0.0, 6.0, 7))
+            >>> mean.shape
+            (2, 7)
+        """
+        prior = self.prior
+        t_star = jnp.asarray(t_star)
+        if t_star.ndim == 1:
+            t_axis = None
+        elif t_star.ndim == 2 and t_star.shape[0] == prior.n_sites:
+            t_axis = 0
+        else:
+            raise ValueError(
+                f"t_star must be (M,) or (S, M)=({prior.n_sites}, M), got shape "
+                f"{tuple(t_star.shape)!r}."
+            )
+        noise_axis = None if self.noise_var.ndim == 0 else 0
+        mean_dynamic, mean_axes, mean_static = prior._mean_parts()
+
+        def site(kernel_s, mean_s, t_s, y_s, m_s, noise_s, m_smooth, P_smooth, lml, ts):
+            site_prior = prior._site_prior(kernel_s, t_s, mean_s, mean_static)
+            cond = ConditionedMarkovGP(
+                prior=site_prior,
+                y=y_s,
+                noise_var=noise_s,
+                smoothed_means=m_smooth,
+                smoothed_covs=P_smooth,
+                log_marginal=lml,
+                mask=None if m_s is None else _observation_mask(m_s, t_s),
+            )
+            return cond.predict(ts, include_noise=include_noise)
+
+        in_axes = (
+            _site_axes(prior.sde_kernel, prior.n_sites),
+            mean_axes,
+            0,
+            0,
+            None if prior.mask is None else 0,
+            noise_axis,
+            0,
+            0,
+            0,
+            t_axis,
+        )
+        return jax.vmap(site, in_axes=in_axes)(
+            prior.sde_kernel,
+            mean_dynamic,
+            prior.times,
+            self.y,
+            prior.mask,
+            self.noise_var,
+            self.smoothed_means,
+            self.smoothed_covs,
+            self.site_log_marginals,
+            t_star,
+        )
+
+
 def markov_gp_sites_factor(
     name: str,
     sde_kernel: SDEKernel,
@@ -194,7 +576,9 @@ def markov_gp_sites_factor(
     each term the masked Kalman log marginal of `MarkovGPPrior.log_marginal`.
     It replaces the hand-written ``jax.vmap`` over sites shown in
     `markov_gp_factor`'s example, and is one ``numpyro.factor`` site, so it
-    composes with NUTS and SVI as that pattern does.
+    composes with NUTS and SVI as that pattern does. It registers
+    ``MarkovGPSitesPrior(sde_kernel, times, mask=mask, ...).log_marginal(y,
+    noise_var)``; build that prior to condition and predict after a fit.
 
     One kernel per site is one kernel whose array leaves carry a leading
     ``(S,)`` axis, such as ``MaternSDE(variance, lengthscale, order=1)`` with
@@ -210,14 +594,15 @@ def markov_gp_sites_factor(
         noise_var: Observation noise variance, shared ``()`` or per site
             ``(S,)``.
         mask: Optional ``(S, N)`` boolean mask, ``True`` where observed.
-        mean_fn: Optional mean function shared by every site, as in
-            `MarkovGPPrior`.
+        mean_fn: Optional mean function, as in `MarkovGPPrior`; shared, or
+            one per site through array leaves with a leading ``(S,)`` axis
+            (see `MarkovGPSitesPrior`).
         obs_noise_floor: Extra observation variance, as in `MarkovGPPrior`.
 
     Raises:
         ValueError: If ``times``, ``y`` or ``mask`` is not ``(S, N)``, or if a
-            non-scalar kernel leaf or ``noise_var`` has a leading axis whose
-            length is not ``S``.
+            non-scalar array leaf of the kernel or the mean function, or
+            ``noise_var``, has a leading axis whose length is not ``S``.
 
     Examples:
         >>> import jax.numpy as jnp
@@ -234,51 +619,10 @@ def markov_gp_sites_factor(
         ...     noise = jnp.asarray(0.1)
         ...     pss.markov_gp_sites_factor("y", kernel, t, y, noise, mask=mask)
     """
-    times = jnp.asarray(times)
-    if times.ndim != 2:
-        raise ValueError(
-            f"times must be (S, N), one row per site, got shape {tuple(times.shape)!r}."
-        )
-    n_sites = times.shape[0]
-    y = jnp.asarray(y)
-    if y.shape != times.shape:
-        raise ValueError(
-            f"y has shape {tuple(y.shape)!r} but times has {tuple(times.shape)!r}."
-        )
-    if mask is not None and jnp.shape(mask) != times.shape:
-        raise ValueError(
-            f"mask has shape {tuple(jnp.shape(mask))!r} but times has "
-            f"{tuple(times.shape)!r}."
-        )
-
-    kernel_axes = _site_axes(sde_kernel, n_sites)
-    noise_var = jnp.asarray(noise_var)
-    if noise_var.ndim not in (0, 1) or (
-        noise_var.ndim == 1 and noise_var.shape[0] != n_sites
-    ):
-        raise ValueError(
-            f"noise_var must be () or (S,)=({n_sites},), got shape "
-            f"{tuple(noise_var.shape)!r}."
-        )
-    noise_axis = None if noise_var.ndim == 0 else 0
-
-    def _site(
-        kernel_s: SDEKernel,
-        t_s: Float[Array, " N"],
-        y_s: Float[Array, " N"],
-        m_s: Bool[Array, " N"] | None,
-        noise_s: Float[Array, ""],
-    ) -> Float[Array, ""]:
-        prior = MarkovGPPrior(
-            kernel_s, t_s, mean_fn=mean_fn, obs_noise_floor=obs_noise_floor
-        )
-        return prior.log_marginal(y_s, noise_s, mask=m_s)
-
-    mask_axis = None if mask is None else 0
-    log_marginals = jax.vmap(_site, in_axes=(kernel_axes, 0, 0, mask_axis, noise_axis))(
-        sde_kernel, times, y, mask, noise_var
+    prior = MarkovGPSitesPrior(
+        sde_kernel, times, mask=mask, mean_fn=mean_fn, obs_noise_floor=obs_noise_floor
     )
-    numpyro.factor(name, jnp.sum(log_marginals))
+    numpyro.factor(name, prior.log_marginal(y, noise_var))
 
 
 def noncentred_log_normal(

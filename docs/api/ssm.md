@@ -236,6 +236,13 @@ def pooled_model(t, y, mask):
     pss.markov_gp_sites_factor("y", kernel, t, y, jnp.asarray(0.01), mask=mask)
 ```
 
+The factor registers `MarkovGPSitesPrior(kernel, t, mask=mask).log_marginal(y, noise_var)`. After a fit, build that prior with the fitted kernel to predict every site at once: `condition(y, noise_var)` runs each site's filter and smoother, and the `ConditionedMarkovGPSites` it returns gives `predict(t_star)`, each site's mean and variance shaped `(S, M)`, at the same `(M,)` times for every site or at an `(S, M)` row per site. A mean function follows the kernel's rule: a plain function is shared, and an `eqx.Module` mean whose array leaves carry the leading `(S,)` axis gives each site its own mean:
+
+```python
+prior = pss.MarkovGPSitesPrior(kernel, t, mask=mask)
+mean, var = prior.condition(y, jnp.asarray(0.01)).predict(t_star)   # (S, M) each
+```
+
 Per-site hyperparameters drawn around a population value with an unknown spread give NUTS a funnel when the spread is small. `noncentred_log_normal` samples a standard normal `f"{name}_z"` per site under the plate and records `exp(loc + scale * z)` as the deterministic site `name`:
 
 ```python
@@ -244,6 +251,8 @@ with numpyro.plate("site", t.shape[0]):
 ```
 
 ::: pyrox_ssm.pad_sites
+::: pyrox_ssm.MarkovGPSitesPrior
+::: pyrox_ssm.ConditionedMarkovGPSites
 ::: pyrox_ssm.markov_gp_sites_factor
 ::: pyrox_ssm.noncentred_log_normal
 
