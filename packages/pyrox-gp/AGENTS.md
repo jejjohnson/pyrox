@@ -70,7 +70,7 @@ The Markov / state-space track (`MarkovGPPrior`, the SDE kernels, the Markov non
   never `+ jnp.eye` on a diagonal one.
 - **Inference strategies** are `eqx.Module`s with static configuration that
   satisfy `_NonGaussStrategy.fit(prior, likelihood, y)` and return
-  `NonGaussConditionedGP`; reuse the helpers in `_inference_nongauss.py`
+  `ConditionedNonGaussGP`; reuse the helpers in `_inference_nongauss.py`
   (`_prior_K`, `_per_point_grad_hess`, `_posterior_from_diag_sites`, …).
 - **Multi-output kernels** join the closed union `MultiOutputKernel` and
   `_latent_kernels` in `_multi_output_models.py`; distinct latent kernels

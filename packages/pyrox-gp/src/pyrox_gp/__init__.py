@@ -10,7 +10,7 @@
   `OILMMKernel`, and shared inducing-point helpers for explicit
   cross-output structure without monolithic model classes — plus the
   model layer on top: `MultiOutputGPPrior` /
-  `MultiOutputConditionedGP` / `mo_gp_factor` for exact
+  `ConditionedMultiOutputGP` / `mo_gp_factor` for exact
   inference, `MultiOutputSparseGPPrior` /
   `mo_svgp_elbo` / `mo_svgp_factor` for the inducing-input
   variational path (reusing the single-output guides), and
@@ -42,7 +42,14 @@ stable matrix assembly, implicit operators, batched matvec, Cholesky /
 CG / BBMM / LSMR, etc. — live in ``gaussx``. pyrox model entry points
 accept any ``gaussx.AbstractSolverStrategy``; the default is
 ``gaussx.DenseSolver()``.
+
+`NonGaussConditionedGP` is now `ConditionedNonGaussGP` and
+`MultiOutputConditionedGP` is `ConditionedMultiOutputGP`, the
+``Conditioned<Model>`` order of the other results; the old names still import,
+with a `DeprecationWarning`, and are the same class objects.
 """
+
+import warnings
 
 from pyrox_gp._guides import (
     DeltaGuide,
@@ -67,10 +74,10 @@ from pyrox_gp._inference import (
     svgp_factor,
 )
 from pyrox_gp._inference_nongauss import (
+    ConditionedNonGaussGP,
     ExpectationPropagation,
     GaussNewtonInference,
     LaplaceInference,
-    NonGaussConditionedGP,
     PosteriorLinearization,
     QuasiNewtonInference,
 )
@@ -125,8 +132,8 @@ from pyrox_gp._multi_output import (
     SharedInducingPoints,
 )
 from pyrox_gp._multi_output_models import (
+    ConditionedMultiOutputGP,
     ConditionedOILMMGP,
-    MultiOutputConditionedGP,
     MultiOutputGPPrior,
     MultiOutputSparseGPPrior,
     OILMMGPPrior,
@@ -193,8 +200,23 @@ _SSM_RENAMED = {
 }
 
 
+# Old names, kept as deprecated aliases of the same class objects (pyrox#516).
+_RENAMED = {
+    "NonGaussConditionedGP": "ConditionedNonGaussGP",
+    "MultiOutputConditionedGP": "ConditionedMultiOutputGP",
+}
+
+
 def __getattr__(name: str):
-    """Raise an `ImportError` naming the pyrox-ssm home of a moved name."""
+    """Serve a renamed class with a warning; name the pyrox-ssm home of a moved one."""
+    if name in _RENAMED:
+        new = _RENAMED[name]
+        warnings.warn(
+            f"pyrox_gp.{name} is deprecated; use pyrox_gp.{new}.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return globals()[new]
     if name in _MOVED_TO_SSM:
         module = "pyrox_ssm.flows" if name in _SSM_FLOWS else "pyrox_ssm"
         new = _SSM_RENAMED.get(name, name)
@@ -210,6 +232,8 @@ __all__ = [
     "BernoulliLikelihood",
     "ConditionedGP",
     "ConditionedLatentFactorGP",
+    "ConditionedMultiOutputGP",
+    "ConditionedNonGaussGP",
     "ConditionedOILMMGP",
     "ConjugateVI",
     "Constant",
@@ -238,12 +262,10 @@ __all__ = [
     "Linear",
     "Matern",
     "MeanFieldGuide",
-    "MultiOutputConditionedGP",
     "MultiOutputGPPrior",
     "MultiOutputInducingVariables",
     "MultiOutputSparseGPPrior",
     "NaturalGuide",
-    "NonGaussConditionedGP",
     "OILMMGPPrior",
     "OILMMKernel",
     "PathwiseFunction",

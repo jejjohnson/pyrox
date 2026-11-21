@@ -46,7 +46,7 @@ from pyrox_gp._protocols import Kernel, Likelihood
 
 
 if TYPE_CHECKING:
-    from pyrox_gp._inference_nongauss import NonGaussConditionedGP
+    from pyrox_gp._inference_nongauss import ConditionedNonGaussGP
 
 
 class _NonGaussStrategy(Protocol):
@@ -57,7 +57,7 @@ class _NonGaussStrategy(Protocol):
         prior: GPPrior,
         likelihood: Likelihood,
         y: Float[Array, " N"],
-    ) -> NonGaussConditionedGP: ...
+    ) -> ConditionedNonGaussGP: ...
 
 
 def _psd_operator(K: Float[Array, "N N"]) -> lx.AbstractLinearOperator:
@@ -231,7 +231,7 @@ class GPPrior(eqx.Module):
         y: Float[Array, " N"],
         *,
         strategy: _NonGaussStrategy,
-    ) -> NonGaussConditionedGP:
+    ) -> ConditionedNonGaussGP:
         """Condition on a non-Gaussian likelihood via a site-based strategy.
 
         Convenience that forwards to ``strategy.fit(self, likelihood, y)``.
@@ -242,7 +242,7 @@ class GPPrior(eqx.Module):
         `pyrox_gp.PosteriorLinearization`,
         `pyrox_gp.ExpectationPropagation`, or
         `pyrox_gp.QuasiNewtonInference`. Returns a
-        `pyrox_gp.NonGaussConditionedGP` with the same
+        `pyrox_gp.ConditionedNonGaussGP` with the same
         ``predict`` / ``predict_mean`` / ``predict_var`` API as the
         Gaussian-likelihood `ConditionedGP`.
 

@@ -21,12 +21,12 @@ import pytest
 from pyrox_gp import (
     RBF,
     BernoulliLikelihood,
+    ConditionedNonGaussGP,
     ExpectationPropagation,
     GaussNewtonInference,
     GPPrior,
     HeteroscedasticGaussianLikelihood,
     LaplaceInference,
-    NonGaussConditionedGP,
     PosteriorLinearization,
     QuasiNewtonInference,
     SoftmaxLikelihood,
@@ -77,7 +77,7 @@ def test_strategy_runs_and_returns_finite_posterior(strategy_factory) -> None:
     prior, _, y = _make_classification_problem()
     strategy = strategy_factory()
     cond = strategy.fit(prior, BernoulliLikelihood(), y)
-    assert isinstance(cond, NonGaussConditionedGP)
+    assert isinstance(cond, ConditionedNonGaussGP)
     assert cond.q_mean.shape == y.shape
     assert cond.q_var.shape == y.shape
     assert jnp.all(jnp.isfinite(cond.q_mean))
@@ -172,7 +172,7 @@ def test_condition_nongauss_method_works() -> None:
     cond = prior.condition_nongauss(
         BernoulliLikelihood(), y, strategy=LaplaceInference()
     )
-    assert isinstance(cond, NonGaussConditionedGP)
+    assert isinstance(cond, ConditionedNonGaussGP)
 
 
 @pytest.mark.slow

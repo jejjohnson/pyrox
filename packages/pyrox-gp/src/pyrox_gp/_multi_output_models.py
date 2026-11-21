@@ -4,7 +4,7 @@ The model surface on top of the multi-output kernels in
 `pyrox_gp._multi_output`. Two workflows:
 
 * **Exact** — `MultiOutputGPPrior` /
-  `MultiOutputConditionedGP` mirror the single-output
+  `ConditionedMultiOutputGP` mirror the single-output
   `pyrox_gp.GPPrior` / `pyrox_gp.ConditionedGP` pair for
   vector-valued observations ``Y`` of shape ``(N, P)`` under a Gaussian
   likelihood with scalar or per-output noise. `mo_gp_factor` is
@@ -310,14 +310,14 @@ class MultiOutputGPPrior(eqx.Module):
         self,
         Y: Float[Array, "N P"],
         noise_var: Float[Array, ""] | Float[Array, " P"],
-    ) -> MultiOutputConditionedGP:
+    ) -> ConditionedMultiOutputGP:
         """Condition on Gaussian-likelihood observations ``Y`` of shape ``(N, P)``.
 
         ``noise_var`` is either a scalar (shared across outputs) or a
         ``(P,)`` vector of per-output noise variances. Precomputes the
         flattened training solve
         ``alpha = (K_ff + (jitter + noise) I)^{-1} vec(Y - mu(X))`` and
-        caches it in the returned `MultiOutputConditionedGP`, so
+        caches it in the returned `ConditionedMultiOutputGP`, so
         predictions at multiple test sets reuse the factorization.
         """
         _validate_targets(Y, self.num_outputs)
@@ -327,7 +327,7 @@ class MultiOutputGPPrior(eqx.Module):
         cache = build_prediction_cache(
             operator, residual, solver=self._resolved_solver()
         )
-        return MultiOutputConditionedGP(
+        return ConditionedMultiOutputGP(
             prior=self,
             Y=Y,
             noise_var=jnp.asarray(noise_var),
@@ -336,7 +336,7 @@ class MultiOutputGPPrior(eqx.Module):
         )
 
 
-class MultiOutputConditionedGP(eqx.Module):
+class ConditionedMultiOutputGP(eqx.Module):
     """Multi-output GP conditioned on Gaussian-likelihood observations.
 
     Holds the precomputed flattened training solve (via
@@ -849,7 +849,7 @@ class ConditionedOILMMGP(eqx.Module):
     ) -> Float[Array, "S M P"]:
         """Sample from the diagonal predictive ``N(mean, diag(var))``.
 
-        Matches the `MultiOutputConditionedGP.sample` convention —
+        Matches the `ConditionedMultiOutputGP.sample` convention —
         independent per input and output channel.
         """
         with call_contexts(self.prior.kernel.kernels):
