@@ -195,3 +195,27 @@ def test_fit_jits_and_vmaps_over_datasets(name):
         assert bool(batched[3][row]) and bool(eager[3])
         for got, want in zip(batched[:3], eager[:3], strict=True):
             assert jnp.allclose(got[row], want, rtol=1e-6, atol=1e-9)
+
+
+def _float32_classification(n: int = 60):
+    """The quasi-Newton notebook's problem in float32: a short lengthscale."""
+    X = jnp.linspace(-3.0, 3.0, n, dtype=jnp.float32)[:, None]
+    y = (jnp.sin(2.0 * X[:, 0]) > 0.0).astype(jnp.float32)
+    return GPPrior(kernel=RBF(init_lengthscale=0.6, init_variance=1.5), X=X), y
+
+
+@pytest.mark.parametrize("x64", [True, False])
+def test_float32_fits_stay_float32_and_finite(x64):
+    """Float32 data, with x64 on (the suite) and off (the notebooks)."""
+    with jax.enable_x64(x64):
+        prior, y = _float32_classification()
+        laplace = LaplaceInference(max_iter=50).fit(prior, BernoulliLikelihood(), y)
+        quasi = QuasiNewtonInference(max_iter=200, tol=1e-5).fit(
+            prior, BernoulliLikelihood(), y
+        )
+    for fit in (laplace, quasi):
+        assert fit.q_mean.dtype == fit.q_var.dtype == jnp.float32
+        assert bool(fit.converged)
+        assert bool(jnp.isfinite(fit.log_marginal_approx))
+    # The whitened L-BFGS reaches the Newton mode to float32 precision.
+    assert jnp.allclose(quasi.q_mean, laplace.q_mean, atol=1e-3)

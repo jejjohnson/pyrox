@@ -355,6 +355,37 @@ def _log_prob_per_point_factory(
     return per_point
 
 
+def _laplace_at_mode(
+    prior: GPPrior,
+    y: Float[Array, " N"],
+    f: Float[Array, " N"],
+    K: Float[Array, "N N"],
+    prior_mean: Float[Array, " N"],
+    log_prob_per_point: Callable[[Float[Array, " N"], PyTree], Float[Array, " N"]],
+    sites: PyTree,
+    *,
+    precision_floor: float,
+    n_iter: Int[Array, ""],
+    converged: Bool[Array, ""],
+) -> ConditionedNonGaussGP:
+    """The Laplace Gaussian at the mode ``f``: its sites, marginals and evidence."""
+    g, h = _per_point_grad_hess(log_prob_per_point, f, sites)
+    nat1, Lam = newton_update(f, g, h, precision_floor=precision_floor)
+    q_mean, q_var = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
+    log_marg = _laplace_log_marginal(log_prob_per_point, f, sites, prior_mean, K, Lam)
+    return ConditionedNonGaussGP(
+        prior=prior,
+        y=y,
+        site_nat1=nat1,
+        site_nat2=Lam,
+        q_mean=q_mean,
+        q_var=q_var,
+        log_marginal_approx=log_marg,
+        n_iter=n_iter,
+        converged=converged,
+    )
+
+
 def _newton_fit(
     prior: GPPrior,
     likelihood: Likelihood,
@@ -369,8 +400,10 @@ def _newton_fit(
 
     The loop is a ``lax.while_loop`` and the mode is implicitly
     differentiable, so the fit runs under ``jax.jit`` and ``jax.vmap`` and
-    a gradient does not unroll it. The sites, the marginals and the Laplace
-    log marginal are those at the mode.
+    a gradient does not unroll it. Only the mode, the iteration count and
+    the convergence flag come from argminax: the sites, the marginals and
+    the Laplace log marginal at the mode are pyrox-gp's own algebra
+    (`_laplace_at_mode`), whose safe Cholesky keeps them finite in float32.
     """
     _check_scalar_latent(likelihood)
     K = _prior_K(prior)
@@ -386,14 +419,15 @@ def _newton_fit(
         damping=damping,
         precision_floor=precision_floor,
     )
-    return ConditionedNonGaussGP(
-        prior=prior,
-        y=y,
-        site_nat1=fit.site_information,
-        site_nat2=fit.site_precision,
-        q_mean=fit.mean,
-        q_var=fit.variance,
-        log_marginal_approx=fit.log_marginal,
+    return _laplace_at_mode(
+        prior,
+        y,
+        fit.mode,
+        K,
+        prior_mean,
+        log_prob_per_point,
+        sites,
+        precision_floor=precision_floor,
         n_iter=fit.n_iter,
         converged=fit.converged,
     )
@@ -777,7 +811,10 @@ class QuasiNewtonInference(eqx.Module):
 
     Optimizes the unnormalized log posterior
     $\log p(y | f) - \tfrac12 (f - \mu)^\top K^{-1} (f - \mu)$
-    with `optimistix.LBFGS`, then forms a Laplace-style Gaussian
+    with `optimistix.LBFGS` in the whitened coordinates $v$ of
+    $f = \mu + L v$, $L L^\top = K$, where the prior term is
+    $\tfrac12 v^\top v$ and the problem is far better conditioned than in
+    $f$; then it forms a Laplace-style Gaussian
     approximation centered at the optimum using the exact per-point
     Hessian. The optimization is the cheap path for very high N where
     you cannot afford dense Hessians per iteration; the final Laplace
@@ -788,15 +825,15 @@ class QuasiNewtonInference(eqx.Module):
     delivers the simpler "QN optimization, Laplace covariance"
     contract.
 
+    The L-BFGS loop is `optimistix.minimise`, so ``fit`` runs under
+    ``jax.jit`` and ``jax.vmap``.
+
     Attributes:
         max_iter: L-BFGS iterations. Default ``50``.
         tol: The ``rtol`` and ``atol`` of `optimistix.LBFGS`, which stops
-            when both the step in ``f`` and the change in the objective are
+            when both the step in ``v`` and the change in the objective are
             within ``atol + rtol * |.|``. Default ``1e-6``.
         precision_floor: Lower bound on the diagonal precision.
-
-    The L-BFGS loop is `optimistix.minimise`, so ``fit`` runs under
-    ``jax.jit`` and ``jax.vmap``.
     """
 
     max_iter: int = eqx.field(static=True, default=50)
@@ -816,43 +853,36 @@ class QuasiNewtonInference(eqx.Module):
         sites = _site_data(likelihood, y, prior.X)
         L_K = _psd_safe_cholesky(K)
 
-        def neg_log_post(f: Float[Array, " N"], args: None) -> Float[Array, ""]:
-            del args
-            ll = log_prob_per_point(f, sites).sum()
-            r = f - prior_mean
-            alpha = jax.scipy.linalg.cho_solve((L_K, True), r)
-            return -(ll - 0.5 * jnp.dot(r, alpha))
+        def latent(v: Float[Array, " N"]) -> Float[Array, " N"]:
+            # f = μ + L v, the whitened coordinates of the prior
+            return prior_mean + einx.dot("i j, j -> i", L_K, v)
 
+        def neg_log_post(v: Float[Array, " N"], args: None) -> Float[Array, ""]:
+            del args
+            # −log p(y | f) + ½ vᵀv, the negative log posterior in v
+            return -log_prob_per_point(latent(v), sites).sum() + 0.5 * jnp.dot(v, v)
+
+        # optimistix keeps the L-BFGS history in the default float dtype, so
+        # float32 data under x64 runs the search in float64 and casts back.
+        dtype = jnp.promote_types(prior_mean.dtype, jnp.result_type(float))
         solution = optx.minimise(
             neg_log_post,
             optx.LBFGS(rtol=self.tol, atol=self.tol),
-            prior_mean,
+            jnp.zeros(prior_mean.shape, dtype),
             max_steps=self.max_iter,
             throw=False,
         )
-        n_iter = solution.stats["num_steps"]
-        converged = solution.result == optx.RESULTS.successful
-
-        # Laplace covariance at the optimum.
-        f_opt = solution.value
-        g, h = _per_point_grad_hess(log_prob_per_point, f_opt, sites)
-        nat1, Lam = newton_update(f_opt, g, h, precision_floor=self.precision_floor)
-        q_mean, q_var = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
-
-        log_marg = _laplace_log_marginal(
-            log_prob_per_point, f_opt, sites, prior_mean, K, Lam
-        )
-
-        return ConditionedNonGaussGP(
-            prior=prior,
-            y=y,
-            site_nat1=nat1,
-            site_nat2=Lam,
-            q_mean=q_mean,
-            q_var=q_var,
-            log_marginal_approx=log_marg,
-            n_iter=jnp.asarray(n_iter),
-            converged=jnp.asarray(converged),
+        return _laplace_at_mode(
+            prior,
+            y,
+            latent(solution.value).astype(prior_mean.dtype),
+            K,
+            prior_mean,
+            log_prob_per_point,
+            sites,
+            precision_floor=self.precision_floor,
+            n_iter=jnp.asarray(solution.stats["num_steps"]),
+            converged=solution.result == optx.RESULTS.successful,
         )
 
 
