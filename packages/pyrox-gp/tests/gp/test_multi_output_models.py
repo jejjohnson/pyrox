@@ -494,7 +494,7 @@ def test_mo_svgp_elbo_improves_with_informative_guide():
 def test_mo_sparse_predict_shapes_and_prior_variance_cap():
     prior, X, _ = _sparse_setup()
     guide = WhitenedGuide.init(num_inducing=prior.num_inducing, scale=1.0)
-    mean, var = prior.predict(guide, X[:5])
+    mean, var = prior.condition(guide).predict(X[:5])
     assert mean.shape == (5, 3)
     assert var.shape == (5, 3)
     # With a unit whitened guide the predictive variance equals the
@@ -512,8 +512,8 @@ def test_mo_sparse_mean_fn_added_to_predict():
         jitter=prior.jitter,
     )
     guide = FullRankGuide.init(num_inducing=prior.num_inducing)
-    mean_base, _ = prior.predict(guide, X[:4])
-    mean_shifted, _ = shifted.predict(guide, X[:4])
+    mean_base, _ = prior.condition(guide).predict(X[:4])
+    mean_shifted, _ = shifted.condition(guide).predict(X[:4])
     assert jnp.allclose(mean_shifted, mean_base + offset, atol=1e-5)
 
 
