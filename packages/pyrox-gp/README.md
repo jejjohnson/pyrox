@@ -113,12 +113,12 @@ We have not put pyrox-gp on PyPI, and the name `pyrox` there belongs to an unrel
 uv add "pyrox-gp @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-gp"
 ```
 
-kernellib v0.0.22 pins gaussx v0.6.5, while pyrox-gp needs gaussx v0.7.0, so add this override to your project's `pyproject.toml`; without it uv cannot resolve the install.
+kernellib v0.0.22 pins gaussx v0.6.5, while pyrox-gp needs gaussx v0.8.0, so add this override to your project's `pyproject.toml`; without it uv cannot resolve the install.
 
 ```toml
 [tool.uv]
 override-dependencies = [
-    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.7.0",
+    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.8.0",
 ]
 ```
 
