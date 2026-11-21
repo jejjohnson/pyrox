@@ -273,14 +273,14 @@ Gauss-Newton curvature, statistical linearization under the cavity
 (posterior linearization / CVI), moment matching against the tilted
 distribution (EP), or L-BFGS to the MAP with a Laplace covariance at
 convergence (quasi-Newton). Each `fit(prior, likelihood, y)` returns a
-`NonGaussConditionedGP` that quacks like `ConditionedGP`.
+`ConditionedNonGaussGP` that quacks like `ConditionedGP`.
 
 ::: pyrox_gp.LaplaceInference
 ::: pyrox_gp.GaussNewtonInference
 ::: pyrox_gp.PosteriorLinearization
 ::: pyrox_gp.ExpectationPropagation
 ::: pyrox_gp.QuasiNewtonInference
-::: pyrox_gp.NonGaussConditionedGP
+::: pyrox_gp.ConditionedNonGaussGP
 
 ## Multi-output GPs
 

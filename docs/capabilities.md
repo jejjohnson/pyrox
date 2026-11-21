@@ -121,10 +121,10 @@ compose it; if it is almost here, extend it where it lives. Regenerate with
 
 | Name | Kind | What it does |
 |---|---|---|
+| `ConditionedNonGaussGP` | class | GP conditioned on a non-Gaussian likelihood via an advanced strategy. |
 | `ExpectationPropagation` | class | Parallel expectation propagation (Minka 2001) with damping. |
 | `GaussNewtonInference` | class | Gauss-Newton inference: Newton loop with PSD-projected curvature. |
 | `LaplaceInference` | class | Laplace approximation via Newton iteration on the log posterior. |
-| `NonGaussConditionedGP` | class | GP conditioned on a non-Gaussian likelihood via an advanced strategy. |
 | `PosteriorLinearization` | class | Iterated statistical-linearization site updates. |
 | `QuasiNewtonInference` | class | MAP optimization via L-BFGS, Laplace covariance at convergence. |
 
@@ -204,8 +204,8 @@ compose it; if it is almost here, extend it where it lives. Regenerate with
 
 | Name | Kind | What it does |
 |---|---|---|
+| `ConditionedMultiOutputGP` | class | Multi-output GP conditioned on Gaussian-likelihood observations. |
 | `ConditionedOILMMGP` | class | OILMM posterior — ``Q`` conditioned scalar GPs plus the mixing. |
-| `MultiOutputConditionedGP` | class | Multi-output GP conditioned on Gaussian-likelihood observations. |
 | `MultiOutputGPPrior` | class | Finite-dimensional multi-output GP prior over fixed training inputs. |
 | `MultiOutputSparseGPPrior` | class | Sparse multi-output GP prior over shared inducing inputs. |
 | `OILMMGPPrior` | class | Orthogonal-mixing multi-output GP prior with a projected exact posterior. |

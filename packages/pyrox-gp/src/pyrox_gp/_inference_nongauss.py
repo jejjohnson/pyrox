@@ -25,7 +25,7 @@ Strategy                          Curvature ``H`` from
 
 All five accept a `pyrox_gp.GPPrior` and a scalar-latent
 `pyrox_gp.Likelihood`, and return an
-`NonGaussConditionedGP` that quacks like
+`ConditionedNonGaussGP` that quacks like
 `pyrox_gp.ConditionedGP` (``predict``, ``predict_mean``,
 ``predict_var``).
 
@@ -72,7 +72,7 @@ if TYPE_CHECKING:
 # --- result type ---------------------------------------------------------
 
 
-class NonGaussConditionedGP(eqx.Module):
+class ConditionedNonGaussGP(eqx.Module):
     """GP conditioned on a non-Gaussian likelihood via an advanced strategy.
 
     Equivalent role to `pyrox_gp.ConditionedGP` but the
@@ -392,7 +392,7 @@ class LaplaceInference(eqx.Module):
         prior: GPPrior,
         likelihood: Likelihood,
         y: Float[Array, " N"],
-    ) -> NonGaussConditionedGP:
+    ) -> ConditionedNonGaussGP:
         _check_scalar_latent(likelihood)
         K = _prior_K(prior)
         prior_mean = prior.mean(prior.X)
@@ -424,7 +424,7 @@ class LaplaceInference(eqx.Module):
             log_prob_per_point, f, sites, prior_mean, K, Lam
         )
 
-        return NonGaussConditionedGP(
+        return ConditionedNonGaussGP(
             prior=prior,
             y=y,
             site_nat1=nat1,
@@ -475,7 +475,7 @@ class GaussNewtonInference(eqx.Module):
         prior: GPPrior,
         likelihood: Likelihood,
         y: Float[Array, " N"],
-    ) -> NonGaussConditionedGP:
+    ) -> ConditionedNonGaussGP:
         _check_scalar_latent(likelihood)
         K = _prior_K(prior)
         prior_mean = prior.mean(prior.X)
@@ -508,7 +508,7 @@ class GaussNewtonInference(eqx.Module):
             log_prob_per_point, f, sites, prior_mean, K, Lam
         )
 
-        return NonGaussConditionedGP(
+        return ConditionedNonGaussGP(
             prior=prior,
             y=y,
             site_nat1=nat1,
@@ -560,7 +560,7 @@ class PosteriorLinearization(eqx.Module):
         prior: GPPrior,
         likelihood: Likelihood,
         y: Float[Array, " N"],
-    ) -> NonGaussConditionedGP:
+    ) -> ConditionedNonGaussGP:
         _check_scalar_latent(likelihood)
         K = _prior_K(prior)
         prior_mean = prior.mean(prior.X)
@@ -630,7 +630,7 @@ class PosteriorLinearization(eqx.Module):
             log_prob_per_point, q_mean, sites, prior_mean, K, nat2
         )
 
-        return NonGaussConditionedGP(
+        return ConditionedNonGaussGP(
             prior=prior,
             y=y,
             site_nat1=nat1,
@@ -704,7 +704,7 @@ class ExpectationPropagation(eqx.Module):
         prior: GPPrior,
         likelihood: Likelihood,
         y: Float[Array, " N"],
-    ) -> NonGaussConditionedGP:
+    ) -> ConditionedNonGaussGP:
         _check_scalar_latent(likelihood)
         K = _prior_K(prior)
         prior_mean = prior.mean(prior.X)
@@ -768,7 +768,7 @@ class ExpectationPropagation(eqx.Module):
             log_prob_per_point, q_mean, sites, prior_mean, K, nat2
         )
 
-        return NonGaussConditionedGP(
+        return ConditionedNonGaussGP(
             prior=prior,
             y=y,
             site_nat1=nat1,
@@ -815,7 +815,7 @@ class QuasiNewtonInference(eqx.Module):
         prior: GPPrior,
         likelihood: Likelihood,
         y: Float[Array, " N"],
-    ) -> NonGaussConditionedGP:
+    ) -> ConditionedNonGaussGP:
         import optax
 
         _check_scalar_latent(likelihood)
@@ -860,7 +860,7 @@ class QuasiNewtonInference(eqx.Module):
             log_prob_per_point, f_opt, sites, prior_mean, K, Lam
         )
 
-        return NonGaussConditionedGP(
+        return ConditionedNonGaussGP(
             prior=prior,
             y=y,
             site_nat1=nat1,

@@ -1,6 +1,6 @@
 """Tests for the multi-output GP model layer.
 
-Covers :class:`MultiOutputGPPrior` / :class:`MultiOutputConditionedGP` /
+Covers :class:`MultiOutputGPPrior` / :class:`ConditionedMultiOutputGP` /
 :func:`mo_gp_factor` (exact) and :class:`MultiOutputSparseGPPrior` /
 :func:`mo_svgp_elbo` / :func:`mo_svgp_factor` (inducing inputs).
 """
