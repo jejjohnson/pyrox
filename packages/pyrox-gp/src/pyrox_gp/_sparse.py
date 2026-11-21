@@ -38,7 +38,7 @@ from pyrox._core import call_context
 from pyrox_gauss import MultivariateNormal
 
 from pyrox_gp._inducing import InducingFeatures
-from pyrox_gp._protocols import Kernel
+from pyrox_gp._protocols import Guide, Kernel
 
 
 def _psd_operator(K: Float[Array, "M M"]) -> lx.AbstractLinearOperator:
@@ -249,3 +249,76 @@ class SparseGPPrior(eqx.Module):
         loc = jnp.zeros(n, dtype=op.out_structure().dtype)
         mvn = MultivariateNormal(loc, op, solver=self._resolved_solver())
         return mvn.sample(key)
+
+    def condition(self, guide: Guide) -> ConditionedSparseGP:
+        r"""The sparse posterior for a fitted guide.
+
+        The observations are already summarised in the fitted guide
+        $q(u) = \mathcal{N}(m_q, S_q)$, so `condition` takes the guide
+        rather than ``y``; the result is
+        $q(f) = \int p(f \mid u)\, q(u)\, du$, whose ``predict(X_star)``
+        gives the SVGP predictive marginals.
+
+        Args:
+            guide: The fitted guide over the inducing values, any
+                `pyrox_gp.Guide` with ``predict(K_xz, K_zz_op, K_xx_diag)``
+                (`FullRankGuide`, `WhitenedGuide`, `NaturalGuide`, …).
+
+        Returns:
+            The `ConditionedSparseGP` holding this prior and the guide.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> from pyrox_gp import RBF, FullRankGuide, SparseGPPrior
+            >>> prior = SparseGPPrior(RBF(), Z=jnp.linspace(0.0, 1.0, 5)[:, None])
+            >>> guide = FullRankGuide.init(prior.num_inducing)
+            >>> mean, var = prior.condition(guide).predict(jnp.array([[0.3], [2.0]]))
+        """
+        return ConditionedSparseGP(prior=self, guide=guide)
+
+
+class ConditionedSparseGP(eqx.Module):
+    r"""A sparse GP conditioned through a fitted guide on its inducing values.
+
+    Returned by `SparseGPPrior.condition`. ``predict(X_star)`` is the SVGP
+    predictive
+
+    $$
+    \mu_* = K_{*Z} K_{ZZ}^{-1} m_q + \mu(X_*), \qquad
+    \sigma_*^2 = k_{**} - K_{*Z} K_{ZZ}^{-1} K_{Z*}
+      + K_{*Z} K_{ZZ}^{-1} S_q K_{ZZ}^{-1} K_{Z*},
+    $$
+
+    computed by the guide's own ``predict`` on `SparseGPPrior.predictive_blocks`.
+
+    Attributes:
+        prior: The originating `SparseGPPrior`.
+        guide: The fitted guide over the inducing values.
+    """
+
+    prior: SparseGPPrior
+    guide: Guide
+
+    def predict(
+        self, X_star: Float[Array, "M D"]
+    ) -> tuple[Float[Array, " M"], Float[Array, " M"]]:
+        """Predictive ``(mean, variance)`` of ``f`` at ``X_star``.
+
+        Args:
+            X_star: Test inputs, shape ``(M, D)``.
+
+        Returns:
+            ``(mean, var)``, each ``(M,)``, mean function included.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> from pyrox_gp import RBF, WhitenedGuide, SparseGPPrior
+            >>> prior = SparseGPPrior(RBF(), Z=jnp.linspace(0.0, 1.0, 4)[:, None])
+            >>> cond = prior.condition(WhitenedGuide.init(prior.num_inducing))
+            >>> mean, var = cond.predict(jnp.linspace(0.0, 1.0, 7)[:, None])
+            >>> mean.shape
+            (7,)
+        """
+        K_zz_op, K_xz, K_xx_diag = self.prior.predictive_blocks(X_star)
+        mean, var = self.guide.predict(K_xz, K_zz_op, K_xx_diag)  # ty: ignore[unresolved-attribute]
+        return mean + self.prior.mean(X_star), var

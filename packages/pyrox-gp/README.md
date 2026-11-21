@@ -251,12 +251,9 @@ with handlers.substitute(data=theta):
         sparse, NaturalGuide.init(8), likelihood, inputs, targets
     )
     # today (pyrox-gp)
-    # K_ZZ, K_*Z and diag K_** at X_*
-    K_zz, K_xz, K_xx_diag = sparse.predictive_blocks(test_inputs)
-    # today (pyrox-gp)
-    # 𝔼_q[f_*] and Var_q[f_*]
+    # 𝔼_q[f_*] and Var_q[f_*] under q(f) = ∫ p(f | u) q(u) du
     # → (N_*,), (N_*,)
-    sparse_mean, sparse_var = q_u.predict(K_xz, K_zz, K_xx_diag)
+    sparse_mean, sparse_var = sparse.condition(q_u).predict(test_inputs)
 ```
 
 **Compare.** Each route gives a mean and a standard deviation of $`f(\mathbf{X}_*)`$.
@@ -340,12 +337,12 @@ Each public name sits on one rung of the GeoStack role ladder, by the job it doe
 |---|---|---|
 | Kernels | `RBF`, `Matern`, `Periodic`, `RationalQuadratic`, `Linear`, `Polynomial`, `Cosine`, `White`, `Constant` | `Parameterized` wrappers of `kernellib.functional`, with priors, guides and `frozen()` |
 | Exact GP | `GPPrior`, `ConditionedGP`, `GradientPosterior`, `gp_factor`, `gp_sample`, `preconditioned_cg_solver` | The marginal likelihood, the cached posterior, the gradient posterior, a latent sample site, and CG with a low-rank preconditioner |
-| Sparse prior and inducing features | `SparseGPPrior`, `init_inducing`, `InducingFeatures`, `FourierInducingFeatures`, `SphericalHarmonicInducingFeatures`, `SlepianInducingFeatures`, `LaplacianInducingFeatures`, `DecoupledInducingFeatures`, `funk_hecke_coefficients` | Inducing points picked from the data, or inter-domain features; `funk_hecke_coefficients` is a deprecated alias of kernellib's |
+| Sparse prior and inducing features | `SparseGPPrior`, `ConditionedSparseGP`, `init_inducing`, `InducingFeatures`, `FourierInducingFeatures`, `SphericalHarmonicInducingFeatures`, `SlepianInducingFeatures`, `LaplacianInducingFeatures`, `DecoupledInducingFeatures`, `funk_hecke_coefficients` | Inducing points picked from the data, or inter-domain features; `funk_hecke_coefficients` is a deprecated alias of kernellib's |
 | Guides | `FullRankGuide`, `MeanFieldGuide`, `WhitenedGuide`, `NaturalGuide`, `DeltaGuide` | $`q(\mathbf{u})`$ in moment, whitened, natural or point-mass form |
 | SVGP inference | `svgp_elbo`, `svgp_factor`, `ConjugateVI` | The ELBO as a scalar or a NumPyro factor, and natural-gradient steps |
 | Likelihoods | `GaussianLikelihood`, `BernoulliLikelihood`, `PoissonLikelihood`, `StudentTLikelihood`, `SoftmaxLikelihood`, `HeteroscedasticGaussianLikelihood`, `DistLikelihood`, `WarpedGaussianLikelihood`, `warped_predictive_moments` | Observation models over gaussx, any NumPyro distribution, and a Gaussian through a flowjax warp |
 | Non-Gaussian inference | `LaplaceInference`, `GaussNewtonInference`, `PosteriorLinearization`, `ExpectationPropagation`, `QuasiNewtonInference`, `ConditionedNonGaussGP` | Strategies for `condition_nongauss`; `QuasiNewtonInference` needs the `optax` extra |
-| Multi-output | `LMCKernel`, `ICMKernel`, `OILMMKernel`, `SharedInducingPoints`, `MultiOutputInducingVariables`, `MultiOutputGPPrior`, `ConditionedMultiOutputGP`, `MultiOutputSparseGPPrior`, `OILMMGPPrior`, `ConditionedOILMMGP`, `mo_gp_factor`, `mo_svgp_elbo`, `mo_svgp_factor` | Mixing kernels, and exact, sparse and orthogonal-projection models over them |
+| Multi-output | `LMCKernel`, `ICMKernel`, `OILMMKernel`, `SharedInducingPoints`, `MultiOutputInducingVariables`, `MultiOutputGPPrior`, `ConditionedMultiOutputGP`, `MultiOutputSparseGPPrior`, `ConditionedMultiOutputSparseGP`, `OILMMGPPrior`, `ConditionedOILMMGP`, `mo_gp_factor`, `mo_svgp_elbo`, `mo_svgp_factor` | Mixing kernels, and exact, sparse and orthogonal-projection models over them |
 | Latent factor | `LatentFactorGPPrior`, `ConditionedLatentFactorGP`, `collapsed_lfr_log_prob`, `decoder_posterior`, `lfr_predictive_moments`, `lfr_factor`, `lfr_model`, `latent_init`, `latent_total_correlation`, `warp_to_base`, `warped_decoder_posterior`, `warped_lfr_log_prob` | GP latent factors with the linear decoder integrated out; `latent_total_correlation` needs the `flows` extra |
 | Pathwise | `PathwiseSampler`, `DecoupledPathwiseSampler`, `PathwiseFunction` | Posterior function draws for the exact and the sparse GP |
 | Protocols | `Kernel`, `Guide`, `Likelihood` | `Kernel` is kernellib's `AbstractKernel`; `Guide` and `Likelihood` come from `pyrox.likelihoods` |

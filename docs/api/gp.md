@@ -196,7 +196,10 @@ prior    = SparseGPPrior(kernel=kernel, inducing=features)   # K_uu is diagonal!
 
 ## Sparse GP prior
 
+After fitting a guide over the inducing values (`svgp_factor`, `svgp_elbo` or `ConjugateVI`), `prior.condition(guide)` returns the `ConditionedSparseGP`, whose `predict(X_star)` gives the SVGP predictive mean and variance, mean function included. `MultiOutputSparseGPPrior.condition(guide)` does the same for the multi-output prior, in the `(M, P)` layout, and replaces its deprecated `predict(guide, X_star)`.
+
 ::: pyrox_gp.SparseGPPrior
+::: pyrox_gp.ConditionedSparseGP
 
 ## Variational guides
 

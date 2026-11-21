@@ -133,6 +133,7 @@ from pyrox_gp._multi_output import (
 )
 from pyrox_gp._multi_output_models import (
     ConditionedMultiOutputGP,
+    ConditionedMultiOutputSparseGP,
     ConditionedOILMMGP,
     MultiOutputGPPrior,
     MultiOutputSparseGPPrior,
@@ -152,7 +153,7 @@ from pyrox_gp._protocols import (
     Kernel,
     Likelihood,
 )
-from pyrox_gp._sparse import SparseGPPrior
+from pyrox_gp._sparse import ConditionedSparseGP, SparseGPPrior
 from pyrox_gp._warped import (
     WarpedGaussianLikelihood,
     warped_predictive_moments,
@@ -233,8 +234,10 @@ __all__ = [
     "ConditionedGP",
     "ConditionedLatentFactorGP",
     "ConditionedMultiOutputGP",
+    "ConditionedMultiOutputSparseGP",
     "ConditionedNonGaussGP",
     "ConditionedOILMMGP",
+    "ConditionedSparseGP",
     "ConjugateVI",
     "Constant",
     "Cosine",

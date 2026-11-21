@@ -41,6 +41,7 @@ As with the single-output entry points, all linear algebra delegates to
 from __future__ import annotations
 
 import contextlib
+import warnings
 from collections.abc import Callable, Iterator
 
 import einx
@@ -582,24 +583,90 @@ class MultiOutputSparseGPPrior(eqx.Module):
         K_fu = einx.id("u f -> f u", K_uf)
         return K_uu_op, K_fu, K_ff_diag
 
+    def condition(self, guide: Guide) -> ConditionedMultiOutputSparseGP:
+        r"""The sparse multi-output posterior for a fitted guide.
+
+        The observations are already summarised in the fitted guide over the
+        stacked ``Q * M`` inducing values, so `condition` takes the guide
+        rather than ``Y``; ``predict(X_star)`` gives each output's SVGP
+        predictive marginals in the ``(M, P)`` layout.
+
+        Args:
+            guide: The fitted guide, sized ``num_inducing = prior.num_inducing``.
+
+        Returns:
+            The `ConditionedMultiOutputSparseGP`.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> from pyrox_gp import (
+            ...     RBF, FullRankGuide, ICMKernel, MultiOutputSparseGPPrior,
+            ...     SharedInducingPoints,
+            ... )
+            >>> prior = MultiOutputSparseGPPrior(
+            ...     ICMKernel(RBF(), jnp.array([[1.0], [0.5]])),
+            ...     SharedInducingPoints(locations=jnp.linspace(0.0, 1.0, 4)[:, None]),
+            ... )
+            >>> cond = prior.condition(FullRankGuide.init(prior.num_inducing))
+            >>> mean, var = cond.predict(jnp.array([[0.2], [0.9]]))
+            >>> mean.shape
+            (2, 2)
+        """
+        return ConditionedMultiOutputSparseGP(prior=self, guide=guide)
+
     def predict(
         self,
         guide: Guide,
         X_star: Float[Array, "M D"],
     ) -> tuple[Float[Array, "M P"], Float[Array, "M P"]]:
-        """Per-output predictive ``(mean, variance)`` under ``q(u)`` from ``guide``.
+        """Deprecated: use ``prior.condition(guide).predict(X_star)``.
 
-        Assembles `predictive_blocks` at ``X_star``, routes them
-        through ``guide.predict``, adds the mean function, and
-        unflattens to the ``(M, P)`` layout. Handles the ``vec``
-        bookkeeping so callers never touch the flattened layout.
+        Returns exactly what ``self.condition(guide).predict(X_star)``
+        returns, with a `DeprecationWarning`.
         """
-        K_uu_op, K_fu, K_ff_diag = self.predictive_blocks(X_star)
-        f_loc, f_var = guide.predict(K_fu, K_uu_op, K_ff_diag)  # ty: ignore[unresolved-attribute]
-        f_loc = f_loc + _flatten_outputs(self.mean(X_star))
+        warnings.warn(
+            "MultiOutputSparseGPPrior.predict(guide, X_star) is deprecated; use "
+            "prior.condition(guide).predict(X_star).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.condition(guide).predict(X_star)
+
+
+class ConditionedMultiOutputSparseGP(eqx.Module):
+    """A sparse multi-output GP conditioned through a fitted guide.
+
+    Returned by `MultiOutputSparseGPPrior.condition`. ``predict`` assembles
+    `MultiOutputSparseGPPrior.predictive_blocks` at the test inputs, routes
+    them through the guide's ``predict``, adds the mean function and
+    unflattens to ``(M, P)``, so callers never touch the flattened layout.
+
+    Attributes:
+        prior: The originating `MultiOutputSparseGPPrior`.
+        guide: The fitted guide over the stacked inducing values.
+    """
+
+    prior: MultiOutputSparseGPPrior
+    guide: Guide
+
+    def predict(
+        self, X_star: Float[Array, "M D"]
+    ) -> tuple[Float[Array, "M P"], Float[Array, "M P"]]:
+        """Per-output predictive ``(mean, variance)`` at ``X_star``, ``(M, P)`` each.
+
+        Args:
+            X_star: Test inputs, shape ``(M, D)``.
+
+        Returns:
+            ``(mean, var)``, each ``(M, P)``, mean function included.
+        """
+        prior = self.prior
+        K_uu_op, K_fu, K_ff_diag = prior.predictive_blocks(X_star)
+        f_loc, f_var = self.guide.predict(K_fu, K_uu_op, K_ff_diag)  # ty: ignore[unresolved-attribute]
+        f_loc = f_loc + _flatten_outputs(prior.mean(X_star))
         return (
-            _unflatten_outputs(f_loc, self.num_outputs),
-            _unflatten_outputs(f_var, self.num_outputs),
+            _unflatten_outputs(f_loc, prior.num_outputs),
+            _unflatten_outputs(f_var, prior.num_outputs),
         )
 
 
