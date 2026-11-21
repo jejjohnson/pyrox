@@ -186,6 +186,45 @@ class GPPrior(eqx.Module):
         mvn = MultivariateNormal(loc, op, solver=self._resolved_solver())
         return mvn.sample(key)
 
+    def log_marginal(
+        self,
+        y: Float[Array, " N"],
+        noise_var: Float[Array, ""],
+    ) -> Float[Array, ""]:
+        r"""Collapsed log marginal likelihood $\log p(y \mid X, \theta)$.
+
+        $$
+        \log p(y \mid X, \theta)
+          = \log \mathcal{N}\!\left(y \mid \mu(X),\,
+            K + (\text{jitter} + \sigma^2) I\right),
+        $$
+
+        through `gaussx.log_marginal_likelihood` with this prior's solver,
+        the latent function integrated out. The prior's ``jitter`` is added
+        with the noise, so the covariance is the one `condition` builds.
+        `gp_factor` registers this value.
+
+        Args:
+            y: Observations at the training inputs, shape ``(N,)``.
+            noise_var: Observation noise variance $\sigma^2$.
+
+        Returns:
+            The scalar log marginal likelihood.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> from pyrox_gp import GPPrior, RBF
+            >>> X = jnp.linspace(0.0, 1.0, 8)[:, None]
+            >>> prior = GPPrior(RBF(init_lengthscale=0.3), X)
+            >>> log_marg = prior.log_marginal(jnp.sin(6.0 * X[:, 0]), jnp.asarray(0.05))
+        """
+        return log_marginal_likelihood(
+            self.mean(self.X),
+            self._noisy_operator(noise_var),
+            y,
+            solver=self._resolved_solver(),
+        )
+
     def condition(
         self,
         y: Float[Array, " N"],
@@ -710,15 +749,10 @@ def gp_factor(
     ``jitter`` is included in addition to the observation noise variance
     so the covariance matches what `GPPrior.condition` builds. Use
     this inside a NumPyro model when the likelihood is Gaussian and you
-    want the latent function marginalized analytically.
+    want the latent function marginalized analytically. The value is
+    `GPPrior.log_marginal`.
     """
-    logp = log_marginal_likelihood(
-        prior.mean(prior.X),
-        prior._noisy_operator(noise_var),
-        y,
-        solver=prior._resolved_solver(),
-    )
-    numpyro.factor(name, logp)
+    numpyro.factor(name, prior.log_marginal(y, noise_var))
 
 
 def gp_sample(
