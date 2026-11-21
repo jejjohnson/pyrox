@@ -34,7 +34,7 @@ import jax.numpy as jnp
 import lineax as lx
 import numpyro
 from gaussx import FilterState, SDEKernel
-from jaxtyping import Array, Bool, Float
+from jaxtyping import Array, Bool, Float, PRNGKeyArray
 from numpyro import distributions as dist
 from pyrox.likelihoods import Likelihood
 
@@ -839,6 +839,83 @@ class ConditionedMarkovGP(eqx.Module):
         if include_noise:
             vars_ = vars_ + self.prior._R(self.noise_var)
         return means, vars_
+
+    def sample(
+        self,
+        key: PRNGKeyArray,
+        n_paths: int = 1,
+        t_star: Float[Array, " M"] | None = None,
+    ) -> Float[Array, "S M"]:
+        r"""Joint draws of the latent path $f(t_*) \mid y$.
+
+        Backward sampling (`gaussx.rts_sample`) through the filter of
+        `MarkovGPPrior.as_lgssm`: the last state from its filtered
+        distribution, then each state given the next with the smoother's
+        gain, and $f(t) = H x(t) + \mu(t)$ read off. Each draw is a whole
+        path, so a quantity of several times (a maximum over a window, the
+        length of an exceedance, a total over a season) gets its joint
+        uncertainty, which `predict`'s marginals cannot give; the
+        per-time moments of the draws converge to `predict`'s.
+
+        With ``t_star=None`` the draws are at the training times. Otherwise
+        the filter runs over the merged grid ``sort(times ∪ t_star)`` with
+        the test times unobserved, as `predict` does, and the draws are read
+        off at the test times, in the order given; a test time equal to a
+        training time sorts after it, so it sees that observation.
+
+        Args:
+            key: PRNG key.
+            n_paths: Number of joint draws $S$.
+            t_star: Optional test times ``(M,)``; ``None`` draws at the
+                training times.
+
+        Returns:
+            The paths, shaped ``(S, M)`` (``(S, N)`` at the training times),
+            mean function included.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> import jax.random as jr
+            >>> from pyrox_ssm import MaternSDE, MarkovGPPrior
+            >>> prior = MarkovGPPrior(MaternSDE(1.0, 0.5, order=1), jnp.arange(6.0))
+            >>> y = jnp.array([0.1, 0.4, jnp.nan, jnp.nan, 0.3, 0.2])
+            >>> cond = prior.condition(y, jnp.asarray(0.1), mask=~jnp.isnan(y))
+            >>> paths = cond.sample(jr.key(0), n_paths=32, t_star=jnp.linspace(1, 4, 7))
+            >>> paths.shape
+            (32, 7)
+        """
+        prior = self.prior
+        _F, _L, H, _Qc, _P_inf = prior.sde_kernel.sde_params()
+        times = prior.times
+        if t_star is None:
+            lgssm = prior.as_lgssm(self.noise_var)
+            state = lgssm.filter(self.y, mask=self.mask)
+            states = gaussx.rts_sample(state, lgssm.transition, key, n_paths)
+            # f(t) = H x(t) + μ(t)
+            return einx.dot("s n d, o d -> s n o", states, H)[..., 0] + prior.mean(
+                times
+            )
+
+        t_star = jnp.asarray(t_star)
+        n_train, n_test = times.shape[0], t_star.shape[0]
+        merged = jnp.concatenate([times, t_star])
+        # Stable sort: a test time equal to a training time sorts after it.
+        order = jnp.argsort(merged, stable=True)
+        observed = jnp.ones(n_train, dtype=bool) if self.mask is None else self.mask
+        merged_mask = jnp.concatenate([observed, jnp.zeros(n_test, dtype=bool)])[order]
+        merged_y = jnp.concatenate([self.y, jnp.zeros(n_test, dtype=self.y.dtype)])[
+            order
+        ]
+        # tree_at skips __init__, whose strictly-increasing check a test time
+        # equal to a training time would fail; a zero step is A = I, Q = 0.
+        merged_prior = eqx.tree_at(lambda p: p.times, prior, merged[order])
+        lgssm = merged_prior.as_lgssm(self.noise_var)
+        state = lgssm.filter(merged_y, mask=merged_mask)
+        states = gaussx.rts_sample(state, lgssm.transition, key, n_paths)
+        test_rows = jnp.argsort(order, stable=True)[n_train:]
+        # f(t_*) = H x(t_*) + μ(t_*)
+        f_test = einx.dot("s m d, o d -> s m o", states[:, test_rows], H)[..., 0]
+        return f_test + prior.mean(t_star)
 
 
 def markov_gp_factor(

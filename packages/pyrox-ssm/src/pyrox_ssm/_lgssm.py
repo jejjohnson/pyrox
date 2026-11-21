@@ -18,10 +18,13 @@ from __future__ import annotations
 import einx
 import equinox as eqx
 import gaussx
+import jax
 import jax.numpy as jnp
+import jax.random as jr
+import lineax as lx
 import numpyro
 from gaussx import FilterState
-from jaxtyping import Array, Bool, Float
+from jaxtyping import Array, Bool, Float, PRNGKeyArray
 
 
 def _as_float(x: Array) -> Array:
@@ -35,6 +38,18 @@ def _as_float(x: Array) -> Array:
     if jnp.issubdtype(x.dtype, jnp.inexact):
         return x
     return x.astype(jnp.result_type(x, 0.0))
+
+
+def _psd_root(cov: Float[Array, "D D"]) -> Float[Array, "D D"]:
+    r"""The symmetric root $L$ of a covariance, $L L^\top = \Sigma$.
+
+    `gaussx.sqrt` takes $V \operatorname{diag}(\sqrt{\max(\gamma, 0)}) V^\top$,
+    exact for a singular covariance such as the zero process noise of
+    `pyrox_ssm.MarkovGPPrior.as_lgssm`'s first step.
+    """
+    return gaussx.sqrt(
+        lx.MatrixLinearOperator(cov, lx.positive_semidefinite_tag)
+    ).as_matrix()
 
 
 def _check_shape(name: str, x: Array, allowed: tuple[tuple[int, ...], ...]) -> None:
@@ -396,6 +411,86 @@ class LinearGaussianSSMPrior(eqx.Module):
         m_smooth, P_smooth = gaussx.rts_smoother(state, self.transition)
         return m_smooth, P_smooth, state.log_likelihood
 
+    def sample(
+        self, key: PRNGKeyArray, n: int = 1
+    ) -> tuple[Float[Array, "S T D"], Float[Array, "S T M"]]:
+        r"""Draws of $(x_{1:T}, y_{1:T})$ from the prior, by running the model forward.
+
+        $$
+        x_0 \sim \mathcal{N}(m_0, P_0), \qquad
+        x_k = A_k x_{k-1} + \eta_k, \qquad
+        y_k = H_k x_k + b_k + \varepsilon_k,
+        $$
+
+        with $\eta_k \sim \mathcal{N}(0, Q_k)$ and
+        $\varepsilon_k \sim \mathcal{N}(0, R_k)$, row $k - 1$ holding step
+        $k$. The noise square roots are symmetric (`gaussx.sqrt`), so a
+        singular $Q_k$, such as the zero first step of
+        `pyrox_ssm.MarkovGPPrior.as_lgssm`, is drawn exactly. Use it to
+        simulate data from the model, or to check a fit on data whose truth
+        is known.
+
+        Args:
+            key: PRNG key.
+            n: Number of independent draws $S$.
+
+        Returns:
+            ``(states, observations)``, shaped ``(S, T, D)`` and ``(S, T, M)``.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> import jax.random as jr
+            >>> import pyrox_ssm as pss
+            >>> prior = pss.LinearGaussianSSMPrior(
+            ...     jnp.ones((5, 1, 1)), jnp.eye(1), jnp.full((5, 1, 1), 0.1),
+            ...     0.5 * jnp.eye(1), jnp.zeros(1), jnp.eye(1),
+            ... )
+            >>> states, y = prior.sample(jr.key(0), n=3)
+            >>> states.shape, y.shape
+            ((3, 5, 1), (3, 5, 1))
+        """
+        T, D, M = self.n_steps, self.state_dim, self.obs_dim
+        dtype = self.init_mean.dtype
+        init_root = _psd_root(self.init_cov)
+        process_roots = jax.vmap(_psd_root)(self.process_noise)
+        R = self.obs_noise
+        obs_roots = jax.vmap(_psd_root)(R) if R.ndim == 3 else _psd_root(R)
+        offset = (
+            jnp.zeros((T, M), dtype=dtype)
+            if self.obs_offset is None
+            else self.obs_offset
+        )
+
+        def one(draw_key):
+            init_key, state_key, obs_key = jr.split(draw_key, 3)
+            # x_0 = m_0 + L_0 z_0
+            x0 = self.init_mean + init_root @ jr.normal(init_key, (D,), dtype=dtype)
+            state_noise = jr.normal(state_key, (T, D), dtype=dtype)
+
+            def step(x_prev, inputs):
+                transition, root, z = inputs
+                # x_k = A_k x_{k-1} + L_{Q,k} z_k
+                x = transition @ x_prev + root @ z
+                return x, x
+
+            _, states = jax.lax.scan(
+                step, x0, (self.transition, process_roots, state_noise)
+            )
+            obs_noise = jr.normal(obs_key, (T, M), dtype=dtype)
+            # H_k x_k and L_{R,k} e_k, with one H or R for every step or one per step
+            if self.obs_model.ndim == 2:
+                signal = einx.dot("m d, t d -> t m", self.obs_model, states)
+            else:
+                signal = einx.dot("t m d, t d -> t m", self.obs_model, states)
+            if obs_roots.ndim == 2:
+                noise = einx.dot("m n, t n -> t m", obs_roots, obs_noise)
+            else:
+                noise = einx.dot("t m n, t n -> t m", obs_roots, obs_noise)
+            # y_k = H_k x_k + b_k + ε_k
+            return states, signal + offset + noise
+
+        return jax.vmap(one)(jr.split(key, n))
+
     def condition(
         self,
         y: Float[Array, "T M"] | Float[Array, " T"],
@@ -471,6 +566,40 @@ class ConditionedLinearGaussianSSM(eqx.Module):
     smoothed_covs: Float[Array, "T D D"]
     log_marginal: Float[Array, ""]
     mask: Bool[Array, " T"] | Bool[Array, "T M"] | None = None
+
+    def sample(self, key: PRNGKeyArray, n_paths: int = 1) -> Float[Array, "S T D"]:
+        r"""Joint draws of the state path from $p(x_{1:T} \mid y_{\mathrm{obs}})$.
+
+        Backward sampling (`gaussx.rts_sample`) on the filter's moments: $x_T$
+        from its filtered distribution, then each $x_k \mid x_{k+1}$ with the
+        smoother's gain. Each draw is a whole path, so a quantity of several
+        steps (a maximum over a window, a run length, a sum) gets its joint
+        uncertainty, which the marginals of `smoothed_means` and
+        `smoothed_covs` cannot give; the per-step moments of the draws
+        converge to them. The filter runs again on the stored observations.
+
+        Args:
+            key: PRNG key.
+            n_paths: Number of joint draws $S$.
+
+        Returns:
+            The state paths, shaped ``(S, T, D)``.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> import jax.random as jr
+            >>> import pyrox_ssm as pss
+            >>> prior = pss.LinearGaussianSSMPrior(
+            ...     jnp.ones((4, 1, 1)), jnp.eye(1), jnp.full((4, 1, 1), 0.1),
+            ...     0.5 * jnp.eye(1), jnp.zeros(1), jnp.eye(1),
+            ... )
+            >>> y = jnp.array([0.1, 0.3, jnp.nan, 0.2])
+            >>> cond = prior.condition(y, mask=~jnp.isnan(y))
+            >>> cond.sample(jr.key(0), n_paths=16).shape
+            (16, 4, 1)
+        """
+        state = self.prior.filter(self.y, mask=self.mask)
+        return gaussx.rts_sample(state, self.prior.transition, key, num_samples=n_paths)
 
     def predict(
         self, *, include_noise: bool = False
