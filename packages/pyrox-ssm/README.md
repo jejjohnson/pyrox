@@ -64,7 +64,7 @@ pyrox-ssm is one package of the pyrox workspace; the [workspace README](../../RE
 
 - ⏱️ **Temporal GPs in linear time**: `MarkovGPPrior` turns any gaussx SDE kernel (Matérn, periodic, quasi-periodic, cosine, constant, integrated Wiener, and their sums and products) into a Kalman filter for the marginal likelihood and an RTS smoother for the posterior, both $`\mathcal{O}(N d^3)`$.
 - 🕳️ **Gaps as masks**: every entry point takes a `mask`, a masked step runs the predict only, and a `NaN` placeholder there reaches neither the value nor a gradient, so a record with an outage needs no reindexing; `predict` interpolates, forecasts and backcasts on one code path.
-- 🧮 **Any linear-Gaussian model**: `LinearGaussianSSMPrior` takes the transition, observation and noise matrices directly, and `nonlinear_ssm_factor` scores a nonlinear model by an extended, unscented, cubature, Gauss-Hermite or Monte Carlo Kalman filter.
+- 🧮 **Any linear-Gaussian model**: `LinearGaussianSSMPrior` takes the transition, observation and noise matrices directly, and `NonlinearGaussianSSMPrior` filters, smooths and scores a nonlinear model (its factor `nonlinear_ssm_factor`) by an extended, unscented, cubature, Gauss-Hermite or Monte Carlo Kalman filter.
 - 🎲 **Non-Gaussian likelihoods**: Laplace, Gauss-Newton, posterior linearisation and expectation propagation behind `condition_nongauss`, each iteration one Kalman pass, and `markov_laplace_factor` puts the approximate evidence in a NumPyro model for NUTS over the hyperparameters.
 - 🪶 **Sparse Markov GPs**: `SparseMarkovGPPrior` with inducing times and `sparse_markov_elbo`, taking any guide with the pyrox `Guide` protocol.
 - 🗺️ **Many sites**: `pad_sites` pads ragged per-site series to one shape with the mask that skips the padding, `markov_gp_sites_factor` scores them as one factor, and `SharedPlusSiteMarkovGPPrior` fits a shared GP plus one GP per site as one state-space model.
@@ -78,7 +78,7 @@ Every model in the package is a Kalman recursion over some state, and they diffe
 |---|---|---|---|
 | Markov GP | `MarkovGPPrior`, `markov_gp_factor`, `.condition()` | an SDE kernel's state; Gaussian noise | a GP over a long series |
 | Linear-Gaussian SSM | `LinearGaussianSSMPrior`, `lgssm_factor`, `.condition()` | your matrices $`\mathbf{A}_k`$, $`\mathbf{H}_k`$, $`\mathbf{Q}_k`$, $`\mathbf{R}_k`$ | known linear dynamics, or several outputs |
-| Nonlinear SSM | `nonlinear_ssm_factor` | dynamics $`f`$ and observation $`h`$, moment-matched | nonlinear dynamics, at the cost of a surrogate likelihood |
+| Nonlinear SSM | `NonlinearGaussianSSMPrior`, `nonlinear_ssm_factor`, `.condition()` | dynamics $`f`$ and observation $`h`$, moment-matched | nonlinear dynamics, at the cost of a surrogate likelihood |
 | Non-Gaussian | `.condition_nongauss()`, `markov_laplace_factor` | an SDE kernel's state; a Gaussian site per observation | counts, labels or heavy tails |
 | Sparse | `SparseMarkovGPPrior`, `sparse_markov_elbo` | inducing times; any likelihood, through a guide | a variational fit with fewer inducing times than steps |
 | Many sites | `pad_sites`, `MarkovGPSitesPrior`, `markov_gp_sites_factor`, `SharedPlusSiteMarkovGPPrior` | one state per site, or a shared state plus one per site | a network of stations |
@@ -320,7 +320,7 @@ Each public name sits on one rung of the GeoStack role ladder, by the job it doe
 | SDE kernels (from gaussx) | `MaternSDE`, `PeriodicSDE`, `QuasiPeriodicSDE`, `CosineSDE`, `ConstantSDE`, `IntegratedWienerSDE`, `SumSDE`, `ProductSDE`, `SDEKernel`, `SDEParams` | Kernels as linear SDEs, re-exported unchanged |
 | Markov GP | `MarkovGPPrior`, `ConditionedMarkovGP`, `markov_gp_factor`, `markov_gp_sample`, `markov_gp_from_innovations`, `markov_gp_innovations_sample` | The filter's marginal likelihood, the smoothed posterior, and latent paths in linear time |
 | Linear-Gaussian SSM | `LinearGaussianSSMPrior`, `ConditionedLinearGaussianSSM`, `lgssm_factor` | A state-space model given by its matrices, with per-step or per-entry masks |
-| Nonlinear SSM | `nonlinear_ssm_factor` | The moment-matched log likelihood of gaussx's nonlinear Kalman filter |
+| Nonlinear SSM | `NonlinearGaussianSSMPrior`, `ConditionedNonlinearGaussianSSM`, `nonlinear_ssm_factor` | The moment-matched filter and smoother of gaussx, as a prior with a conditioned form and as a factor |
 | Non-Gaussian likelihoods | `LaplaceMarkovInference`, `GaussNewtonMarkovInference`, `PosteriorLinearizationMarkov`, `ExpectationPropagationMarkov`, `ConditionedNonGaussMarkovGP`, `markov_laplace_factor`, `markov_implicit_adjoint` | Strategies for `condition_nongauss`, the approximate evidence as a factor, and the adjoint that makes its gradient safe inside NUTS |
 | Sparse Markov GP | `SparseMarkovGPPrior`, `ConditionedSparseMarkovGP`, `sparse_markov_elbo`, `sparse_markov_factor` | Inducing times and a variational guide |
 | Many sites | `pad_sites`, `MarkovGPSitesPrior`, `ConditionedMarkovGPSites`, `markov_gp_sites_factor`, `noncentred_log_normal`, `SharedPlusSiteMarkovGPPrior`, `ConditionedSharedPlusSiteMarkovGP`, `shared_plus_site_factor` | Ragged series on one grid, pooled hyperparameters, and a shared GP plus one per site |
@@ -386,7 +386,7 @@ packages/pyrox-ssm/
 │   ├── __init__.py          ← the public names and the gaussx SDE kernels
 │   ├── _markov.py           ← MarkovGPPrior, ConditionedMarkovGP, the factors and samplers
 │   ├── _lgssm.py            ← LinearGaussianSSMPrior, lgssm_factor
-│   ├── _nonlinear.py        ← nonlinear_ssm_factor
+│   ├── _nonlinear.py        ← NonlinearGaussianSSMPrior, nonlinear_ssm_factor
 │   ├── _inference_nongauss_markov.py ← Laplace, Gauss-Newton, PL and EP on a Markov GP
 │   ├── _sparse_markov.py    ← the sparse Markov GP
 │   ├── _sites.py, _hierarchical.py ← many sites
