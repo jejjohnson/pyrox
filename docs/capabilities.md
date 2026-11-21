@@ -1185,7 +1185,7 @@ compose it; if it is almost here, extend it where it lives. Regenerate with
 
 <!-- upstream -->
 
-Listed at gaussx 0.6.15, kernellib 0.0.22, geonnax 0.0.11, functax 0.0.7.
+Listed at gaussx 0.8.0, kernellib 0.0.22, geonnax 0.0.11, functax 0.0.7.
 
 ## Upstream: `gaussx`
 
@@ -1198,7 +1198,6 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `AbstractIntegrator` | class | Protocol for Gaussian integral approximation. |
 | `AbstractLikelihood` | class | Base class for likelihood functions with optional analytical ELL. |
 | `AbstractLogdetStrategy` | class | Protocol for a log-determinant strategy. |
-| `AbstractMultivariateNormal` | class | Common surface of `MultivariateNormal` and `MultivariateNormalPrecision`. |
 | `AbstractPreconditioner` | class | Protocol for preconditioners that produce an approximate inverse. |
 | `AbstractSketch` | class | A random sketching matrix S ∈ ℝ^(d × M), sampled once. |
 | `AbstractSolveStrategy` | class | Protocol for a linear-solve strategy. |
@@ -1250,12 +1249,10 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `Kronecker` | class | Kronecker product A = A_1 ⊗ … ⊗ A_D, applied one factor at a time. |
 | `KroneckerSum` | class | Kronecker sum A_1 ⊕ A_2 = A_1 ⊗ I + I ⊗ A_2 of two square operators. |
 | `KroneckerSumSqrt` | class | Symmetric square root S of A_1 ⊕ A_2 from the factor eigenvectors. |
-| `LGSSM` | class | Linear-Gaussian state-space model as a density over observations ``(T, M)``. |
-| `LGSSMFactory` | class | Callable ``obs_mask -> MaskedLGSSM``, for conditional use. |
 | `LOOResult` | class | Result of `leave_one_out_cv`: the LOO log-likelihood and predictives. |
 | `LOVECache` | class | Cached rank-k Lanczos approximation Q diag(θ)⁻¹ Qᵀ of Σ_y⁻¹. |
 | `LSMRSolver` | class | LSMR iterative least-squares solver (Fong & Saunders 2011). |
-| `LaplaceModel` | class | The latent Gaussian model of `laplace_mode`, with the maps one Newton step needs. |
+| `LaplaceModel` | class | The latent Gaussian model of a Laplace fit, with the maps one Newton step needs. |
 | `LaplaceResult` | class | The Gaussian approximation 𝒩(x̂, Λ_x\|y⁻¹) at the mode. |
 | `LinearGaussianPosterior` | class | Posterior 𝒩(x_a, P_a) of `linear_gaussian_update`. |
 | `LinearizedSDE` | class | Linear surrogate dx(t) = (F_c,t x(t) + c_t) dt + L_c db(t) of an SDE. |
@@ -1263,14 +1260,10 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `LowRankUpdate` | class | Low-rank update A = A₀ + U D Vᵀ of a base operator, with D = diag(d). |
 | `LowerBlockTriDiag` | class | Lower block-bidiagonal operator L, the block Cholesky factor of A. |
 | `MINRESSolver` | class | MINRES solver for symmetric, possibly indefinite, systems. |
-| `MarkovGaussian` | class | Gauss-Markov chain over the states x_0:T−1 as a density over ``(T, d)``. |
-| `MaskedLGSSM` | class | `LGSSM` whose ``log_prob`` marginalises unobserved channels exactly. |
 | `MaskedOperator` | class | Masked view A = A₀[m_r, m_c] of a square base operator A₀. |
 | `MaternSDE` | class | State-space form of the Matérn kernel of order p, smoothness p + ½. |
 | `MomentMatchResult` | class | Tilted log-normaliser and its derivatives with respect to the cavity mean. |
 | `MonteCarloIntegrator` | class | Monte Carlo moment matching: sample, propagate, take empirical moments. |
-| `MultivariateNormal` | class | Multivariate normal 𝒩(μ, Σ) whose covariance Σ is a lineax operator. |
-| `MultivariateNormalPrecision` | class | Multivariate normal 𝒩(μ, Λ⁻¹) whose precision Λ = Σ⁻¹ is a lineax operator. |
 | `NegativeBinomialLikelihood` | class | Negative-binomial likelihood with log link (NB2, a gamma-Poisson mixture). |
 | `NystromLogdet` | class | Nyström-preconditioned SLQ log-determinant of K + σ² I (Wenger et al., 2022). |
 | `NystromPreconditioner` | class | Randomized Nyström preconditioner for K + σ² I. |
@@ -1291,7 +1284,6 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `SLQLogdet` | class | Stochastic log-determinant by stochastic Lanczos quadrature (SLQ). |
 | `SLRResult` | class | Linear-Gaussian surrogate produced by statistical linear regression. |
 | `SRHTSketch` | class | Subsampled randomized Hadamard transform sketch. |
-| `SVDLowRankUpdate` | class | Deprecated subclass of `LowRankUpdate` with ``orthonormal=True``. |
 | `SketchAndPrecondLSMR` | class | Sketch-and-precondition LSMR for tall least squares (Rokhlin & Tygert, 2008). |
 | `SoftmaxLikelihood` | class | Softmax (categorical) likelihood for multi-class classification. |
 | `SparseCholeskyFactor` | class | Sparse Cholesky factor on a static symbolic pattern. |
@@ -1301,8 +1293,6 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `SparsityPattern` | class | Static, hashable sparsity pattern of an M × N matrix A. |
 | `SpectralFunction` | class | f(A) = W⁻¹ diag(f(γ)) W for a symmetric A with a factored eigenbasis. |
 | `StudentTLikelihood` | class | Student-t likelihood for robust regression. |
-| `SumKronecker` | class | Deprecated alias for `SumOfKroneckers`. |
-| `SumKroneckerSqrt` | class | Deprecated alias for `SumOfKroneckersSqrt` (gh-297). |
 | `SumOfKroneckers` | class | Sum of Kronecker products ∑_j A_j ⊗ B_j, applied term by term. |
 | `SumOfKroneckersSqrt` | class | Lazy Lanczos square root A^½ of a `SumOfKroneckers` covariance. |
 | `SumSDE` | class | Sum of independent SDE kernels, stacked block-diagonally. |
@@ -1317,7 +1307,6 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `ar1_precision` | function | Precision of a stationary AR(1) process with marginal precision τ. |
 | `as_diagonalized` | function | Express an operator as one `DiagonalizedOperator`, if possible. |
 | `as_linear_operator` | function | Wrap a raw ``matvec`` callable as a tagged lineax operator. |
-| `base_conditional` | function | Deprecated: use `sparse_conditional` (note ``K_xz = K_mn.T``). |
 | `besag_structure` | function | Validate a graph Laplacian as a Besag (ICAR) structure matrix. |
 | `block_diagonal_tag` | constant | `block_diagonal_tag` |
 | `block_tridiagonal_tag` | constant | `block_tridiagonal_tag` |
@@ -1341,7 +1330,6 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `cov_transform` | function | Covariance propagation through a linear map, J Σ Jᵀ. |
 | `create_grid` | function | Regular grid axes g_d = linspace(lo_d, hi_d, N_d), one per dimension. |
 | `cubature_points` | function | Spherical-radial cubature points and weights, 2 D_x of them. |
-| `cubic_interpolation_weights` | function | Sparse rows of the cubic SKI interpolation matrix W_interp. |
 | `cur` | function | Randomized CUR decomposition (Voronin & Martinsson, 2017, §4). |
 | `cvi_update_sites` | function | Damped natural-gradient update of CVI sites. |
 | `damped_natural_update` | function | Damped update in natural-parameter space. |
@@ -1430,13 +1418,11 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `kronecker_sum_solve` | function | Solve a shifted Kronecker-sum system in tensor (unvectorised) form. |
 | `kronecker_sum_tag` | constant | `kronecker_sum_tag` |
 | `kronecker_tag` | constant | `kronecker_tag` |
-| `laplace_mode` | function | Mode, Hessian and log-marginal of the Laplace approximation, in precision form. |
-| `laplace_model` | function | Collect and check the pieces of the latent Gaussian model of `laplace_mode`. |
+| `laplace_model` | function | Collect and check the pieces of the latent Gaussian model of a Laplace fit. |
 | `laplace_result` | function | The Gaussian approximation and the Laplace log-marginal at a mode. |
 | `leave_one_out_cv` | function | LOO-CV via the bordered-system identity, without refitting N times. |
 | `ledoit_wolf_shrinkage` | function | Ledoit-Wolf shrinkage of an ensemble covariance, without forming it. |
 | `linear_gaussian_update` | function | Matrix-free posterior of a linear-Gaussian observation. |
-| `linear_interpolation_weights` | function | Sparse rows of the multilinear interpolation matrix on a rectilinear grid. |
 | `linear_solve` | function | Solve A x = b through the unified front door. |
 | `linearize_sde` | function | Optimal linear drift of a nonlinear SDE along a Gaussian path. |
 | `localization_matrix` | function | Pairwise Gaspari-Cohn taper ρ(d(aₙ, bₘ); c). |
@@ -1501,6 +1487,7 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `root_inv_decomposition` | function | Inverse-root decomposition: a tall factor R⁻ with A⁻¹ ≈ R⁻ (R⁻)ᵀ. |
 | `rp_cholesky` | function | Randomly pivoted partial Cholesky of a PSD matrix A. |
 | `rts_interpolate` | function | Smoothed marginal at an unobserved step t from filtered and smoothed states. |
+| `rts_sample` | function | Joint draws of the state path x_1:T from p(x_1:T \| y_1:T). |
 | `rts_smoother` | function | Rauch-Tung-Striebel backward smoother for `kalman_filter` output. |
 | `rw1_structure` | function | Structure matrix R = D₁ᵀ W D₁ of a first-order random walk. |
 | `rw2_structure` | function | Structure matrix R = D₂ᵀ D₂ of a second-order random walk. |
@@ -1541,7 +1528,6 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `sufficient_stats` | function | Sufficient statistics (x, x xᵀ) of a Gaussian, over any batch axes. |
 | `sum_of_kroneckers_sample` | function | Sample from 𝒩(0, K) with a matrix-free Lanczos square root. |
 | `sum_operator` | function | Lazy sum A = A_1 + … + A_D, applied one summand at a time. |
-| `sumkronecker_sample` | function | Deprecated alias for `sum_of_kroneckers_sample` (gh-297). |
 | `svd` | function | Singular value decomposition of A, with structural dispatch. |
 | `svd_low_rank_plus_diag` | function | Build A = diag(a) + U diag(s) Vᵀ from a truncated SVD. |
 | `svgp_variance_adjustment` | function | SVGP variance adjustment operator Q = K_ℐℐ⁻¹ Σ_ℐ K_ℐℐ⁻¹ − K_ℐℐ⁻¹. |
@@ -1550,9 +1536,7 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `symmetrize` | function | Symmetric part of the trailing two axes, removing round-off asymmetry. |
 | `theta_design` | function | Integration points and log-weights over hyperparameters θ. |
 | `tikhonov_augment` | function | Observation augmentation for Tikhonov-regularised EKI (TEKI). |
-| `to_expectation` | function | Deprecated alias of `to_mean_cov`. |
 | `to_mean_cov` | function | Mean μ and covariance Σ of a Gaussian in natural form. |
-| `to_natural` | function | Deprecated alias of `gaussx.mean_cov_to_natural`. |
 | `toeplitz_sample` | function | Draw from 𝒩(0, toeplitz(t)) by circulant embedding and the FFT. |
 | `trace` | function | Trace tr(A) of an operator, with structural dispatch. |
 | `trace_and_diag` | function | Joint stochastic estimate of tr(A) and diag(A) from one probe pass. |

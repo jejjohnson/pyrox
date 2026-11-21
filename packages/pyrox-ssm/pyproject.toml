@@ -23,7 +23,7 @@ classifiers = [
 # need nothing from the sibling packages (tests/test_ssm_import_guard.py).
 dependencies = [
     "pyrox",
-    "gaussx>=0.7.0",
+    "gaussx>=0.8.0",
     "pyrox-gauss",
     "equinox>=0.13.8",
     "lineax>=0.1.1",
@@ -53,7 +53,7 @@ Repository = "https://github.com/jejjohnson/pyrox"
 [tool.uv.sources]
 # Not on PyPI yet; resolve the release tag from GitHub, in step with the
 # other members' sources (one version per package across the workspace).
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.7.0" }
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.0" }
 # `markov_implicit_adjoint` is built on `argminax.adjoint.safe_implicit_adjoint`
 # (v0.0.8), in step with pyrox-lgm's and pyrox-nn's source. argminax pins gaussx v0.6.13
 # by URL; the root override keeps the workspace's one gaussx instead.
