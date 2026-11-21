@@ -49,6 +49,8 @@ def latent_model(X):
 
 `prior.log_marginal(y, noise_var)` returns the collapsed log marginal likelihood that `gp_factor` registers, for use outside a NumPyro model (an optimiser's loss, a model comparison); `MultiOutputGPPrior.log_marginal(Y, noise_var)` is the same for `mo_gp_factor`, Kronecker-exact where the Gram allows, and `OILMMGPPrior.log_marginal(Y, noise_var)` is the same for `oilmm_factor`, exact at the projected cost under isotropic noise.
 
+The conditioned results (`ConditionedGP`, `ConditionedMultiOutputGP`, `ConditionedOILMMGP`) predict the latent function by default; `predict(X_star, include_noise=True)` adds the noise variance they were conditioned on, for a band on a new observation.
+
 Swap the solver strategy at construction time:
 
 ```python
