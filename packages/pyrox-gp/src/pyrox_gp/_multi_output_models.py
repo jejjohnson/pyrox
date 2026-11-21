@@ -430,11 +430,25 @@ class ConditionedMultiOutputGP(eqx.Module):
         return _unflatten_outputs(flat, self.prior.num_outputs)
 
     def predict(
-        self, X_star: Float[Array, "M D"]
+        self, X_star: Float[Array, "M D"], *, include_noise: bool = False
     ) -> tuple[Float[Array, "M P"], Float[Array, "M P"]]:
-        """Return per-output ``(mean, variance)`` at ``X_*`` as ``(M, P)`` pairs."""
+        r"""Return per-output ``(mean, variance)`` at ``X_*`` as ``(M, P)`` pairs.
+
+        Args:
+            X_star: Test inputs, shape ``(M, D)``.
+            include_noise: Add the noise variance the posterior was
+                conditioned on, $\sigma^2$ or $\sigma_p^2$ per output,
+                giving the variance of a new observation. The jitter is not
+                noise and is left out; the mean is unchanged.
+
+        Returns:
+            The predictive mean and variance, each of shape ``(M, P)``.
+        """
         with _mo_kernel_context(self.prior.kernel):
-            return self.predict_mean(X_star), self.predict_var(X_star)
+            mean, var = self.predict_mean(X_star), self.predict_var(X_star)
+        if include_noise:
+            var = var + jnp.asarray(self.noise_var, dtype=var.dtype)
+        return mean, var
 
     def sample(
         self,
@@ -1009,17 +1023,29 @@ class ConditionedOILMMGP(eqx.Module):
         )
 
     def predict(
-        self, X_star: Float[Array, "M D"]
+        self, X_star: Float[Array, "M D"], *, include_noise: bool = False
     ) -> tuple[Float[Array, "M P"], Float[Array, "M P"]]:
-        """Return per-output ``(mean, variance)`` at ``X_*`` as ``(M, P)`` pairs.
+        r"""Return per-output ``(mean, variance)`` at ``X_*`` as ``(M, P)`` pairs.
 
         Both latent sweeps share one kernel context; the back-projection
         delegates to `pyrox_gp.OILMMKernel.back_project`.
+
+        Args:
+            X_star: Test inputs, shape ``(M, D)``.
+            include_noise: Add the per-output noise variance $\sigma_p^2$
+                the posterior was conditioned on, giving the variance of a
+                new observation. The jitter is not noise and is left out;
+                the mean is unchanged.
+
+        Returns:
+            The predictive mean and variance, each of shape ``(M, P)``.
         """
         with call_contexts(self.prior.kernel.kernels):
             latent_means = self._latent_means(X_star)
             latent_vars = self._latent_vars(X_star)
         f_mean, f_var = self.prior.kernel.back_project(latent_means, latent_vars)
+        if include_noise:
+            f_var = f_var + self.noise_var
         return self.prior.mean(X_star) + f_mean, f_var
 
     def sample(

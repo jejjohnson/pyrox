@@ -482,15 +482,28 @@ class ConditionedGP(eqx.Module):
         )
 
     def predict(
-        self, X_star: Float[Array, "M D"]
+        self, X_star: Float[Array, "M D"], *, include_noise: bool = False
     ) -> tuple[Float[Array, " M"], Float[Array, " M"]]:
-        """Return ``(mean, variance)`` at ``X_*`` as a tuple.
+        r"""Return ``(mean, variance)`` at ``X_*`` as a tuple.
 
         Both kernel evaluations share a single kernel context; see
         `predict_var`.
+
+        Args:
+            X_star: Test inputs, shape ``(M, D)``.
+            include_noise: Add the noise variance $\sigma^2$ the posterior
+                was conditioned on, giving the variance of a new
+                observation rather than of the latent function. The jitter
+                is not noise and is left out; the mean is unchanged.
+
+        Returns:
+            The predictive mean and variance, each of shape ``(M,)``.
         """
         with call_context(self.prior.kernel):
-            return self.predict_mean(X_star), self.predict_var(X_star)
+            mean, var = self.predict_mean(X_star), self.predict_var(X_star)
+        if include_noise:
+            var = var + jnp.asarray(self.noise_var, dtype=var.dtype)
+        return mean, var
 
     def sample(
         self,
