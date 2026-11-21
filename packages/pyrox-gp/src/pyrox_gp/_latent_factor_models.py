@@ -85,7 +85,8 @@ externally before fitting.
 
 from __future__ import annotations
 
-from typing import cast
+import warnings
+from typing import cast, overload
 
 import equinox as eqx
 import jax
@@ -398,36 +399,15 @@ class ConditionedLatentFactorGP(eqx.Module):
         )
 
 
-def lfr_factor(
+def _register_lfr(
+    name: str,
     Y: Float[Array, "N P"],
     Z: Float[Array, "N Q"],
     noise_var: Float[Array, ""],
-    *,
-    warp: AbstractBijection | None = None,
-    beta: float | None = None,
-    name: str = "collapsed_lfr",
+    warp: AbstractBijection | None,
+    beta: float | None,
 ) -> None:
-    """Register the collapsed latent-factor log-likelihood with NumPyro.
-
-    The likelihood term grows as $O(NP)$ while the GP prior on $Z$ grows
-    as $O(NQ)$, so for $P \\gg Q$ an untempered MAP drives $Z$ to
-    interpolate noise. The likelihood is therefore scaled by an inverse
-    temperature ``beta``; priors are left at unit weight.
-
-    Args:
-        Y: Observations, ``(N, P)``.
-        Z: Latent factor values, ``(N, Q)``.
-        noise_var: Scalar isotropic observation noise variance (in the
-            warped space when ``warp`` is given).
-        warp: Optional bijection with event shape ``(P,)``; when given,
-            registers [`warped_lfr_log_prob`][pyrox_gp.warped_lfr_log_prob]
-            instead of the plain collapsed likelihood.
-        beta: Inverse temperature on the likelihood. ``None`` selects
-            ``Q / P``, which keeps the likelihood and the latent GP prior
-            balanced as the output dimension grows. Tune by held-out
-            likelihood when it matters.
-        name: NumPyro factor site name.
-    """
+    """Register the tempered collapsed (or warped) LFR factor ``name``."""
     if beta is None:
         beta = Z.shape[1] / Y.shape[1]
     if warp is None:
@@ -436,6 +416,125 @@ def lfr_factor(
         log_prob = warped_lfr_log_prob(Y, Z, noise_var, warp)
     with numpyro.handlers.scale(scale=beta):
         numpyro.factor(name, log_prob)
+
+
+def _lfr_factor(
+    name: str,
+    prior: LatentFactorGPPrior,
+    Y: Float[Array, "N P"],
+    Z: Float[Array, "N Q"],
+    noise_var: Float[Array, ""],
+    *,
+    beta: float | None = None,
+) -> None:
+    n_points = prior.X.shape[0]
+    if Y.shape[0] != n_points:
+        raise ValueError(
+            f"Y must have {n_points} rows to match prior.X; got {Y.shape[0]}."
+        )
+    if Z.shape != (n_points, prior.num_latents):
+        raise ValueError(
+            f"Z must have shape {(n_points, prior.num_latents)}; got {Z.shape}."
+        )
+    _register_lfr(name, Y, Z, noise_var, prior.warp, beta)
+
+
+def _legacy_lfr_factor(
+    Y: Float[Array, "N P"],
+    Z: Float[Array, "N Q"],
+    noise_var: Float[Array, ""],
+    *,
+    warp: AbstractBijection | None = None,
+    beta: float | None = None,
+    name: str = "collapsed_lfr",
+) -> None:
+    _register_lfr(name, Y, Z, noise_var, warp, beta)
+
+
+@overload
+def lfr_factor(
+    name: str,
+    prior: LatentFactorGPPrior,
+    Y: Float[Array, "N P"],
+    Z: Float[Array, "N Q"],
+    noise_var: Float[Array, ""],
+    *,
+    beta: float | None = None,
+) -> None: ...
+
+
+@overload
+def lfr_factor(
+    Y: Float[Array, "N P"],
+    Z: Float[Array, "N Q"],
+    noise_var: Float[Array, ""],
+    *,
+    warp: AbstractBijection | None = None,
+    beta: float | None = None,
+    name: str = "collapsed_lfr",
+) -> None: ...
+
+
+def lfr_factor(*args, **kwargs) -> None:
+    """Register the collapsed latent-factor log-likelihood with NumPyro.
+
+    Called as ``lfr_factor(name, prior, Y, Z, noise_var, *, beta=None)``,
+    the order of every other factor (`gp_factor`, `mo_gp_factor`, …).
+    Registers the one factor site ``name``: the collapsed likelihood
+    `collapsed_lfr_log_prob`, or `warped_lfr_log_prob` when the prior has
+    a ``warp``.
+
+    The likelihood term grows as $O(NP)$ while the GP prior on $Z$ grows
+    as $O(NQ)$, so for $P \\gg Q$ an untempered MAP drives $Z$ to
+    interpolate noise. The likelihood is therefore scaled by an inverse
+    temperature ``beta``; priors are left at unit weight.
+
+    The old form ``lfr_factor(Y, Z, noise_var, *, warp=None, beta=None,
+    name="collapsed_lfr")`` still works and registers the same factor, with
+    a `DeprecationWarning`.
+
+    Args:
+        name: NumPyro factor site name.
+        prior: The `LatentFactorGPPrior`; its ``warp`` (if any) selects
+            the warped likelihood. Its kernels are not evaluated.
+        Y: Observations, ``(N, P)``, with ``N`` the rows of ``prior.X``.
+        Z: Latent factor values, ``(N, Q)``, with ``Q`` the prior's latents.
+        noise_var: Scalar isotropic observation noise variance (in the
+            warped space when the prior has a warp).
+        beta: Inverse temperature on the likelihood. ``None`` selects
+            ``Q / P``, which keeps the likelihood and the latent GP prior
+            balanced as the output dimension grows. Tune by held-out
+            likelihood when it matters.
+
+    Raises:
+        ValueError: If ``Y`` or ``Z`` does not match the prior's shapes.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> import jax.random as jr
+        >>> from numpyro import handlers
+        >>> from pyrox_gp import RBF, LatentFactorGPPrior, lfr_factor
+        >>> X = jnp.linspace(0.0, 1.0, 5)[:, None]
+        >>> prior = LatentFactorGPPrior(kernels=(RBF(),), X=X)
+        >>> Y = jr.normal(jr.key(0), (5, 4))
+        >>> Z = jr.normal(jr.key(1), (5, 1))
+        >>> def model():
+        ...     lfr_factor("y", prior, Y, Z, jnp.asarray(0.1))
+        >>> trace = handlers.trace(handlers.seed(model, 0)).get_trace()
+        >>> float(trace["y"]["scale"])  # beta = Q / P
+        0.25
+    """
+    if (args and isinstance(args[0], str)) or (not args and "prior" in kwargs):
+        _lfr_factor(*args, **kwargs)
+        return
+    warnings.warn(
+        "lfr_factor(Y, Z, noise_var, *, warp=None, beta=None, name=...) is "
+        "deprecated; use lfr_factor(name, prior, Y, Z, noise_var, *, beta=None), "
+        "which reads the warp from prior.warp.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    _legacy_lfr_factor(*args, **kwargs)
 
 
 def lfr_model(
@@ -501,7 +600,7 @@ def lfr_model(
         params, static = eqx.partition(prior.warp, eqx.is_inexact_array)
         params = numpyro.param("warp_params", params)
         warp = cast(AbstractBijection, eqx.combine(params, static))
-    lfr_factor(Y, Z_T.T, noise**2, warp=warp, beta=beta)
+    _register_lfr("collapsed_lfr", Y, Z_T.T, noise**2, warp, beta)
 
 
 def latent_total_correlation(Z: Float[Array, "N Q"]) -> Float[Array, ""]:

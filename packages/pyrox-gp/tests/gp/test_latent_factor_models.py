@@ -135,7 +135,7 @@ def test_warp_field_default_and_conditional_rejection():
 # --- NumPyro integration ------------------------------------------------
 
 
-def test_lfr_factor_tempering_default_and_override():
+def test_lfr_factor_tempering_default_and_override(prior):
     _, Y = _data()
     Z = jr.normal(jr.PRNGKey(2), (N, Q))
 
@@ -144,14 +144,14 @@ def test_lfr_factor_tempering_default_and_override():
             "Z_T",
             numpyro.distributions.Normal(jnp.zeros((Q, N)), 1.0).to_event(2),
         )
-        lfr_factor(Y, Z_T.T, jnp.asarray(0.1))
+        lfr_factor("collapsed_lfr", prior, Y, Z_T.T, jnp.asarray(0.1))
 
     tr = handlers.trace(handlers.seed(model, jr.PRNGKey(0))).get_trace()
     assert tr["collapsed_lfr"]["scale"] == pytest.approx(Q / P)
     assert tr["Z_T"].get("scale") in (None, 1.0)
 
     def model_beta():
-        lfr_factor(Y, Z, jnp.asarray(0.1), beta=0.5)
+        lfr_factor("collapsed_lfr", prior, Y, Z, jnp.asarray(0.1), beta=0.5)
 
     tr = handlers.trace(handlers.seed(model_beta, jr.PRNGKey(0))).get_trace()
     assert tr["collapsed_lfr"]["scale"] == pytest.approx(0.5)
