@@ -306,6 +306,53 @@ class MultiOutputGPPrior(eqx.Module):
         )
         return _unflatten_outputs(mvn.sample(key), self.num_outputs)
 
+    def log_marginal(
+        self,
+        Y: Float[Array, "N P"],
+        noise_var: Float[Array, ""] | Float[Array, " P"],
+    ) -> Float[Array, ""]:
+        r"""Collapsed log marginal likelihood of the ``(N, P)`` observations.
+
+        $$
+        \log p(Y \mid X, \theta)
+          = \log \mathcal{N}\!\left(\mathrm{vec}(Y) \mid
+            \mathrm{vec}(\mu(X)),\, K_{ff} + (\text{jitter} + \Sigma) I\right),
+        $$
+
+        with $\Sigma$ the scalar or per-output noise. A single-Kronecker
+        Gram (`pyrox_gp.ICMKernel`, or `pyrox_gp.LMCKernel` with one latent)
+        stays lazy, so this costs $O(P^3 + N^3)$ rather than $O(P^3 N^3)$.
+        `mo_gp_factor` registers this value.
+
+        Args:
+            Y: Observations, shape ``(N, P)``.
+            noise_var: Observation noise variance, a scalar or ``(P,)``.
+
+        Returns:
+            The scalar log marginal likelihood.
+
+        Raises:
+            ValueError: If ``Y`` is not ``(N, P)``.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> from pyrox_gp import RBF, ICMKernel, MultiOutputGPPrior
+            >>> X = jnp.linspace(0.0, 1.0, 6)[:, None]
+            >>> kernel = ICMKernel(RBF(init_lengthscale=0.3), jnp.array([[1.0], [0.5]]))
+            >>> prior = MultiOutputGPPrior(kernel, X)
+            >>> Y = jnp.stack([jnp.sin(4 * X[:, 0]), jnp.cos(4 * X[:, 0])], axis=-1)
+            >>> log_marg = prior.log_marginal(Y, jnp.array([0.05, 0.1]))
+        """
+        _validate_targets(Y, self.num_outputs)
+        with _mo_kernel_context(self.kernel):
+            operator = self._noisy_operator(noise_var)
+        return log_marginal_likelihood(
+            self._flat_mean(self.X),
+            operator,
+            _flatten_outputs(Y),
+            solver=self._resolved_solver(),
+        )
+
     def condition(
         self,
         Y: Float[Array, "N P"],
@@ -422,18 +469,10 @@ def mo_gp_factor(
     Adds ``log N(vec(Y) | vec(mu), K_ff + (jitter + noise) I)`` to the
     NumPyro trace as ``numpyro.factor(name, ...)`` — the multi-output
     analogue of `pyrox_gp.gp_factor`. ``noise_var`` is a scalar or
-    a ``(P,)`` per-output vector.
+    a ``(P,)`` per-output vector. The value is
+    `MultiOutputGPPrior.log_marginal`.
     """
-    _validate_targets(Y, prior.num_outputs)
-    with _mo_kernel_context(prior.kernel):
-        operator = prior._noisy_operator(noise_var)
-    logp = log_marginal_likelihood(
-        prior._flat_mean(prior.X),
-        operator,
-        _flatten_outputs(Y),
-        solver=prior._resolved_solver(),
-    )
-    numpyro.factor(name, logp)
+    numpyro.factor(name, prior.log_marginal(Y, noise_var))
 
 
 class MultiOutputSparseGPPrior(eqx.Module):
