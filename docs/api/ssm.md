@@ -104,6 +104,8 @@ def local_level(y, mask):
 
 After `condition(y, mask=mask)`, [`predict()`][pyrox_ssm.ConditionedLinearGaussianSSM.predict] returns each channel's posterior mean `H_k m_{k|T} + b_k` and variance `diag(H_k P_{k|T} H_kᵀ)` at every step, `(T, M)` each, and `include_noise=True` adds `diag(R_k)` for the band a new observation should fall in. The model is indexed by step, so to forecast or fill a gap, extend the matrices over the extra steps and mask them.
 
+`cond.sample(key, n_paths)` draws whole state paths $x_{1:T}$ from the posterior by backward sampling (`gaussx.rts_sample`), shaped `(S, T, D)`, for any quantity of several steps that the marginals cannot give (a maximum, a run length, a sum); `prior.sample(key, n)` simulates `(x, y)` from the model itself.
+
 ::: pyrox_ssm.LinearGaussianSSMPrior
 ::: pyrox_ssm.ConditionedLinearGaussianSSM
 ::: pyrox_ssm.lgssm_factor
