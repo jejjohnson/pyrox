@@ -50,7 +50,7 @@ fails under a handler, a transform or a second instance.
 | **geonnax** | Deterministic network cores, encoders | pyrox-nn wraps a geonnax core and swaps its parameters for sites; new deterministic architecture goes to geonnax. |
 | **functax** | Bases (`functax.basis.<family>`), grids and point sets, interpolation plans | Take a basis from its family module, never re-implement it; a grid-to-points projector is a local plan's stencil (`plan.to_gaussx()`) under `Policies(outside="raise")`. |
 | **lineax** | Operators and tags | Dense Grams enter as `lx.MatrixLinearOperator(K, lx.positive_semidefinite_tag)`. |
-| **argminax**, **optimistix** | Laplace modes and evidence (`inla`'s inner fit, `last_layer_laplace`), L-BFGS (`inla`'s mode search) | A Newton loop to a Laplace mode goes through `argminax.solve.laplace_mode`, not a hand-written loop. |
+| **argminax**, **optimistix** | Laplace modes and evidence (`inla`'s inner fit, `last_layer_laplace`, pyrox-gp's `LaplaceInference` and `GaussNewtonInference`), L-BFGS (`inla`'s mode search, `QuasiNewtonInference`) | A Newton loop to a Laplace mode goes through `argminax.solve.laplace_mode`, not a hand-written loop. |
 | **matfree**, **optax** | Lanczos (PC priors), optimisers (ensemble MAP) | optax is optional in `pyrox` (`[optax]`): import it lazily (`_require_optax`). |
 | **einx**, **jaxtyping** | Axis-naming array ops; shape annotations | Contractions are written with einx (`einx.dot("... i, i o -> ... o", …)`); public arrays are jaxtyping-annotated. |
 | **jax** | `jit`, `grad`, `vmap`, PRNG, x64 | Pure functions, explicit keys, no Python control flow on traced values; the test suite runs with x64 on. |
@@ -151,10 +151,11 @@ fails under a handler, a transform or a second instance.
 
 - **Pure and explicit.** Arrays and modules in, arrays and modules out; keys
   are explicit (`jr.key`, split before reuse); no Python control flow on
-  traced values (the eager `fit` loops of the dense non-Gaussian inference
-  strategies in `pyrox_gp._inference_nongauss` are the documented exception;
-  the Markov strategies in `pyrox_ssm` run on `optimistix.fixed_point` and
-  trace).
+  traced values (the eager `fit` loops of `PosteriorLinearization` and
+  `ExpectationPropagation` in `pyrox_gp._inference_nongauss` are the
+  documented exception; the Laplace, Gauss–Newton and quasi-Newton
+  strategies run on argminax and optimistix, and the Markov strategies in
+  `pyrox_ssm` run on `optimistix.fixed_point`, so all of those trace).
 - **Linear algebra through gaussx.** Wrap Grams as PSD-tagged lineax
   operators and call gaussx; respect the model's `solver=`. A few modules
   still hand-roll `cho_solve` / `solve_triangular`

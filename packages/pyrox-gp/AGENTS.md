@@ -78,8 +78,11 @@ The Markov / state-space track (`MarkovGPPrior`, the SDE kernels, the Markov non
 - **Linear algebra** goes through gaussx with the model's `solver`
   (default `DenseSolver()`); Grams are `lx.MatrixLinearOperator(K,
   lx.positive_semidefinite_tag)` with jitter on the diagonal.
-- **Optional dependencies**: `optax` (`QuasiNewtonInference`, imported
-  lazily), `flows` (`gauss_flows`; tests use
+- **Newton loops** run on argminax (`laplace_mode_covariance` for
+  `LaplaceInference` and `GaussNewtonInference`) and optimistix
+  (`optx.LBFGS` for `QuasiNewtonInference`), so those fits trace; their
+  `n_iter` and `converged` are arrays (`tests/gp/test_inference_nongauss_argminax.py`).
+- **Optional dependencies**: `flows` (`gauss_flows`; tests use
   `pytest.importorskip("gauss_flows")`).
 
 ## Docs

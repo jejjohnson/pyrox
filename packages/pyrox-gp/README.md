@@ -122,10 +122,10 @@ override-dependencies = [
 ]
 ```
 
-Three extras add the rest: `optax` for `QuasiNewtonInference`, which runs `optax.lbfgs`, `flows` for `latent_total_correlation` (gauss-flows, which brings scikit-learn, diffrax and matfree), and `colab` for what the example notebooks need (matplotlib, watermark and pandas). The quickstart needs none of them.
+Two extras add the rest: `flows` for `latent_total_correlation` (gauss-flows, which brings scikit-learn, diffrax and matfree), and `colab` for what the example notebooks need (matplotlib, watermark and pandas). The quickstart needs none of them.
 
 ```bash
-uv add "pyrox-gp[optax] @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-gp"
+uv add "pyrox-gp[flows] @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-gp"
 ```
 
 ## 🧠 Quickstart: one regression, three posteriors
@@ -341,7 +341,7 @@ Each public name sits on one rung of the GeoStack role ladder, by the job it doe
 | Guides | `FullRankGuide`, `MeanFieldGuide`, `WhitenedGuide`, `NaturalGuide`, `DeltaGuide` | $`q(\mathbf{u})`$ in moment, whitened, natural or point-mass form |
 | SVGP inference | `svgp_elbo`, `svgp_factor`, `ConjugateVI` | The ELBO as a scalar or a NumPyro factor, and natural-gradient steps |
 | Likelihoods | `GaussianLikelihood`, `BernoulliLikelihood`, `PoissonLikelihood`, `StudentTLikelihood`, `SoftmaxLikelihood`, `HeteroscedasticGaussianLikelihood`, `DistLikelihood`, `WarpedGaussianLikelihood`, `warped_predictive_moments` | Observation models over gaussx, any NumPyro distribution, and a Gaussian through a flowjax warp |
-| Non-Gaussian inference | `LaplaceInference`, `GaussNewtonInference`, `PosteriorLinearization`, `ExpectationPropagation`, `QuasiNewtonInference`, `ConditionedNonGaussGP` | Strategies for `condition_nongauss`; `QuasiNewtonInference` needs the `optax` extra |
+| Non-Gaussian inference | `LaplaceInference`, `GaussNewtonInference`, `PosteriorLinearization`, `ExpectationPropagation`, `QuasiNewtonInference`, `ConditionedNonGaussGP` | Strategies for `condition_nongauss`; the Newton and quasi-Newton fits run under `jax.jit` and `jax.vmap` |
 | Multi-output | `LMCKernel`, `ICMKernel`, `OILMMKernel`, `SharedInducingPoints`, `MultiOutputInducingVariables`, `MultiOutputGPPrior`, `ConditionedMultiOutputGP`, `MultiOutputSparseGPPrior`, `ConditionedMultiOutputSparseGP`, `OILMMGPPrior`, `ConditionedOILMMGP`, `mo_gp_factor`, `mo_svgp_elbo`, `mo_svgp_factor`, `oilmm_factor` | Mixing kernels, and exact, sparse and orthogonal-projection models over them |
 | Latent factor | `LatentFactorGPPrior`, `ConditionedLatentFactorGP`, `collapsed_lfr_log_prob`, `decoder_posterior`, `lfr_predictive_moments`, `lfr_factor`, `lfr_model`, `latent_init`, `latent_total_correlation`, `warp_to_base`, `warped_decoder_posterior`, `warped_lfr_log_prob` | GP latent factors with the linear decoder integrated out; `latent_total_correlation` needs the `flows` extra |
 | Pathwise | `PathwiseSampler`, `DecoupledPathwiseSampler`, `PathwiseFunction` | Posterior function draws for the exact and the sparse GP |
@@ -389,7 +389,7 @@ pyrox-gp is a package of the pyrox [uv workspace](https://docs.astral.sh/uv/conc
 | Bijections for the warped likelihood and the warped latent-factor model | [`flowjax`](https://github.com/danielward27/flowjax), and [`gauss_flows`](https://github.com/jejjohnson/gauss_flows) (the `flows` extra) |
 | Sample sites, NUTS, SVI, autoguides and `Predictive` | [`numpyro`](https://github.com/pyro-ppl/numpyro) |
 | Modules as pytrees | [`equinox`](https://github.com/patrick-kidger/equinox) |
-| L-BFGS for `QuasiNewtonInference` (the `optax` extra) | [`optax`](https://github.com/google-deepmind/optax) |
+| The Newton loop of `LaplaceInference` and `GaussNewtonInference`, and L-BFGS for `QuasiNewtonInference` | [`argminax`](https://github.com/jejjohnson/argminax) and [`optimistix`](https://github.com/patrick-kidger/optimistix) |
 
 Dependencies point one way. pyrox-gp imports the pyrox core and pyrox-gauss, and no other package of the workspace imports pyrox-gp: pyrox-nn, pyrox-lgm, pyrox-ssm, pyrox-gauss and pyrox-xtreme each forbid it in an import-guard test, and nothing outside the workspace imports it either. A pyrox-gp kernel still works where a kernellib kernel is expected, so pyrox-nn's `HSGPFeatures` and `SphericalHarmonicFeatures` take one when you pass it.
 

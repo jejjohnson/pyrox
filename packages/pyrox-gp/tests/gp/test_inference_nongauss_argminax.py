@@ -1,4 +1,4 @@
-"""The Newton strategies on argminax and optimistix: the port, ``jit`` and ``vmap`` (pyrox#346).
+"""The Newton strategies on argminax and optimistix (pyrox#346).
 
 `LaplaceInference` and `GaussNewtonInference` run their loop on
 ``argminax.solve.laplace_mode_covariance`` and `QuasiNewtonInference` on
@@ -51,7 +51,10 @@ def _outlier_regression(n: int = 20):
 
 
 def _eager_newton(prior, likelihood, y, *, max_iter, tol, damping, floor):
-    """The loop pyrox-gp ran before argminax: ``(q_mean, q_var, log_marginal, n_iter)``."""
+    """The eager loop pyrox-gp ran before argminax.
+
+    Returns ``(q_mean, q_var, log_marginal, n_iter)``.
+    """
     K = _prior_K(prior)
     prior_mean = prior.mean(prior.X)
     log_prob = _log_prob_per_point_factory(likelihood)
@@ -93,8 +96,16 @@ _PORT_CASES = {
 }
 
 
-@pytest.mark.parametrize("damping", [1.0, 0.8])
-@pytest.mark.parametrize("case", list(_PORT_CASES))
+# A full Newton step oscillates on the Student-t outlier in both loops (neither
+# converges in 200 steps at damping 1.0 or 0.8); at 0.5 both converge in 31.
+_PORT_PARAMS = [
+    (case, damping)
+    for case in _PORT_CASES
+    for damping in ((0.5,) if case.endswith("studentt") else (1.0, 0.8))
+]
+
+
+@pytest.mark.parametrize(("case", "damping"), _PORT_PARAMS)
 def test_port_matches_the_eager_loop(case, damping):
     strategy_cls, problem, likelihood_factory, floor = _PORT_CASES[case]
     prior, y = problem()
