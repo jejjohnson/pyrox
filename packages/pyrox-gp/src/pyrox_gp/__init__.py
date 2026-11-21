@@ -14,7 +14,7 @@
   inference, `MultiOutputSparseGPPrior` /
   `mo_svgp_elbo` / `mo_svgp_factor` for the inducing-input
   variational path (reusing the single-output guides), and
-  `OILMMGPPrior` / `ConditionedOILMMGP` for the
+  `OILMMGPPrior` / `ConditionedOILMMGP` / `oilmm_factor` for the
   orthogonal-projection exact workflow.
 * Collapsed latent-factor regression — `collapsed_lfr_log_prob` /
   `decoder_posterior` / `lfr_predictive_moments`: the linear decoder
@@ -141,6 +141,7 @@ from pyrox_gp._multi_output_models import (
     mo_gp_factor,
     mo_svgp_elbo,
     mo_svgp_factor,
+    oilmm_factor,
 )
 from pyrox_gp._pathwise import (
     DecoupledPathwiseSampler,
@@ -303,6 +304,7 @@ __all__ = [
     "mo_gp_factor",
     "mo_svgp_elbo",
     "mo_svgp_factor",
+    "oilmm_factor",
     "preconditioned_cg_solver",
     "svgp_elbo",
     "svgp_factor",

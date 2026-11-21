@@ -47,7 +47,7 @@ def latent_model(X):
     # ... attach any likelihood to f here, e.g. Bernoulli or Poisson.
 ```
 
-`prior.log_marginal(y, noise_var)` returns the collapsed log marginal likelihood that `gp_factor` registers, for use outside a NumPyro model (an optimiser's loss, a model comparison); `MultiOutputGPPrior.log_marginal(Y, noise_var)` is the same for `mo_gp_factor`, Kronecker-exact where the Gram allows.
+`prior.log_marginal(y, noise_var)` returns the collapsed log marginal likelihood that `gp_factor` registers, for use outside a NumPyro model (an optimiser's loss, a model comparison); `MultiOutputGPPrior.log_marginal(Y, noise_var)` is the same for `mo_gp_factor`, Kronecker-exact where the Gram allows, and `OILMMGPPrior.log_marginal(Y, noise_var)` is the same for `oilmm_factor`, exact at the projected cost under isotropic noise.
 
 Swap the solver strategy at construction time:
 
@@ -300,6 +300,7 @@ per latent process (the projections delegate to `gaussx.oilmm_project`
 ::: pyrox_gp.LMCKernel
 ::: pyrox_gp.ICMKernel
 ::: pyrox_gp.OILMMKernel
+::: pyrox_gp.oilmm_factor
 ::: pyrox_gp.MultiOutputInducingVariables
 ::: pyrox_gp.SharedInducingPoints
 
