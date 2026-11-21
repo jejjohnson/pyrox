@@ -282,6 +282,8 @@ distribution (EP), or L-BFGS to the MAP with a Laplace covariance at
 convergence (quasi-Newton). Each `fit(prior, likelihood, y)` returns a
 `ConditionedNonGaussGP` that quacks like `ConditionedGP`.
 
+The Laplace and Gauss-Newton loops run on `argminax.solve.laplace_mode_covariance` and the quasi-Newton one on `optimistix.LBFGS`, so those three fits run under `jax.jit` and `jax.vmap` (over datasets, say) and their `n_iter` and `converged` are arrays. Close over the prior rather than passing it through the transform, since its kernel's priors live in a registry that a rebuilt module loses.
+
 ::: pyrox_gp.LaplaceInference
 ::: pyrox_gp.GaussNewtonInference
 ::: pyrox_gp.PosteriorLinearization
