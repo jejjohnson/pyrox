@@ -2449,7 +2449,7 @@ requires-dist = [
 
 [[package]]
 name = "pyrox-gp"
-version = "0.3.1"
+version = "0.3.2"
 source = { editable = "packages/pyrox-gp" }
 dependencies = [
     { name = "argminax" },
@@ -2670,7 +2670,7 @@ provides-extras = ["optax", "bnf", "xarray", "colab"]
 
 [[package]]
 name = "pyrox-ssm"
-version = "0.2.1"
+version = "0.2.2"
 source = { editable = "packages/pyrox-ssm" }
 dependencies = [
     { name = "argminax" },

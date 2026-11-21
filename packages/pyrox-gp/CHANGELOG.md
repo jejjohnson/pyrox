@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.2](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.3.1...pyrox-gp-v0.3.2) (2026-11-21)
+
+
+### Features
+
+* **gp:** add gp_laplace_factor, the Laplace approximate evidence as a NumPyro factor ([#531](https://github.com/jejjohnson/pyrox/issues/531)) ([cf63c96](https://github.com/jejjohnson/pyrox/commit/cf63c9617710a6242b17824f1eec9ee64423906b))
+* **gp:** add include_noise to the exact GP predict methods ([#529](https://github.com/jejjohnson/pyrox/issues/529)) ([97d6c75](https://github.com/jejjohnson/pyrox/commit/97d6c75ea422cc2b76b9e82e9c25ce72bdce8790))
+* **gp:** add log_marginal on GPPrior and MultiOutputGPPrior, with the factors built on them ([#525](https://github.com/jejjohnson/pyrox/issues/525)) ([e2c7d2f](https://github.com/jejjohnson/pyrox/commit/e2c7d2faf600eb63688be12b531675931b1089ed))
+* **gp:** add oilmm_factor and OILMMGPPrior.log_marginal ([#527](https://github.com/jejjohnson/pyrox/issues/527)) ([30bea2a](https://github.com/jejjohnson/pyrox/commit/30bea2ab6547bf8fc2d213ee91977b7e20d7059e))
+* **gp:** add SparseGPPrior.condition(guide) and the multi-output form, returning the conditioned sparse GPs ([#526](https://github.com/jejjohnson/pyrox/issues/526)) ([dd58a33](https://github.com/jejjohnson/pyrox/commit/dd58a33b421c61a21e1ff28dc777516ac3bb6441))
+* **gp:** give lfr_factor the (name, prior, ...) order of the other factors ([#528](https://github.com/jejjohnson/pyrox/issues/528)) ([c47620b](https://github.com/jejjohnson/pyrox/commit/c47620b7d44d23d1037e662a03c27e9c8da307a5))
+
 ## [0.3.1](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.3.0...pyrox-gp-v0.3.1) (2026-11-19)
 
 

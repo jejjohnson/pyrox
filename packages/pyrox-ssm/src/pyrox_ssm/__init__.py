@@ -110,7 +110,7 @@ from pyrox_ssm._sparse_markov import (
 )
 
 
-__version__ = "0.2.1"  # x-release-please-version
+__version__ = "0.2.2"  # x-release-please-version
 
 # Old names, kept as deprecated aliases of the same class objects.
 _RENAMED = {
