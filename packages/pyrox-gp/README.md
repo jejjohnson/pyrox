@@ -85,6 +85,15 @@ A `GPPrior` (or a `SparseGPPrior`) is the prior, and the package offers four rou
 | Site-based | `condition_nongauss` with a strategy, `gp_laplace_factor` | `ConditionedNonGaussGP`, a Gaussian $`q(\mathbf{f})`$ | counts, labels or heavy tails at moderate $`N`$ |
 | Pathwise | `PathwiseSampler`, `DecoupledPathwiseSampler` | `PathwiseFunction`, callable draws | you need whole functions, for Thompson sampling or a derived quantity |
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_gp_hub/pyrox_gp_hub-dark.svg">
+    <img alt="One GPPrior fans out to seven uses: gp_factor as a NumPyro factor for NUTS and SVI, log_marginal for the collapsed evidence under jit and grad, condition and predict for the mean and variance with include_noise for a band, predict_gradient for the gradient and its covariance, PathwiseSampler for callable posterior draws, condition_nongauss with Laplace, Gauss-Newton, quasi-Newton, posterior linearisation and EP, and gp_laplace_factor for the Laplace evidence under NUTS" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_gp_hub/pyrox_gp_hub-light.svg" width="100%">
+  </picture>
+</p>
+
+The figure draws the exact GP, the one pyrox-gp prior with every part.
+
 With Gaussian noise of variance $`\sigma^2`$ and a zero mean, the exact posterior at test inputs $`\mathbf{X}_* \in \mathbb{R}^{N_* \times D_x}`$ is
 
 ```math
