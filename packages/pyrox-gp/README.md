@@ -82,7 +82,7 @@ A `GPPrior` (or a `SparseGPPrior`) is the prior, and the package offers four rou
 |---|---|---|---|
 | Exact | `gp_factor`, `GPPrior.condition` | `ConditionedGP`, Gaussian in closed form | the noise is Gaussian |
 | Sparse variational | `SparseGPPrior`, the guides, `svgp_elbo`, `ConjugateVI` | $`q(\mathbf{u})`$ over $`M`$ inducing values | $`N`$ is large, or the likelihood is not Gaussian and you want SVI |
-| Site-based | `condition_nongauss` with a strategy | `ConditionedNonGaussGP`, a Gaussian $`q(\mathbf{f})`$ | counts, labels or heavy tails at moderate $`N`$ |
+| Site-based | `condition_nongauss` with a strategy, `gp_laplace_factor` | `ConditionedNonGaussGP`, a Gaussian $`q(\mathbf{f})`$ | counts, labels or heavy tails at moderate $`N`$ |
 | Pathwise | `PathwiseSampler`, `DecoupledPathwiseSampler` | `PathwiseFunction`, callable draws | you need whole functions, for Thompson sampling or a derived quantity |
 
 With Gaussian noise of variance $`\sigma^2`$ and a zero mean, the exact posterior at test inputs $`\mathbf{X}_* \in \mathbb{R}^{N_* \times D_x}`$ is
@@ -341,7 +341,7 @@ Each public name sits on one rung of the GeoStack role ladder, by the job it doe
 | Guides | `FullRankGuide`, `MeanFieldGuide`, `WhitenedGuide`, `NaturalGuide`, `DeltaGuide` | $`q(\mathbf{u})`$ in moment, whitened, natural or point-mass form |
 | SVGP inference | `svgp_elbo`, `svgp_factor`, `ConjugateVI` | The ELBO as a scalar or a NumPyro factor, and natural-gradient steps |
 | Likelihoods | `GaussianLikelihood`, `BernoulliLikelihood`, `PoissonLikelihood`, `StudentTLikelihood`, `SoftmaxLikelihood`, `HeteroscedasticGaussianLikelihood`, `DistLikelihood`, `WarpedGaussianLikelihood`, `warped_predictive_moments` | Observation models over gaussx, any NumPyro distribution, and a Gaussian through a flowjax warp |
-| Non-Gaussian inference | `LaplaceInference`, `GaussNewtonInference`, `PosteriorLinearization`, `ExpectationPropagation`, `QuasiNewtonInference`, `ConditionedNonGaussGP` | Strategies for `condition_nongauss`; the Newton and quasi-Newton fits run under `jax.jit` and `jax.vmap` |
+| Non-Gaussian inference | `LaplaceInference`, `GaussNewtonInference`, `PosteriorLinearization`, `ExpectationPropagation`, `QuasiNewtonInference`, `ConditionedNonGaussGP`, `gp_laplace_factor` | Strategies for `condition_nongauss`, whose Newton and quasi-Newton fits run under `jax.jit` and `jax.vmap`, and the Laplace evidence as a NumPyro factor |
 | Multi-output | `LMCKernel`, `ICMKernel`, `OILMMKernel`, `SharedInducingPoints`, `MultiOutputInducingVariables`, `MultiOutputGPPrior`, `ConditionedMultiOutputGP`, `MultiOutputSparseGPPrior`, `ConditionedMultiOutputSparseGP`, `OILMMGPPrior`, `ConditionedOILMMGP`, `mo_gp_factor`, `mo_svgp_elbo`, `mo_svgp_factor`, `oilmm_factor` | Mixing kernels, and exact, sparse and orthogonal-projection models over them |
 | Latent factor | `LatentFactorGPPrior`, `ConditionedLatentFactorGP`, `collapsed_lfr_log_prob`, `decoder_posterior`, `lfr_predictive_moments`, `lfr_factor`, `lfr_model`, `latent_init`, `latent_total_correlation`, `warp_to_base`, `warped_decoder_posterior`, `warped_lfr_log_prob` | GP latent factors with the linear decoder integrated out; `latent_total_correlation` needs the `flows` extra |
 | Pathwise | `PathwiseSampler`, `DecoupledPathwiseSampler`, `PathwiseFunction` | Posterior function draws for the exact and the sparse GP |
