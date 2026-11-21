@@ -21,11 +21,13 @@ classifiers = [
 ]
 dependencies = [
     "pyrox",
+    "argminax>=0.0.8",
     "gaussx>=0.8.0",
     "pyrox-gauss",
     "kernellib>=0.0.22",
     "functax[jax] @ git+https://github.com/jejjohnson/functax.git@v0.0.7",
     "lineax>=0.1.1",
+    "optimistix>=0.1.0",
     "einx>=0.4.3",
     "flowjax>=0.9",     # AbstractBijection protocol (typed warp fields). Shares
                         # equinox/jax/jaxtyping with pyrox-gp already; matches
@@ -33,11 +35,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# `pip install pyrox-gp[optax]` enables the quasi-Newton non-Gaussian
-# inference path (`QuasiNewtonInference`), which uses `optax.lbfgs`.
-optax = [
-    "optax>=0.2.8",
-]
 # `pip install pyrox-gp[colab]` bundles what the example notebooks need to run
 # top-to-bottom in Google Colab — matplotlib for plots, watermark for an
 # explicit version readout at the top of each notebook.
@@ -64,6 +61,10 @@ gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.0" }
 # kernellib is not yet on PyPI either; same pattern. 0.0.5 carries the
 # spectral methods and RFF draws `_basis` delegates to, and needs gaussx >= 0.2.0.
 kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.22" }
+# The Newton loop of `LaplaceInference` and `GaussNewtonInference`
+# (`argminax.solve.laplace_mode_covariance`, v0.0.8), in step with the
+# argminax source of pyrox-lgm, pyrox-nn and pyrox-ssm.
+argminax = { git = "https://github.com/jejjohnson/argminax.git", tag = "v0.0.8" }
 
 [build-system]
 requires = ["hatchling>=1.27"]

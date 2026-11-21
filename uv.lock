@@ -2452,12 +2452,14 @@ name = "pyrox-gp"
 version = "0.3.1"
 source = { editable = "packages/pyrox-gp" }
 dependencies = [
+    { name = "argminax" },
     { name = "einx" },
     { name = "flowjax" },
     { name = "functax", extra = ["jax"] },
     { name = "gaussx" },
     { name = "kernellib" },
     { name = "lineax" },
+    { name = "optimistix" },
     { name = "pyrox" },
     { name = "pyrox-gauss" },
 ]
@@ -2471,12 +2473,10 @@ colab = [
 flows = [
     { name = "gauss-flows" },
 ]
-optax = [
-    { name = "optax" },
-]
 
 [package.metadata]
 requires-dist = [
+    { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?tag=v0.0.8" },
     { name = "einx", specifier = ">=0.4.3" },
     { name = "flowjax", specifier = ">=0.9" },
     { name = "functax", extras = ["jax"], git = "https://github.com/jejjohnson/functax.git?rev=v0.0.7" },
@@ -2485,13 +2485,13 @@ requires-dist = [
     { name = "kernellib", git = "https://github.com/jejjohnson/kernellib.git?tag=v0.0.22" },
     { name = "lineax", specifier = ">=0.1.1" },
     { name = "matplotlib", marker = "extra == 'colab'", specifier = ">=3.10.9" },
-    { name = "optax", marker = "extra == 'optax'", specifier = ">=0.2.8" },
+    { name = "optimistix", specifier = ">=0.1.0" },
     { name = "pandas", marker = "extra == 'colab'", specifier = ">=3.0.3" },
     { name = "pyrox", editable = "packages/pyrox" },
     { name = "pyrox-gauss", editable = "packages/pyrox-gauss" },
     { name = "watermark", marker = "extra == 'colab'", specifier = ">=2.6.0" },
 ]
-provides-extras = ["optax", "colab", "flows"]
+provides-extras = ["colab", "flows"]
 
 [[package]]
 name = "pyrox-lgm"
