@@ -141,6 +141,7 @@ from pyrox_gp._multi_output_models import (
     mo_gp_factor,
     mo_svgp_elbo,
     mo_svgp_factor,
+    oilmm_factor,
 )
 from pyrox_gp._pathwise import (
     DecoupledPathwiseSampler,
@@ -303,6 +304,7 @@ __all__ = [
     "mo_gp_factor",
     "mo_svgp_elbo",
     "mo_svgp_factor",
+    "oilmm_factor",
     "preconditioned_cg_solver",
     "svgp_elbo",
     "svgp_factor",

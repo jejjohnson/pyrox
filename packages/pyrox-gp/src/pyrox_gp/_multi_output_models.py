@@ -798,8 +798,9 @@ class OILMMGPPrior(eqx.Module):
     approximation ``s_latent = (W ** 2)^T s`` — see
     `pyrox_gp.OILMMKernel.project`. For exact inference under
     general noise, use the dense `MultiOutputGPPrior` instead.
-    That dense model is also the collapsed NumPyro path
-    (`mo_gp_factor`) for `OILMMKernel`.
+    With isotropic noise, `log_marginal` and `oilmm_factor` give the
+    exact collapsed log marginal likelihood at the projected cost, so the
+    hyperparameters are fitted without the dense ``(P*N, P*N)`` model.
 
     Attributes:
         kernel: `pyrox_gp.OILMMKernel` holding the latent kernels
@@ -863,6 +864,80 @@ class OILMMGPPrior(eqx.Module):
         # Mix latent draws into output space: f = g W^T.
         return self.mean(self.X) + einx.dot(
             "n q, p q -> n p", latents, self.kernel.mixing
+        )
+
+    def log_marginal(
+        self, Y: Float[Array, "N P"], noise_var: Float[Array, ""]
+    ) -> Float[Array, ""]:
+        r"""Exact collapsed log marginal likelihood, by the orthogonal projection.
+
+        With the semi-orthogonal mixing $W \in \mathbb{R}^{P \times Q}$,
+        $W^\top W = I$, isotropic noise $\sigma^2$ (plus the prior's
+        ``jitter``, written $\tilde\sigma^2 = \sigma^2 + \text{jitter}$) and
+        the residuals $R = Y - \mu(X)$, the projection $T = R W$ splits the
+        likelihood into the $Q$ latent problems and the orthogonal complement
+        (Bruinsma et al., 2020):
+
+        $$
+        \log p(Y) = \sum_{q=1}^{Q}
+          \log \mathcal{N}(t_q \mid 0, K_q + \tilde\sigma^2 I)
+          - \frac{N (P - Q)}{2} \log 2 \pi \tilde\sigma^2
+          - \frac{1}{2 \tilde\sigma^2} \lVert R - R W W^\top \rVert_F^2 .
+        $$
+
+        It equals the dense `MultiOutputGPPrior` log marginal of the same
+        `OILMMKernel` at $Q$ factorisations of $N \times N$ instead of one of
+        $PN \times PN$. `oilmm_factor` registers this value.
+
+        Args:
+            Y: Observations, shape ``(N, P)``.
+            noise_var: The isotropic noise variance $\sigma^2$, a scalar.
+
+        Returns:
+            The scalar log marginal likelihood.
+
+        Raises:
+            ValueError: If ``Y`` is not ``(N, P)``, or ``noise_var`` is not a
+                scalar: per-output noise breaks the factorisation, so use the
+                dense `MultiOutputGPPrior` and `mo_gp_factor` for it.
+
+        Examples:
+            >>> import jax.numpy as jnp
+            >>> from pyrox_gp import RBF, OILMMGPPrior, OILMMKernel
+            >>> X = jnp.linspace(0.0, 1.0, 6)[:, None]
+            >>> W = jnp.array([[1.0], [0.0], [0.0]])  # P = 3, Q = 1
+            >>> prior = OILMMGPPrior(OILMMKernel(kernels=(RBF(),), mixing=W), X)
+            >>> Y = jnp.stack([jnp.sin(4 * X[:, 0]), 0.1 * X[:, 0], -X[:, 0]], -1)
+            >>> log_marg = prior.log_marginal(Y, jnp.asarray(0.05))
+        """
+        _validate_targets(Y, self.num_outputs)
+        noise = jnp.asarray(noise_var)
+        if noise.ndim != 0:
+            raise ValueError(
+                "OILMMGPPrior.log_marginal takes a scalar noise_var: per-output "
+                "noise breaks the orthogonal factorisation, so the projected log "
+                "marginal would not be a likelihood. Use MultiOutputGPPrior and "
+                f"mo_gp_factor for it; got noise_var of shape {noise.shape}."
+            )
+        W = self.kernel.mixing
+        residual = Y - self.mean(self.X)
+        # T = R W, the projection onto the latent processes
+        projected = einx.dot("n p, p q -> n q", residual, W)
+        with call_contexts(self.kernel.kernels):
+            latent = sum(
+                prior.log_marginal(projected[:, q], noise)
+                for q, prior in enumerate(self.latent_priors())
+            )
+        # R − R W Wᵀ, the part of the residuals no latent process explains
+        complement = residual - einx.dot("n q, p q -> n p", projected, W)
+        n_points, n_out = residual.shape
+        n_latent = W.shape[1]
+        total_var = noise + self.jitter
+        complement_count = n_points * (n_out - n_latent)
+        return (
+            latent
+            - 0.5 * complement_count * jnp.log(2.0 * jnp.pi * total_var)
+            - 0.5 * jnp.sum(jnp.square(complement)) / total_var
         )
 
     def condition(
@@ -964,3 +1039,41 @@ class ConditionedOILMMGP(eqx.Module):
         eps = jax.random.normal(key, (n_samples, *mean.shape), dtype=mean.dtype)
         # Scale per-point, per-output std across the S sample rows.
         return einx.multiply("m p, s m p -> s m p", std, eps) + mean
+
+
+def oilmm_factor(
+    name: str,
+    prior: OILMMGPPrior,
+    Y: Float[Array, "N P"],
+    noise_var: Float[Array, ""],
+) -> None:
+    """Register the OILMM collapsed log marginal likelihood with NumPyro.
+
+    Adds ``numpyro.factor(name, prior.log_marginal(Y, noise_var))``: the
+    exact log marginal of the orthogonal-mixing model at the projected
+    cost of `OILMMGPPrior.log_marginal`, the OILMM analogue of
+    `mo_gp_factor`. Registers the one site ``name``.
+
+    Args:
+        name: The factor site name.
+        prior: The `OILMMGPPrior`.
+        Y: Observations, shape ``(N, P)``.
+        noise_var: The isotropic noise variance, a scalar.
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> import numpyro
+        >>> import numpyro.distributions as dist
+        >>> from pyrox_gp import RBF, OILMMGPPrior, OILMMKernel, oilmm_factor
+        >>> X = jnp.linspace(0.0, 1.0, 6)[:, None]
+        >>> W = jnp.array([[0.6], [0.8]])
+        >>> Y = jnp.stack([jnp.sin(4 * X[:, 0]), jnp.cos(4 * X[:, 0])], -1)
+        >>> def model():
+        ...     noise = numpyro.sample("noise_var", dist.LogNormal(-3.0, 1.0))
+        ...     prior = OILMMGPPrior(OILMMKernel(kernels=(RBF(),), mixing=W), X)
+        ...     oilmm_factor("y", prior, Y, noise)
+        >>> trace = numpyro.handlers.trace(numpyro.handlers.seed(model, 0)).get_trace()
+        >>> sorted(trace)
+        ['RBF.lengthscale', 'RBF.variance', 'noise_var', 'y']
+    """
+    numpyro.factor(name, prior.log_marginal(Y, noise_var))
