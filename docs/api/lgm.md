@@ -96,6 +96,8 @@ An `LGM` assembles components, fixed effects and an observation model;
 
 ::: pyrox_lgm.LGM
 
+::: pyrox_lgm.LGMPrior
+
 ::: pyrox_lgm.FixedEffects
 
 ::: pyrox_lgm.inla

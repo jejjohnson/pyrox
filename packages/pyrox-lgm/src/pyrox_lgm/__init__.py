@@ -32,7 +32,7 @@ from pyrox_lgm._likelihood import (
     NegativeBinomial,
     Poisson,
 )
-from pyrox_lgm._model import LGM, FixedEffects
+from pyrox_lgm._model import LGM, FixedEffects, LGMPrior
 from pyrox_lgm._priors import (
     PCAR1Rho,
     PCBYM2Phi,
@@ -66,6 +66,7 @@ __all__ = [
     "Generic",
     "INLAResult",
     "Kronecker",
+    "LGMPrior",
     "Leroux",
     "MarkovGP",
     "NegativeBinomial",

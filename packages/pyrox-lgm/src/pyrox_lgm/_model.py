@@ -1,4 +1,4 @@
-r"""The latent Gaussian model, LGM (P8).
+r"""The latent Gaussian model, LGM, and its prior, LGMPrior (P8).
 
 $$
 \eta = \sum_j A_j x_j + X\beta + o,\qquad
@@ -18,17 +18,19 @@ its own $\theta$-dependent normaliser.
 
 from __future__ import annotations
 
+import abc
 import math
 from collections.abc import Mapping
 
 import equinox as eqx
 import gaussx as gx
+import jax
 import jax.numpy as jnp
 import lineax as lx
 import numpy as np
 import numpyro.distributions as dist
 from argminax.solve import LaplaceModeResult, laplace_mode
-from jaxtyping import Array, ArrayLike, Float
+from jaxtyping import Array, ArrayLike, Float, PRNGKeyArray
 from numpyro.distributions.transforms import Transform
 
 from pyrox_lgm._assembly import block_diagonal, hstack
@@ -152,91 +154,12 @@ class LatentIntrinsicGMRF(gx.IntrinsicGMRF, _Latent):
 _RESERVED = frozenset({"y", "offset", "n_trials"})
 
 
-class LGM(eqx.Module):
-    r"""A latent Gaussian model: components, fixed effects and an observation model.
+class _Hyperparameters(eqx.Module):
+    """The unconstrained vector $u$ of whatever `theta_spec` declares."""
 
-    $\theta$ collects every component's and the likelihood's hyperparameters
-    under ``f"{name}.{k}"``. `inla()` works on the *unconstrained* vector
-    $u$, $\theta = T(u)$ with each prior's bijection, whose log-prior
-    includes the Jacobian; `log_posterior_theta` is $\log\tilde\pi(u\mid y)$
-    in those coordinates.
-
-    ``data`` holds ``"y"``, an optional ``"offset"``, the node index of each
-    observation for every component (``data[component.name]``; an
-    `SPDE` also takes locations, ``(n, 2)`` points on a mesh or ``(n, d)`` on
-    a grid) and the fixed-effect covariates.
-
-    Args:
-        components: Latent components, with distinct names.
-        fixed: Fixed effects, or ``None``.
-        likelihood: Observation model.
-
-    Examples:
-        >>> import jax.numpy as jnp
-        >>> import numpy as np
-        >>> import pyrox_lgm as lgm
-        >>> model = lgm.LGM(
-        ...     components=(lgm.RW1(5, name="t"),),
-        ...     fixed=lgm.FixedEffects(("intercept",)),
-        ...     likelihood=lgm.Poisson(),
-        ... )
-        >>> list(model.theta_spec())
-        ['t.tau']
-        >>> data = {"y": np.array([1, 0, 2, 3, 1]), "t": np.arange(5)}
-        >>> model.projector(data).as_matrix().shape  # 5 nodes + intercept
-        (5, 6)
-    """
-
-    components: tuple[AbstractComponent, ...]
-    fixed: FixedEffects | None
-    likelihood: AbstractObservation
-    consts: tuple[Float[Array, ""], ...]
-
-    def __init__(
-        self,
-        components: tuple[AbstractComponent, ...],
-        fixed: FixedEffects | None = None,
-        likelihood: AbstractObservation | None = None,
-    ) -> None:
-        from pyrox_lgm._likelihood import Gaussian
-
-        names = [c.name for c in components]
-        if fixed is not None:
-            names += list(fixed.names)
-        if len(set(names)) != len(names):
-            raise ValueError(
-                f"component and fixed-effect names must be distinct, got {names}"
-            )
-        # Each effect reads its data column by name, so it cannot share one
-        # with the response or the observation model's inputs.
-        reserved = sorted(set(names) & _RESERVED)
-        if reserved:
-            raise ValueError(
-                f"{reserved} name observation data; rename the effect "
-                f"(reserved: {sorted(_RESERVED)})"
-            )
-        self.components = tuple(components)
-        self.fixed = fixed
-        self.likelihood = Gaussian() if likelihood is None else likelihood
-        # Hyperparameters are keyed f"{name}.{k}": the observation model's
-        # namespace must not be a component's.
-        if self.likelihood.name in {c.name for c in self.components}:
-            raise ValueError(
-                f"the observation model's name {self.likelihood.name!r} is also "
-                "a component's; rename one"
-            )
-        self.consts = tuple(self._normaliser(c) for c in self.components)
-
-    # -- hyperparameters --------------------------------------------------
-
+    @abc.abstractmethod
     def theta_spec(self) -> dict[str, tuple[dist.Distribution, Transform]]:
         """Every hyperparameter: ``f"{name}.{k}"`` to (prior, bijection)."""
-        spec = {}
-        for c in self.components:
-            spec |= {f"{c.name}.{k}": v for k, v in c.theta_spec().items()}
-        lik = self.likelihood
-        spec |= {f"{lik.name}.{k}": v for k, v in lik.theta_spec().items()}
-        return spec
 
     def _sizes(self) -> list[tuple[str, int, tuple[int, ...]]]:
         out = []
@@ -273,12 +196,89 @@ class LGM(eqx.Module):
             i += size
         return total
 
-    def _component_theta(self, theta: Mapping[str, Array], comp) -> dict[str, Array]:
-        return {k: theta[f"{comp.name}.{k}"] for k in comp.theta_spec()}
 
-    def _likelihood_theta(self, theta: Mapping[str, Array]) -> dict[str, Array]:
-        lik = self.likelihood
-        return {k: theta[f"{lik.name}.{k}"] for k in lik.theta_spec()}
+class LGMPrior(_Hyperparameters):
+    r"""The latent field of an `LGM`: its components and fixed effects.
+
+    The prior of the latent vector $x = (x_1, \dots, x_k, \beta)$ at
+    hyperparameters $\theta$, without a likelihood:
+
+    $$
+    x_j \mid \theta \sim \text{GMRF}_j(\theta),\qquad
+    \beta \sim \mathcal N(0, \lambda^{-1} I),\qquad
+    \eta = \sum_j A_j x_j + X\beta + o.
+    $$
+
+    ``theta`` is a mapping of constrained values keyed as in `theta_spec`
+    (``"t.tau"``); keys the prior does not know are ignored, so the values of
+    a whole `LGM` can be passed. ``data`` is an `LGM`'s: the node index (or
+    locations) of each observation per component, the fixed-effect
+    covariates, an optional ``"offset"`` and, where observations are scored,
+    ``"y"``.
+
+    Args:
+        components: Latent components, with distinct names.
+        fixed: Fixed effects, or ``None``.
+
+    Examples:
+        >>> import jax
+        >>> import numpy as np
+        >>> import pyrox_lgm as lgm
+        >>> prior = lgm.LGMPrior((lgm.AR1(5, name="t"),), lgm.FixedEffects(("z",)))
+        >>> list(prior.theta_spec())
+        ['t.tau', 't.rho']
+        >>> draws = prior.sample(jax.random.key(0), {"t.tau": 4.0, "t.rho": 0.8}, 3)
+        >>> draws.shape  # 5 nodes + the slope of z
+        (3, 6)
+
+        The likelihood joins in an `LGM`:
+
+        >>> model = lgm.LGM(prior, likelihood=lgm.Poisson())
+        >>> model.components is prior.components
+        True
+    """
+
+    components: tuple[AbstractComponent, ...]
+    fixed: FixedEffects | None
+    consts: tuple[Float[Array, ""], ...]
+
+    def __init__(
+        self,
+        components: tuple[AbstractComponent, ...],
+        fixed: FixedEffects | None = None,
+    ) -> None:
+        names = [c.name for c in components]
+        if fixed is not None:
+            names += list(fixed.names)
+        if len(set(names)) != len(names):
+            raise ValueError(
+                f"component and fixed-effect names must be distinct, got {names}"
+            )
+        # Each effect reads its data column by name, so it cannot share one
+        # with the response or the observation model's inputs.
+        reserved = sorted(set(names) & _RESERVED)
+        if reserved:
+            raise ValueError(
+                f"{reserved} name observation data; rename the effect "
+                f"(reserved: {sorted(_RESERVED)})"
+            )
+        self.components = tuple(components)
+        self.fixed = fixed
+        self.consts = tuple(self._normaliser(c) for c in self.components)
+
+    # -- hyperparameters --------------------------------------------------
+
+    def theta_spec(self) -> dict[str, tuple[dist.Distribution, Transform]]:
+        """The components' hyperparameters: ``f"{name}.{k}"`` to (prior, bijection)."""
+        spec = {}
+        for c in self.components:
+            spec |= {f"{c.name}.{k}": v for k, v in c.theta_spec().items()}
+        return spec
+
+    def _component_theta(
+        self, theta: Mapping[str, ArrayLike], comp: AbstractComponent
+    ) -> dict[str, Array]:
+        return {k: jnp.asarray(theta[f"{comp.name}.{k}"]) for k in comp.theta_spec()}
 
     # -- latent field -----------------------------------------------------
 
@@ -336,7 +336,7 @@ class LGM(eqx.Module):
         return 0.5 * log_pdet - 0.5 * rank * _LOG_2PI
 
     def latent_prior(
-        self, theta: Mapping[str, Array]
+        self, theta: Mapping[str, ArrayLike]
     ) -> LatentGMRF | LatentIntrinsicGMRF:
         """The assembled prior of $(x_1, \\dots, x_k, \\beta)$ at ``theta``."""
         parts, blocks, nulls, slices, start = [], [], [], [], 0
@@ -368,12 +368,59 @@ class LGM(eqx.Module):
             parts, slices, self.consts, self.n_fixed, lam, Q, null
         )
 
+    def sample(
+        self, key: PRNGKeyArray, theta: Mapping[str, ArrayLike], n_samples: int = 1
+    ) -> Float[Array, "S n"]:
+        r"""Draws of the latent vector $x = (x_1, \dots, x_k, \beta)$ from the prior.
+
+        One draw per component and one of the fixed effects. An intrinsic
+        component is improper along its null space, where it is drawn as
+        zero: an `RW2` draw sums to zero and has no linear trend, which an
+        `LGM` leaves free.
+
+        A component is drawn by its own `gaussx.IntrinsicGMRF`, whose sampler
+        regularises the structure by about $10^{-8}$ of its diagonal. That is
+        more than the smallest eigenvalues of a long `RW2`, so draws of one
+        with more than about 100 nodes are less variable than the prior
+        that is conditioned on.
+
+        Args:
+            key: PRNG key.
+            theta: Hyperparameter values keyed as in `theta_spec`.
+            n_samples: Number of independent draws $S$.
+
+        Returns:
+            The draws, shaped ``(S, n_latent)``, in the order of `slices`.
+        """
+        keys = jax.random.split(key, len(self.components) + 1)
+        draws = [
+            c.prior(self._component_theta(theta, c), constraint="hard").sample(
+                k, (n_samples,)
+            )
+            for c, k in zip(self.components, keys[:-1], strict=True)
+        ]
+        if self.fixed is not None:
+            z = jax.random.normal(keys[-1], (n_samples, self.n_fixed))
+            draws.append(z / math.sqrt(self.fixed.prior_precision))
+        return jnp.concatenate(draws, axis=1) if draws else jnp.zeros((n_samples, 0))
+
     # -- observations ------------------------------------------------------
 
+    def _n_rows(self, data: Mapping[str, ArrayLike]) -> int:
+        """How many rows ``data`` has: the length of ``"y"`` or of any column."""
+        names = ["y", *(c.name for c in self.components)]
+        names += [] if self.fixed is None else self.fixed.names
+        for name in (*names, "offset"):
+            if name in data and np.ndim(data[name]):
+                return np.shape(data[name])[0]
+        raise KeyError(f"data has none of the columns {names}, so no number of rows")
+
     def projector(self, data: Mapping[str, ArrayLike]) -> gx.SparseOperator:
-        """``[A_1 | ... | A_k | X]`` for ``data``, built on the host."""
-        y = np.asarray(data["y"])
-        m = y.shape[0]
+        """``[A_1 | ... | A_k | X]`` for ``data``, built on the host.
+
+        ``data`` needs no ``"y"``: its rows are counted from any column.
+        """
+        m = self._n_rows(data)
         blocks: list[lx.AbstractLinearOperator] = []
         for c in self.components:
             if c.name not in data:
@@ -398,6 +445,136 @@ class LGM(eqx.Module):
 
     def offset(self, data: Mapping[str, ArrayLike]) -> Array | None:
         return None if "offset" not in data else jnp.asarray(data["offset"])
+
+
+class LGM(_Hyperparameters):
+    r"""A latent Gaussian model: components, fixed effects and an observation model.
+
+    $\theta$ collects every component's and the likelihood's hyperparameters
+    under ``f"{name}.{k}"``. `inla()` works on the *unconstrained* vector
+    $u$, $\theta = T(u)$ with each prior's bijection, whose log-prior
+    includes the Jacobian; `log_posterior_theta` is $\log\tilde\pi(u\mid y)$
+    in those coordinates.
+
+    ``data`` holds ``"y"``, an optional ``"offset"``, the node index of each
+    observation for every component (``data[component.name]``; an
+    `SPDE` also takes locations, ``(n, 2)`` points on a mesh or ``(n, d)`` on
+    a grid) and the fixed-effect covariates.
+
+    The latent field is an `LGMPrior`, ``model.prior``, and the model forwards
+    ``components``, ``fixed``, ``slices``, ``n_latent``, ``n_fixed``,
+    ``latent_prior``, ``projector`` and ``offset`` to it.
+
+    Args:
+        components: Latent components, with distinct names, or an `LGMPrior`.
+        fixed: Fixed effects, or ``None``; an `LGMPrior` has its own.
+        likelihood: Observation model (`Gaussian` by default).
+
+    Examples:
+        >>> import jax.numpy as jnp
+        >>> import numpy as np
+        >>> import pyrox_lgm as lgm
+        >>> model = lgm.LGM(
+        ...     components=(lgm.RW1(5, name="t"),),
+        ...     fixed=lgm.FixedEffects(("intercept",)),
+        ...     likelihood=lgm.Poisson(),
+        ... )
+        >>> list(model.theta_spec())
+        ['t.tau']
+        >>> data = {"y": np.array([1, 0, 2, 3, 1]), "t": np.arange(5)}
+        >>> model.projector(data).as_matrix().shape  # 5 nodes + intercept
+        (5, 6)
+
+        The same latent field under another likelihood:
+
+        >>> lgm.LGM(model.prior, likelihood=lgm.Gaussian()).n_theta
+        2
+    """
+
+    prior: LGMPrior
+    likelihood: AbstractObservation
+
+    def __init__(
+        self,
+        components: tuple[AbstractComponent, ...] | LGMPrior,
+        fixed: FixedEffects | None = None,
+        likelihood: AbstractObservation | None = None,
+    ) -> None:
+        from pyrox_lgm._likelihood import Gaussian
+
+        if isinstance(components, LGMPrior):
+            if fixed is not None:
+                raise ValueError("an LGMPrior has its own fixed effects; drop fixed=")
+            self.prior = components
+        else:
+            self.prior = LGMPrior(components, fixed)
+        self.likelihood = Gaussian() if likelihood is None else likelihood
+        # Hyperparameters are keyed f"{name}.{k}": the observation model's
+        # namespace must not be a component's.
+        if self.likelihood.name in {c.name for c in self.components}:
+            raise ValueError(
+                f"the observation model's name {self.likelihood.name!r} is also "
+                "a component's; rename one"
+            )
+
+    @property
+    def components(self) -> tuple[AbstractComponent, ...]:
+        """The latent components, ``prior.components``."""
+        return self.prior.components
+
+    @property
+    def fixed(self) -> FixedEffects | None:
+        """The fixed effects, ``prior.fixed``."""
+        return self.prior.fixed
+
+    @property
+    def consts(self) -> tuple[Float[Array, ""], ...]:
+        """The components' theta-free normalisers, ``prior.consts``."""
+        return self.prior.consts
+
+    # -- hyperparameters --------------------------------------------------
+
+    def theta_spec(self) -> dict[str, tuple[dist.Distribution, Transform]]:
+        """Every hyperparameter: ``f"{name}.{k}"`` to (prior, bijection)."""
+        lik = self.likelihood
+        own = {f"{lik.name}.{k}": v for k, v in lik.theta_spec().items()}
+        return self.prior.theta_spec() | own
+
+    def _likelihood_theta(self, theta: Mapping[str, Array]) -> dict[str, Array]:
+        lik = self.likelihood
+        return {k: theta[f"{lik.name}.{k}"] for k in lik.theta_spec()}
+
+    # -- latent field (the prior's) ----------------------------------------
+
+    @property
+    def n_fixed(self) -> int:
+        """Number of fixed effects."""
+        return self.prior.n_fixed
+
+    def slices(self) -> dict[str, tuple[int, int]]:
+        """``name -> (start, stop)`` in the latent vector; fixed effects last."""
+        return self.prior.slices()
+
+    @property
+    def n_latent(self) -> int:
+        """Size of the latent vector."""
+        return self.prior.n_latent
+
+    def latent_prior(
+        self, theta: Mapping[str, ArrayLike]
+    ) -> LatentGMRF | LatentIntrinsicGMRF:
+        """The assembled prior of $(x_1, \\dots, x_k, \\beta)$ at ``theta``."""
+        return self.prior.latent_prior(theta)
+
+    # -- observations ------------------------------------------------------
+
+    def projector(self, data: Mapping[str, ArrayLike]) -> gx.SparseOperator:
+        """``[A_1 | ... | A_k | X]`` for ``data``, built on the host."""
+        return self.prior.projector(data)
+
+    def offset(self, data: Mapping[str, ArrayLike]) -> Array | None:
+        """``data["offset"]`` as an array, or ``None``."""
+        return self.prior.offset(data)
 
     def log_posterior_theta(
         self,
