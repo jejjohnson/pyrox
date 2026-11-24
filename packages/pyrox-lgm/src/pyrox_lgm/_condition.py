@@ -67,9 +67,9 @@ class _ConditionedLatent(eqx.Module):
         return self.fit.mode, self.posterior.marginal_variances()
 
     def _predict(
-        self, new_data: Mapping[str, ArrayLike]
+        self, new_data: Mapping[str, ArrayLike], projector: gx.SparseOperator | None
     ) -> tuple[Float[Array, " M"], Float[Array, " M"]]:
-        A = self.prior.projector(new_data)
+        A = self.prior.projector(new_data) if projector is None else projector
         mean = A.mv(self.fit.mode)
         offset = self.prior.offset(new_data)
         if offset is not None:
@@ -117,6 +117,8 @@ class _ConditionedLatent(eqx.Module):
         key: PRNGKeyArray,
         n_samples: int = 1,
         new_data: Mapping[str, ArrayLike] | None = None,
+        *,
+        projector: gx.SparseOperator | None = None,
     ) -> Float[Array, "S n"] | Float[Array, "S M"]:
         r"""Joint posterior draws of the latent vector, or of $\eta$ at ``new_data``.
 
@@ -129,6 +131,7 @@ class _ConditionedLatent(eqx.Module):
             n_samples: Number of joint draws $S$.
             new_data: Where to read the linear predictor $\eta = A x + o$;
                 ``None`` returns the latent vector itself.
+            projector: ``prior.projector(new_data)``, as in `predict`.
 
         Returns:
             The draws, shaped ``(S, n_latent)``, or ``(S, M)`` with
@@ -137,7 +140,8 @@ class _ConditionedLatent(eqx.Module):
         draws = self.posterior.sample(key, (n_samples,))
         if new_data is None:
             return draws
-        eta = jax.vmap(self.prior.projector(new_data).mv)(draws)
+        A = self.prior.projector(new_data) if projector is None else projector
+        eta = jax.vmap(A.mv)(draws)
         offset = self.prior.offset(new_data)
         return eta if offset is None else eta + offset
 
@@ -182,20 +186,26 @@ class ConditionedLGM(_ConditionedLatent):
         return self.fit.log_marginal
 
     def predict(
-        self, new_data: Mapping[str, ArrayLike], *, include_noise: bool = False
+        self,
+        new_data: Mapping[str, ArrayLike],
+        *,
+        projector: gx.SparseOperator | None = None,
+        include_noise: bool = False,
     ) -> tuple[Float[Array, " M"], Float[Array, " M"]]:
         r"""Mean and variance of the linear predictor $\eta = A x + o$ at ``new_data``.
 
         Args:
             new_data: The component indices (or locations) and covariates of
                 the ``M`` new rows, and an optional ``"offset"``; no ``"y"``.
+            projector: ``prior.projector(new_data)``; required under ``jit``
+                when ``new_data`` is traced, or has an `SPDE` at locations.
             include_noise: Add the noise variance $\sigma^2$, giving the
                 variance of a new observation. The mean is the same.
 
         Returns:
             ``(mean, var)``, each shaped ``(M,)``.
         """
-        mean, var = self._predict(new_data)
+        mean, var = self._predict(new_data, projector)
         return mean, var + self.noise_var if include_noise else var
 
 
@@ -237,7 +247,10 @@ class ConditionedNonGaussLGM(_ConditionedLatent):
         return self.fit.converged
 
     def predict(
-        self, new_data: Mapping[str, ArrayLike]
+        self,
+        new_data: Mapping[str, ArrayLike],
+        *,
+        projector: gx.SparseOperator | None = None,
     ) -> tuple[Float[Array, " M"], Float[Array, " M"]]:
         r"""Mean and variance of the linear predictor $\eta = A x + o$ at ``new_data``.
 
@@ -247,11 +260,13 @@ class ConditionedNonGaussLGM(_ConditionedLatent):
         Args:
             new_data: The component indices (or locations) and covariates of
                 the ``M`` new rows, and an optional ``"offset"``; no ``"y"``.
+            projector: ``prior.projector(new_data)``; required under ``jit``
+                when ``new_data`` is traced, or has an `SPDE` at locations.
 
         Returns:
             ``(mean, var)``, each shaped ``(M,)``.
         """
-        return self._predict(new_data)
+        return self._predict(new_data, projector)
 
 
 def row_entries(A: gx.SparseOperator) -> tuple[Int[Array, "M k"], Float[Array, "M k"]]:

@@ -616,13 +616,6 @@ class LGMPrior(_Hyperparameters):
 
     # -- conditioning ------------------------------------------------------
 
-    def _constraints(
-        self, theta: Mapping[str, ArrayLike]
-    ) -> Float[Array, "n c"] | None:
-        """Basis of the hard constraints, ``None`` for a proper field."""
-        latent = self.latent_prior(theta)
-        return latent.null_space if isinstance(latent, gx.IntrinsicGMRF) else None
-
     def condition(
         self,
         theta: Mapping[str, ArrayLike],
@@ -641,7 +634,9 @@ class LGMPrior(_Hyperparameters):
         $$
 
         with $\Sigma$ the inverse of $Q(\theta) + \sigma^{-2} A^\top A$, kriged
-        onto the hard constraints of the intrinsic components.
+        onto the hard constraints of the intrinsic components. A direction
+        that neither the data nor a constraint fixes (the trend of an `RW2`
+        seen at one time) has no posterior, and gives ``NaN``.
 
         Args:
             theta: Hyperparameter values keyed as in `theta_spec`.
@@ -652,13 +647,18 @@ class LGMPrior(_Hyperparameters):
 
         Returns:
             The `ConditionedLGM`.
+
+        Raises:
+            EquinoxRuntimeError: If no observation reads a part of an
+                intrinsic component: a replicate, a connected part of its
+                graph, or a slice of a `Kronecker`.
         """
-        fit = self._laplace_gaussian(theta, data, noise_var, projector)
+        fit = self._laplace_gaussian(theta, data, noise_var, projector).checked()
         return ConditionedLGM(
             prior=self,
-            theta={k: jnp.asarray(v) for k, v in theta.items()},
-            fit=fit,
-            constraints=self._constraints(theta),
+            theta={k: jnp.asarray(theta[k]) for k in self.theta_spec()},
+            fit=fit.laplace,
+            constraints=fit.constraints,
             noise_var=jnp.asarray(noise_var),
         )
 
@@ -688,14 +688,20 @@ class LGMPrior(_Hyperparameters):
 
         Returns:
             The `ConditionedNonGaussLGM`.
+
+        Raises:
+            EquinoxRuntimeError: As `condition`.
         """
         self._check_observation(likelihood)
-        fit = self._laplace_under(theta, likelihood, data, projector, max_newton)
+        laplace = self._laplace_under(theta, likelihood, data, projector, max_newton)
+        fit = laplace.checked()
+        own = observation_theta(likelihood, theta)
         return ConditionedNonGaussLGM(
             prior=self,
-            theta={k: jnp.asarray(v) for k, v in theta.items()},
-            fit=fit,
-            constraints=self._constraints(theta),
+            theta={k: jnp.asarray(theta[k]) for k in self.theta_spec()}
+            | {f"{likelihood.name}.{k}": v for k, v in own.items()},
+            fit=fit.laplace,
+            constraints=fit.constraints,
         )
 
 
