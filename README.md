@@ -58,6 +58,8 @@ numpyro.sample("obs", gumbel.to_event(1), obs=maxima)
 
 Most of the machinery belongs to other libraries, and the workspace composes them. A model is made of [`equinox`](https://github.com/patrick-kidger/equinox) modules whose parameters are NumPyro sites, so `jit`, `vmap`, `grad` and every NumPyro handler treat it as any other. The structured linear algebra, the Kalman filters and the sparse precisions are [`gaussx`](https://github.com/jejjohnson/gaussx) on [`lineax`](https://github.com/patrick-kidger/lineax) operators, the kernels are [`kernellib`](https://github.com/jejjohnson/kernellib), the networks are [`geonnax`](https://github.com/jejjohnson/geonnax), the bases and the interpolation are [`functax`](https://github.com/jejjohnson/functax), and the Laplace fits are [`argminax`](https://github.com/jejjohnson/argminax) and [`optimistix`](https://github.com/patrick-kidger/optimistix).
 
+<p align="center"><img src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_workspace_overview/pyrox_workspace_overview.png" alt="pyrox in one picture: you supply noisy data and what you know about the function, the data and the open parameters; these choices make one joint density p(y, f, θ) = p(y | f, θ) p(f | θ) p(θ), with the function kept as a site or integrated out; each package writes one factor, where pyrox writes the parameters as named sites, pyrox-gp, pyrox-lgm, pyrox-ssm and pyrox-nn write the prior on the function as a covariance, a sparse precision, a recursion and random weights, pyrox-xtreme writes the data in the tails, and pyrox-gauss any Gaussian factor; out come posterior samples, a variational posterior, marginals without sampling, an ensemble of fits and predictions; numpyro and equinox, gaussx and lineax, kernellib, geonnax and functax, and argminax and optimistix underneath" width="100%"></p>
+
 ## 🌟 Highlights
 
 - 🔁 **One model, any inference**: a module declares its sites under stable names such as `Matern.lengthscale`, so the same model function runs under NUTS, SVI with any autoguide, `Predictive` and the NumPyro handlers.
@@ -203,17 +205,12 @@ This prints `34.0 34.6`, the posterior mean of the return level in the last year
 
 All seven are released, each with its own [version and notes](https://github.com/jejjohnson/pyrox/releases). An arrow below points at what a package imports:
 
-```mermaid
-flowchart TD
-    gp[pyrox-gp] --> core[pyrox]
-    nn[pyrox-nn] --> core
-    lgm[pyrox-lgm] --> core
-    ssm[pyrox-ssm] --> core
-    gp --> gauss[pyrox-gauss]
-    lgm --> gauss
-    ssm --> gauss
-    xtreme[pyrox-xtreme]
-```
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_workspace_ecosystem/pyrox_workspace_ecosystem-dark.svg">
+    <img alt="The seven packages of the pyrox workspace: pyrox-nn, pyrox-gp, pyrox-lgm and pyrox-ssm import the core pyrox; pyrox-gp, pyrox-lgm and pyrox-ssm also import pyrox-gauss; pyrox-gauss and pyrox-xtreme import no sibling; each card names the libraries the package builds on" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_workspace_ecosystem/pyrox_workspace_ecosystem-light.svg" width="100%">
+  </picture>
+</p>
 
 Nothing points back up (the core only looks pyrox-nn up for two deprecated names, when asked), and the four in the top row do not import each other. Two of them can still meet in your model, as on the [four priors](https://jejjohnson.github.io/pyrox/four-priors/) page, which passes a pyrox-gp kernel to a pyrox-nn layer. pyrox-xtreme stands alone, so it can be used without the rest.
 
