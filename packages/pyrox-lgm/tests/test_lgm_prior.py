@@ -38,6 +38,7 @@ def test_an_lgm_built_from_a_prior_is_the_same_model():
     prior = lgm.LGMPrior(components, fixed)
     through = lgm.LGM(prior, likelihood=likelihood)
     assert through.prior is prior
+    assert through.consts is prior.consts
     assert list(direct.theta_spec()) == list(through.theta_spec())
     assert list(direct.theta_spec()) == ["t.tau", "g.tau", "lik.size"]
     a = direct.log_posterior_theta(u, data)
@@ -128,6 +129,8 @@ def test_every_component_family_draws():
     prior = lgm.LGMPrior(components)
     theta = prior.unflatten(jnp.zeros(prior.n_theta))
     draws = prior.sample(jax.random.key(2), theta, 2)
+    empty = lgm.LGMPrior(()).sample(jax.random.key(2), {}, 2)
+    assert empty.shape == (2, 0)
     assert draws.shape == (2, prior.n_latent)
     assert bool(jnp.all(jnp.isfinite(draws)))
 
@@ -201,3 +204,52 @@ def test_log_marginal_gradient_matches_central_differences():
     for f in (gaussian, poisson):
         fd = (f(1.3 + h) - f(1.3 - h)) / (2 * h)
         assert np.isclose(float(jax.grad(f)(1.3)), float(fd), rtol=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("component", "index"),
+    [
+        (lgm.Replicate(lgm.RW1(4, name="r"), 2, name="t"), np.arange(4)),
+        (
+            lgm.Kronecker(lgm.RW1(4, name="m"), lgm.AR1(3, name="k"), name="t"),
+            np.arange(4) * 3,
+        ),
+    ],
+    ids=["replicate", "kronecker"],
+)
+def test_a_part_that_no_observation_reads_is_an_error(component, index):
+    # H is singular along the null direction of the unread part, so its solves
+    # are round-off: the new methods raise instead of returning them.
+    prior = lgm.LGMPrior((component,), lgm.FixedEffects(("intercept",)))
+    theta = prior.unflatten(jnp.zeros(prior.n_theta))
+    data = {"y": np.ones(4), "t": index}
+    with pytest.raises(Exception, match="no observation reads"):
+        prior.log_marginal(theta, data, 0.3)
+    with pytest.raises(Exception, match="no observation reads"):
+        lgm.LGM(prior, likelihood=lgm.Poisson()).log_marginal(theta, data)
+    # With every part read there is no error.
+    full = {"y": np.ones(prior.n_latent - 1), "t": np.arange(prior.n_latent - 1)}
+    assert np.isfinite(float(prior.log_marginal(theta, full, 0.3)))
+
+
+def test_the_noise_variance_is_a_scalar():
+    with pytest.raises(ValueError, match="noise_var must be a scalar"):
+        lgm.LGMPrior(*_parts()).log_marginal({"t.tau": 1.0, "g.tau": 1.0}, _data(), [1])
+
+
+def test_a_disconnected_graph_is_an_error_only_where_a_part_is_unread():
+    import kernellib as kl
+
+    edges = np.array([[0, 1], [1, 2], [3, 4], [4, 5]])
+    weights = np.zeros((6, 6))
+    weights[edges[:, 0], edges[:, 1]] = weights[edges[:, 1], edges[:, 0]] = 1.0
+    graph = kl.graph_from_adjacency(weights)
+    for component in (lgm.Besag(graph, name="t"), lgm.BYM2(graph, name="t")):
+        prior = lgm.LGMPrior((component,), lgm.FixedEffects(("intercept",)))
+        theta = prior.unflatten(jnp.zeros(prior.n_theta))
+        both = {"y": np.ones(4), "t": np.array([0, 1, 3, 4])}
+        assert np.isfinite(float(prior.log_marginal(theta, both, 0.3)))
+    one = {"y": np.ones(4), "t": np.array([0, 1, 2, 0])}
+    prior = lgm.LGMPrior((lgm.Besag(graph, name="t"),))
+    with pytest.raises(Exception, match="no observation reads"):
+        prior.log_marginal({"t.tau": 1.0}, one, 0.3)

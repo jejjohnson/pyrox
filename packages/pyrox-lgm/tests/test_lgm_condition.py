@@ -219,3 +219,44 @@ def test_condition_nongauss_is_what_inla_mixes():
     eta, eta_var = posterior.predict(data)
     assert np.allclose(eta, res.predictor_means[k], rtol=1e-7, atol=1e-9)
     assert np.allclose(eta_var, res.predictor_variances[k], rtol=1e-7, atol=1e-9)
+
+
+# --- what the data must pin down ---------------------------------------------
+
+
+def test_conditioning_an_unread_part_is_an_error():
+    prior = lgm.LGMPrior((lgm.Replicate(lgm.RW1(4, name="r"), 2, name="t"),))
+    data = {"y": np.ones(4), "t": np.arange(4)}  # nothing in the second copy
+    with pytest.raises(Exception, match="no observation reads"):
+        prior.condition({"t.tau": 1.0}, data, NOISE)
+    with pytest.raises(Exception, match="no observation reads"):
+        prior.condition_nongauss({"t.tau": 1.0}, lgm.Poisson(), data)
+
+
+def test_a_projector_lets_an_spde_predict_under_jit():
+    prior = lgm.LGMPrior((lgm.SPDE(grid=(4, 4), name="s"),))
+    points = np.random.default_rng(0).uniform(0.2, 2.8, size=(6, 2))
+    data = {"y": np.ones(6), "s": points}
+    new = {"s": points[:2] + 0.05}
+    A, A_new = prior.projector(data), prior.projector(new)
+
+    @eqx.filter_jit
+    def predict(sigma):
+        theta = {"s.range_sigma": jnp.array([1.5, 1.0]) * sigma}
+        posterior = prior.condition(theta, data, NOISE, projector=A)
+        draws = posterior.sample(jax.random.key(0), 3, new, projector=A_new)
+        return *posterior.predict(new, projector=A_new), draws
+
+    theta = {"s.range_sigma": jnp.array([1.5, 1.0])}
+    eager = prior.condition(theta, data, NOISE).predict(new)
+    mean, var, draws = predict(jnp.asarray(1.0))
+    assert np.allclose(mean, eager[0], rtol=1e-8)
+    assert np.allclose(var, eager[1], rtol=1e-8)
+    assert draws.shape == (3, 2)
+
+
+def test_the_result_keeps_only_the_hyperparameters_it_used():
+    prior, data = _prior(COMPONENTS[0]), _counts()
+    theta = {**THETA, "lik.size": 2.0, "note": "ignored"}
+    posterior = prior.condition_nongauss(theta, lgm.NegativeBinomial(), data)
+    assert set(posterior.theta) == {"t.tau", "lik.size"}
