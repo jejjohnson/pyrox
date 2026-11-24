@@ -106,6 +106,14 @@ An `LGM` assembles components, fixed effects and an observation model;
 
 ::: pyrox_lgm.Summary
 
+### NumPyro factors
+
+Each integrates the whole latent field out of a NumPyro model, so NUTS samples the hyperparameters only, under priors of the model's own.
+
+::: pyrox_lgm.lgm_factor
+
+::: pyrox_lgm.lgm_laplace_factor
+
 ### Formula sugar
 
 `f(column, model, ...)` builds a component named after the data column that

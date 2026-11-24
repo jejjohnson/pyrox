@@ -33,6 +33,7 @@ from pyrox_lgm._likelihood import (
     Poisson,
 )
 from pyrox_lgm._model import LGM, FixedEffects, LGMPrior
+from pyrox_lgm._numpyro import lgm_factor, lgm_laplace_factor
 from pyrox_lgm._priors import (
     PCAR1Rho,
     PCBYM2Phi,
@@ -82,5 +83,7 @@ __all__ = [
     "diagnostics",
     "f",
     "inla",
+    "lgm_factor",
+    "lgm_laplace_factor",
     "structure_spectrum",
 ]
