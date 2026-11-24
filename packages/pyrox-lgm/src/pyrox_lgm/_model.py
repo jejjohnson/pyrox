@@ -151,7 +151,18 @@ class LatentIntrinsicGMRF(gx.IntrinsicGMRF, _Latent):
         return self._sum_log_prob(value)
 
 
+# A Gaussian likelihood's Newton step lands on the mode; the second only sees
+# that it has, and the rest are room for the round-off of a stiff system.
+_GAUSSIAN_NEWTON = 10
 _RESERVED = frozenset({"y", "offset", "n_trials"})
+
+
+def observation_theta(
+    likelihood: AbstractObservation, theta: Mapping[str, ArrayLike]
+) -> dict[str, Array]:
+    """``likelihood``'s own hyperparameters, from the model's ``"name.key"`` ones."""
+    name = likelihood.name
+    return {k: jnp.asarray(theta[f"{name}.{k}"]) for k in likelihood.theta_spec()}
 
 
 class _Hyperparameters(eqx.Module):
@@ -279,6 +290,15 @@ class LGMPrior(_Hyperparameters):
         self, theta: Mapping[str, ArrayLike], comp: AbstractComponent
     ) -> dict[str, Array]:
         return {k: jnp.asarray(theta[f"{comp.name}.{k}"]) for k in comp.theta_spec()}
+
+    def _check_observation(self, likelihood: AbstractObservation) -> None:
+        # Hyperparameters are keyed f"{name}.{k}": the observation model's
+        # namespace must not be a component's.
+        if likelihood.name in {c.name for c in self.components}:
+            raise ValueError(
+                f"the observation model's name {likelihood.name!r} is also "
+                "a component's; rename one"
+            )
 
     # -- latent field -----------------------------------------------------
 
@@ -439,6 +459,100 @@ class LGMPrior(_Hyperparameters):
     def offset(self, data: Mapping[str, ArrayLike]) -> Array | None:
         return None if "offset" not in data else jnp.asarray(data["offset"])
 
+    # -- evidence ----------------------------------------------------------
+
+    def _laplace(
+        self,
+        theta: Mapping[str, ArrayLike],
+        likelihood: gx.AbstractLikelihood,
+        data: Mapping[str, ArrayLike],
+        projector: gx.SparseOperator | None,
+        max_newton: int,
+    ) -> LaplaceModeResult:
+        """The Gaussian approximation of $x \\mid y, \\theta$ at its mode."""
+        return laplace_mode(
+            self.latent_prior(theta),
+            likelihood,
+            projector=self.projector(data) if projector is None else projector,
+            offset=self.offset(data),
+            max_iter=max_newton,
+        )
+
+    def _laplace_under(
+        self,
+        theta: Mapping[str, ArrayLike],
+        likelihood: AbstractObservation,
+        data: Mapping[str, ArrayLike],
+        projector: gx.SparseOperator | None,
+        max_newton: int,
+    ) -> LaplaceModeResult:
+        """`_laplace` under an observation model, its hyperparameters in ``theta``."""
+        own = observation_theta(likelihood, theta)
+        built = likelihood.build(jnp.asarray(data["y"]), own, data)
+        return self._laplace(theta, built, data, projector, max_newton)
+
+    def _laplace_gaussian(
+        self,
+        theta: Mapping[str, ArrayLike],
+        data: Mapping[str, ArrayLike],
+        noise_var: Float[ArrayLike, ""],
+        projector: gx.SparseOperator | None,
+    ) -> LaplaceModeResult:
+        """`_laplace` under Gaussian noise: exact, so one Newton step and its check."""
+        y, noise = jnp.asarray(data["y"]), jnp.asarray(noise_var)
+        # gaussx annotates a Python float and takes a (traced) scalar too.
+        built = gx.GaussianLikelihood(y, noise)  # ty: ignore[invalid-argument-type]
+        return self._laplace(theta, built, data, projector, _GAUSSIAN_NEWTON)
+
+    def log_marginal(
+        self,
+        theta: Mapping[str, ArrayLike],
+        data: Mapping[str, ArrayLike],
+        noise_var: Float[ArrayLike, ""],
+        *,
+        projector: gx.SparseOperator | None = None,
+    ) -> Float[Array, ""]:
+        r"""Exact log marginal likelihood under Gaussian noise.
+
+        $$
+        \log p(y \mid \theta)
+          = \log \mathcal N(y \mid o,\; A Q(\theta)^{-1} A^\top + \sigma^2 I),
+        $$
+
+        the latent vector integrated out in precision form, at the cost of a
+        sparse Cholesky of $Q(\theta) + \sigma^{-2} A^\top A$, and without the
+        hyperparameters' priors. An intrinsic component contributes the
+        density of its constrained field, as in `LGM.log_posterior_theta`.
+        For any other likelihood, `LGM.log_marginal` is the Laplace
+        approximation.
+
+        Args:
+            theta: Hyperparameter values keyed as in `theta_spec`.
+            data: The observations ``"y"`` and where they are.
+            noise_var: Observation noise variance $\sigma^2$.
+            projector: ``self.projector(data)``, to keep its host work out of
+                a traced loop.
+
+        Returns:
+            The scalar log marginal likelihood.
+
+        Examples:
+            >>> import jax
+            >>> import numpy as np
+            >>> import pyrox_lgm as lgm
+            >>> prior = lgm.LGMPrior((lgm.RW1(6, name="t"),))
+            >>> data = {"y": np.sin(np.arange(6.0)), "t": np.arange(6)}
+            >>> prior.log_marginal({"t.tau": 2.0}, data, 0.1).shape
+            ()
+
+            Differentiable in the noise and the hyperparameters:
+
+            >>> grad = jax.grad(lambda v: prior.log_marginal({"t.tau": 2.0}, data, v))
+            >>> bool(np.isfinite(grad(0.1)))
+            True
+        """
+        return self._laplace_gaussian(theta, data, noise_var, projector).log_marginal
+
 
 class LGM(_Hyperparameters):
     r"""A latent Gaussian model: components, fixed effects and an observation model.
@@ -502,13 +616,7 @@ class LGM(_Hyperparameters):
         else:
             self.prior = LGMPrior(components, fixed)
         self.likelihood = Gaussian() if likelihood is None else likelihood
-        # Hyperparameters are keyed f"{name}.{k}": the observation model's
-        # namespace must not be a component's.
-        if self.likelihood.name in {c.name for c in self.components}:
-            raise ValueError(
-                f"the observation model's name {self.likelihood.name!r} is also "
-                "a component's; rename one"
-            )
+        self.prior._check_observation(self.likelihood)
 
     @property
     def components(self) -> tuple[AbstractComponent, ...]:
@@ -528,9 +636,8 @@ class LGM(_Hyperparameters):
         own = {f"{lik.name}.{k}": v for k, v in lik.theta_spec().items()}
         return self.prior.theta_spec() | own
 
-    def _likelihood_theta(self, theta: Mapping[str, Array]) -> dict[str, Array]:
-        lik = self.likelihood
-        return {k: theta[f"{lik.name}.{k}"] for k in lik.theta_spec()}
+    def _likelihood_theta(self, theta: Mapping[str, ArrayLike]) -> dict[str, Array]:
+        return observation_theta(self.likelihood, theta)
 
     # -- latent field (the prior's) ----------------------------------------
 
@@ -564,6 +671,52 @@ class LGM(_Hyperparameters):
         """``data["offset"]`` as an array, or ``None``."""
         return self.prior.offset(data)
 
+    def log_marginal(
+        self,
+        theta: Mapping[str, ArrayLike],
+        data: Mapping[str, ArrayLike],
+        *,
+        projector: gx.SparseOperator | None = None,
+        max_newton: int = 50,
+    ) -> Float[Array, ""]:
+        r"""The Laplace log marginal likelihood at constrained hyperparameters.
+
+        $$
+        \log p(y \mid \theta) \approx \log p(y \mid \hat x, \theta)
+          + \log p(\hat x \mid \theta)
+          - \log p_G(\hat x \mid y, \theta),
+        $$
+
+        at the mode $\hat x$ of the latent vector, with $p_G$ the Gaussian
+        approximation there: exact for a `Gaussian` observation model. It
+        holds no hyperprior, so a model can put its own on $\theta$.
+        Gradients are implicit at the mode (argminax), so the Newton loop is
+        not unrolled.
+
+        Args:
+            theta: Constrained values of every hyperparameter, keyed as in
+                `theta_spec`.
+            data: The observations ``"y"`` and where they are.
+            projector: ``self.projector(data)``, to keep its host work out of
+                a traced loop.
+            max_newton: Newton iterations of the inner fit.
+
+        Returns:
+            The scalar log marginal likelihood.
+
+        Examples:
+            >>> import numpy as np
+            >>> import pyrox_lgm as lgm
+            >>> model = lgm.LGM((lgm.RW1(5, name="t"),), likelihood=lgm.Poisson())
+            >>> data = {"y": np.array([1, 0, 2, 3, 1]), "t": np.arange(5)}
+            >>> model.log_marginal({"t.tau": 2.0}, data).shape
+            ()
+        """
+        fit = self.prior._laplace_under(
+            theta, self.likelihood, data, projector, max_newton
+        )
+        return fit.log_marginal
+
     def log_posterior_theta(
         self,
         u: Float[Array, " m"],
@@ -579,8 +732,10 @@ class LGM(_Hyperparameters):
         implicit-differentiated Laplace mode. Pass a prebuilt ``projector`` to
         keep host work out of a traced loop.
         """
-        fit = self.laplace(u, data, projector=projector, max_newton=max_newton)
-        return fit.log_marginal + self.log_prior(u)
+        log_marginal = self.log_marginal(
+            self.unflatten(u), data, projector=projector, max_newton=max_newton
+        )
+        return log_marginal + self.log_prior(u)
 
     def laplace(
         self,
@@ -592,15 +747,6 @@ class LGM(_Hyperparameters):
     ) -> LaplaceModeResult:
         """The Laplace approximation of $x \\mid y, \\theta = T(u)$, by
         `argminax.solve.laplace_mode`."""
-        theta = self.unflatten(u)
-        A = self.projector(data) if projector is None else projector
-        lik = self.likelihood.build(
-            jnp.asarray(data["y"]), self._likelihood_theta(theta), data
-        )
-        return laplace_mode(
-            self.latent_prior(theta),
-            lik,
-            projector=A,
-            offset=self.offset(data),
-            max_iter=max_newton,
+        return self.prior._laplace_under(
+            self.unflatten(u), self.likelihood, data, projector, max_newton
         )

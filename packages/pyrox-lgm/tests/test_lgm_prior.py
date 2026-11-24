@@ -130,3 +130,74 @@ def test_every_component_family_draws():
     draws = prior.sample(jax.random.key(2), theta, 2)
     assert draws.shape == (2, prior.n_latent)
     assert bool(jnp.all(jnp.isfinite(draws)))
+
+
+# --- the log marginal likelihood ---------------------------------------------
+
+
+def _dense_marginal(prior, theta, data, noise_var):
+    """log N(y | 0, A Q^-1 A^T + s^2 I) with the intrinsic part pseudo-inverted."""
+    from scipy.stats import multivariate_normal
+
+    cov = np.zeros((prior.n_latent, prior.n_latent))
+    for c, (a, b) in zip(prior.components, prior.slices().values(), strict=False):
+        theta_c = prior._component_theta(theta, c)
+        gmrf = c.prior(theta_c)
+        Q = np.asarray(c.assembly_precision(theta_c, gmrf).as_matrix())
+        cov[a:b, a:b] = np.linalg.pinv(Q, hermitian=True, rcond=1e-10)
+    n = prior.n_fixed
+    if n:
+        cov[-n:, -n:] = np.eye(n) / prior.fixed.prior_precision
+    A = np.asarray(prior.projector(data).as_matrix())
+    cov_y = A @ cov @ A.T + noise_var * np.eye(A.shape[0])
+    return multivariate_normal(np.zeros(A.shape[0]), cov_y).logpdf(data["y"])
+
+
+@pytest.mark.parametrize("component", [lgm.RW1(N, name="t"), lgm.AR1(N, name="t")])
+def test_log_marginal_is_the_dense_gaussian_density(component):
+    prior = lgm.LGMPrior((component,), lgm.FixedEffects(("intercept",)))
+    data = _data()
+    theta = {"t.tau": 1.7, "t.rho": 0.4}
+    ref = _dense_marginal(prior, theta, data, 0.3)
+    assert np.isclose(float(prior.log_marginal(theta, data, 0.3)), ref, atol=1e-9)
+    # The same evidence, through a Gaussian observation model's precision.
+    model = lgm.LGM(prior)
+    through = model.log_marginal({**theta, "lik.prec": 1.0 / 0.3}, data)
+    assert np.isclose(float(through), ref, atol=1e-9)
+
+
+def test_log_marginal_reads_the_offset():
+    prior = lgm.LGMPrior((lgm.AR1(N, name="t"),))
+    data, theta = _data(), {"t.tau": 1.7, "t.rho": 0.4}
+    shift = np.linspace(-1.0, 1.0, N)
+    a = prior.log_marginal(theta, data, 0.3)
+    b = prior.log_marginal(
+        theta, {**data, "y": data["y"] + shift, "offset": shift}, 0.3
+    )
+    assert np.isclose(float(a), float(b), atol=1e-9)
+
+
+@pytest.mark.parametrize("likelihood", [lgm.Gaussian(), lgm.Poisson()])
+def test_log_posterior_theta_is_the_log_marginal_plus_the_hyperprior(likelihood):
+    model = lgm.LGM(*_parts(), likelihood)
+    data = _data()
+    u = jnp.linspace(-0.4, 0.9, model.n_theta)
+    whole = model.log_posterior_theta(u, data)
+    parts = model.log_marginal(model.unflatten(u), data) + model.log_prior(u)
+    assert float(whole) == float(parts)
+
+
+def test_log_marginal_gradient_matches_central_differences():
+    prior, data = lgm.LGMPrior(*_parts()), _data()
+    model = lgm.LGM(prior, likelihood=lgm.Poisson())
+    h = 1e-5
+
+    def gaussian(v):
+        return prior.log_marginal({"t.tau": v, "g.tau": 2.0}, data, 0.5)
+
+    def poisson(v):
+        return model.log_marginal({"t.tau": v, "g.tau": 2.0}, data)
+
+    for f in (gaussian, poisson):
+        fd = (f(1.3 + h) - f(1.3 - h)) / (2 * h)
+        assert np.isclose(float(jax.grad(f)(1.3)), float(fd), rtol=1e-6)
