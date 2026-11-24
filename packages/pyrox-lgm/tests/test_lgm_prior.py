@@ -38,6 +38,7 @@ def test_an_lgm_built_from_a_prior_is_the_same_model():
     prior = lgm.LGMPrior(components, fixed)
     through = lgm.LGM(prior, likelihood=likelihood)
     assert through.prior is prior
+    assert through.consts is prior.consts
     assert list(direct.theta_spec()) == list(through.theta_spec())
     assert list(direct.theta_spec()) == ["t.tau", "g.tau", "lik.size"]
     a = direct.log_posterior_theta(u, data)
@@ -128,6 +129,8 @@ def test_every_component_family_draws():
     prior = lgm.LGMPrior(components)
     theta = prior.unflatten(jnp.zeros(prior.n_theta))
     draws = prior.sample(jax.random.key(2), theta, 2)
+    empty = lgm.LGMPrior(()).sample(jax.random.key(2), {}, 2)
+    assert empty.shape == (2, 0)
     assert draws.shape == (2, prior.n_latent)
     assert bool(jnp.all(jnp.isfinite(draws)))
 

@@ -395,7 +395,14 @@ class LGMPrior(_Hyperparameters):
 
         One draw per component and one of the fixed effects. An intrinsic
         component is improper along its null space, where it is drawn as
-        zero: an `RW2` draw sums to zero and has no linear trend.
+        zero: an `RW2` draw sums to zero and has no linear trend, which an
+        `LGM` leaves free.
+
+        A component is drawn by its own `gaussx.IntrinsicGMRF`, whose sampler
+        regularises the structure by about $10^{-8}$ of its diagonal. That is
+        more than the smallest eigenvalues of a long `RW2`, so draws of one
+        with more than about 100 nodes are less variable than the prior
+        that is conditioned on.
 
         Args:
             key: PRNG key.
@@ -415,7 +422,7 @@ class LGMPrior(_Hyperparameters):
         if self.fixed is not None:
             z = jax.random.normal(keys[-1], (n_samples, self.n_fixed))
             draws.append(z / math.sqrt(self.fixed.prior_precision))
-        return jnp.concatenate(draws, axis=1)
+        return jnp.concatenate(draws, axis=1) if draws else jnp.zeros((n_samples, 0))
 
     # -- observations ------------------------------------------------------
 
@@ -568,9 +575,9 @@ class LGM(_Hyperparameters):
     `SPDE` also takes locations, ``(n, 2)`` points on a mesh or ``(n, d)`` on
     a grid) and the fixed-effect covariates.
 
-    The latent field is an `LGMPrior`, ``model.prior``; ``components``,
-    ``fixed``, ``slices``, ``latent_prior``, ``projector`` and the rest of its
-    surface are read through the model.
+    The latent field is an `LGMPrior`, ``model.prior``, and the model forwards
+    ``components``, ``fixed``, ``slices``, ``n_latent``, ``n_fixed``,
+    ``latent_prior``, ``projector`` and ``offset`` to it.
 
     Args:
         components: Latent components, with distinct names, or an `LGMPrior`.
@@ -627,6 +634,11 @@ class LGM(_Hyperparameters):
     def fixed(self) -> FixedEffects | None:
         """The fixed effects, ``prior.fixed``."""
         return self.prior.fixed
+
+    @property
+    def consts(self) -> tuple[Float[Array, ""], ...]:
+        """The components' theta-free normalisers, ``prior.consts``."""
+        return self.prior.consts
 
     # -- hyperparameters --------------------------------------------------
 
