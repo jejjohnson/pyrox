@@ -380,8 +380,9 @@ Two tools, one site for the workspace (`docs/README.md` explains the split): mys
   `plt.show()`: no `savefig`, no separate image files (the
   `docs/images/readme/` PNGs are README figures). Full standards:
   `.github/instructions/docs-examples.instructions.md`.
-- **Diagrams and icons** come from `docs/assets/render.py`
-  (`uv run --no-project python docs/assets/render.py`).
+- **Icons and the logo** come from `docs/assets/render.py`
+  (`uv run --no-project python docs/assets/render.py`); the schematics are
+  drawn in geostack, under `docs/images/libraries/`.
 - **Design references** live in `design_docs/pyrox/`; parts of it predate the
   workspace split (single-package layout, older pattern names), so the code
   and this file win where they disagree.

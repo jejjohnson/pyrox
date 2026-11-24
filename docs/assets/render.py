@@ -1,4 +1,4 @@
-"""Render the pyrox README assets: icons, logos and the two diagrams.
+"""Render the pyrox README assets: the icons and the logo.
 
 Every output is a plain SVG written next to this file. The icons share the
 gaussx tile (a 120-unit rounded square, r = 26, white glyph) in the pyrox
@@ -12,8 +12,8 @@ ember gradient; each package gets its own glyph:
     pyrox-ssm  a Markov chain of states, each observed below, one observation missing
     pyrox-gauss  a bell curve over a banded (tridiagonal) precision matrix
 
-Diagrams come in a light and a dark variant for GitHub's
-``<picture>`` / ``prefers-color-scheme`` switch.
+The logo comes in a light and a dark variant for GitHub's
+``<picture>`` / ``prefers-color-scheme`` switch. The diagrams are drawn in geostack.
 
 Run from the repo root:
 
@@ -26,38 +26,13 @@ from pathlib import Path
 
 OUT = Path(__file__).parent
 
-DOT = " \N{MIDDLE DOT} "
 SANS = "ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"
-MONO = "ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace"
 
 # Ember: the pyrox gradient and its wordmark accents.
 C1, C2 = "#F97316", "#E11D48"
 ACCENT = {"light": "#C2410C", "dark": "#FDBA74"}
 
-THEME = {
-    "light": {
-        "text": "#1F2937",
-        "muted": "#6B7280",
-        "card": "#F9FAFB",
-        "line": "#D1D5DB",
-        "arrow": "#9CA3AF",
-        "hi_fill": "#FFF7ED",
-        "hi_line": "#EA580C",
-        "site": "#C2410C",
-        "band": "#F3F4F6",
-    },
-    "dark": {
-        "text": "#E5E7EB",
-        "muted": "#9CA3AF",
-        "card": "#111827",
-        "line": "#374151",
-        "arrow": "#6B7280",
-        "hi_fill": "#2A1408",
-        "hi_line": "#EA580C",
-        "site": "#FDBA74",
-        "band": "#1F2937",
-    },
-}
+TEXT = {"light": "#1F2937", "dark": "#E5E7EB"}
 
 W = "#FFFFFF"
 
@@ -236,60 +211,6 @@ def svg(width: int, height: int, label: str, title: str, body: str) -> str:
     )
 
 
-def text(
-    x: float,
-    y: float,
-    s: str,
-    *,
-    size: float = 14,
-    weight: int = 400,
-    fill: str,
-    family: str = SANS,
-    anchor: str = "start",
-) -> str:
-    # xml:space keeps leading spaces, so indented code lines stay indented.
-    return (
-        f'<text x="{x}" y="{y}" text-anchor="{anchor}" font-family="{family}" '
-        f'font-size="{size}" font-weight="{weight}" fill="{fill}" '
-        f'xml:space="preserve">{s}</text>'
-    )
-
-
-def arrow_defs(mid: str, colour: str) -> str:
-    return (
-        f'<defs><marker id="{mid}" viewBox="0 0 10 10" refX="9" refY="5" '
-        'markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
-        f'<path d="M0 0 L10 5 L0 10 z" fill="{colour}"/></marker></defs>'
-    )
-
-
-def line(points: list[tuple[float, float]], colour: str, head: str | None) -> str:
-    d = " ".join(f"{'M' if i == 0 else 'L'}{x} {y}" for i, (x, y) in enumerate(points))
-    end = f' marker-end="url(#{head})"' if head else ""
-    return (
-        f'<path d="{d}" fill="none" stroke="{colour}" stroke-width="1.6" '
-        f'stroke-linejoin="round"{end}/>'
-    )
-
-
-def card(
-    x: float,
-    y: float,
-    w: float,
-    h: float,
-    t: dict[str, str],
-    *,
-    highlight: bool = False,
-) -> str:
-    fill, stroke, sw = (
-        (t["hi_fill"], t["hi_line"], 2) if highlight else (t["card"], t["line"], 1)
-    )
-    return (
-        f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="12" fill="{fill}" '
-        f'stroke="{stroke}" stroke-width="{sw}"/>'
-    )
-
-
 # ---------------------------------------------------------------- icons and logo
 
 
@@ -301,210 +222,15 @@ def write_icons() -> None:
 
 
 def write_logos() -> None:
-    for mode, t in THEME.items():
+    for mode, colour in TEXT.items():
         body = tile(f"logo-{mode}", glyph_plate(), x=6, y=6) + (
             f'<text x="154" y="92" font-family="{SANS}" font-size="72" '
-            f'font-weight="700" letter-spacing="-1.5" fill="{t["text"]}">'
+            f'font-weight="700" letter-spacing="-1.5" fill="{colour}">'
             f'pyro<tspan fill="{ACCENT[mode]}">x</tspan></text>'
         )
         (OUT / f"logo-{mode}.svg").write_text(svg(400, 140, "pyrox", "pyrox", body))
 
 
-# ---------------------------------------------------------------- hero
-
-
-ENGINES = [
-    ("handlers.seed" + DOT + "trace", "inspect every site"),
-    ("MCMC(NUTS(model))", "sample the posterior"),
-    ("SVI(model, AutoNormal)", "fit a guide"),
-    ("Predictive", "posterior predictive draws"),
-    ("jit" + DOT + "vmap" + DOT + "grad", "plain JAX transforms"),
-]
-
-
-def write_hero() -> None:
-    """One PyroxModule fanning out to every NumPyro handler and engine."""
-    width, height = 960, 356
-    for mode, t in THEME.items():
-        head = f"hero-{mode}-head"
-        parts = [arrow_defs(head, t["arrow"])]
-
-        # Module card, centred on the fan-out trunk.
-        mx, my, mw, mh = 20, 88, 340, 180
-        parts.append(card(mx, my, mw, mh, t, highlight=True))
-        parts.append(tile(f"hero-{mode}-icon", glyph_plate(), mx + 18, my + 16, 36))
-        parts.append(
-            text(
-                mx + 64,
-                my + 40,
-                "BayesianLinear(PyroxModule)",
-                size=14.5,
-                weight=700,
-                fill=t["text"],
-                family=MONO,
-            )
-        )
-        code = [
-            "@pyrox_method",
-            "def __call__(self, x):",
-            '    W = self.pyrox_sample("weight", prior)',
-            '    b = self.pyrox_param("bias", zeros)',
-        ]
-        for i, s in enumerate(code):
-            parts.append(
-                text(mx + 18, my + 74 + 19 * i, s, size=12, fill=t["text"], family=MONO)
-            )
-        parts.append(
-            text(
-                mx + 18,
-                my + 162,
-                "sites: BayesianLinear.weight, .bias",
-                size=12.5,
-                weight=600,
-                fill=t["site"],
-                family=MONO,
-            )
-        )
-
-        # Trunk, then one arrow into each engine card.
-        cy = my + mh / 2
-        trunk_x, ex, ew, eh, gap = 410, 470, 470, 52, 14
-        centres = [20 + eh / 2 + i * (eh + gap) for i in range(len(ENGINES))]
-        parts.append(line([(mx + mw, cy), (trunk_x, cy)], t["arrow"], None))
-        parts.append(
-            line([(trunk_x, centres[0]), (trunk_x, centres[-1])], t["arrow"], None)
-        )
-        for c in centres:
-            parts.append(line([(trunk_x, c), (ex - 3, c)], t["arrow"], head))
-
-        for (name, what), c in zip(ENGINES, centres, strict=True):
-            parts.append(card(ex, c - eh / 2, ew, eh, t))
-            parts.append(
-                text(
-                    ex + 18,
-                    c + 5,
-                    name,
-                    size=14,
-                    weight=700,
-                    fill=t["text"],
-                    family=MONO,
-                )
-            )
-            parts.append(
-                text(
-                    ex + ew - 18, c + 5, what, size=13.5, fill=t["muted"], anchor="end"
-                )
-            )
-
-        label = (
-            "One PyroxModule with named sample and param sites runs unchanged "
-            "under NumPyro handlers, NUTS, SVI, Predictive and JAX transforms."
-        )
-        (OUT / f"hero-{mode}.svg").write_text(
-            svg(
-                width,
-                height,
-                label,
-                "One module, every inference engine",
-                "\n".join(parts),
-            )
-        )
-
-
-# ---------------------------------------------------------------- layers
-
-
-PACKAGES = {
-    # name: (x, y, w, description, extra dependencies)
-    "pyrox-gp": (
-        30,
-        20,
-        400,
-        "kernels" + DOT + "guides" + DOT + "likelihoods" + DOT + "GP models",
-        "+ gaussx" + DOT + "kernellib" + DOT + "geonnax" + DOT + "flowjax",
-    ),
-    "pyrox-nn": (
-        30,
-        130,
-        400,
-        "Bayesian layers" + DOT + "SIREN" + DOT + "SNGP" + DOT + "BNF",
-        "+ gaussx" + DOT + "kernellib" + DOT + "geonnax",
-    ),
-    "pyrox-lgm": (
-        30,
-        240,
-        400,
-        "GMRF components" + DOT + "PC priors" + DOT + "inla()",
-        "+ gaussx" + DOT + "kernellib" + DOT + "matfree",
-    ),
-    "pyrox": (
-        510,
-        130,
-        420,
-        "PyroxModule" + DOT + "Parameterized" + DOT + "ensemble MAP / VI",
-        "+ jax" + DOT + "equinox" + DOT + "numpyro",
-    ),
-}
-
-
-def write_layers() -> None:
-    """The four packages; arrows point at what each one imports."""
-    width, height, h = 960, 416, 92
-    for mode, t in THEME.items():
-        head = f"layers-{mode}-head"
-        a = t["arrow"]
-        parts = [arrow_defs(head, a)]
-
-        # gp, nn and lgm are siblings: each imports pyrox, and none another.
-        parts.append(line([(430, 66), (470, 66), (470, 176), (507, 176)], a, head))
-        parts.append(line([(430, 176), (507, 176)], a, head))
-        parts.append(line([(430, 286), (470, 286), (470, 176), (507, 176)], a, head))
-
-        for name, (x, y, w, desc, deps) in PACKAGES.items():
-            core = name == "pyrox"
-            parts.append(card(x, y, w, h, t, highlight=core))
-            parts.append(
-                tile(f"layers-{mode}-{name}", GLYPHS[name](), x + 16, y + 22, 48)
-            )
-            parts.append(
-                text(
-                    x + 80,
-                    y + 32,
-                    name,
-                    size=16,
-                    weight=700,
-                    fill=t["site"] if core else t["text"],
-                    family=MONO,
-                )
-            )
-            parts.append(text(x + 80, y + 56, desc, size=13, fill=t["text"]))
-            parts.append(text(x + 80, y + 77, deps, size=12.5, fill=t["muted"]))
-
-        parts.append(
-            f'<rect x="20" y="352" width="920" height="44" rx="10" fill="{t["band"]}"/>'
-        )
-        for x, head_word, names in [
-            (44, "Foundations", ["jax", "equinox", "numpyro", "einx"]),
-            (500, "GeoML", ["gaussx", "kernellib", "geonnax", "matfree", "flowjax"]),
-        ]:
-            parts.append(
-                f'<text x="{x}" y="379" font-family="{SANS}" font-size="13" '
-                f'fill="{t["muted"]}"><tspan font-weight="700" fill="{t["text"]}">'
-                f"{head_word}</tspan>  {DOT.join(names)}</text>"
-            )
-
-        label = (
-            "pyrox-gp, pyrox-nn and pyrox-lgm are siblings that each build on pyrox "
-            "directly. All sit on JAX, Equinox and NumPyro and on the GeoML packages "
-            "gaussx, kernellib and geonnax."
-        )
-        (OUT / f"layers-{mode}.svg").write_text(
-            svg(width, height, label, "pyrox package layers", "\n".join(parts))
-        )
-
-
 if __name__ == "__main__":
     write_icons()
     write_logos()
-    write_hero()
-    write_layers()
