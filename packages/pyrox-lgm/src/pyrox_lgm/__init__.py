@@ -21,6 +21,7 @@ from pyrox_lgm._components import (
     MarkovGP,
     Replicate,
 )
+from pyrox_lgm._condition import ConditionedLGM, ConditionedNonGaussLGM
 from pyrox_lgm._diagnostics import Diagnostics, diagnostics
 from pyrox_lgm._formula import f
 from pyrox_lgm._inla import inla
@@ -61,6 +62,8 @@ __all__ = [
     "Bernoulli",
     "Besag",
     "Binomial",
+    "ConditionedLGM",
+    "ConditionedNonGaussLGM",
     "Diagnostics",
     "FixedEffects",
     "Gaussian",

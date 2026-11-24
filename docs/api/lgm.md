@@ -106,6 +106,14 @@ An `LGM` assembles components, fixed effects and an observation model;
 
 ::: pyrox_lgm.Summary
 
+### Conditioned at fixed hyperparameters
+
+`LGMPrior.condition` (Gaussian noise, exact) and `LGMPrior.condition_nongauss` (Laplace) return the posterior of the latent vector, with `predict` and `sample`.
+
+::: pyrox_lgm.ConditionedLGM
+
+::: pyrox_lgm.ConditionedNonGaussLGM
+
 ### NumPyro factors
 
 Each integrates the whole latent field out of a NumPyro model, so NUTS samples the hyperparameters only, under priors of the model's own.

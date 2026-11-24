@@ -7,7 +7,6 @@ from collections.abc import Mapping
 from typing import Any, NamedTuple
 
 import equinox as eqx
-import gaussx as gx
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -194,6 +193,20 @@ def mixture_summary(
     return Summary(mean, sd, *q)
 
 
+# Compiled once per model structure and Newton budget, like the pieces of
+# `inla`, so the design points share it.
+@eqx.filter_jit
+def _condition_at(model, data, A, u, max_newton):
+    """The model's `LGMPrior` conditioned at unconstrained hyperparameters ``u``."""
+    return model.prior.condition_nongauss(
+        model.unflatten(u),
+        model.likelihood,
+        data,
+        projector=A,
+        max_newton=max_newton,
+    )
+
+
 class INLAResult(eqx.Module):
     """What `inla()` returns.
 
@@ -248,8 +261,8 @@ class INLAResult(eqx.Module):
 
         Each draw picks a design point by its weight, then samples that
         point's Gaussian approximation $\\mathcal N(\\bar x_k, H_k^{-1})$
-        (kriged onto the hard constraints) through the sparse Cholesky
-        factor of $H_k$.
+        (kriged onto the hard constraints), as `ConditionedNonGaussLGM.sample`
+        does.
         """
         k_pick, k_draw = jax.random.split(key)
         picks = np.asarray(
@@ -262,22 +275,12 @@ class INLAResult(eqx.Module):
         A = self.model.projector(self.data)
         for k in np.unique(picks):
             rows = np.flatnonzero(picks == k)
-            fit = self.model.laplace(
-                self.theta_points[k],
-                self.data,
-                projector=A,
-                max_newton=self.newton_iters[k],
+            posterior = _condition_at(
+                self.model, self.data, A, self.theta_points[k], self.newton_iters[k]
             )
-            if not bool(fit.converged):
+            if not bool(posterior.converged):
                 raise RuntimeError(f"refit of design point {k} did not converge")
-            prior = self.model.latent_prior(self.model.unflatten(self.theta_points[k]))
-            z = jax.random.normal(keys[k], (rows.size, fit.mode.shape[0]))
-            draws = jax.vmap(fit.factor.solve_lower_transpose)(z)
-            if isinstance(prior, gx.IntrinsicGMRF):
-                V = prior.null_space
-                HV = jax.vmap(fit.factor.solve, in_axes=1, out_axes=1)(V)
-                S = V.T @ HV
-                draws = draws - (HV @ jnp.linalg.solve(S, V.T @ draws.T)).T
+            draws = posterior.sample(keys[k], rows.size) - posterior.fit.mode
             out[rows] = np.asarray(self.latent_means[k] + draws)
         return jnp.asarray(out)
 
