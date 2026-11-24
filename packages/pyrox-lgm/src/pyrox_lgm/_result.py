@@ -6,7 +6,6 @@ import math
 from collections.abc import Mapping
 from typing import Any, NamedTuple
 
-import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -359,10 +358,10 @@ class INLAResult(eqx.Module):
         if offset is not None:
             means = means + offset
         # m_i = Σ_k w_k m_ik
-        mean = einx.dot("k, k m -> m", self.theta_weights, means)
+        mean = self.theta_weights @ means
         # v_i = Σ_k w_k (v_ik + (m_ik − m_i)²)
         spread = jnp.stack(variances) + (means - mean) ** 2
-        return mean, einx.dot("k, k m -> m", self.theta_weights, spread)
+        return mean, self.theta_weights @ spread
 
     def to_xarray(self):
         """The summaries as an ``xarray.Dataset`` (needs the ``xarray`` extra)."""

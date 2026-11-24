@@ -38,7 +38,10 @@ def _check(res, data):
 
 
 def test_predict_moments_is_the_mixture_at_the_training_rows():
-    _check(*_fit("eb"))  # one design point: the smoke test of the fast tier
+    res, data = _fit("eb")  # one design point: the smoke test of the fast tier
+    _check(res, data)
+    none = {k: data[k][:0] for k in ("t", "z", "offset")}
+    assert [a.shape for a in res.predict_moments(none)] == [(0,), (0,)]
 
 
 @pytest.mark.slow
