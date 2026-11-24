@@ -36,6 +36,7 @@ from numpyro.distributions.transforms import Transform
 
 from pyrox_lgm._assembly import block_diagonal, hstack
 from pyrox_lgm._components._base import AbstractComponent, prior_shape, probe_theta
+from pyrox_lgm._condition import ConditionedLGM, ConditionedNonGaussLGM
 from pyrox_lgm._likelihood import AbstractObservation
 
 
@@ -612,6 +613,96 @@ class LGMPrior(_Hyperparameters):
         """
         fit = self._laplace_gaussian(theta, data, noise_var, projector).checked()
         return fit.laplace.log_marginal
+
+    # -- conditioning ------------------------------------------------------
+
+    def condition(
+        self,
+        theta: Mapping[str, ArrayLike],
+        data: Mapping[str, ArrayLike],
+        noise_var: Float[ArrayLike, ""],
+        *,
+        projector: gx.SparseOperator | None = None,
+    ) -> ConditionedLGM:
+        r"""Condition on observations with Gaussian noise, at fixed $\theta$.
+
+        The posterior of the latent vector is exactly Gaussian,
+
+        $$
+        x \mid y, \theta \sim \mathcal N(\hat x, \Sigma),\qquad
+        \hat x = \sigma^{-2} \Sigma A^\top (y - o),
+        $$
+
+        with $\Sigma$ the inverse of $Q(\theta) + \sigma^{-2} A^\top A$, kriged
+        onto the hard constraints of the intrinsic components. A direction
+        that neither the data nor a constraint fixes (the trend of an `RW2`
+        seen at one time) has no posterior, and gives ``NaN``.
+
+        Args:
+            theta: Hyperparameter values keyed as in `theta_spec`.
+            data: The observations ``"y"`` and where they are.
+            noise_var: Observation noise variance $\sigma^2$.
+            projector: ``self.projector(data)``, to keep its host work out of
+                a traced loop.
+
+        Returns:
+            The `ConditionedLGM`.
+
+        Raises:
+            EquinoxRuntimeError: If no observation reads a part of an
+                intrinsic component: a replicate, a connected part of its
+                graph, or a slice of a `Kronecker`.
+        """
+        fit = self._laplace_gaussian(theta, data, noise_var, projector).checked()
+        return ConditionedLGM(
+            prior=self,
+            theta={k: jnp.asarray(theta[k]) for k in self.theta_spec()},
+            fit=fit.laplace,
+            constraints=fit.constraints,
+            noise_var=jnp.asarray(noise_var),
+        )
+
+    def condition_nongauss(
+        self,
+        theta: Mapping[str, ArrayLike],
+        likelihood: AbstractObservation,
+        data: Mapping[str, ArrayLike],
+        *,
+        projector: gx.SparseOperator | None = None,
+        max_newton: int = 50,
+    ) -> ConditionedNonGaussLGM:
+        r"""Condition under any observation model by Laplace, at fixed $\theta$.
+
+        Newton's method to the mode of $p(x \mid y, \theta)$
+        (`argminax.solve.laplace_mode`), and the Gaussian there. Check
+        ``converged`` on the result.
+
+        Args:
+            theta: Hyperparameter values, the components' and the
+                likelihood's (``"lik.size"``).
+            likelihood: The observation model.
+            data: The observations ``"y"`` and where they are.
+            projector: ``self.projector(data)``, to keep its host work out of
+                a traced loop.
+            max_newton: Newton iterations.
+
+        Returns:
+            The `ConditionedNonGaussLGM`.
+
+        Raises:
+            EquinoxRuntimeError: As `condition`.
+        """
+        self._check_observation(likelihood)
+        laplace = self._laplace_under(theta, likelihood, data, projector, max_newton)
+        fit = laplace.checked()
+        own = observation_theta(likelihood, theta)
+        return ConditionedNonGaussLGM(
+            prior=self,
+            theta={k: jnp.asarray(theta[k]) for k in self.theta_spec()}
+            | {f"{likelihood.name}.{k}": v for k, v in own.items()},
+            fit=fit.laplace,
+            constraints=fit.constraints,
+        )
 
 
 class LGM(_Hyperparameters):
