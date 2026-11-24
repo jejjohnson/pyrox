@@ -207,6 +207,13 @@ def _condition_at(model, data, A, u, max_newton):
     )
 
 
+@eqx.filter_jit
+def _predictor_variance_at(model, data, A, u, max_newton, A_new):
+    """Variances of the linear predictor at the rows of ``A_new``, and convergence."""
+    posterior = _condition_at(model, data, A, u, max_newton)
+    return posterior._predictor_variance(A_new), posterior.converged
+
+
 class INLAResult(eqx.Module):
     """What `inla()` returns.
 
@@ -296,8 +303,8 @@ class INLAResult(eqx.Module):
         """Monte Carlo summary of the linear predictor $\\eta = Ax + o$ at ``new_data``.
 
         ``new_data`` has the component indices and covariates of the new
-        locations (and ``"y"``, any placeholder of the right length, which
-        sizes the projector); ``"offset"`` is optional.
+        locations, and an optional ``"offset"``; no ``"y"`` is needed. For the
+        mean and variance alone, `predict_moments` is exact and takes no key.
         """
         A = self.model.projector(new_data)
         x = self.sample_latent(key, n_samples)
@@ -306,6 +313,55 @@ class INLAResult(eqx.Module):
             eta = eta + jnp.asarray(new_data["offset"])
         q = jnp.quantile(eta, jnp.asarray(_PROBS), axis=0)
         return Summary(eta.mean(0), eta.std(0), q[0], q[1], q[2])
+
+    def predict_moments(
+        self, new_data: Mapping[str, ArrayLike]
+    ) -> tuple[Float[Array, " M_new"], Float[Array, " M_new"]]:
+        r"""Mean and variance of the linear predictor $\eta = Ax + o$ at ``new_data``.
+
+        Those of the mixture over the design points, with no sampling:
+
+        $$
+        m_i = \sum_k w_k m_{ik},\qquad
+        v_i = \sum_k w_k \{v_{ik} + (m_{ik} - m_i)^2\},
+        $$
+
+        with $m_{ik}$ from the latent means kept at design point $k$ (VB- or
+        Laplace-corrected as `inla` left them) and $v_{ik}$ from the
+        `LGMPrior` conditioned there. It costs one refit per design point.
+        The moments are the whole mixture's; under ``integration="auto"``
+        the summaries in `linear_predictor` are cut at the mixture's mean
+        $\pm 5$ sds, as R-INLA reports them.
+
+        Args:
+            new_data: The component indices (or locations) and covariates of
+                the new rows, and an optional ``"offset"``; no ``"y"``.
+
+        Returns:
+            ``(mean, var)``, one entry per row of ``new_data``.
+
+        Raises:
+            RuntimeError: If the refit of a design point does not converge.
+        """
+        A = self.model.projector(self.data)
+        A_new = self.model.projector(new_data)
+        offset = self.model.offset(new_data)
+        variances = []
+        for k, (u, budget) in enumerate(
+            zip(self.theta_points, self.newton_iters, strict=True)
+        ):
+            var, ok = _predictor_variance_at(self.model, self.data, A, u, budget, A_new)
+            if not bool(ok):
+                raise RuntimeError(f"refit of design point {k} did not converge")
+            variances.append(var)
+        means = jax.vmap(A_new.mv)(self.latent_means)
+        if offset is not None:
+            means = means + offset
+        # m_i = Σ_k w_k m_ik
+        mean = self.theta_weights @ means
+        # v_i = Σ_k w_k (v_ik + (m_ik − m_i)²)
+        spread = jnp.stack(variances) + (means - mean) ** 2
+        return mean, self.theta_weights @ spread
 
     def to_xarray(self):
         """The summaries as an ``xarray.Dataset`` (needs the ``xarray`` extra)."""
