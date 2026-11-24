@@ -33,6 +33,8 @@ project:
     - file: index.md
     - title: Getting started
       children:
+        - file: four_priors.md
+          title: One trend in the extremes, four priors
         - file: methane_overpass.md
           title: Map methane from one overpass
         - file: agents.md
