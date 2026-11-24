@@ -21,6 +21,7 @@ from __future__ import annotations
 import abc
 import math
 from collections.abc import Mapping
+from typing import NamedTuple
 
 import equinox as eqx
 import gaussx as gx
@@ -155,6 +156,48 @@ class LatentIntrinsicGMRF(gx.IntrinsicGMRF, _Latent):
 # that it has, and the rest are room for the round-off of a stiff system.
 _GAUSSIAN_NEWTON = 10
 _RESERVED = frozenset({"y", "offset", "n_trials"})
+
+
+class _Fit(NamedTuple):
+    """A Laplace fit, with the latent prior and the projector it was made with."""
+
+    laplace: LaplaceModeResult
+    latent: LatentGMRF | LatentIntrinsicGMRF
+    projector: gx.SparseOperator
+
+    @property
+    def constraints(self) -> Float[Array, "n c"] | None:
+        """Basis of the hard constraints, ``None`` for a proper field."""
+        intrinsic = isinstance(self.latent, LatentIntrinsicGMRF)
+        return self.latent.null_space if intrinsic else None
+
+    def checked(self) -> _Fit:
+        r"""The fit, or an error where the data leave it singular.
+
+        The precision $H = Q + A^\top \Lambda A$ is singular along a
+        constrained direction $v$ with $Qv = 0$ that no observation reads,
+        $Av = 0$: an unobserved connected part of a graph, replicate or time
+        slice. Solves with it are then round-off, and nothing downstream
+        says so.
+        """
+        if not isinstance(self.latent, LatentIntrinsicGMRF):
+            return self
+        V, Q = self.latent.null_space, self.latent.structure
+        read = jax.vmap(self.projector.mv, in_axes=1, out_axes=1)(V)
+        # Q v is zero up to the round-off of its sums for a null direction; a
+        # constraint that is not one (BYM2's, on its structured part) differs.
+        QV = jax.vmap(Q.mv, in_axes=1, out_axes=1)(V)
+        tol = 100.0 * jnp.finfo(V.dtype).eps * jnp.max(jnp.abs(gx.diag(Q)))
+        flat = jnp.max(jnp.abs(QV), axis=0) <= tol * jnp.max(jnp.abs(V), axis=0)
+        unread = jnp.any(jnp.all(read == 0.0, axis=0) & flat)
+        fit = eqx.error_if(
+            self.laplace,
+            unread,
+            "an intrinsic component of the prior has a part that no observation "
+            "reads (a replicate, a connected part of its graph or a slice of a "
+            "Kronecker), so the posterior precision is singular there",
+        )
+        return self._replace(laplace=fit)
 
 
 def observation_theta(
@@ -395,7 +438,14 @@ class LGMPrior(_Hyperparameters):
 
         One draw per component and one of the fixed effects. An intrinsic
         component is improper along its null space, where it is drawn as
-        zero: an `RW2` draw sums to zero and has no linear trend.
+        zero: an `RW2` draw sums to zero and has no linear trend, which an
+        `LGM` leaves free.
+
+        A component is drawn by its own `gaussx.IntrinsicGMRF`, whose sampler
+        regularises the structure by about $10^{-8}$ of its diagonal. That is
+        more than the smallest eigenvalues of a long `RW2`, so draws of one
+        with more than about 100 nodes are less variable than the prior
+        that is conditioned on.
 
         Args:
             key: PRNG key.
@@ -415,7 +465,7 @@ class LGMPrior(_Hyperparameters):
         if self.fixed is not None:
             z = jax.random.normal(keys[-1], (n_samples, self.n_fixed))
             draws.append(z / math.sqrt(self.fixed.prior_precision))
-        return jnp.concatenate(draws, axis=1)
+        return jnp.concatenate(draws, axis=1) if draws else jnp.zeros((n_samples, 0))
 
     # -- observations ------------------------------------------------------
 
@@ -468,15 +518,18 @@ class LGMPrior(_Hyperparameters):
         data: Mapping[str, ArrayLike],
         projector: gx.SparseOperator | None,
         max_newton: int,
-    ) -> LaplaceModeResult:
+    ) -> _Fit:
         """The Gaussian approximation of $x \\mid y, \\theta$ at its mode."""
-        return laplace_mode(
-            self.latent_prior(theta),
+        latent = self.latent_prior(theta)
+        A = self.projector(data) if projector is None else projector
+        fit = laplace_mode(
+            latent,
             likelihood,
-            projector=self.projector(data) if projector is None else projector,
+            projector=A,
             offset=self.offset(data),
             max_iter=max_newton,
         )
+        return _Fit(fit, latent, A)
 
     def _laplace_under(
         self,
@@ -485,7 +538,7 @@ class LGMPrior(_Hyperparameters):
         data: Mapping[str, ArrayLike],
         projector: gx.SparseOperator | None,
         max_newton: int,
-    ) -> LaplaceModeResult:
+    ) -> _Fit:
         """`_laplace` under an observation model, its hyperparameters in ``theta``."""
         own = observation_theta(likelihood, theta)
         built = likelihood.build(jnp.asarray(data["y"]), own, data)
@@ -497,9 +550,11 @@ class LGMPrior(_Hyperparameters):
         data: Mapping[str, ArrayLike],
         noise_var: Float[ArrayLike, ""],
         projector: gx.SparseOperator | None,
-    ) -> LaplaceModeResult:
+    ) -> _Fit:
         """`_laplace` under Gaussian noise: exact, so one Newton step and its check."""
         y, noise = jnp.asarray(data["y"]), jnp.asarray(noise_var)
+        if noise.ndim:
+            raise ValueError(f"noise_var must be a scalar, got shape {noise.shape}")
         # gaussx annotates a Python float and takes a (traced) scalar too.
         built = gx.GaussianLikelihood(y, noise)  # ty: ignore[invalid-argument-type]
         return self._laplace(theta, built, data, projector, _GAUSSIAN_NEWTON)
@@ -521,17 +576,21 @@ class LGMPrior(_Hyperparameters):
 
         the latent vector integrated out in precision form, at the cost of a
         sparse Cholesky of $Q(\theta) + \sigma^{-2} A^\top A$, and without the
-        hyperparameters' priors. An intrinsic component contributes the
-        density of its constrained field, as in `LGM.log_posterior_theta`.
-        For any other likelihood, `LGM.log_marginal` is the Laplace
-        approximation.
+        hyperparameters' priors. For any other likelihood, `LGM.log_marginal`
+        is the Laplace approximation.
+
+        An intrinsic component's $Q^{-1}$ is the pseudo-inverse on the
+        complement of its null space. A null direction that the LGM leaves
+        free (the trend of an `RW2` or of an integrated Wiener process) has a
+        flat improper prior: the value then compares hyperparameters of one
+        model, as in `inla`, and is not a normalised density of $y$.
 
         Args:
             theta: Hyperparameter values keyed as in `theta_spec`.
             data: The observations ``"y"`` and where they are.
             noise_var: Observation noise variance $\sigma^2$.
             projector: ``self.projector(data)``, to keep its host work out of
-                a traced loop.
+                a traced loop; required there for an `SPDE` at locations.
 
         Returns:
             The scalar log marginal likelihood.
@@ -551,7 +610,8 @@ class LGMPrior(_Hyperparameters):
             >>> bool(np.isfinite(grad(0.1)))
             True
         """
-        return self._laplace_gaussian(theta, data, noise_var, projector).log_marginal
+        fit = self._laplace_gaussian(theta, data, noise_var, projector).checked()
+        return fit.laplace.log_marginal
 
 
 class LGM(_Hyperparameters):
@@ -568,9 +628,9 @@ class LGM(_Hyperparameters):
     `SPDE` also takes locations, ``(n, 2)`` points on a mesh or ``(n, d)`` on
     a grid) and the fixed-effect covariates.
 
-    The latent field is an `LGMPrior`, ``model.prior``; ``components``,
-    ``fixed``, ``slices``, ``latent_prior``, ``projector`` and the rest of its
-    surface are read through the model.
+    The latent field is an `LGMPrior`, ``model.prior``, and the model forwards
+    ``components``, ``fixed``, ``slices``, ``n_latent``, ``n_fixed``,
+    ``latent_prior``, ``projector`` and ``offset`` to it.
 
     Args:
         components: Latent components, with distinct names, or an `LGMPrior`.
@@ -627,6 +687,11 @@ class LGM(_Hyperparameters):
     def fixed(self) -> FixedEffects | None:
         """The fixed effects, ``prior.fixed``."""
         return self.prior.fixed
+
+    @property
+    def consts(self) -> tuple[Float[Array, ""], ...]:
+        """The components' theta-free normalisers, ``prior.consts``."""
+        return self.prior.consts
 
     # -- hyperparameters --------------------------------------------------
 
@@ -691,7 +756,7 @@ class LGM(_Hyperparameters):
         approximation there: exact for a `Gaussian` observation model. It
         holds no hyperprior, so a model can put its own on $\theta$.
         Gradients are implicit at the mode (argminax), so the Newton loop is
-        not unrolled.
+        not unrolled. `log_posterior_theta` is this plus `log_prior`.
 
         Args:
             theta: Constrained values of every hyperparameter, keyed as in
@@ -715,7 +780,7 @@ class LGM(_Hyperparameters):
         fit = self.prior._laplace_under(
             theta, self.likelihood, data, projector, max_newton
         )
-        return fit.log_marginal
+        return fit.checked().laplace.log_marginal
 
     def log_posterior_theta(
         self,
@@ -732,10 +797,8 @@ class LGM(_Hyperparameters):
         implicit-differentiated Laplace mode. Pass a prebuilt ``projector`` to
         keep host work out of a traced loop.
         """
-        log_marginal = self.log_marginal(
-            self.unflatten(u), data, projector=projector, max_newton=max_newton
-        )
-        return log_marginal + self.log_prior(u)
+        fit = self.laplace(u, data, projector=projector, max_newton=max_newton)
+        return fit.log_marginal + self.log_prior(u)
 
     def laplace(
         self,
@@ -747,6 +810,7 @@ class LGM(_Hyperparameters):
     ) -> LaplaceModeResult:
         """The Laplace approximation of $x \\mid y, \\theta = T(u)$, by
         `argminax.solve.laplace_mode`."""
-        return self.prior._laplace_under(
+        fit = self.prior._laplace_under(
             self.unflatten(u), self.likelihood, data, projector, max_newton
         )
+        return fit.laplace
