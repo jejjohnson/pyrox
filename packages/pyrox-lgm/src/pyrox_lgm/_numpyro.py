@@ -96,7 +96,8 @@ def lgm_factor(
       = \log \mathcal N(y \mid o,\; A Q(\theta)^{-1} A^\top + \sigma^2 I),
     $$
 
-    the whole latent vector integrated out. Registers the one site ``name``:
+    the whole latent vector integrated out (`LGMPrior.log_marginal` says what
+    $Q^{-1}$ is for an intrinsic component). Registers the one site ``name``:
     the hyperparameters in ``theta`` are the model's own sites, under any
     prior, and the components' hyperpriors are not used.
 
@@ -106,7 +107,8 @@ def lgm_factor(
         theta: Hyperparameter values keyed as in `LGMPrior.theta_spec`.
         data: The observations ``"y"`` and where they are.
         noise_var: Observation noise variance $\sigma^2$.
-        projector: ``prior.projector(data)``, built once outside the model.
+        projector: ``prior.projector(data)``, built once outside the model;
+            required under NUTS for an `SPDE` at locations.
 
     Examples:
         >>> import numpy as np
@@ -161,7 +163,8 @@ def lgm_laplace_factor(
         likelihood: The observation model.
         data: The observations ``"y"`` and where they are.
         projector: ``prior.projector(data)``, built once outside the model
-            when no covariate depends on a sampled parameter.
+            when no covariate depends on a sampled parameter; required under
+            NUTS for an `SPDE` at locations.
         max_newton: Newton iterations of the inner fit.
         reject_unconverged: If ``True``, the factor is $-\infty$ when the
             inner fit did not converge, so NUTS rejects that $\theta$ rather
@@ -184,7 +187,8 @@ def lgm_laplace_factor(
         ['g.tau', 'y']
     """
     prior._check_observation(likelihood)
-    fit = prior._laplace_under(theta, likelihood, data, projector, max_newton)
+    laplace = prior._laplace_under(theta, likelihood, data, projector, max_newton)
+    fit = laplace.checked().laplace
     value = fit.log_marginal
     if reject_unconverged:
         value = jnp.where(fit.converged, value, -jnp.inf)
