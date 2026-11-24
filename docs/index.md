@@ -24,7 +24,7 @@ uv add "pyrox @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=package
 uv add "pyrox-gp @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-gp"
 ```
 
-`pyrox-gp`, `pyrox-nn` and `pyrox-lgm` also need a geonnax v0.0.11 override until kernellib pins that version; the [README](https://github.com/jejjohnson/pyrox#installation) has the details.
+`pyrox-gp`, `pyrox-nn` and `pyrox-lgm` also need a geonnax v0.0.11 override until kernellib pins that version; the [README](https://github.com/jejjohnson/pyrox#-install) has the details.
 
 ## Three modeling patterns
 
@@ -104,6 +104,8 @@ Switch `kernel.set_mode("guide")` to draw variational params instead of sampling
 
 ## Links
 
+- [One trend in the extremes, four priors](four_priors.md): the same model with its trend from pyrox-gp, pyrox-ssm, pyrox-lgm and pyrox-nn
+- [Map methane from one overpass](methane_overpass.md): one GP from its evidence to a map, and the three patterns on the same model
 - [API reference](https://jejjohnson.github.io/pyrox/reference/)
 - [Core API](https://jejjohnson.github.io/pyrox/reference/core/)
 - [GP API](https://jejjohnson.github.io/pyrox/reference/gp/)

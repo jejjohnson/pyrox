@@ -55,7 +55,7 @@ downstream package.
 ## 4. Docs
 
 Update the docstrings and `docs/api/core.md` / `docs/api/inference.md`; if
-the change alters a documented pattern (A / B / C in the README), update the
-README example and the notebooks that use it. `design_docs/pyrox/` predates
-the workspace split; note a superseded decision there rather than leaving it
-contradictory.
+the change alters a documented pattern (A / B / C in `packages/pyrox/README.md`
+and `docs/methane_overpass.md`), update both and the notebooks that use it.
+`design_docs/pyrox/` predates the workspace split; note a superseded decision
+there rather than leaving it contradictory.
