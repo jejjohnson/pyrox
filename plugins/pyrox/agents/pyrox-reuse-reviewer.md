@@ -60,7 +60,8 @@ has the same list grouped by module, plus gaussx, kernellib and geonnax.
    - a loop of independent MAP or SVI fits → `pyrox.inference.ensemble_map`
      / `ensemble_vi`;
    - a GLMM / areal / SPDE model with a hand-written Laplace approximation →
-     `pyrox_lgm` (`LGM`, components, `inla()`).
+     `pyrox_lgm` (`LGM`, components, `inla()`; `LGMPrior` and
+     `lgm_laplace_factor` inside a NumPyro model).
 3. For modules that already use pyrox, flag rule breaks: two instances of
    one class without distinct `pyrox_name`s in one model; a site-registering
    method without `@pyrox_method`; a `Parameterized` module rebuilt with

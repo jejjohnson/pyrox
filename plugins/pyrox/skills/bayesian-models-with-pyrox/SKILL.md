@@ -51,7 +51,7 @@ a Bayesian layer, look it up:
 | A GP on the sphere S² in weight space (an optimal-interpolation baseline for a neural field, linear in N) | `pyrox-nn` | `pyrox_nn.SphericalHarmonicFeatures`: `(l_max+1)²` harmonics with Funk-Hecke prior variances, so cost grows as `N·l_max²`; lon/lat input needs an explicit `input_unit="degrees" \| "radians"`; ARD (per-dimension lengthscale) kernels raise `NotImplementedError` |
 | A spatio-temporal regressor from a DataFrame | `pyrox-nn[bnf]` | `pyrox_nn.api.BNFEstimator` |
 | Fit any Bayesian neural field (a `BayesianSIREN` behind a `geonnax` encoder, `SphericalHarmonicFeatures`, …) to coordinates with ensemble MAP / VI | `pyrox-nn[bnf]` (+ `[xarray]` for `fit_xarray`) | `pyrox_nn.api.NeuralFieldEstimator(model_fn=..., encoder=..., noise="fixed" \| "learned" \| "heteroscedastic")`: `.fit(X, y, sigma=, valid=, seed=)` on arrays (rows with `valid=False` are padding and change nothing), `.fit_xarray(ds, coords=, target=, sigma=)` on a gridded Dataset (NaN cells masked, datetimes as days since the first timestamp; `predict_xarray` back onto a grid); MAP rejects fields that call `numpyro.prng_key()`; `"heteroscedastic"` needs a field returning `(mu, log_sigma)`, e.g. a trunk + `GaussianRegressionHead` |
-| Latent Gaussian models (GLMMs, disease mapping, SPDE) with INLA | `pyrox-lgm` | `pyrox_lgm.LGM`, components (`IID`, `RW1`, `AR1`, `BYM2`, `SPDE`, …), PC priors, `inla()`, `f()` |
+| Latent Gaussian models (GLMMs, disease mapping, SPDE) with INLA | `pyrox-lgm` | `pyrox_lgm.LGM`, components (`IID`, `RW1`, `AR1`, `BYM2`, `SPDE`, …), PC priors, `inla()`, `f()`; at fixed or sampled hyperparameters, `LGMPrior` with `lgm_factor` / `lgm_laplace_factor` and `condition` / `condition_nongauss` |
 
 ## The three modelling patterns
 
@@ -190,6 +190,7 @@ true slope of 2, and the GP's guide holds `RBF.lengthscale`,
 | Spherical-harmonic features with kernel-derived weight variances on S² | `pyrox_nn.SphericalHarmonicFeatures` (isotropic `pyrox_gp` kernel; `input_unit` required for lon/lat) |
 | A deep-ensemble training loop | `pyrox.inference.ensemble_map` / `ensemble_vi` |
 | A GLMM / BYM2 / SPDE model and its INLA approximation | `pyrox_lgm.LGM` + components + `inla()` |
+| A hand-written Laplace evidence of a GMRF model inside NumPyro | `pyrox_lgm.lgm_laplace_factor` on an `LGMPrior` (`lgm_factor` for Gaussian noise) |
 | `cho_solve` / `slogdet` on a covariance | gaussx (`gaussx.solve`, `logdet` on a PSD-tagged operator) |
 
 ## Self-check before you finish

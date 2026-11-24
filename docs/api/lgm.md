@@ -6,15 +6,11 @@ built on gaussx's sparse precision operators and Laplace modes and
 kernellib's graph and GMRF structure matrices. GPs in covariance form stay in
 [pyrox-gp](gp.md); `pyrox_lgm` imports nothing from it.
 
-This page is a stub: the package is a scaffold (P6 of the
-[`inla()` epic](https://github.com/jejjohnson/pyrox/issues/258)), and the
-API lands with its phases.
-
-| Phase | Adds |
-|---|---|
-| P7 | Components (RW1, RW2, AR1, Markov GP, ICAR, BYM2, SPDE, generic, combinators) and PC priors |
-| P8 | `LGM`, `inla()` and `INLAResult` |
-| P9 | `f(...)` formula sugar, diagnostics, simplified Laplace, MCMC-INLA hybrid |
+An `LGMPrior` is the latent field: components and fixed effects. An `LGM` is a
+prior with a likelihood, and `inla()` integrates its hyperparameters out. At
+fixed or sampled hyperparameters, the prior gives its log marginal, conditions
+on data, and is integrated out of a NumPyro model, as pyrox-gp's `GPPrior` and
+pyrox-ssm's `MarkovGPPrior` are.
 
 ## Penalised-complexity priors
 
@@ -91,8 +87,9 @@ On a kernellib graph (from edges, polygons' contiguity, or a grid).
 
 ## Models and inference
 
-An `LGM` assembles components, fixed effects and an observation model;
-`inla()` integrates over the hyperparameters (Rue, Martino & Chopin, 2009).
+An `LGM` holds an `LGMPrior` and an observation model, and `LGM(components,
+fixed, likelihood)` builds the prior itself; `inla()` integrates over the
+hyperparameters (Rue, Martino & Chopin, 2009).
 
 ::: pyrox_lgm.LGM
 
