@@ -27,7 +27,7 @@ Claude Code users can install the `pyrox` plugin: `/plugin marketplace add jejjo
 - [GP](https://jejjohnson.github.io/pyrox/reference/gp/): kernels, guides, likelihoods, exact / sparse / multi-output GPs, non-Gaussian inference, pathwise sampling
 - [SSM](https://jejjohnson.github.io/pyrox/reference/ssm/): Markov (Kalman) GPs, SDE kernels, sparse and non-Gaussian Markov GPs, the normalizing Kalman filter (`pyrox-ssm`)
 - [NN](https://jejjohnson.github.io/pyrox/reference/nn/): Bayesian dense layers, random features, SIREN / MFN, SNGP, deep VSSGP, conditioning
-- [LGM](https://jejjohnson.github.io/pyrox/reference/lgm/): components, PC priors, `inla()`
+- [LGM](https://jejjohnson.github.io/pyrox/reference/lgm/): components, PC priors, `LGMPrior` (`log_marginal`, `condition`, `lgm_factor`, `lgm_laplace_factor`), `inla()`
 - [Estimator](https://jejjohnson.github.io/pyrox/reference/api/) and [Preprocessing](https://jejjohnson.github.io/pyrox/reference/preprocessing/): the BNF estimator (`pyrox-nn[bnf]`)
 - [Xtreme](https://jejjohnson.github.io/pyrox/reference/xtreme/): EVT distributions and primitives, extraction, point processes (primitives, operators, NumPyro wrappers), simulations (`pyrox-xtreme`)
 

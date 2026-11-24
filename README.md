@@ -63,7 +63,7 @@ Most of the machinery belongs to other libraries, and the workspace composes the
 ## 🌟 Highlights
 
 - 🔁 **One model, any inference**: a module declares its sites under stable names such as `Matern.lengthscale`, so the same model function runs under NUTS, SVI with any autoguide, `Predictive` and the NumPyro handlers.
-- 🎯 **Functions integrated out**: `gp_factor`, `markov_gp_factor` and `lgssm_factor` add the exact evidence to a model when the noise is Gaussian, `gp_laplace_factor` and `markov_laplace_factor` the Laplace one when it is not, and `inla()` does it for a whole latent Gaussian model.
+- 🎯 **Functions integrated out**: `gp_factor`, `lgm_factor`, `markov_gp_factor` and `lgssm_factor` add the exact evidence to a model when the noise is Gaussian, `gp_laplace_factor`, `lgm_laplace_factor` and `markov_laplace_factor` the Laplace one when it is not, and `inla()` does it for a whole latent Gaussian model.
 - ⏱️ **Time series in linear time**: `MarkovGPPrior` writes a temporal Gaussian process as a Kalman filter and smoother, and a mask stands for the gaps in the record.
 - 🗺️ **Sparse precisions for maps and areas**: random walks, `Besag` and `BYM2` areal fields and the Matérn `SPDE` keep their precision sparse, with penalised-complexity priors on their hyperparameters.
 - 🧠 **Networks that know what they do not know**: Bayesian layers, random Fourier features, neural fields with `NeuralFieldEstimator`, and `last_layer_laplace` for a network that is already fitted.
@@ -78,7 +78,7 @@ Each package owns one factor, or one way of writing it. The prior on the functio
 |---|---|---|---|
 | $`p(\boldsymbol{\theta})`$ | sites of a module | [`pyrox`](packages/pyrox/README.md) | `PyroxModule`, `Parameterized` |
 | $`p(\mathbf{f} \mid \boldsymbol{\theta})`$ | a covariance | [`pyrox-gp`](packages/pyrox-gp/README.md) | `GPPrior`, `SparseGPPrior` |
-| $`p(\mathbf{f} \mid \boldsymbol{\theta})`$ | a sparse precision | [`pyrox-lgm`](packages/pyrox-lgm/README.md) | `LGM`, `inla` |
+| $`p(\mathbf{f} \mid \boldsymbol{\theta})`$ | a sparse precision | [`pyrox-lgm`](packages/pyrox-lgm/README.md) | `LGMPrior`, `inla` |
 | $`p(\mathbf{f} \mid \boldsymbol{\theta})`$ | a recursion in time | [`pyrox-ssm`](packages/pyrox-ssm/README.md) | `MarkovGPPrior` |
 | $`p(\mathbf{f} \mid \boldsymbol{\theta})`$ | random weights | [`pyrox-nn`](packages/pyrox-nn/README.md) | `DenseReparameterization`, `HSGPFeatures` |
 | $`p(\mathbf{y} \mid \mathbf{f}, \boldsymbol{\theta})`$ | tails and events | [`pyrox-xtreme`](packages/pyrox-xtreme/README.md) | `GeneralizedExtremeValueDistribution` |

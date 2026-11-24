@@ -66,6 +66,7 @@ pyrox-lgm is one package of the pyrox workspace; the [workspace README](../../RE
 - 🧱 **Components in precision form**: `IID`, `RW1`, `RW2`, `AR1` and `MarkovGP` over time, `Besag`, `BYM2`, `CAR` and `Leroux` over areas, `SPDE` for a Matérn field on a mesh or a grid, `Generic` for any structure matrix, and `Kronecker` and `Replicate` to combine them; each keeps its precision sparse.
 - 🎯 **Penalised-complexity priors**: `PCPrecision`, `PCAR1Rho`, `PCBYM2Phi` and `PCMatern`, R-INLA's `pc.prec`, `pc.cor0`, the BYM2 mixing prior and `inla.spde2.pcmatern`, as NumPyro distributions calibrated against numerical integration in the tests; each component defaults to its matching one.
 - 🧮 **`inla()` as R-INLA does it**: the VB mean correction by default (R-INLA's default since 22.11), the Gaussian or simplified-Laplace strategies, and R-INLA's integration design over $`\boldsymbol{\theta}`$ (a grid for one or two hyperparameters, a CCD above), whose latent means match R-INLA 26.8.7 to within about $`10^{-3}`$, relative, on five reference cases (Gaussian RW2 and AR1, Poisson BYM2 on the Scotland data, Poisson SPDE, Bernoulli).
+- 🔗 **A prior like the siblings'**: `LGMPrior` is the model without its likelihood, with `log_marginal`, `condition` and `condition_nongauss` at fixed hyperparameters, and `lgm_factor` and `lgm_laplace_factor` to integrate the field out of any NumPyro model.
 - 📝 **Formula sugar**: `f("week", "rw2", n=52)` and `f("region", "bym2", graph=g)` build a component named after the data column it indexes, as R-INLA's `f()` does.
 - 🩺 **Diagnostics without refits**: `diagnostics(result)` gives DIC, WAIC, CPO, PIT and the log score from one `inla()` run.
 - 🎲 **The same model by NUTS**: every component's `.sample()` registers its hyperparameters and its field as NumPyro sites, soft-constraining an intrinsic field, so a component sits in any NumPyro model and NUTS can check `inla()`.
@@ -97,6 +98,32 @@ where $`\hat{\mathbf{x}}(\boldsymbol{\theta})`$ is the mode of the latent field 
 ```
 
 with weights $`\Delta_k`$ from the design, and the `strategy` picks how each conditional $`\tilde{\pi}(x_j \mid \mathbf{y}, \boldsymbol{\theta}_k)`$ is corrected from the Gaussian (a VB shift of the mean, or a skew-normal from the simplified Laplace expansion).
+
+## 🔗 One prior, four routes
+
+`LGMPrior(components, fixed)` is the latent field alone, and an `LGM` is a prior with a likelihood, `LGM(prior, likelihood=...)`. `inla()` integrates $`\boldsymbol{\theta}`$ out. When $`\boldsymbol{\theta}`$ is known, or sampled by NUTS, the prior is enough, and it has the contract of pyrox-gp's `GPPrior` and pyrox-ssm's `MarkovGPPrior`:
+
+| Route | Entry points | Posterior | Reach for it when |
+|---|---|---|---|
+| Integrated | `inla` | `INLAResult`, marginals over $`\boldsymbol{\theta}`$ | the hyperparameters are few and the components' own priors suit |
+| Exact | `lgm_factor`, `LGMPrior.condition` | `ConditionedLGM`, Gaussian in closed form | the noise is Gaussian and $`\boldsymbol{\theta}`$ is fixed or sampled |
+| Laplace | `lgm_laplace_factor`, `LGMPrior.condition_nongauss` | `ConditionedNonGaussLGM`, the Gaussian at the mode | counts or labels, or a parameter outside the latent Gaussian model |
+| Sampled | `RW2(...).sample(index)` and the other components' | NUTS draws of the field | checking the rest |
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_lgm_hub/pyrox_lgm_hub-dark.svg">
+    <img alt="One LGMPrior fans out to seven uses: lgm_factor as a NumPyro factor for NUTS and SVI, log_marginal for the collapsed evidence under jit and grad, condition and predict for the mean and variance with include_noise for a band, condition_nongauss for the Laplace posterior with predictions and joint draws, lgm_laplace_factor for the Laplace evidence under NUTS, inla on an LGM holding the prior to integrate the hyperparameters out, and predict_moments of its result for the mean and variance over the design" src="https://raw.githubusercontent.com/jejjohnson/geostack/main/docs/images/libraries/pyrox_lgm_hub/pyrox_lgm_hub-light.svg" width="100%">
+  </picture>
+</p>
+
+Conditioned at $`\boldsymbol{\theta}`$, the latent vector is Gaussian around its mode $`\hat{\mathbf{x}}`$, with
+
+```math
+\boldsymbol{\Sigma} = \mathbf{H}^{-1} - \mathbf{H}^{-1} \mathbf{V} (\mathbf{V}^\top \mathbf{H}^{-1} \mathbf{V})^{-1} \mathbf{V}^\top \mathbf{H}^{-1}
+```
+
+where $`\mathbf{H} = \mathbf{Q}(\boldsymbol{\theta}) + \mathbf{A}^\top \boldsymbol{\Lambda} \mathbf{A} \in \mathbb{R}^{n \times n}`$, the diagonal $`\boldsymbol{\Lambda} \in \mathbb{R}^{N \times N}`$ holds the likelihood's negative second derivatives, and the columns of $`\mathbf{V} \in \mathbb{R}^{n \times D_v}`$ are the $`D_v`$ hard constraints (a sum to zero per intrinsic component). It is exact for Gaussian noise.
 
 ## 📥 Install
 
@@ -235,6 +262,47 @@ tau 2.79, largest gap in eta 0.012
 
 that is, NUTS's posterior mean of $`\tau`$, 2.79 against `inla()`'s 3.02 (both with a posterior standard deviation above 1, so the two agree), and the largest difference between the two posterior means of the linear predictor over the 104 weeks, 0.012. The approximation and the sampler give the same fit, and the component did not change between them: the same `RW2` is a GMRF block inside `inla()` and two sample sites inside NumPyro.
 
+The third route leaves the field out of the chain. `lgm_laplace_factor` adds the Laplace evidence $`\log p(\mathbf{y} \mid \tau)`$ to a model whose only site is $`\tau`$, under any prior; then the prior is conditioned at a value of it.
+
+```python
+# Shapes: T weeks; n = T + 1 latent nodes; 200 posterior draws
+
+# today (pyrox-lgm)
+# x ~ N(0, Q(τ)⁻¹), the latent field of the model above
+prior = model.prior
+projector = prior.projector(data)
+
+
+# today (pyrox-lgm)
+# log p(y | τ), x integrated out, with a prior on τ of our own
+def collapsed_model() -> None:
+    tau = numpyro.sample("tau", dist.LogNormal(1.0, 1.0))
+    lgm.lgm_laplace_factor(
+        "y", prior, {"week.tau": tau}, model.likelihood, data, projector=projector
+    )
+
+
+mcmc = MCMC(NUTS(collapsed_model), num_warmup=200, num_samples=200, progress_bar=False)
+mcmc.run(jr.key(1))
+tau_draws = mcmc.get_samples()["tau"]
+# today (pyrox-lgm)
+# x | y, τ at the posterior mean of τ, and the predictor without the offset
+theta = {"week.tau": tau_draws.mean()}
+posterior = prior.condition_nongauss(theta, model.likelihood, data)
+# → (T,), (T,)
+eta_mean, eta_var = posterior.predict({"week": weeks})
+gap = np.max(np.abs(np.asarray(eta_mean) - inla_eta))
+print(f"tau {float(tau_draws.mean()):.2f}, largest gap in eta {gap:.3f}")
+```
+
+This prints
+
+```
+tau 2.55, largest gap in eta 0.007
+```
+
+that is, NUTS over one number instead of 107, with $`\tau`$ a little smaller under this prior than under the PC prior, and a linear predictor within 0.007 of `inla()`'s in every week. A single $`\tau`$ leaves its uncertainty out of `eta_var`: condition at several draws and mix them, or use `inla()`, for that.
+
 ## 🔬 What else is in the box
 
 <p align="center">
@@ -256,7 +324,8 @@ Each public name sits on one rung of the GeoStack role ladder, by the job it doe
 | Combinators | `Kronecker`, `Replicate`, `AbstractComponent` | Separable products (R-INLA's `group`), shared-hyperparameter copies, and the base every component subclasses |
 | PC priors | `PCPrecision`, `PCAR1Rho`, `PCBYM2Phi`, `PCMatern`, `StructureSpectrum`, `structure_spectrum` | R-INLA's penalised-complexity priors as NumPyro distributions; the spectrum `PCBYM2Phi` needs, computed once |
 | Observations | `Gaussian`, `Poisson`, `Bernoulli`, `Binomial`, `NegativeBinomial`, `AbstractObservation` | Likelihoods with their own hyperparameters, over the core's observation model |
-| Model and inference | `LGM`, `FixedEffects`, `f`, `inla`, `INLAResult`, `Summary` | The model, the formula sugar, the driver and what it returns |
+| Model and inference | `LGM`, `LGMPrior`, `FixedEffects`, `f`, `inla`, `INLAResult`, `Summary` | The model and its latent field, the formula sugar, the driver and what it returns |
+| At fixed hyperparameters | `ConditionedLGM`, `ConditionedNonGaussLGM`, `lgm_factor`, `lgm_laplace_factor` | What `LGMPrior.condition` and `condition_nongauss` return, and the collapsed NumPyro factors |
 | Diagnostics | `diagnostics`, `Diagnostics` | DIC, WAIC, CPO, PIT and the log score, without refits |
 
 ## 📓 Tutorials
@@ -307,10 +376,11 @@ packages/pyrox-lgm/
 │   ├── _components/         ← temporal, areal, SPDE, generic and combinator components
 │   ├── _priors/             ← the PC priors
 │   ├── _likelihood.py       ← the observation models
-│   ├── _model.py, _formula.py, _assembly.py ← LGM, f(...) and the sparse assembly
+│   ├── _model.py, _formula.py, _assembly.py ← LGM and LGMPrior, f(...) and the sparse assembly
+│   ├── _condition.py        ← the field conditioned at fixed hyperparameters
 │   ├── _inla.py, _result.py ← inla() and INLAResult
 │   ├── _diagnostics.py      ← DIC, WAIC, CPO, PIT
-│   └── _numpyro.py          ← each component's NumPyro face
+│   └── _numpyro.py          ← each component's NumPyro face, and the collapsed factors
 ├── tests/                   ← R-INLA fixtures, PC-prior calibration, doctests, the import guard
 └── AGENTS.md                ← the contracts and the tests that hold them
 ```
