@@ -133,7 +133,15 @@ class LatentIntrinsicGMRF(gx.IntrinsicGMRF, _Latent):
     fixed_precision: float = eqx.field(static=True)
 
     def __init__(
-        self, parts, slices, consts, n_fixed, fixed_precision, structure, null_space
+        self,
+        parts,
+        slices,
+        consts,
+        n_fixed,
+        fixed_precision,
+        structure,
+        null_space,
+        constraint_basis,
     ):
         self.parts, self.slices, self.consts = (
             tuple(parts),
@@ -147,6 +155,7 @@ class LatentIntrinsicGMRF(gx.IntrinsicGMRF, _Latent):
             structure,
             null_space,
             constraint="hard",
+            constraint_basis=constraint_basis,
         )
 
     def log_prob(self, value):
@@ -157,6 +166,18 @@ class LatentIntrinsicGMRF(gx.IntrinsicGMRF, _Latent):
 # that it has, and the rest are room for the round-off of a stiff system.
 _GAUSSIAN_NEWTON = 10
 _RESERVED = frozenset({"y", "offset", "n_trials"})
+
+
+def _stack_columns(
+    n: int, bases: list[tuple[int, Float[Array, "m c"]]]
+) -> Float[Array, "n k"]:
+    """Columns of every basis, each on its component's rows of the latent vector."""
+    out = jnp.zeros((n, sum(V.shape[1] for _, V in bases)))
+    col = 0
+    for start, V in bases:
+        out = out.at[start : start + V.shape[0], col : col + V.shape[1]].set(V)
+        col += V.shape[1]
+    return out
 
 
 class _Fit(NamedTuple):
@@ -170,33 +191,40 @@ class _Fit(NamedTuple):
     def constraints(self) -> Float[Array, "n c"] | None:
         """Basis of the hard constraints, ``None`` for a proper field."""
         intrinsic = isinstance(self.latent, LatentIntrinsicGMRF)
+        return self.latent.hard_constraint if intrinsic else None
+
+    @property
+    def null_space(self) -> Float[Array, "n k"] | None:
+        """Null spaces of the intrinsic components, ``None`` for a proper field."""
+        intrinsic = isinstance(self.latent, LatentIntrinsicGMRF)
         return self.latent.null_space if intrinsic else None
 
     def checked(self) -> _Fit:
-        r"""The fit, or an error where the data leave it singular.
+        r"""The fit, or an error where the posterior is improper.
 
-        The precision $H = Q + A^\top \Lambda A$ is singular along a
-        constrained direction $v$ with $Qv = 0$ that no observation reads,
-        $Av = 0$: an unobserved connected part of a graph, replicate or time
-        slice. Solves with it are then round-off, and nothing downstream
-        says so.
+        The components' null spaces $K$ are flat under the prior. The hard
+        constraints $V^\top x = 0$ fix some of their directions, and the data
+        must fix the rest: the posterior is proper when $A K u = 0$ and
+        $V^\top K u = 0$ only at $u = 0$. The trend of an `RW2` replicate that
+        no observation reads is neither.
         """
-        if not isinstance(self.latent, LatentIntrinsicGMRF):
+        latent = self.latent
+        if not isinstance(latent, LatentIntrinsicGMRF):
             return self
-        V, Q = self.latent.null_space, self.latent.structure
-        read = jax.vmap(self.projector.mv, in_axes=1, out_axes=1)(V)
-        # Q v is zero up to the round-off of its sums for a null direction; a
-        # constraint that is not one (BYM2's, on its structured part) differs.
-        QV = jax.vmap(Q.mv, in_axes=1, out_axes=1)(V)
-        tol = 100.0 * jnp.finfo(V.dtype).eps * jnp.max(jnp.abs(gx.diag(Q)))
-        flat = jnp.max(jnp.abs(QV), axis=0) <= tol * jnp.max(jnp.abs(V), axis=0)
-        unread = jnp.any(jnp.all(read == 0.0, axis=0) & flat)
+        K, V = latent.null_space, latent.hard_constraint
+        if V.shape[1] >= K.shape[1]:  # every null direction is constrained
+            return self
+        read = jax.vmap(self.projector.mv, in_axes=1, out_axes=1)(K)
+        fixed = jnp.concatenate([read, V.T @ K])
+        size = jnp.linalg.svd(jax.lax.stop_gradient(fixed), compute_uv=False)
+        tol = 10.0 * max(fixed.shape) * jnp.finfo(fixed.dtype).eps
+        short = fixed.shape[0] < K.shape[1]
         fit = eqx.error_if(
             self.laplace,
-            unread,
-            "an intrinsic component of the prior has a part that no observation "
-            "reads (a replicate, a connected part of its graph or a slice of a "
-            "Kronecker), so the posterior precision is singular there",
+            short | (size[-1] <= tol * size[0]),
+            "the posterior is improper: an intrinsic component has a direction that "
+            "neither an observation nor a constraint fixes (the trend of an RW2 "
+            "replicate that no observation reads)",
         )
         return self._replace(laplace=fit)
 
@@ -403,14 +431,18 @@ class LGMPrior(_Hyperparameters):
         self, theta: Mapping[str, ArrayLike]
     ) -> LatentGMRF | LatentIntrinsicGMRF:
         """The assembled prior of $(x_1, \\dots, x_k, \\beta)$ at ``theta``."""
-        parts, blocks, nulls, slices, start = [], [], [], [], 0
+        parts, blocks, kernels, constraints, slices = [], [], [], [], []
+        start = 0
         for c in self.components:
             theta_c = self._component_theta(theta, c)
             gmrf = c.prior(theta_c, constraint="hard")
             op, V = c.assembly_precision(theta_c, gmrf), c.constraint_basis(gmrf)
             parts.append(gmrf)
             blocks.append(op)
-            nulls.append((start, V))
+            if V is not None:
+                constraints.append((start, V))
+            if isinstance(gmrf, gx.IntrinsicGMRF):
+                kernels.append((start, gmrf.null_space))
             slices.append((start, start + c.n_nodes))
             start += c.n_nodes
         lam = 0.0
@@ -419,17 +451,19 @@ class LGMPrior(_Hyperparameters):
             blocks.append(lx.DiagonalLinearOperator(jnp.full(self.n_fixed, lam)))
         Q = block_diagonal(blocks)
         n = Q.in_size()
-        constrained = [(s, V) for s, V in nulls if V is not None]
-        if not constrained:
+        if not constraints:
             return LatentGMRF(parts, slices, self.consts, self.n_fixed, lam, Q)
-        c_total = sum(V.shape[1] for _, V in constrained)
-        null = jnp.zeros((n, c_total))
-        col = 0
-        for s, V in constrained:
-            null = null.at[s : s + V.shape[0], col : col + V.shape[1]].set(V)
-            col += V.shape[1]
+        # A constrained component may be proper: its constraint then stands for a
+        # null space, which only has to contain the true one.
         return LatentIntrinsicGMRF(
-            parts, slices, self.consts, self.n_fixed, lam, Q, null
+            parts,
+            slices,
+            self.consts,
+            self.n_fixed,
+            lam,
+            Q,
+            _stack_columns(n, kernels or constraints),
+            _stack_columns(n, constraints),
         )
 
     def sample(
@@ -441,12 +475,6 @@ class LGMPrior(_Hyperparameters):
         component is improper along its null space, where it is drawn as
         zero: an `RW2` draw sums to zero and has no linear trend, which an
         `LGM` leaves free.
-
-        A component is drawn by its own `gaussx.IntrinsicGMRF`, whose sampler
-        regularises the structure by about $10^{-8}$ of its diagonal. That is
-        more than the smallest eigenvalues of a long `RW2`, so draws of one
-        with more than about 100 nodes are less variable than the prior
-        that is conditioned on.
 
         Args:
             key: PRNG key.
@@ -634,9 +662,11 @@ class LGMPrior(_Hyperparameters):
         $$
 
         with $\Sigma$ the inverse of $Q(\theta) + \sigma^{-2} A^\top A$, kriged
-        onto the hard constraints of the intrinsic components. A direction
-        that neither the data nor a constraint fixes (the trend of an `RW2`
-        seen at one time) has no posterior, and gives ``NaN``.
+        onto the hard constraints of the intrinsic components. The precision
+        may be singular off those constraints (two intrinsic components whose
+        constants cancel in $\eta$, or a replicate that no observation reads);
+        the posterior is exact there too. A direction that neither the data
+        nor a constraint fixes has no posterior.
 
         Args:
             theta: Hyperparameter values keyed as in `theta_spec`.
@@ -649,9 +679,10 @@ class LGMPrior(_Hyperparameters):
             The `ConditionedLGM`.
 
         Raises:
-            EquinoxRuntimeError: If no observation reads a part of an
-                intrinsic component: a replicate, a connected part of its
-                graph, or a slice of a `Kronecker`.
+            EquinoxRuntimeError: If the posterior is improper: neither an
+                observation nor a constraint fixes a direction of an intrinsic
+                component, such as the trend of an `RW2` replicate that no
+                observation reads.
         """
         fit = self._laplace_gaussian(theta, data, noise_var, projector).checked()
         return ConditionedLGM(
@@ -659,6 +690,7 @@ class LGMPrior(_Hyperparameters):
             theta={k: jnp.asarray(theta[k]) for k in self.theta_spec()},
             fit=fit.laplace,
             constraints=fit.constraints,
+            null_space=fit.null_space,
             noise_var=jnp.asarray(noise_var),
         )
 
@@ -702,6 +734,7 @@ class LGMPrior(_Hyperparameters):
             | {f"{likelihood.name}.{k}": v for k, v in own.items()},
             fit=fit.laplace,
             constraints=fit.constraints,
+            null_space=fit.null_space,
         )
 
 

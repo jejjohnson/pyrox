@@ -95,8 +95,10 @@ def test_log_posterior_theta_is_the_exact_gaussian_marginal():
 def test_rw2_constrains_only_the_sum_inside_an_lgm():
     model, _ = _gaussian_rw2()
     prior = model.latent_prior(model.unflatten(jnp.zeros(model.n_theta)))
-    assert prior.null_space.shape == (N + 1, 1)  # one constraint, not two
-    assert np.allclose(np.abs(prior.null_space[:N, 0]), 1.0 / np.sqrt(N))
+    V = prior.hard_constraint
+    assert V.shape == (N + 1, 1)  # one constraint, not two
+    assert np.allclose(np.abs(V[:N, 0]), 1.0 / np.sqrt(N))
+    assert prior.null_space.shape == (N + 1, 2)  # the trend is still flat
 
 
 def test_theta_bookkeeping():
@@ -303,10 +305,10 @@ def test_combinators_lift_the_inner_constraint_basis():
     # (Replicate) or per group node (Kronecker), not two.
     rep = lgm.LGM((lgm.Replicate(lgm.RW2(6, name="t"), 3),))
     prior = rep.latent_prior(rep.unflatten(jnp.zeros(rep.n_theta)))
-    assert prior.null_space.shape == (18, 3)
+    assert prior.hard_constraint.shape == (18, 3)
     kron = lgm.LGM((lgm.Kronecker(lgm.RW2(6, name="t"), lgm.AR1(4, name="g")),))
     prior = kron.latent_prior(kron.unflatten(jnp.zeros(kron.n_theta)))
-    assert prior.null_space.shape == (24, 4)
+    assert prior.hard_constraint.shape == (24, 4)
 
 
 def test_mesh_points_with_integer_coordinates_are_points():

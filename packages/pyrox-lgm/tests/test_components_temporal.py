@@ -31,20 +31,34 @@ def _scale(R):
 
 
 # --- scale_model ------------------------------------------------------------
-# gaussx's generalized_variance_scale factors R + eps I (eps = sqrt(machine eps)
-# times the mean diagonal, as R-INLA does), so it agrees with the exact
-# pseudo-inverse to ~1e-6 relative; RW2's padding correction raises it to the
-# power N/n. Hence rtol=1e-5.
+# gaussx's generalized_variance_scale is the exact pseudo-inverse; RW2's padding
+# correction raises it to the power N/n. R-INLA's own scale carries a ridge, which
+# biases it by about 1e-6 here and by a factor of five for an RW2 of 500 nodes.
 
 
 @pytest.mark.parametrize("n", [5, 8])
 def test_rw1_scale_matches_dense(n):
-    assert np.isclose(float(lgm.RW1(n).scale), _scale(_diff_structure(n, 1)), rtol=1e-5)
+    assert np.isclose(float(lgm.RW1(n).scale), _scale(_diff_structure(n, 1)), rtol=1e-9)
 
 
 @pytest.mark.parametrize("n", [6, 7, 11])
 def test_rw2_scale_matches_dense_including_odd_n(n):
-    assert np.isclose(float(lgm.RW2(n).scale), _scale(_diff_structure(n, 2)), rtol=1e-5)
+    assert np.isclose(float(lgm.RW2(n).scale), _scale(_diff_structure(n, 2)), rtol=1e-9)
+
+
+def test_a_long_rw2_has_unit_generalized_variance():
+    # The scaled field's variances have geometric mean 1 at tau = 1, whatever n.
+    n = 400
+    comp = lgm.RW2(n)
+    field = comp.prior({"tau": jnp.asarray(1.0)})
+    variances = np.asarray(field.marginal_variances())[:n]
+    assert np.isclose(np.exp(np.mean(np.log(variances))), 1.0, rtol=1e-6)
+    # ... and the scale grows like n^3, exactly: R+ of an RW2 is a fixed curve
+    # times n^3 up to a relative O(1/n).
+    ratio = float(comp.scale) / float(lgm.RW2(n // 2).scale)
+    assert np.isclose(ratio, 8.0, rtol=0.02)
+    draws = np.asarray(field.sample(jax.random.key(0), (500,)))[:, :n]
+    assert np.isclose(np.mean(draws.var(0) / variances), 1.0, atol=0.35)
 
 
 def test_scale_model_false_is_unscaled():
