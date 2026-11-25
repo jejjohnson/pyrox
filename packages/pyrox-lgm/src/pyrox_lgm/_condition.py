@@ -10,7 +10,10 @@ H = Q(\theta) + A^\top \Lambda A,\qquad W = H^{-1} V,
 $$
 
 $\Lambda$ the likelihood's negative second derivatives and $V$ the basis of
-the hard constraints (no correction without any).
+the hard constraints (no correction without any). $H$ need only be positive
+definite on $\{V^\top x = 0\}$: where it is singular off it, gaussx's factor is
+that of $H + V B V^\top$ for a positive diagonal $B$, which changes nothing on
+that subspace.
 """
 
 from __future__ import annotations
@@ -45,6 +48,7 @@ class _ConditionedLatent(eqx.Module):
     theta: Mapping[str, Array]
     fit: LaplaceModeResult
     constraints: Float[Array, "n c"] | None
+    null_space: Float[Array, "n k"] | None
 
     @property
     def posterior(self) -> gx.GaussianMRF | gx.ConstrainedGMRF:
@@ -54,7 +58,10 @@ class _ConditionedLatent(eqx.Module):
             return field
         # Vᵀ x = 0
         A_c = self.constraints.T
-        return field.condition_on_constraints(A_c, jnp.zeros(A_c.shape[0]))
+        # H may be singular along the components' null directions
+        return field.condition_on_constraints(
+            A_c, jnp.zeros(A_c.shape[0]), null_space=self.null_space
+        )
 
     def predict_latent(self) -> tuple[Float[Array, " n"], Float[Array, " n"]]:
         """Posterior mean and variance of every latent node.
@@ -158,6 +165,7 @@ class ConditionedLGM(_ConditionedLatent):
         fit: argminax's fit: the mode $\hat x$, the precision $H$ and its
             factor.
         constraints: Basis $V$ of the hard constraints, or ``None``.
+        null_space: Null spaces of the intrinsic components, or ``None``.
         noise_var: The observation noise variance $\sigma^2$.
 
     Examples:
@@ -222,6 +230,7 @@ class ConditionedNonGaussLGM(_ConditionedLatent):
         fit: argminax's fit: the mode $\hat x$, the precision $H$ and its
             factor.
         constraints: Basis $V$ of the hard constraints, or ``None``.
+        null_space: Null spaces of the intrinsic components, or ``None``.
 
     Examples:
         >>> import numpy as np

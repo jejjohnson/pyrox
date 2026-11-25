@@ -203,7 +203,7 @@ def _fit_point(model, A, data, u, n_iter, subspace, sla=False):
     var = fit.factor.diag_inv()
     G = HV = None
     if isinstance(prior, gx.IntrinsicGMRF):
-        V = prior.null_space
+        V = prior.hard_constraint
         HV = jax.vmap(fit.factor.solve, in_axes=1, out_axes=1)(V)
         S = V.T @ HV
         G = jnp.linalg.solve(S, HV.T).T  # Sigma_c = H^-1 - G HV^T

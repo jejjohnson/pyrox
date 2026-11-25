@@ -32,7 +32,6 @@ import numpyro.distributions as dist
 from jaxtyping import Array, ArrayLike, Float, Int
 from numpyro.distributions.transforms import Transform
 
-from pyrox_lgm._assembly import full_coo
 from pyrox_lgm._components._areal import BYM2
 from pyrox_lgm._components._base import AbstractComponent, Constraint, probe_theta
 
@@ -110,33 +109,6 @@ def _check_index(index: ArrayLike, n_index: int) -> np.ndarray:
             f"index out of range for {n_index} nodes: [{index.min()}, {index.max()}]"
         )
     return index
-
-
-def _row_kron(
-    left: gx.SparseOperator, right: gx.SparseOperator, n_right: int
-) -> gx.SparseOperator:
-    r"""Row-wise Kronecker product: row $j$ is ``kron(left[j], right[j])``.
-
-    Every stored entry $(j, a)$ of ``left`` pairs with every $(j, b)$ of
-    ``right`` into $(j, a\,n_\text{right} + b)$, built on the host.
-    """
-    rl, cl, vl = full_coo(left)
-    rr, cr, vr = full_coo(right)
-    order = np.argsort(rr, kind="stable")
-    rr, cr = rr[order], cr[order]
-    vr = vr[jnp.asarray(order)]
-    starts = np.searchsorted(rr, rl, side="left")
-    counts = np.searchsorted(rr, rl, side="right") - starts
-    li = np.repeat(np.arange(rl.size), counts)
-    offsets = np.arange(counts.sum()) - np.repeat(np.cumsum(counts) - counts, counts)
-    ri = np.repeat(starts, counts) + offsets
-    m = left.out_size()
-    return gx.SparseOperator.from_coo(
-        rl[li],
-        cl[li] * n_right + cr[ri],
-        vl[jnp.asarray(li)] * vr[jnp.asarray(ri)],
-        (m, left.in_size() * n_right),
-    )
 
 
 def _product(
@@ -229,9 +201,7 @@ class Kronecker(AbstractComponent):
     def projector(self, index: Int[ArrayLike, " n_obs"]) -> gx.SparseOperator:
         """Observation ``i * group.n_index + j`` reads main ``i`` and group ``j``."""
         i, j = np.divmod(_check_index(index, self.n_index), self.group.n_index)
-        return _row_kron(
-            self.main.projector(i), self.group.projector(j), self.group.n_nodes
-        )
+        return gx.row_kron(self.main.projector(i), self.group.projector(j))
 
     def field_at(self, x, index=None):
         X = x.reshape(self.main.n_nodes, self.group.n_nodes)
@@ -327,7 +297,7 @@ class Replicate(AbstractComponent):
         r, i = np.divmod(_check_index(index, self.n_index), self.component.n_index)
         m = r.shape[0]
         copy = gx.SparseOperator.from_coo(np.arange(m), r, jnp.ones(m), (m, self.n_rep))
-        return _row_kron(copy, self.component.projector(i), self.component.n_nodes)
+        return gx.row_kron(copy, self.component.projector(i))
 
     def field_at(self, x, index=None):
         xs = x.reshape(self.n_rep, self.component.n_nodes)

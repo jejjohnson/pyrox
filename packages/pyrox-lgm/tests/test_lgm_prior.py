@@ -217,19 +217,16 @@ def test_log_marginal_gradient_matches_central_differences():
     ],
     ids=["replicate", "kronecker"],
 )
-def test_a_part_that_no_observation_reads_is_an_error(component, index):
-    # H is singular along the null direction of the unread part, so its solves
-    # are round-off: the new methods raise instead of returning them.
+def test_a_part_that_no_observation_reads_keeps_the_evidence(component, index):
+    # H is singular along the null direction of the unread part, which the
+    # constraint removes: the evidence is the dense one.
     prior = lgm.LGMPrior((component,), lgm.FixedEffects(("intercept",)))
     theta = prior.unflatten(jnp.zeros(prior.n_theta))
-    data = {"y": np.ones(4), "t": index}
-    with pytest.raises(Exception, match="no observation reads"):
-        prior.log_marginal(theta, data, 0.3)
-    with pytest.raises(Exception, match="no observation reads"):
-        lgm.LGM(prior, likelihood=lgm.Poisson()).log_marginal(theta, data)
-    # With every part read there is no error.
-    full = {"y": np.ones(prior.n_latent - 1), "t": np.arange(prior.n_latent - 1)}
-    assert np.isfinite(float(prior.log_marginal(theta, full, 0.3)))
+    data = {"y": np.arange(4.0), "t": index}
+    value = prior.log_marginal(theta, data, 0.3)
+    assert np.isclose(float(value), _dense_marginal(prior, theta, data, 0.3), rtol=1e-9)
+    model = lgm.LGM(prior, likelihood=lgm.Poisson())
+    assert np.isfinite(float(model.log_marginal(theta, data)))
 
 
 def test_the_noise_variance_is_a_scalar():
@@ -237,8 +234,9 @@ def test_the_noise_variance_is_a_scalar():
         lgm.LGMPrior(*_parts()).log_marginal({"t.tau": 1.0, "g.tau": 1.0}, _data(), [1])
 
 
-def test_a_disconnected_graph_is_an_error_only_where_a_part_is_unread():
+def test_an_unread_part_of_a_graph_keeps_the_evidence():
     import kernellib as kl
+    from scipy.stats import multivariate_normal
 
     edges = np.array([[0, 1], [1, 2], [3, 4], [4, 5]])
     weights = np.zeros((6, 6))
@@ -248,8 +246,16 @@ def test_a_disconnected_graph_is_an_error_only_where_a_part_is_unread():
         prior = lgm.LGMPrior((component,), lgm.FixedEffects(("intercept",)))
         theta = prior.unflatten(jnp.zeros(prior.n_theta))
         both = {"y": np.ones(4), "t": np.array([0, 1, 3, 4])}
-        assert np.isfinite(float(prior.log_marginal(theta, both, 0.3)))
-    one = {"y": np.ones(4), "t": np.array([0, 1, 2, 0])}
-    prior = lgm.LGMPrior((lgm.Besag(graph, name="t"),))
-    with pytest.raises(Exception, match="no observation reads"):
-        prior.log_marginal({"t.tau": 1.0}, one, 0.3)
+        one = {"y": np.ones(4), "t": np.array([0, 1, 2, 0])}
+        latent = prior.latent_prior(theta)
+        # Q^-1 on the complement of the constraints (a BYM2's constraint is not
+        # its null space, so a pseudo-inverse would not do).
+        V = np.asarray(latent.hard_constraint)
+        B = np.linalg.svd(V)[0][:, V.shape[1] :]
+        cov = B @ np.linalg.inv(B.T @ np.asarray(latent.structure.as_matrix()) @ B)
+        for data in (both, one):
+            A = np.asarray(prior.projector(data).as_matrix())
+            cov_y = A @ cov @ B.T @ A.T + 0.3 * np.eye(4)
+            ref = multivariate_normal(np.zeros(4), cov_y).logpdf(data["y"])
+            value = float(prior.log_marginal(theta, data, 0.3))
+            assert np.isclose(value, ref, rtol=1e-8)

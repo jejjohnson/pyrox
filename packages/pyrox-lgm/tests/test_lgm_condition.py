@@ -49,11 +49,12 @@ def _dense_posterior(prior, theta, data, noise_var):
     )
     A = np.asarray(prior.projector(data).as_matrix())
     H = Q + A.T @ A / noise_var
-    cov = np.linalg.inv(H)
+    # restrict to the complement of the constraints: H may be singular off it
+    N = np.eye(Q.shape[0])
     if intrinsic:
-        V = np.asarray(latent.null_space)
-        W = cov @ V
-        cov = cov - W @ np.linalg.solve(V.T @ W, W.T)
+        V = np.asarray(latent.hard_constraint)
+        N = np.linalg.svd(V)[0][:, V.shape[1] :]
+    cov = N @ np.linalg.inv(N.T @ H @ N) @ N.T
     residual = data["y"] - data["offset"]
     return cov @ (A.T @ residual) / noise_var, cov
 
@@ -224,13 +225,111 @@ def test_condition_nongauss_is_what_inla_mixes():
 # --- what the data must pin down ---------------------------------------------
 
 
-def test_conditioning_an_unread_part_is_an_error():
-    prior = lgm.LGMPrior((lgm.Replicate(lgm.RW1(4, name="r"), 2, name="t"),))
-    data = {"y": np.ones(4), "t": np.arange(4)}  # nothing in the second copy
-    with pytest.raises(Exception, match="no observation reads"):
+SEVERAL = {
+    # two intrinsic components: their constants cancel in the predictor
+    "two_walks": (lgm.RW1(N, name="t"), lgm.RW1(4, name="w")),
+    "walk_and_trend": (lgm.RW2(N, name="t"), lgm.RW1(4, name="w")),
+    "three": (
+        lgm.RW2(N + 1, name="t"),
+        lgm.RW1(4, name="w"),
+        lgm.Kronecker(lgm.RW1(4, name="m"), lgm.AR1(3, name="k"), name="g"),
+    ),
+    # a replicate, and a slice of a Kronecker, that no observation reads
+    "unread_replicate": (lgm.Replicate(lgm.RW1(N, name="r"), 2, name="t"),),
+    "unread_slice": (
+        lgm.RW1(N, name="t"),
+        lgm.Kronecker(lgm.RW1(4, name="m"), lgm.AR1(5, name="k"), name="g"),
+    ),
+}
+
+
+def _several(name):
+    components = SEVERAL[name]
+    rng = np.random.default_rng(3)
+    n_obs = 40
+    data = {
+        "y": rng.normal(size=n_obs),
+        "t": rng.integers(0, N - 2, n_obs),
+        "w": rng.integers(0, 4, n_obs),
+        # time slices 0 to 2 only
+        "g": rng.integers(0, 4, n_obs) * components[-1].group.n_index
+        + rng.integers(0, 3, n_obs)
+        if name in ("three", "unread_slice")
+        else None,
+        "offset": np.zeros(n_obs),
+    }
+    return components, {k: v for k, v in data.items() if v is not None}
+
+
+@pytest.mark.parametrize("fixed", [(), ("intercept",)], ids=["bare", "intercept"])
+@pytest.mark.parametrize("name", SEVERAL)
+def test_a_singular_precision_still_gives_the_exact_posterior(name, fixed):
+    components, data = _several(name)
+    prior = lgm.LGMPrior(components, lgm.FixedEffects(fixed) if fixed else None)
+    theta = prior.unflatten(0.3 * jnp.ones(prior.n_theta))
+    mean, cov = _dense_posterior(prior, theta, data, NOISE)
+    posterior = prior.condition(theta, data, NOISE)
+    got_mean, got_var = posterior.predict_latent()
+    assert np.allclose(got_mean, mean, atol=1e-8)
+    assert np.allclose(got_var, np.diag(cov), atol=1e-8)
+    # joint draws: the variance of 4000 is within 7 of its own standard errors
+    draws = np.asarray(posterior.sample(jax.random.key(1), 4000))
+    free = np.diag(cov) > 1e-10
+    ratio = draws.var(0)[free] / np.diag(cov)[free]
+    assert np.all(np.abs(ratio - 1.0) < 7 * np.sqrt(2 / 4000))
+    # the linear predictor at every index of the first component
+    new = {k: np.zeros(N, dtype=int) for k in data if k not in ("y", "offset")}
+    new = new | {"t": np.arange(N)}
+    A = np.asarray(prior.projector(new).as_matrix())
+    eta, eta_var = posterior.predict(new)
+    assert np.allclose(eta, A @ mean, atol=1e-8)
+    assert np.allclose(eta_var, np.diag(A @ cov @ A.T), atol=1e-8)
+
+
+def test_an_improper_posterior_is_an_error():
+    # An RW2 leaves its trend to the data. Nothing fixes it when the only reading
+    # is at the centre, where the trend is zero, or in a replicate with none.
+    prior = lgm.LGMPrior((lgm.RW2(7, name="t"),))
+    data = {"y": np.ones(3), "t": np.array([3, 3, 3])}
+    with pytest.raises(Exception, match="posterior is improper"):
         prior.condition({"t.tau": 1.0}, data, NOISE)
-    with pytest.raises(Exception, match="no observation reads"):
+    with pytest.raises(Exception, match="posterior is improper"):
         prior.condition_nongauss({"t.tau": 1.0}, lgm.Poisson(), data)
+    replicate = lgm.LGMPrior((lgm.Replicate(lgm.RW2(6, name="r"), 2, name="t"),))
+    with pytest.raises(Exception, match="posterior is improper"):
+        replicate.condition({"t.tau": 1.0}, {"y": np.ones(6), "t": np.arange(6)}, NOISE)
+
+
+def test_one_reading_and_the_sum_fix_a_trend():
+    # Off the centre, one reading and the sum-to-zero constraint are enough, under
+    # jit too.
+    prior = lgm.LGMPrior((lgm.RW2(6, name="t"),))
+    data = {"y": np.ones(3), "t": np.array([2, 2, 2]), "offset": np.zeros(3)}
+    mean, cov = _dense_posterior(prior, {"t.tau": 1.0}, data, NOISE)
+
+    @jax.jit
+    def moments(tau):
+        return prior.condition({"t.tau": tau}, data, NOISE).predict_latent()
+
+    got_mean, got_var = moments(1.0)
+    assert np.allclose(got_mean, mean, atol=1e-8)
+    assert np.allclose(got_var, np.diag(cov), rtol=1e-8)
+
+
+@pytest.mark.slow
+def test_inla_fits_two_intrinsic_components():
+    components, data = _several("two_walks")
+    model = lgm.LGM(
+        lgm.LGMPrior(components, lgm.FixedEffects(("intercept",))),
+        likelihood=lgm.Gaussian(),
+    )
+    res = lgm.inla(model, data, strategy="gaussian")
+    k = int(jnp.argmax(res.theta_weights))
+    theta = model.unflatten(res.theta_points[k])
+    noise_var = 1.0 / float(theta["lik.prec"])
+    mean, cov = _dense_posterior(model.prior, theta, data, noise_var)
+    assert np.allclose(res.latent_means[k], mean, atol=1e-6)
+    assert np.allclose(res.latent_variances[k], np.diag(cov), rtol=1e-6)
 
 
 def test_a_projector_lets_an_spde_predict_under_jit():
