@@ -133,12 +133,12 @@ We have not put pyrox-lgm on PyPI, and the name `pyrox` there belongs to an unre
 uv add "pyrox-lgm @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-lgm"
 ```
 
-argminax v0.0.6 and kernellib v0.0.22 pin older gaussx releases, while pyrox-lgm needs gaussx v0.8.0, so add this override to your project's `pyproject.toml`; without it uv cannot resolve the install.
+argminax v0.0.6 and kernellib v0.0.22 pin older gaussx releases, while pyrox-lgm needs gaussx v0.8.2, so add this override to your project's `pyproject.toml`; without it uv cannot resolve the install.
 
 ```toml
 [tool.uv]
 override-dependencies = [
-    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.8.0",
+    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.8.2",
 ]
 ```
 

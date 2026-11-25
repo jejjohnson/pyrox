@@ -1204,7 +1204,7 @@ compose it; if it is almost here, extend it where it lives. Regenerate with
 
 <!-- upstream -->
 
-Listed at gaussx 0.8.0, kernellib 0.0.22, geonnax 0.0.11, functax 0.0.7.
+Listed at gaussx 0.8.2, kernellib 0.0.22, geonnax 0.0.11, functax 0.0.7.
 
 ## Upstream: `gaussx`
 
@@ -1219,6 +1219,7 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `AbstractLogdetStrategy` | class | Protocol for a log-determinant strategy. |
 | `AbstractPreconditioner` | class | Protocol for preconditioners that produce an approximate inverse. |
 | `AbstractSketch` | class | A random sketching matrix S ∈ ℝ^(d × M), sampled once. |
+| `AbstractSmoother` | class | A smoother u ← S(u, b) for A u = b on one level. |
 | `AbstractSolveStrategy` | class | Protocol for a linear-solve strategy. |
 | `AbstractSolverStrategy` | class | Protocol for a solver strategy that pairs a solve and a log-determinant. |
 | `AnalyticalPsiStatistics` | class | Protocol for kernels with closed-form Ψ statistics. |
@@ -1283,6 +1284,9 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `MaternSDE` | class | State-space form of the Matérn kernel of order p, smoothness p + ½. |
 | `MomentMatchResult` | class | Tilted log-normaliser and its derivatives with respect to the cavity mean. |
 | `MonteCarloIntegrator` | class | Monte Carlo moment matching: sample, propagate, take empirical moments. |
+| `MultigridLevel` | class | One level of a hierarchy: A_ℓ, its transfers and its smoother. |
+| `MultigridPreconditioner` | class | One V-cycle as the preconditioner M⁻¹ ≈ A⁻¹. |
+| `MultigridSolver` | class | CG preconditioned by a V-cycle over the caller's levels. |
 | `NegativeBinomialLikelihood` | class | Negative-binomial likelihood with log link (NB2, a gamma-Poisson mixture). |
 | `NystromLogdet` | class | Nyström-preconditioned SLQ log-determinant of K + σ² I (Wenger et al., 2022). |
 | `NystromPreconditioner` | class | Randomized Nyström preconditioner for K + σ² I. |
@@ -1305,6 +1309,7 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `SRHTSketch` | class | Subsampled randomized Hadamard transform sketch. |
 | `SketchAndPrecondLSMR` | class | Sketch-and-precondition LSMR for tall least squares (Rokhlin & Tygert, 2008). |
 | `SoftmaxLikelihood` | class | Softmax (categorical) likelihood for multi-class classification. |
+| `SolveInfo` | class | How a solve ended, from `linear_solve_with_info`. |
 | `SparseCholeskyFactor` | class | Sparse Cholesky factor on a static symbolic pattern. |
 | `SparseCholeskySolver` | class | Exact ``solve`` / ``logdet`` / ``diag_inv`` through a sparse Cholesky factor. |
 | `SparseOperator` | class | Sparse matrix A with a static `SparsityPattern` and traced values. |
@@ -1322,6 +1327,7 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `UDLDecomposition` | class | Banded factorisation Λ_x = U D Uᵀ of a block-tridiagonal precision. |
 | `UnscentedIntegrator` | class | Unscented transform: 2 D_x + 1 deterministic sigma points. |
 | `UpperBlockTriDiag` | class | Upper block-bidiagonal operator U, the transpose of a `LowerBlockTriDiag`. |
+| `WeightedJacobi` | class | Weighted Jacobi: u ← u + ω D⁻¹ (b − A u), ``sweeps`` times. |
 | `add_jitter` | function | Diagonal jitter A + β I for numerical stability. |
 | `ar1_precision` | function | Precision of a stationary AR(1) process with marginal precision τ. |
 | `as_diagonalized` | function | Express an operator as one `DiagonalizedOperator`, if possible. |
@@ -1385,6 +1391,7 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `fifth_order_cubature_points` | function | Fifth-order fully symmetric cubature points and weights. |
 | `fisher_info` | function | Fisher information of the mean μ, which is the precision Λ = Σ⁻¹. |
 | `frobenius_norm` | function | Frobenius norm ‖A‖_F of an operator, with structural dispatch. |
+| `galerkin_levels` | function | A hierarchy with Galerkin coarse operators A_ℓ₊₁ = R_ℓ A_ℓ P_ℓ. |
 | `gaspari_cohn` | function | Gaspari-Cohn (1999) fifth-order compactly supported taper. |
 | `gauss_hermite_points` | function | Tensor-product Gauss-Hermite points and weights for a standard Gaussian. |
 | `gauss_kl` | function | KL(first ‖ second): KL[q(f_ℐ) ‖ p(f_ℐ)] with p(f_ℐ) = 𝒩(0, K_ℐℐ). |
@@ -1441,8 +1448,10 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `laplace_result` | function | The Gaussian approximation and the Laplace log-marginal at a mode. |
 | `leave_one_out_cv` | function | LOO-CV via the bordered-system identity, without refitting N times. |
 | `ledoit_wolf_shrinkage` | function | Ledoit-Wolf shrinkage of an ensemble covariance, without forming it. |
+| `lift_known_values` | function | Lift prescribed values to the right-hand side of A x = b. |
 | `linear_gaussian_update` | function | Matrix-free posterior of a linear-Gaussian observation. |
 | `linear_solve` | function | Solve A x = b through the unified front door. |
+| `linear_solve_with_info` | function | Solve A x = b as `linear_solve` does, and report how the solve ended. |
 | `linearize_sde` | function | Optimal linear drift of a nonlinear SDE along a Gaussian path. |
 | `localization_matrix` | function | Pairwise Gaspari-Cohn taper ρ(d(aₙ, bₘ); c). |
 | `localized_kalman_gain` | function | Ensemble Kalman gain with Hadamard (Schur-product) localization. |
@@ -1504,6 +1513,7 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `riemannian_psd_correction` | function | Riemannian gradient correction for PSD precision updates. |
 | `root_decomposition` | function | Root decomposition of an SPD operator: a tall factor R with A ≈ R Rᵀ. |
 | `root_inv_decomposition` | function | Inverse-root decomposition: a tall factor R⁻ with A⁻¹ ≈ R⁻ (R⁻)ᵀ. |
+| `row_kron` | function | Row-wise Kronecker (face-splitting) product A • B of two sparse operators. |
 | `rp_cholesky` | function | Randomly pivoted partial Cholesky of a PSD matrix A. |
 | `rts_interpolate` | function | Smoothed marginal at an unobserved step t from filtered and smoothed states. |
 | `rts_sample` | function | Joint draws of the state path x_1:T from p(x_1:T \| y_1:T). |
@@ -1530,6 +1540,7 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `solve_columns` | function | Solve A X = B column by column, with structured dispatch per column. |
 | `solve_matrix` | function | Solve A X = B with one factorisation for the whole matrix right-hand side. |
 | `solve_rows` | function | Solve A xᵢ = bᵢ for each row bᵢ of a matrix B, with one solve per row. |
+| `solve_with_known_values` | function | Solve A x = b on the unknowns, with x prescribed on the known set. |
 | `sparse_cholesky` | function | Sparse Cholesky factorisation of a symmetric positive-definite operator. |
 | `sparse_conditional` | function | Sparse-GP conditional q(f_X) = ∫ p(f_X ∣ f_ℐ) q(f_ℐ) df_ℐ, per output r. |
 | `spde_precision` | function | SPDE precision Λ_α = τ² K (C̃⁻¹ K)^(α−1) with K = κ² C̃ + G. |

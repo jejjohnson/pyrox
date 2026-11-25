@@ -24,7 +24,7 @@ classifiers = [
 dependencies = [
     "pyrox",
     "einx>=0.4.3",
-    "gaussx>=0.8.0",
+    "gaussx>=0.8.2",
     "pyrox-gauss",
     "kernellib>=0.0.22",
     "matfree>=0.6.0",
@@ -46,7 +46,7 @@ Repository = "https://github.com/jejjohnson/pyrox"
 [tool.uv.sources]
 # Neither is on PyPI yet; resolve the release tags from GitHub, in step with
 # pyrox-gp's sources (one version per package across the workspace).
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.0" }
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.2" }
 kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.22" }
 # The inner Newton loop of `inla()` (`argminax.solve.laplace_mode`), at the
 # v0.0.8 release, in step with pyrox-nn's and pyrox-ssm's sources. argminax

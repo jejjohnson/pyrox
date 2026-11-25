@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "pyrox",
-    "gaussx>=0.8.0",
+    "gaussx>=0.8.2",
     "kernellib>=0.0.22",
     "lineax>=0.1.1",
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.11",
@@ -63,7 +63,7 @@ Repository = "https://github.com/jejjohnson/pyrox"
 [tool.uv.sources]
 # Neither is on PyPI yet; resolve the release tags from GitHub, in step with
 # pyrox-gp's and pyrox-lgm's sources (one version per package across the workspace).
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.0" }
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.2" }
 kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.22" }
 # The curvature, evidence and prior-precision search of `last_layer_laplace`,
 # at the v0.0.8 release, in step with pyrox-lgm's and pyrox-ssm's sources.
