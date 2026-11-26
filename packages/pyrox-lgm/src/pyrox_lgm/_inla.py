@@ -31,9 +31,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optimistix as optx
-from argminax.solve import laplace_mode
 from jaxtyping import Array, ArrayLike
 
+from pyrox_lgm._condition import constraint_kriging
 from pyrox_lgm._model import LGM
 from pyrox_lgm._result import INLAResult, Summary, mixture_summary
 
@@ -194,19 +194,18 @@ def _hessian(model, A, data, max_newton, u):
 @eqx.filter_jit
 def _fit_point(model, A, data, u, n_iter, subspace, sla=False):
     theta = model.unflatten(u)
-    prior = model.latent_prior(theta)
     lik = model.likelihood.build(
         jnp.asarray(data["y"]), model._likelihood_theta(theta), data
     )
     offset = model.offset(data)
-    fit = laplace_mode(prior, lik, projector=A, offset=offset, max_iter=n_iter)
+    # the fit of `LGMPrior.condition_nongauss`, improper posteriors rejected
+    checked = model.prior._laplace(theta, lik, data, A, n_iter).checked()
+    fit, prior = checked.laplace, checked.latent
     var = fit.factor.diag_inv()
     G = HV = None
-    if isinstance(prior, gx.IntrinsicGMRF):
-        V = prior.hard_constraint
-        HV = jax.vmap(fit.factor.solve, in_axes=1, out_axes=1)(V)
-        S = V.T @ HV
-        G = jnp.linalg.solve(S, HV.T).T  # Sigma_c = H^-1 - G HV^T
+    if checked.constraints is not None:
+        # Sigma_c = H^-1 - G HV^T
+        HV, G = constraint_kriging(fit.factor.solve, checked.constraints)
         var = var - jnp.sum(HV * G, axis=1)
     mean = fit.mode
     skew = jnp.zeros_like(var)
