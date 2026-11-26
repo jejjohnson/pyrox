@@ -18,7 +18,7 @@ that subspace.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
 import einx
@@ -94,15 +94,7 @@ class _ConditionedLatent(eqx.Module):
         cols, vals = row_entries(A)
         kriging = None
         if self.constraints is not None:
-            V = self.constraints
-            # W = H⁻¹ V
-            W = jax.vmap(solve, in_axes=1, out_axes=1)(V)
-            # S = Vᵀ W
-            S = einx.dot("n a, n b -> a b", V, W)
-            S_op = lx.MatrixLinearOperator(S, lx.positive_semidefinite_tag)
-            # G = W S⁻¹
-            G = gx.solve_columns(S_op, W.T)
-            kriging = W, G.T
+            kriging = constraint_kriging(solve, self.constraints)
 
         def variance(row):
             idx, val = row
@@ -294,3 +286,28 @@ def row_entries(A: gx.SparseOperator) -> tuple[Int[Array, "M k"], Float[Array, "
     take[rows[order], slot] = order
     vals = jnp.append(A.values, jnp.zeros((), A.values.dtype))
     return jnp.asarray(idx), vals[jnp.asarray(take)]
+
+
+def constraint_kriging(
+    solve: Callable[[Float[Array, " n"]], Float[Array, " n"]],
+    V: Float[Array, "n c"],
+) -> tuple[Float[Array, "n c"], Float[Array, "n c"]]:
+    r"""The terms that krige $H^{-1}$ onto the hard constraints $V^\top x = 0$.
+
+    With $W = H^{-1} V$ and $G = W (V^\top W)^{-1}$, the constrained covariance
+    is $\Sigma = H^{-1} - G W^\top$, so $\Sigma_{ab} = (H^{-1})_{ab} - G_a \cdot W_b$.
+
+    Args:
+        solve: $v \mapsto H^{-1} v$, the factor of the posterior precision.
+        V: Basis of the hard constraints.
+
+    Returns:
+        ``(W, G)``, each shaped like ``V``.
+    """
+    # W = H⁻¹ V
+    W = jax.vmap(solve, in_axes=1, out_axes=1)(V)
+    # S = Vᵀ W
+    S = einx.dot("n a, n b -> a b", V, W)
+    S_op = lx.MatrixLinearOperator(S, lx.positive_semidefinite_tag)
+    # G = W S⁻¹
+    return W, gx.solve_columns(S_op, W.T).T

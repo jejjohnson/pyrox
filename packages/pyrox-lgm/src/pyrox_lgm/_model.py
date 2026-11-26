@@ -933,8 +933,13 @@ class LGM(_Hyperparameters):
         max_newton: int = 50,
     ) -> LaplaceModeResult:
         """The Laplace approximation of $x \\mid y, \\theta = T(u)$, by
-        `argminax.solve.laplace_mode`."""
+        `argminax.solve.laplace_mode`.
+
+        Raises:
+            EquinoxRuntimeError: As `LGMPrior.condition`, if the posterior is
+                improper.
+        """
         fit = self.prior._laplace_under(
             self.unflatten(u), self.likelihood, data, projector, max_newton
         )
-        return fit.laplace
+        return fit.checked().laplace

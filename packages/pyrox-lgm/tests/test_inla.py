@@ -101,6 +101,32 @@ def test_rw2_constrains_only_the_sum_inside_an_lgm():
     assert prior.null_space.shape == (N + 1, 2)  # the trend is still flat
 
 
+def _improper_rw2(likelihood):
+    # An RW2 read only at its centre, where the trend is zero: nothing fixes the
+    # trend. Before the fix log_posterior_theta returned a number and inla()
+    # failed after 200 iterations, blaming the mode search or the Newton budget.
+    model = lgm.LGM((lgm.RW2(7, name="t"),), likelihood=likelihood)
+    return model, {"y": np.array([1.0, 2.0, 1.0]), "t": np.array([3, 3, 3])}
+
+
+@pytest.mark.parametrize("likelihood", [lgm.Gaussian(), lgm.Poisson()])
+def test_inla_pieces_reject_an_improper_posterior(likelihood):
+    model, data = _improper_rw2(likelihood)
+    u = jnp.zeros(model.n_theta)
+    with pytest.raises(Exception, match="posterior is improper"):
+        model.log_posterior_theta(u, data)
+    with pytest.raises(Exception, match="posterior is improper"):
+        _fit_point(model, model.projector(data), data, u, 50, ())
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("likelihood", [lgm.Gaussian(), lgm.Poisson()])
+def test_inla_rejects_an_improper_posterior(likelihood):
+    model, data = _improper_rw2(likelihood)
+    with pytest.raises(Exception, match="posterior is improper"):
+        lgm.inla(model, data)
+
+
 def test_theta_bookkeeping():
     model = lgm.LGM(
         (lgm.AR1(5, name="t"), lgm.SPDE(grid=(3, 3), name="s")),
