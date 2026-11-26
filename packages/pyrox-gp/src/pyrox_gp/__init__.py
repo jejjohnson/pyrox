@@ -162,7 +162,7 @@ from pyrox_gp._warped import (
 )
 
 
-__version__ = "0.3.1"  # x-release-please-version
+__version__ = "0.3.2"  # x-release-please-version
 
 # The Markov-GP track and the SDE kernels moved to pyrox-ssm with no
 # deprecation window: pyrox-gp cannot re-export from a sibling package.
