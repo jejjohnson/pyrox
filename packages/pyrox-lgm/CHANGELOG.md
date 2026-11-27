@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.5](https://github.com/jejjohnson/pyrox/compare/pyrox-lgm-v0.1.4...pyrox-lgm-v0.1.5) (2026-11-26)
+
+
+### Features
+
+* **lgm:** add INLAResult.predict_moments, the exact mixture mean and variance of the predictor ([#546](https://github.com/jejjohnson/pyrox/issues/546)) ([ccb8c1f](https://github.com/jejjohnson/pyrox/commit/ccb8c1fe1e15b4ad57a41a87d6b1aa80fdf597a6)), closes [#540](https://github.com/jejjohnson/pyrox/issues/540)
+* **lgm:** add lgm_factor and lgm_laplace_factor, the collapsed factors of an LGMPrior ([#544](https://github.com/jejjohnson/pyrox/issues/544)) ([b50feb3](https://github.com/jejjohnson/pyrox/commit/b50feb3773d7998fb18bbd69107ee0efd45c671d)), closes [#538](https://github.com/jejjohnson/pyrox/issues/538)
+* **lgm:** add LGMPrior, the latent field of an LGM without its likelihood ([#542](https://github.com/jejjohnson/pyrox/issues/542)) ([303501e](https://github.com/jejjohnson/pyrox/commit/303501e6451f5c11be567205aa0954ac5b1a22cf)), closes [#536](https://github.com/jejjohnson/pyrox/issues/536)
+* **lgm:** add LGMPrior.condition and condition_nongauss, returning the conditioned LGM ([#545](https://github.com/jejjohnson/pyrox/issues/545)) ([d0b6088](https://github.com/jejjohnson/pyrox/commit/d0b6088ed6f5f48f94e048007950096b4233d2f3)), closes [#539](https://github.com/jejjohnson/pyrox/issues/539)
+* **lgm:** add log_marginal on LGMPrior and LGM, with log_posterior_theta built on it ([#543](https://github.com/jejjohnson/pyrox/issues/543)) ([ecdc805](https://github.com/jejjohnson/pyrox/commit/ecdc8054ea36681f3a324aafce0110a782b38fbd)), closes [#537](https://github.com/jejjohnson/pyrox/issues/537)
+
+
+### Bug Fixes
+
+* **lgm:** a model with several intrinsic components has an exact posterior ([#564](https://github.com/jejjohnson/pyrox/issues/564)) ([53ddda3](https://github.com/jejjohnson/pyrox/commit/53ddda39cd46f0bb871e7a30af9d19f83ecce59b))
+* **lgm:** inla() and LGM.laplace reject an improper posterior ([#569](https://github.com/jejjohnson/pyrox/issues/569)) ([a37bf49](https://github.com/jejjohnson/pyrox/commit/a37bf49528515a8fc33421f1f88b91760e393590))
+
 ## [0.1.4](https://github.com/jejjohnson/pyrox/compare/pyrox-lgm-v0.1.3...pyrox-lgm-v0.1.4) (2026-11-19)
 
 

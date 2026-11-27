@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.2](https://github.com/jejjohnson/pyrox/compare/pyrox-ssm-v0.2.1...pyrox-ssm-v0.2.2) (2026-11-26)
+
+
+### Features
+
+* **ssm:** add ConditionedLinearGaussianSSM.predict, each channel's marginal mean and variance at every step ([#506](https://github.com/jejjohnson/pyrox/issues/506)) ([fa51cb0](https://github.com/jejjohnson/pyrox/commit/fa51cb05587a472061c2b580982436a33a8bc478))
+* **ssm:** add joint posterior paths on the conditioned results, and prior simulation for LinearGaussianSSMPrior ([#515](https://github.com/jejjohnson/pyrox/issues/515)) ([ebf8b10](https://github.com/jejjohnson/pyrox/commit/ebf8b1078ce195072e17256c4c9064318314af4b))
+* **ssm:** add MarkovGPSitesPrior over padded sites, with condition and predict ([#511](https://github.com/jejjohnson/pyrox/issues/511)) ([4534c56](https://github.com/jejjohnson/pyrox/commit/4534c56e7d8c198881cd12d3150833ed337271cd))
+* **ssm:** add NonlinearGaussianSSMPrior and its conditioned form, on gaussx's nonlinear filter and smoother ([#512](https://github.com/jejjohnson/pyrox/issues/512)) ([824b9fb](https://github.com/jejjohnson/pyrox/commit/824b9fb39f1e54054dd7fe813f3fabcf0fdc9752))
+* **ssm:** add NormalizingKalmanPrior.condition, so prediction lives on a conditioned result ([#510](https://github.com/jejjohnson/pyrox/issues/510)) ([1091f49](https://github.com/jejjohnson/pyrox/commit/1091f49db7df9909d4c0c8ff439ed68f29fc4c93))
+* **ssm:** add SparseMarkovGPPrior.condition(guide), returning the conditioned sparse Markov GP ([#508](https://github.com/jejjohnson/pyrox/issues/508)) ([45ca979](https://github.com/jejjohnson/pyrox/commit/45ca9790432f367d32673d50b16edccf6344eec5))
+* **ssm:** shared_plus_site_factor, the NumPyro factor of the shared-plus-site prior ([#507](https://github.com/jejjohnson/pyrox/issues/507)) ([d209e5d](https://github.com/jejjohnson/pyrox/commit/d209e5d1ca2ec839da16c82a0b2c42289fdbd3bb))
+
 ## [0.2.1](https://github.com/jejjohnson/pyrox/compare/pyrox-ssm-v0.2.0...pyrox-ssm-v0.2.1) (2026-11-19)
 
 
