@@ -83,6 +83,12 @@ class GPPrior(eqx.Module):
         solver: Any ``gaussx.AbstractSolverStrategy``. Defaults to
             ``gaussx.DenseSolver()`` — swap for ``CGSolver``,
             ``BBMMSolver``, ``ComposedSolver(solve=..., logdet=...)``, etc.
+            Every gaussx solver runs on the matrix-free operator, but the
+            system is symmetric positive definite, so CG
+            (`pyrox_gp.preconditioned_cg_solver`, ``CGSolver``,
+            ``PreconditionedCGSolver``, ``BBMMSolver``) is the sensible
+            choice; ``MINRESSolver`` and ``LSMRSolver`` also converge, and
+            LSMR works on the squared condition number, so it is slower.
         jitter: Diagonal regularization added to the prior covariance
             for numerical stability. Not a noise model — use
             ``noise_var`` on `condition` for that.
