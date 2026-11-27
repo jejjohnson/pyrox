@@ -90,19 +90,22 @@ def _matrix_free_system(n, lengthscale, noise_var):
 
 def test_nystrom_logdet_builds_and_is_more_accurate():
     # Matérn-3/2 at N = 400, noise 0.04, rank 50, 20 probes, over 20 keys:
-    # RMS error 1.9 nats for "nystrom" against 10.3 for "slq" (measured).
+    # RMS error about 2 nats for "nystrom" against 10 for "slq" (measured).
     # Before pyrox#556 the solver refused to build with logdet="nystrom".
     solver = preconditioned_cg_solver(logdet="nystrom", key=jr.key(0))
     assert isinstance(solver, gx.ComposedSolver)
     operator = _matrix_free_system(N_LOGDET, 0.3, 0.04)
     exact = jnp.linalg.slogdet(operator.as_matrix())[1]
-    errors = {"slq": [], "nystrom": []}
-    for index in range(20):
-        key = jr.key(100 + index)
-        for logdet in errors:
-            solver = preconditioned_cg_solver(rank=50, logdet=logdet, key=key)
-            errors[logdet].append(float(solver.logdet(operator, key=key) - exact))
-    rms = {name: np.sqrt(np.mean(np.square(e))) for name, e in errors.items()}
+    keys = jr.split(jr.key(100), 20)
+
+    def estimate(logdet, key):
+        solver = preconditioned_cg_solver(rank=50, logdet=logdet, key=key)
+        return solver.logdet(operator, key=key)
+
+    rms = {}
+    for logdet in ("slq", "nystrom"):
+        estimates = jax.vmap(lambda key, logdet=logdet: estimate(logdet, key))(keys)
+        rms[logdet] = float(jnp.sqrt(jnp.mean(jnp.square(estimates - exact))))
     assert rms["nystrom"] < 0.5 * rms["slq"]
 
 

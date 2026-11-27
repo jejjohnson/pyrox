@@ -81,7 +81,7 @@ class _NoiseSplitPreconditioner(gx.AbstractPreconditioner):
 
 
 class _NoiseSplitNystromLogdet(gx.AbstractLogdetStrategy):
-    """`gaussx.NystromLogdet` of ``K + s I``, with ``s`` read from the system per call.
+    """`gaussx.NystromLogdet` of ``K + s I``, ``s`` read from the system per call.
 
     `gaussx.NystromLogdet` needs the shift ``s`` contained in the system at
     construction, and a learned noise changes it at every call. If the
@@ -141,7 +141,7 @@ def preconditioned_cg_solver(
     num_probes: int = 20,
     lanczos_order: int = 30,
 ) -> gx.AbstractSolverStrategy:
-    """A gaussx solver strategy for exact GPs: preconditioned CG plus a stochastic logdet.
+    """A gaussx solver for exact GPs: preconditioned CG plus a stochastic logdet.
 
     Pass it as ``GPPrior(..., solver=...)``; every solve, log-determinant and
     gradient of the marginal likelihood then goes through it.
