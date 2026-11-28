@@ -34,8 +34,11 @@ _value_and_grad = jax.value_and_grad(_lml, argnums=(0, 1))
 
 
 def test_validation():
-    with pytest.raises(ValueError, match="NystromLogdet"):
-        preconditioned_cg_solver(shift=0.1, logdet="nystrom", key=jr.key(0))
+    with pytest.raises(ValueError, match="logdet must be"):
+        preconditioned_cg_solver(
+            logdet="exact",  # ty: ignore[invalid-argument-type]
+            key=jr.key(0),
+        )
     with pytest.raises(ValueError, match="preconditioner must be"):
         preconditioned_cg_solver(
             shift=0.1,
@@ -71,6 +74,85 @@ def test_preconditioning_converges_where_plain_cg_does_not():
     assert np.isfinite(float(value))
     with pytest.raises(Exception, match=r"(?i)max_steps|converge|maximum"):
         _value_and_grad(0.3, 0.04, gx.CGSolver(rtol=1e-6, atol=1e-6, max_steps=60))
+
+
+# --- logdet="nystrom" (pyrox#556) -------------------------------------------
+
+N_LOGDET = 400
+
+
+def _matrix_free_system(n, lengthscale, noise_var):
+    prior = GPPrior(
+        Matern(nu=1.5, init_lengthscale=lengthscale), X[:n], matrix_free=True
+    )
+    return prior._noisy_operator(noise_var)
+
+
+def test_nystrom_logdet_builds_and_is_more_accurate():
+    # Matérn-3/2 at N = 400, noise 0.04, rank 50, 20 probes, over 20 keys:
+    # RMS error about 2 nats for "nystrom" against 10 for "slq" (measured).
+    # Before pyrox#556 the solver refused to build with logdet="nystrom".
+    solver = preconditioned_cg_solver(logdet="nystrom", key=jr.key(0))
+    assert isinstance(solver, gx.ComposedSolver)
+    operator = _matrix_free_system(N_LOGDET, 0.3, 0.04)
+    exact = jnp.linalg.slogdet(operator.as_matrix())[1]
+    keys = jr.split(jr.key(100), 20)
+
+    def estimate(logdet, key):
+        solver = preconditioned_cg_solver(rank=50, logdet=logdet, key=key)
+        return solver.logdet(operator, key=key)
+
+    rms = {}
+    for logdet in ("slq", "nystrom"):
+        estimates = jax.vmap(lambda key, logdet=logdet: estimate(logdet, key))(keys)
+        rms[logdet] = float(jnp.sqrt(jnp.mean(jnp.square(estimates - exact))))
+    assert rms["nystrom"] < 0.5 * rms["slq"]
+
+
+def test_nystrom_logdet_reads_the_noise_from_the_system():
+    # The shift is the scalar of the matrix-free sum, never shift=: a shift
+    # above the noise would make the sketch indefinite (gaussx#878).
+    operator = _matrix_free_system(200, 0.3, 0.04)
+    exact = jnp.linalg.slogdet(operator.as_matrix())[1]
+    solver = preconditioned_cg_solver(
+        shift=10.0, rank=100, logdet="nystrom", key=jr.key(0)
+    )
+    estimate = solver.logdet(operator)
+    assert np.isfinite(float(estimate))
+    assert abs(float(estimate - exact)) < 0.01 * abs(float(exact))
+
+
+def test_nystrom_logdet_dense_system_needs_shift():
+    dense = GPPrior(Matern(nu=1.5, init_lengthscale=0.3), X[:200])
+    operator = dense._noisy_operator(0.04)
+    exact = jnp.linalg.slogdet(operator.as_matrix())[1]
+    with pytest.raises(ValueError, match="not a sum"):
+        preconditioned_cg_solver(logdet="nystrom", key=jr.key(0)).logdet(operator)
+    solver = preconditioned_cg_solver(
+        shift=0.04, rank=100, logdet="nystrom", key=jr.key(0)
+    )
+    estimate = solver.logdet(operator)
+    assert abs(float(estimate - exact)) < 0.01 * abs(float(exact))
+
+
+@pytest.mark.slow
+def test_nystrom_logdet_gradient_matches_dense():
+    # 10 keys at N = 400, rank 50: the mean gradient is within 3 standard
+    # errors of the dense one (measured 1.7 for both hyperparameters).
+    x, y = X[:N_LOGDET], Y[:N_LOGDET]
+    dense = _mf_value_and_grad(x, y, 0.3, 0.04, gx.DenseSolver(), matrix_free=False)
+    dense_grad = np.asarray(dense[1])
+    grads = []
+    for index in range(10):
+        solver = preconditioned_cg_solver(
+            rank=50, logdet="nystrom", key=jr.key(200 + index)
+        )
+        _, grad = _mf_value_and_grad(x, y, 0.3, 0.04, solver, matrix_free=True)
+        grads.append(np.asarray(grad))
+    grads = np.stack(grads)
+    assert np.all(np.isfinite(grads))
+    standard_error = grads.std(axis=0, ddof=1) / np.sqrt(len(grads))
+    assert np.all(np.abs(grads.mean(axis=0) - dense_grad) < 3 * standard_error)
 
 
 # --- Matrix-free GPPrior (pyrox#277) ----------------------------------------

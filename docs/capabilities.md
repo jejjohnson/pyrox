@@ -228,7 +228,7 @@ compose it; if it is almost here, extend it where it lives. Regenerate with
 
 | Name | Kind | What it does |
 |---|---|---|
-| `preconditioned_cg_solver` | function | A gaussx solver strategy for exact GPs: preconditioned CG plus SLQ. |
+| `preconditioned_cg_solver` | function | A gaussx solver for exact GPs: preconditioned CG plus a stochastic logdet. |
 
 #### Sparse GP prior — inducing-input variational foundation. (`pyrox_gp._sparse`)
 
