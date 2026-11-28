@@ -1143,9 +1143,15 @@ class PosteriorLinearization(eqx.Module):
             >>> y = (X[:, 0] > 0.0).astype(X.dtype)
             >>> prior = GPPrior(kernel=RBF(), X=X)
             >>> strategy = PosteriorLinearization(solver=gx.CGSolver())
-            >>> fit = jax.jit(
-            ...     lambda labels: strategy.fit(prior, BernoulliLikelihood(), labels)
+            >>> # return arrays: a fit passed out of a transform rebuilds its
+            >>> # kernel without the parameter registry, so predict outside it
+            >>> q_mean = jax.jit(
+            ...     lambda labels: strategy.fit(
+            ...         prior, BernoulliLikelihood(), labels
+            ...     ).q_mean
             ... )(y)
+            >>> q_mean.shape
+            (10,)
         """
         return _fit_cavity_sites(self, prior, likelihood, y, key)
 
@@ -1316,9 +1322,15 @@ class ExpectationPropagation(eqx.Module):
             >>> y = jnp.sin(X[:, 0]).at[3].set(4.0)
             >>> prior = GPPrior(kernel=RBF(), X=X)
             >>> strategy = ExpectationPropagation(damping=0.3)
-            >>> fits = jax.jit(jax.vmap(
-            ...     lambda labels: strategy.fit(prior, StudentTLikelihood(), labels)
+            >>> # return arrays: a fit passed out of a transform rebuilds its
+            >>> # kernel without the parameter registry, so predict outside it
+            >>> q_means = jax.jit(jax.vmap(
+            ...     lambda labels: strategy.fit(
+            ...         prior, StudentTLikelihood(df=4.0, scale=0.5), labels
+            ...     ).q_mean
             ... ))(jnp.stack([y, -y]))
+            >>> q_means.shape
+            (2, 10)
         """
         return _fit_cavity_sites(self, prior, likelihood, y, key)
 
