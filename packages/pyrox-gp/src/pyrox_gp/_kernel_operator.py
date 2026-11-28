@@ -21,9 +21,9 @@ $O(B n)$ instead of storing ``K``. Vectorising a matvec over several
 vectors (probe vectors, sketch columns) turns each block into a
 matrix-matrix product.
 
-`split_noise` recovers $K_{\text{op}}$ and the noise scalar from that sum,
-so `pyrox_gp.preconditioned_cg_solver` can build its preconditioner from
-$K$ with the exact noise as the shift.
+`gaussx.split_diagonal` recovers $K_{\text{op}}$ and the diagonal from that
+sum, so `pyrox_gp.preconditioned_cg_solver` can build its preconditioner
+from $K$ with the exact noise as the shift.
 """
 
 from __future__ import annotations
@@ -150,34 +150,11 @@ def matrix_free_operator(
         block_size: Rows of ``K`` per matvec step.
 
     Returns:
-        ``TaggedLinearOperator(KernelOperator + d I, PSD)``; `split_noise`
-        inverts it.
+        ``TaggedLinearOperator(KernelOperator + d I, PSD)``;
+        `gaussx.split_diagonal` inverts it.
     """
     K_op = KernelOperator(kernel, X, block_size)
     identity = lx.IdentityLinearOperator(K_op.in_structure())
     scaled = identity * jnp.asarray(diagonal, dtype=X.dtype)
     return lx.TaggedLinearOperator(K_op + scaled, _PSD_TAGS)
 
-
-def split_noise(
-    operator: lx.AbstractLinearOperator,
-) -> tuple[lx.AbstractLinearOperator, Float[Array, ""]] | None:
-    r"""Recover $(K_{\text{op}}, d)$ from $K_{\text{op}} + d\,I$, or ``None``.
-
-    Recognises the sum `matrix_free_operator` builds (tagged or not, with the
-    scaled identity on either side). Any other operator, such as one dense
-    matrix with the noise on its diagonal, returns ``None``.
-    """
-    if isinstance(operator, lx.TaggedLinearOperator):
-        operator = operator.operator
-    if not isinstance(operator, lx.AddLinearOperator):
-        return None
-    for psd_part, other in (
-        (operator.operator1, operator.operator2),
-        (operator.operator2, operator.operator1),
-    ):
-        if isinstance(other, lx.MulLinearOperator) and isinstance(
-            other.operator, lx.IdentityLinearOperator
-        ):
-            return psd_part, other.scalar
-    return None

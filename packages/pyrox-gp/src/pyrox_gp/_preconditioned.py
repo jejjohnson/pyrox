@@ -12,12 +12,18 @@ Lanczos quadrature, either on $\hat K$ itself or on $\hat K$
 preconditioned by a Nyström approximation (gaussx G17,
 `gaussx.NystromLogdet`); gradients flow through both (the preconditioner only
 changes the iteration count, so gaussx stops its gradient). The
-preconditioner is built from $K$ with the noise as its shift, never from
-$\hat K$ itself, so the noise is not counted twice (gaussx#345):
+preconditioner is built from $K$ with the diagonal as its shift, never from
+$\hat K$ itself, so the noise is not counted twice (gaussx#345). The system
+is read back with `gaussx.split_diagonal`:
 
 - for ``GPPrior(..., matrix_free=True)`` the system is the sum
-  $K_{\text{op}} + (\text{jitter} + \sigma^2) I$, and the noise is read
-  from it exactly;
+  $K_{\text{op}} + (\text{jitter} + \sigma^2) I$, and the scalar noise is
+  read from it exactly;
+- for a sum $K + \mathrm{diag}(d)$ whose diagonal varies by point (site
+  variances, heteroscedastic noise), the preconditioner is built by gaussx's
+  per-point shift: a preconditioner $P_B$ of
+  $B = D^{-1/2} \hat K D^{-1/2}$, $D = \mathrm{diag}(d)$, with unit shift,
+  pulled back as $P^{-1} = D^{-1/2} P_B^{-1} D^{-1/2}$ (gaussx#878);
 - for any other operator (one dense $\hat K$) the preconditioner is built
   from $\hat K - \mu I$ with a user lower bound $\mu \le \sigma^2$.
 """
@@ -32,16 +38,63 @@ import jax
 import lineax as lx
 from jaxtyping import Array, Float
 
-from pyrox_gp._kernel_operator import split_noise
+
+def _scalar_noise(
+    operator: lx.AbstractLinearOperator,
+) -> tuple[lx.AbstractLinearOperator, Float[Array, ""]] | None:
+    """$(K, s)$ for a sum of exactly $K$ and $s I$, by type, or ``None``.
+
+    A Gaussian-noise system keeps the scalar shift it has always had, so its
+    preconditioner is bit-identical to the one before per-point shifts
+    (pyrox#555). $K$ must hold no diagonal of its own, or the sum is a
+    per-point $K' + \\mathrm{diag}(d)$ for `gaussx.split_diagonal`.
+    """
+    while isinstance(operator, lx.TaggedLinearOperator):
+        operator = operator.operator
+    if not isinstance(operator, lx.AddLinearOperator):
+        return None
+    for psd_part, other in (
+        (operator.operator1, operator.operator2),
+        (operator.operator2, operator.operator1),
+    ):
+        is_scaled_identity = isinstance(other, lx.MulLinearOperator) and isinstance(
+            other.operator, lx.IdentityLinearOperator
+        )
+        has_diagonal = lx.is_diagonal(psd_part) or (
+            gx.split_diagonal(psd_part) is not None
+        )
+        if is_scaled_identity and not has_diagonal:
+            return psd_part, other.scalar
+    return None
+
+
+def _split_system(
+    operator: lx.AbstractLinearOperator,
+) -> tuple[lx.AbstractLinearOperator, Float[Array, ""] | Float[Array, " N"]] | None:
+    r"""$(K, s)$ for $K + s I$, $(K, d)$ for $K + \mathrm{diag}(d)$, else ``None``.
+
+    The split is by type (`gaussx.split_diagonal`), so it is the same under
+    ``jit`` with the diagonal traced.
+    """
+    scalar_split = _scalar_noise(operator)
+    if scalar_split is not None:
+        # K + s I: the exact scalar, so the Gaussian-noise path is unchanged
+        return scalar_split
+    split = gx.split_diagonal(operator)
+    if split is None:
+        return None
+    # K + diag(d): a per-point shift, by symmetric scaling in gaussx
+    return split.base, split.diagonal
 
 
 class _NoiseSplitPreconditioner(gx.AbstractPreconditioner):
-    """Low-rank preconditioner of ``K + s I``, rebuilt from the system per solve.
+    """Low-rank preconditioner of ``K + diag(d)``, rebuilt from the system per solve.
 
     If the system is the sum ``K_op + s I`` (`GPPrior` with
     ``matrix_free=True``), the low-rank part is built from ``K_op`` with the
-    exact ``s``. Otherwise it is built from ``A - shift I`` with the user
-    bound ``shift``.
+    exact ``s``. If it is ``K + diag(d)`` with a diagonal that varies by
+    point, it is built from ``K`` with the per-point shift ``d``. Otherwise
+    it is built from ``A - shift I`` with the user bound ``shift``.
     """
 
     kind: Literal["nystrom", "rpcholesky"] = eqx.field(static=True)
@@ -51,15 +104,18 @@ class _NoiseSplitPreconditioner(gx.AbstractPreconditioner):
 
     def _psd_part_and_shift(
         self, operator: lx.AbstractLinearOperator
-    ) -> tuple[lx.AbstractLinearOperator, float | Float[Array, ""]]:
-        split = split_noise(operator)
+    ) -> tuple[
+        lx.AbstractLinearOperator,
+        float | Float[Array, ""] | Float[Array, " N"],
+    ]:
+        split = _split_system(operator)
         if split is not None:
             return split
         if self.shift is None:
             raise ValueError(
-                "preconditioned_cg_solver: the system is not a sum K + s I, so "
-                "the noise cannot be read from it. Pass shift= (a lower bound "
-                "on the noise variance) or use GPPrior(..., matrix_free=True)."
+                "preconditioned_cg_solver: the system is not a sum K + diag(d), "
+                "so the diagonal cannot be read from it. Pass shift= (a lower "
+                "bound on the noise variance) or use GPPrior(..., matrix_free=True)."
             )
         identity = lx.IdentityLinearOperator(operator.in_structure())
         return operator - self.shift * identity, self.shift
@@ -81,15 +137,16 @@ class _NoiseSplitPreconditioner(gx.AbstractPreconditioner):
 
 
 class _NoiseSplitNystromLogdet(gx.AbstractLogdetStrategy):
-    """`gaussx.NystromLogdet` of ``K + s I``, ``s`` read from the system per call.
+    """`gaussx.NystromLogdet` of ``K + diag(d)``, ``d`` read from the system per call.
 
-    `gaussx.NystromLogdet` needs the shift ``s`` contained in the system at
+    `gaussx.NystromLogdet` needs the shift contained in the system at
     construction, and a learned noise changes it at every call. If the
     system is the sum ``K_op + s I`` (`GPPrior` with ``matrix_free=True``),
-    ``s`` is the exact scalar of that sum. Otherwise it is the user bound
-    ``shift`` (a lower bound on the noise variance is still valid, since
-    the strategy only needs ``A - shift I`` to be PSD; a shift above the
-    noise makes it indefinite and the estimate NaN, gaussx#878).
+    the shift is the exact scalar of that sum; if it is ``K + diag(d)``, the
+    per-point ``d``. Otherwise it is the user bound ``shift`` (a lower bound
+    on the noise variance is still valid, since the strategy only needs
+    ``A - shift I`` to be PSD; a shift above the noise makes it indefinite
+    and the estimate NaN, gaussx#878).
     """
 
     rank: int = eqx.field(static=True)
@@ -104,7 +161,8 @@ class _NoiseSplitNystromLogdet(gx.AbstractLogdetStrategy):
         *,
         key: jax.Array | None = None,
     ) -> Float[Array, ""]:
-        split = split_noise(operator)
+        split = _split_system(operator)
+        shift: float | Float[Array, ""] | Float[Array, " N"]
         if split is not None:
             _, shift = split
         elif self.shift is not None:
@@ -112,8 +170,8 @@ class _NoiseSplitNystromLogdet(gx.AbstractLogdetStrategy):
         else:
             raise ValueError(
                 'preconditioned_cg_solver(logdet="nystrom"): the system is not a '
-                "sum K + s I, so the noise cannot be read from it. Pass shift= "
-                "(a lower bound on the noise variance) or use "
+                "sum K + diag(d), so the diagonal cannot be read from it. Pass "
+                "shift= (a lower bound on the noise variance) or use "
                 "GPPrior(..., matrix_free=True)."
             )
         strategy = gx.NystromLogdet(
@@ -144,17 +202,24 @@ def preconditioned_cg_solver(
     """A gaussx solver for exact GPs: preconditioned CG plus a stochastic logdet.
 
     Pass it as ``GPPrior(..., solver=...)``; every solve, log-determinant and
-    gradient of the marginal likelihood then goes through it.
+    gradient of the marginal likelihood then goes through it. It also solves
+    a system $K + \\mathrm{diag}(d)$ whose diagonal varies by point, the
+    system of a non-Gaussian or heteroscedastic GP (pyrox#555).
 
     Args:
-        shift: Optional. For ``GPPrior(..., matrix_free=True)`` the system
-            is the sum $K_{\\text{op}} + (\\text{jitter} + \\sigma^2) I$ and
-            the preconditioner takes the noise from it exactly, so ``shift``
-            is ignored. For a dense system it is $\\mu$, a lower bound on
-            the noise variance (e.g. the smallest noise the prior allows):
-            the preconditioner is built from $K + (\\sigma^2 - \\mu) I$, so
-            ``shift`` must not exceed $\\sigma^2$. A dense system without
-            ``shift`` raises at solve time.
+        shift: Optional, and used only for a system that is one dense
+            matrix. A sum $K + \\mathrm{diag}(d)$ is read with
+            `gaussx.split_diagonal`, so ``shift`` is ignored there: for
+            ``GPPrior(..., matrix_free=True)`` the system is
+            $K_{\\text{op}} + (\\text{jitter} + \\sigma^2) I$ and the
+            preconditioner takes the scalar noise from it exactly, and for
+            a per-point $d$ it takes $d$ and builds the preconditioner by
+            gaussx's symmetric scaling. For a dense system ``shift`` is
+            $\\mu$, a lower bound on the noise variance (e.g. the smallest
+            noise the prior allows): the preconditioner is built from
+            $K + (\\sigma^2 - \\mu) I$, so ``shift`` must not exceed
+            $\\sigma^2$. A dense system without ``shift`` raises at solve
+            time.
         preconditioner: ``"nystrom"`` (randomized Nyström) or
             ``"rpcholesky"`` (randomly pivoted partial Cholesky), both of
             rank ``rank`` and rebuilt from the operator at each solve.
@@ -168,10 +233,10 @@ def preconditioned_cg_solver(
             of a rank-``rank`` Nyström preconditioner $P = \\hat K_{\\text{lr}}
             + s I$, plus SLQ on $P^{-1/2} \\hat K P^{-1/2}$, which is close to
             the identity, so its variance is much lower at the same probe
-            count). Its shift $s$ is read from the system like the
-            preconditioner's: the exact noise for ``matrix_free=True``, and
-            ``shift`` for a dense system, which raises at solve time
-            without one. Its sketch has the preconditioner's ``rank`` but
+            count). Its shift is read from the system like the
+            preconditioner's: the exact noise for ``matrix_free=True``, the
+            per-point $d$ of a sum $K + \\mathrm{diag}(d)$, and ``shift``
+            for a dense system, which raises at solve time without one. Its sketch has the preconditioner's ``rank`` but
             is drawn separately (a shared sketch would save one
             factorisation and is not implemented).
         key: PRNG key for the sketch / the random pivots. With
