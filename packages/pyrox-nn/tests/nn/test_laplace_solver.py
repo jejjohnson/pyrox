@@ -128,6 +128,9 @@ def test_default_unchanged(structure):
         tuned.log_marginal_likelihood(),
         tuned.prior_precision,
     ]
+    # Frozen on one machine. The tuned precision comes out of an optimiser
+    # loop, which amplifies BLAS differences: a CI runner differed by 2.3e-7
+    # relative, so 1e-10 failed there.
     np.testing.assert_allclose(
-        np.asarray(got), _DEFAULT_REFERENCE[structure], rtol=1e-10
+        np.asarray(got), _DEFAULT_REFERENCE[structure], rtol=1e-6
     )
