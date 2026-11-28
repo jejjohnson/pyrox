@@ -270,14 +270,13 @@ def svgp_factor(
 
 
 def _prior_solver(prior: SparseGPPrior) -> AbstractSolverStrategy | None:
-    """The prior's composed solver, or ``None`` when it sets none of the three.
+    """The prior's composed solver, or ``None`` when it sets no ``solver``.
 
     ``None`` keeps gaussx's structural dispatch on $K_{ZZ}$ (an $O(M)$
-    diagonal for inter-domain features) exactly as before pyrox#560.
+    diagonal for inter-domain features) exactly as before pyrox#560, as
+    the pathwise samplers do.
     """
-    if prior.solver is None and prior.preconditioner is None and prior.logdet is None:
-        return None
-    return prior.solver_strategy()
+    return None if prior.solver is None else prior.solver_strategy()
 
 
 class ConjugateVI:
