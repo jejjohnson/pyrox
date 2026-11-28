@@ -17,7 +17,10 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import jax.random as jr
+import numpy as np
 import pytest
+from numpyro import handlers
 from pyrox_gp import (
     RBF,
     BernoulliLikelihood,
@@ -27,10 +30,13 @@ from pyrox_gp import (
     GPPrior,
     HeteroscedasticGaussianLikelihood,
     LaplaceInference,
+    Matern,
     PosteriorLinearization,
     QuasiNewtonInference,
     SoftmaxLikelihood,
     StudentTLikelihood,
+    gp_laplace_factor,
+    preconditioned_cg_solver,
 )
 
 
@@ -197,3 +203,100 @@ def test_expectation_propagation_rejects_other_rules() -> None:
 
     with pytest.raises(TypeError, match="GaussHermiteIntegrator"):
         ExpectationPropagation(integrator=gaussx.UnscentedIntegrator())
+
+
+# --- matrix-free priors are refused (pyrox#549) ----------------------------
+
+_STRATEGIES = {
+    "LaplaceInference": LaplaceInference,
+    "GaussNewtonInference": GaussNewtonInference,
+    "PosteriorLinearization": PosteriorLinearization,
+    "ExpectationPropagation": ExpectationPropagation,
+    "QuasiNewtonInference": QuasiNewtonInference,
+}
+
+
+@pytest.mark.parametrize("name", list(_STRATEGIES))
+def test_matrix_free_prior_is_rejected(name, monkeypatch):
+    # Before pyrox#549 each strategy evaluated the (60, 60) kernel block of a
+    # matrix-free prior and ignored its solver.
+    blocks = []
+    original = Matern.__call__
+
+    def spy(self, a, b):
+        blocks.append((a.shape[0], b.shape[0]))
+        return original(self, a, b)
+
+    monkeypatch.setattr(Matern, "__call__", spy)
+    X = jr.uniform(jr.key(0), (60, 2))
+    y = (X[:, 0] > 0.5).astype(X.dtype)
+    solver = preconditioned_cg_solver(rank=20, key=jr.key(1))
+    prior = GPPrior(Matern(nu=1.5), X, solver=solver, matrix_free=True)
+    with pytest.raises(ValueError, match=rf"{name}.*matrix_free=True.*issues/353"):
+        prior.condition_nongauss(BernoulliLikelihood(), y, strategy=_STRATEGIES[name]())
+    assert (60, 60) not in blocks
+    if name in ("LaplaceInference", "GaussNewtonInference"):
+
+        def model():
+            gp_laplace_factor(
+                "y", prior, BernoulliLikelihood(), y, strategy=_STRATEGIES[name]()
+            )
+
+        with pytest.raises(ValueError, match=name):
+            handlers.seed(model, 0)()
+
+
+# log_marginal_approx, q_mean[0], q_var[0], predicted mean and variance at
+# X[0] + 0.01, recorded at edbbd6d (before pyrox#549) in float64
+_DENSE_REFERENCE = {
+    "LaplaceInference": (
+        -21.85439793150134,
+        0.061908180788765366,
+        0.2048395848305088,
+        0.09422909758839337,
+        0.2008022806501557,
+    ),
+    "GaussNewtonInference": (
+        -21.85439793150134,
+        0.061908180788765366,
+        0.2048395848305088,
+        0.09422909758839337,
+        0.2008022806501557,
+    ),
+    "PosteriorLinearization": (
+        -21.8410165741918,
+        0.0693741401997019,
+        0.20790308241663014,
+        0.10239207189887989,
+        0.20383001669777367,
+    ),
+    "ExpectationPropagation": (
+        -21.815888861753628,
+        0.06927206017504794,
+        0.2101956641479824,
+        0.1022759990838994,
+        0.2061059658468143,
+    ),
+    "QuasiNewtonInference": (
+        -21.854397937094596,
+        0.061908180788765255,
+        0.2048395847592499,
+        0.09422909758839326,
+        0.20080228055312266,
+    ),
+}
+
+
+@pytest.mark.parametrize("name", list(_STRATEGIES))
+def test_dense_prior_is_unchanged(name):
+    X = jr.uniform(jr.key(0), (40, 2), dtype=jnp.float64)
+    y = (X[:, 0] > 0.5).astype(jnp.float64)
+    prior = GPPrior(Matern(nu=1.5), X)
+    fit = prior.condition_nongauss(
+        BernoulliLikelihood(), y, strategy=_STRATEGIES[name]()
+    )
+    mean, var = fit.predict(X[:1] + 0.01)
+    got = (fit.log_marginal_approx, fit.q_mean[0], fit.q_var[0], mean[0], var[0])
+    np.testing.assert_allclose(
+        np.asarray(got, dtype=np.float64), _DENSE_REFERENCE[name], rtol=1e-10
+    )

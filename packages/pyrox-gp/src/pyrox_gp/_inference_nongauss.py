@@ -198,6 +198,37 @@ def _check_scalar_latent(lik: Likelihood) -> None:
         raise ValueError(msg)
 
 
+_MATRIX_FREE_EPIC = "https://github.com/jejjohnson/pyrox/issues/353"
+
+
+def _reject_matrix_free(prior: GPPrior, strategy: str) -> None:
+    """Refuse ``GPPrior(matrix_free=True)``: every strategy here forms ``K``.
+
+    A matrix-free prior promises never to form the N × N kernel matrix, and
+    each strategy in this module evaluates it densely (`_prior_K`) and
+    ignores the prior's ``solver``. Raising keeps that promise instead of
+    allocating ``K`` silently.
+    """
+    if not prior.matrix_free:
+        return
+    if strategy == "QuasiNewtonInference":
+        reason = (
+            "it whitens its L-BFGS search with a Cholesky root of the kernel "
+            "matrix, so it never accepts a matrix-free prior; LaplaceInference "
+            "with an iterative solver is the matrix-free route once it lands"
+        )
+    else:
+        reason = (
+            "it forms the dense N x N kernel matrix and does not yet use the "
+            "prior's solver; matrix-free Laplace, Gauss-Newton, posterior "
+            "linearisation and EP are planned (pyrox#551, pyrox#552)"
+        )
+    raise ValueError(
+        f"{strategy} does not support GPPrior(matrix_free=True): {reason}. "
+        f"Use matrix_free=False for this fit. See {_MATRIX_FREE_EPIC}."
+    )
+
+
 def _prior_K(prior: GPPrior) -> Float[Array, "N N"]:
     with call_context(prior.kernel):
         K = prior.kernel(prior.X, prior.X)
@@ -396,6 +427,7 @@ def _newton_fit(
     tol: float,
     damping: float,
     precision_floor: float,
+    strategy: str,
 ) -> ConditionedNonGaussGP:
     """Damped Newton to the Laplace mode, on `argminax.solve.laplace_mode_covariance`.
 
@@ -406,6 +438,7 @@ def _newton_fit(
     the Laplace log marginal at the mode are pyrox-gp's own algebra
     (`_laplace_at_mode`), whose safe Cholesky keeps them finite in float32.
     """
+    _reject_matrix_free(prior, strategy)
     _check_scalar_latent(likelihood)
     K = _prior_K(prior)
     prior_mean = jnp.asarray(prior.mean(prior.X))
@@ -457,6 +490,11 @@ class LaplaceInference(eqx.Module):
     $\log p(y) \approx \log p(y | \hat f) - \tfrac12 \hat f^\top
     K^{-1} \hat f - \tfrac12 \log |I + K \Lambda|$.
 
+    Dense only: the fit forms the N × N kernel matrix and does not use the
+    prior's ``solver``, so a ``GPPrior(matrix_free=True)`` raises
+    ``ValueError`` (pyrox#549; pyrox#551 and pyrox#552 plan the
+    matrix-free version).
+
     Attributes:
         max_iter: Newton iterations. Default ``20``.
         tol: ``inf``-norm convergence tolerance on ``f``. Default ``1e-6``.
@@ -489,6 +527,7 @@ class LaplaceInference(eqx.Module):
             tol=self.tol,
             damping=self.damping,
             precision_floor=self.precision_floor,
+            strategy="LaplaceInference",
         )
 
 
@@ -510,6 +549,11 @@ class GaussNewtonInference(eqx.Module):
     Hessian, so GGN ≡ Laplace; for StudentT the floor matters. The loop is
     the same `argminax.solve.laplace_mode_covariance` call, so ``fit`` runs
     under ``jax.jit`` and ``jax.vmap``.
+
+    Dense only: the fit forms the N × N kernel matrix and does not use the
+    prior's ``solver``, so a ``GPPrior(matrix_free=True)`` raises
+    ``ValueError`` (pyrox#549; pyrox#551 and pyrox#552 plan the
+    matrix-free version).
 
     Attributes:
         max_iter: Iterations. Default ``20``.
@@ -541,6 +585,7 @@ class GaussNewtonInference(eqx.Module):
             tol=self.tol,
             damping=self.damping,
             precision_floor=self.precision_floor,
+            strategy="GaussNewtonInference",
         )
 
 
@@ -560,6 +605,11 @@ class PosteriorLinearization(eqx.Module):
     PL/CVI in the sense of Adam/Garcia-Fernandez/Sarkka — equivalent
     in the Gaussian-cavity limit to taking one EP-style step but using
     derivative expectations instead of moment matching.
+
+    Dense only: the fit forms the N × N kernel matrix and does not use the
+    prior's ``solver``, so a ``GPPrior(matrix_free=True)`` raises
+    ``ValueError`` (pyrox#549; pyrox#551 and pyrox#552 plan the
+    matrix-free version).
 
     Attributes:
         integrator: Cavity integrator. Default
@@ -584,6 +634,7 @@ class PosteriorLinearization(eqx.Module):
         likelihood: Likelihood,
         y: Float[Array, " N"],
     ) -> ConditionedNonGaussGP:
+        _reject_matrix_free(prior, "PosteriorLinearization")
         _check_scalar_latent(likelihood)
         K = _prior_K(prior)
         prior_mean = prior.mean(prior.X)
@@ -700,6 +751,11 @@ class ExpectationPropagation(eqx.Module):
     embarrassingly vectorizable and converges for well-behaved
     log-concave likelihoods; for problematic models reduce ``damping``.
 
+    Dense only: the fit forms the N × N kernel matrix and does not use the
+    prior's ``solver``, so a ``GPPrior(matrix_free=True)`` raises
+    ``ValueError`` (pyrox#549; pyrox#551 and pyrox#552 plan the
+    matrix-free version).
+
     Attributes:
         integrator: Cavity integrator. Default
             ``gaussx.GaussHermiteIntegrator(order=20)``. EP reads only its
@@ -728,6 +784,7 @@ class ExpectationPropagation(eqx.Module):
         likelihood: Likelihood,
         y: Float[Array, " N"],
     ) -> ConditionedNonGaussGP:
+        _reject_matrix_free(prior, "ExpectationPropagation")
         _check_scalar_latent(likelihood)
         K = _prior_K(prior)
         prior_mean = prior.mean(prior.X)
@@ -829,6 +886,12 @@ class QuasiNewtonInference(eqx.Module):
     The L-BFGS loop is `optimistix.minimise`, so ``fit`` runs under
     ``jax.jit`` and ``jax.vmap``.
 
+    Dense only: the whitening needs a Cholesky root of the N × N kernel
+    matrix, and the prior's ``solver`` is not used, so a
+    ``GPPrior(matrix_free=True)`` raises ``ValueError``, permanently
+    (pyrox#549); `LaplaceInference` with an iterative solver is the
+    matrix-free route once pyrox#551 lands.
+
     Attributes:
         max_iter: L-BFGS iterations. Default ``50``.
         tol: The ``rtol`` and ``atol`` of `optimistix.LBFGS`, which stops
@@ -847,6 +910,7 @@ class QuasiNewtonInference(eqx.Module):
         likelihood: Likelihood,
         y: Float[Array, " N"],
     ) -> ConditionedNonGaussGP:
+        _reject_matrix_free(prior, "QuasiNewtonInference")
         _check_scalar_latent(likelihood)
         K = _prior_K(prior)
         prior_mean = jnp.asarray(prior.mean(prior.X))

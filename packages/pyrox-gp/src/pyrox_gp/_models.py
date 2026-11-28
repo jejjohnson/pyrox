@@ -100,6 +100,11 @@ class GPPrior(eqx.Module):
             `pyrox_gp.preconditioned_cg_solver`, which reads the noise from
             the sum; a dense solver materialises ``K`` again. NumPyro-aware
             kernels are resolved once per call through ``frozen()``.
+            Matrix-free entry points: `log_prob`, `log_marginal`,
+            `condition` and its predictions, and `gp_factor`. The
+            non-Gaussian strategies (`condition_nongauss`,
+            `gp_laplace_factor`) form ``K`` and raise ``ValueError`` on a
+            matrix-free prior.
         block_size: Rows of ``K`` per matvec step when ``matrix_free``.
 
     Examples:
