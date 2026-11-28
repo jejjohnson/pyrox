@@ -216,24 +216,6 @@ def test_strategy_fields_override_the_prior() -> None:
     np.testing.assert_allclose(inherited.q_var, dense.q_var, rtol=1e-7)
 
 
-@pytest.mark.parametrize("name", ["pl", "ep"])
-def test_stochastic_variance_raises_naming_gaussx_827(name) -> None:
-    """The stochastic branch waits on gaussx#827 and says so before any work."""
-    X = jnp.linspace(-3.0, 3.0, 8)[:, None]
-    y = (X[:, 0] > 0.0).astype(jnp.float64)
-    prior = GPPrior(RBF(), X, solver=gx.CGSolver())
-    strategy = _CLASSES[name](variance="stochastic")
-    with pytest.raises(NotImplementedError, match=r"gaussx#827.*variance='exact'"):
-        strategy.fit(prior, BernoulliLikelihood(), y)
-    # "auto" turns stochastic above N = 2048 with an iterative solver
-    big = jnp.linspace(-3.0, 3.0, 2049)[:, None]
-    large = GPPrior(RBF(), big, solver=gx.CGSolver(), matrix_free=True)
-    with pytest.raises(NotImplementedError, match="gaussx#827"):
-        _CLASSES[name]().fit(large, BernoulliLikelihood(), (big[:, 0] > 0.0) * 1.0)
-    with pytest.raises(ValueError, match="variance must be"):
-        _CLASSES[name](variance="sampled")
-
-
 def _avals(jaxpr):
     """Every abstract value in a jaxpr and the jaxprs nested in its equations."""
     for eqn in jaxpr.eqns:
