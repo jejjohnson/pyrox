@@ -54,8 +54,9 @@ Repository = "https://github.com/jejjohnson/pyrox"
 # Not on PyPI yet; resolve the release tag from GitHub, in step with the
 # other members' sources (one version per package across the workspace).
 gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.3" }
-# `markov_implicit_adjoint` is built on `argminax.adjoint.safe_implicit_adjoint`
-# (v0.0.10), in step with pyrox-lgm's and pyrox-nn's source. argminax pins gaussx v0.8.2
+# `markov_implicit_adjoint` is built on `argminax.adjoint.safe_implicit_adjoint`,
+# and the Markov strategies' loop is `argminax.solve.site_fixed_point` (v0.0.10;
+# its evidence is gaussx v0.8.3's `site_evidence_correction`), in step with pyrox-lgm's and pyrox-nn's source. argminax pins gaussx v0.8.2
 # by URL; the root override keeps the workspace's one gaussx instead.
 argminax = { git = "https://github.com/jejjohnson/argminax.git", tag = "v0.0.10" }
 
