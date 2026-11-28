@@ -289,6 +289,8 @@ convergence (quasi-Newton). Each `fit(prior, likelihood, y)` returns a
 
 The Laplace and Gauss-Newton loops run on `argminax.solve.laplace_mode_covariance` and the quasi-Newton one on `optimistix.LBFGS`, so those three fits run under `jax.jit` and `jax.vmap` (over datasets, say) and their `n_iter` and `converged` are arrays. Close over the prior rather than passing it through the transform, since its kernel's priors live in a registry that a rebuilt module loses.
 
+All five form the dense $N \times N$ kernel matrix and do not use the prior's `solver`, so each raises a `ValueError` on `GPPrior(..., matrix_free=True)` rather than allocating it silently; `gp_laplace_factor` raises the same way. Matrix-free Laplace, Gauss-Newton, posterior linearisation and EP are planned in [#551](https://github.com/jejjohnson/pyrox/issues/551) and [#552](https://github.com/jejjohnson/pyrox/issues/552). `QuasiNewtonInference` keeps the error, since it whitens its search with a Cholesky root of the kernel matrix.
+
 ::: pyrox_gp.LaplaceInference
 ::: pyrox_gp.GaussNewtonInference
 ::: pyrox_gp.PosteriorLinearization
