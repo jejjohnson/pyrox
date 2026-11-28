@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.3](https://github.com/jejjohnson/pyrox/compare/pyrox-ssm-v0.2.2...pyrox-ssm-v0.2.3) (2026-11-28)
+
+
+### Features
+
+* **gp:** laplace and gauss-newton fits take a solver choice and run on a matrix-free prior ([#583](https://github.com/jejjohnson/pyrox/issues/583)) ([d75552a](https://github.com/jejjohnson/pyrox/commit/d75552a515e10985e0e7327382d0b72fab09bd51)), closes [#551](https://github.com/jejjohnson/pyrox/issues/551)
+* **gp:** stochastic site variances from gaussx 0.8.4 for posterior linearisation, EP and Laplace ([#584](https://github.com/jejjohnson/pyrox/issues/584)) ([5c51534](https://github.com/jejjohnson/pyrox/commit/5c51534bb5979d6e4fe329c5587f8369818673e0))
+
 ## [0.2.2](https://github.com/jejjohnson/pyrox/compare/pyrox-ssm-v0.2.1...pyrox-ssm-v0.2.2) (2026-11-26)
 
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.2](https://github.com/jejjohnson/pyrox/compare/pyrox-nn-v0.2.1...pyrox-nn-v0.2.2) (2026-11-28)
+
+
+### Features
+
+* **gp:** laplace and gauss-newton fits take a solver choice and run on a matrix-free prior ([#583](https://github.com/jejjohnson/pyrox/issues/583)) ([d75552a](https://github.com/jejjohnson/pyrox/commit/d75552a515e10985e0e7327382d0b72fab09bd51)), closes [#551](https://github.com/jejjohnson/pyrox/issues/551)
+* **gp:** stochastic site variances from gaussx 0.8.4 for posterior linearisation, EP and Laplace ([#584](https://github.com/jejjohnson/pyrox/issues/584)) ([5c51534](https://github.com/jejjohnson/pyrox/commit/5c51534bb5979d6e4fe329c5587f8369818673e0))
+* **nn:** last_layer_laplace takes a solver for the posterior precision ([#575](https://github.com/jejjohnson/pyrox/issues/575)) ([ac9e9e5](https://github.com/jejjohnson/pyrox/commit/ac9e9e517a362710cd9f39862885f1661bf998b6)), closes [#561](https://github.com/jejjohnson/pyrox/issues/561)
+
+
+### Bug Fixes
+
+* **gp:** preconditioned_cg_solver takes a diagonal that varies by point ([#578](https://github.com/jejjohnson/pyrox/issues/578)) ([5de2f03](https://github.com/jejjohnson/pyrox/commit/5de2f037f3669148ed3c67b52731f24030917c26)), closes [#555](https://github.com/jejjohnson/pyrox/issues/555)
+
 ## [0.2.1](https://github.com/jejjohnson/pyrox/compare/pyrox-nn-v0.2.0...pyrox-nn-v0.2.1) (2026-11-19)
 
 

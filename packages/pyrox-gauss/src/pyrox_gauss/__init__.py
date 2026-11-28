@@ -17,7 +17,7 @@ from pyrox_gauss._mvn_base import AbstractMultivariateNormal
 from pyrox_gauss._mvn_prec import MultivariateNormalPrecision
 
 
-__version__ = "0.1.0"  # x-release-please-version
+__version__ = "0.1.1"  # x-release-please-version
 
 __all__ = [
     "LGSSM",
