@@ -22,8 +22,8 @@ vectors (probe vectors, sketch columns) turns each block into a
 matrix-matrix product.
 
 `gaussx.split_diagonal` recovers $K_{\text{op}}$ and the diagonal from that
-sum, so `pyrox_gp.preconditioned_cg_solver` can build its preconditioner
-from $K$ with the exact noise as the shift.
+sum, so `pyrox_gp.matfree_solver` and `pyrox_gp.bbmm_solver` can build
+their preconditioner from $K$ with the exact noise as the shift.
 """
 
 from __future__ import annotations

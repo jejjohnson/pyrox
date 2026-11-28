@@ -1,4 +1,4 @@
-r"""A gaussx solver strategy for exact GPs at large ``n`` (P4).
+r"""The preconditioner and log-determinant behind `pyrox_gp.matfree_solver` (P4).
 
 With $\hat K = K + \sigma^2 I$ and $\alpha = \hat K^{-1}y$,
 
@@ -30,6 +30,7 @@ is read back with `gaussx.split_diagonal`:
 
 from __future__ import annotations
 
+import warnings
 from typing import Literal
 
 import equinox as eqx
@@ -87,6 +88,23 @@ def _split_system(
     return split.base, split.diagonal
 
 
+_NOT_A_SUM = (
+    "the system is not a sum K + diag(d), so the diagonal cannot be read "
+    "from it. Use GPPrior(..., matrix_free=True), or pass the deprecated "
+    "preconditioned_cg_solver a shift= (a lower bound on the noise variance)."
+)
+
+
+def _warn_shift_ignored(shift: float | None) -> None:
+    if shift is not None:
+        warnings.warn(
+            f"shift={shift} is ignored: the system is a sum K + diag(d), and "
+            "the diagonal is read from it (pyrox#557).",
+            UserWarning,
+            stacklevel=3,
+        )
+
+
 class _NoiseSplitPreconditioner(gx.AbstractPreconditioner):
     """Low-rank preconditioner of ``K + diag(d)``, rebuilt from the system per solve.
 
@@ -95,6 +113,11 @@ class _NoiseSplitPreconditioner(gx.AbstractPreconditioner):
     exact ``s``. If it is ``K + diag(d)`` with a diagonal that varies by
     point, it is built from ``K`` with the per-point shift ``d``. Otherwise
     it is built from ``A - shift I`` with the user bound ``shift``.
+
+    It serves the CG solve only. On ``K + s I`` it keeps gaussx's scalar
+    Nyström form, whose $P$ is $A$ divided by $\\hat\\gamma_k + s$; CG does
+    not see that scale, but a log-determinant that draws probes from $P$
+    would, so `pyrox_gp.bbmm_solver` uses gaussx's lazy preconditioners.
     """
 
     kind: Literal["nystrom", "rpcholesky"] = eqx.field(static=True)
@@ -110,30 +133,29 @@ class _NoiseSplitPreconditioner(gx.AbstractPreconditioner):
     ]:
         split = _split_system(operator)
         if split is not None:
+            _warn_shift_ignored(self.shift)
             return split
         if self.shift is None:
-            raise ValueError(
-                "preconditioned_cg_solver: the system is not a sum K + diag(d), "
-                "so the diagonal cannot be read from it. Pass shift= (a lower "
-                "bound on the noise variance) or use GPPrior(..., matrix_free=True)."
-            )
+            raise ValueError(f"The pyrox-gp preconditioner: {_NOT_A_SUM}")
         identity = lx.IdentityLinearOperator(operator.in_structure())
         return operator - self.shift * identity, self.shift
+
+    def _built(self, operator: lx.AbstractLinearOperator) -> gx.AbstractPreconditioner:
+        """The gaussx preconditioner of this system, built from its kernel part."""
+        psd_part, shift = self._psd_part_and_shift(operator)
+        psd_part = lx.TaggedLinearOperator(psd_part, lx.positive_semidefinite_tag)
+        if self.kind == "nystrom":
+            return gx.NystromPreconditioner.from_operator(
+                psd_part, self.rank, shift=shift, key=self.key
+            )
+        return gx.PartialCholeskyPreconditioner.from_operator(
+            psd_part, self.rank, shift=shift, pivoting="random", key=self.key
+        )
 
     def as_operator(self, operator=None):
         if operator is None:
             return None
-        psd_part, shift = self._psd_part_and_shift(operator)
-        psd_part = lx.TaggedLinearOperator(psd_part, lx.positive_semidefinite_tag)
-        if self.kind == "nystrom":
-            precond: gx.AbstractPreconditioner = gx.NystromPreconditioner.from_operator(
-                psd_part, self.rank, shift=shift, key=self.key
-            )
-        else:
-            precond = gx.PartialCholeskyPreconditioner.from_operator(
-                psd_part, self.rank, shift=shift, pivoting="random", key=self.key
-            )
-        return precond.as_operator()
+        return self._built(operator).as_operator()
 
 
 class _NoiseSplitNystromLogdet(gx.AbstractLogdetStrategy):
@@ -164,15 +186,13 @@ class _NoiseSplitNystromLogdet(gx.AbstractLogdetStrategy):
         split = _split_system(operator)
         shift: float | Float[Array, ""] | Float[Array, " N"]
         if split is not None:
+            _warn_shift_ignored(self.shift)
             _, shift = split
         elif self.shift is not None:
             shift = self.shift
         else:
             raise ValueError(
-                'preconditioned_cg_solver(logdet="nystrom"): the system is not a '
-                "sum K + diag(d), so the diagonal cannot be read from it. Pass "
-                "shift= (a lower bound on the noise variance) or use "
-                "GPPrior(..., matrix_free=True)."
+                f'The Nyström log-determinant (logdet="nystrom"): {_NOT_A_SUM}'
             )
         strategy = gx.NystromLogdet(
             shift=shift,
@@ -184,117 +204,3 @@ class _NoiseSplitNystromLogdet(gx.AbstractLogdetStrategy):
         # fixed function of the hyperparameters (common random numbers)
         logdet_key = self.key if key is None else key
         return strategy.logdet(operator, key=logdet_key)
-
-
-def preconditioned_cg_solver(
-    *,
-    shift: float | None = None,
-    preconditioner: Literal["nystrom", "rpcholesky"] = "nystrom",
-    rank: int = 200,
-    logdet: Literal["slq", "nystrom"] = "slq",
-    key: jax.Array,
-    rtol: float = 1e-6,
-    atol: float = 1e-6,
-    max_steps: int = 1000,
-    num_probes: int = 20,
-    lanczos_order: int = 30,
-) -> gx.AbstractSolverStrategy:
-    """A gaussx solver for exact GPs: preconditioned CG plus a stochastic logdet.
-
-    Pass it as ``GPPrior(..., solver=...)``; every solve, log-determinant and
-    gradient of the marginal likelihood then goes through it. It also solves
-    a system $K + \\mathrm{diag}(d)$ whose diagonal varies by point, the
-    system of a non-Gaussian or heteroscedastic GP (pyrox#555).
-
-    Args:
-        shift: Optional, and used only for a system that is one dense
-            matrix. A sum $K + \\mathrm{diag}(d)$ is read with
-            `gaussx.split_diagonal`, so ``shift`` is ignored there: for
-            ``GPPrior(..., matrix_free=True)`` the system is
-            $K_{\\text{op}} + (\\text{jitter} + \\sigma^2) I$ and the
-            preconditioner takes the scalar noise from it exactly, and for
-            a per-point $d$ it takes $d$ and builds the preconditioner by
-            gaussx's symmetric scaling. For a dense system ``shift`` is
-            $\\mu$, a lower bound on the noise variance (e.g. the smallest
-            noise the prior allows): the preconditioner is built from
-            $K + (\\sigma^2 - \\mu) I$, so ``shift`` must not exceed
-            $\\sigma^2$. A dense system without ``shift`` raises at solve
-            time.
-        preconditioner: ``"nystrom"`` (randomized Nyström) or
-            ``"rpcholesky"`` (randomly pivoted partial Cholesky), both of
-            rank ``rank`` and rebuilt from the operator at each solve.
-            Nyström sketches all ``rank`` columns in one batched matvec;
-            partial Cholesky takes one matvec per pivot, so prefer
-            ``"nystrom"`` for a matrix-free system.
-        rank: Preconditioner rank; aim for a few times the effective
-            dimension of $K$ at noise level $\\mu$.
-        logdet: ``"slq"`` (stochastic Lanczos quadrature on the system) or
-            ``"nystrom"`` (`gaussx.NystromLogdet`: the exact log-determinant
-            of a rank-``rank`` Nyström preconditioner $P = \\hat K_{\\text{lr}}
-            + s I$, plus SLQ on $P^{-1/2} \\hat K P^{-1/2}$, which is close to
-            the identity, so its variance is much lower at the same probe
-            count). Its shift is read from the system like the
-            preconditioner's: the exact noise for ``matrix_free=True``, the
-            per-point $d$ of a sum $K + \\mathrm{diag}(d)$, and ``shift``
-            for a dense system, which raises at solve time without one. Its
-            sketch has the preconditioner's ``rank`` but is drawn separately
-            (a shared sketch would save one factorisation and is not
-            implemented).
-        key: PRNG key for the sketch / the random pivots. With
-            ``logdet="nystrom"`` and no key passed to ``logdet``, the
-            log-determinant's sketch and probes are split from it as well,
-            so the estimate is a fixed function of the hyperparameters.
-        rtol: CG relative tolerance.
-        atol: CG absolute tolerance.
-        max_steps: CG iteration cap.
-        num_probes: SLQ probe vectors (for either ``logdet``).
-        lanczos_order: SLQ Lanczos steps per probe. The SLQ runs on the
-            unpreconditioned system, so it needs more steps as
-            $K + \\sigma^2 I$ gets worse conditioned: for a Matérn-3/2 GP at
-            $n = 3000$, lengthscale 0.2 and noise 0.04, 30 steps bias the
-            log-determinant gradient by about 8 % and 60 steps by under 1 %.
-
-    Returns:
-        A `gaussx.CGSolver` with the preconditioner attached for
-        ``logdet="slq"``; for ``logdet="nystrom"``, a `gaussx.ComposedSolver`
-        of that CG solve and the Nyström log-determinant.
-
-    Raises:
-        ValueError: For an unknown preconditioner or ``logdet``, or a
-            non-positive shift; at solve time, for a dense system without
-            ``shift``.
-
-    Examples:
-        ```python
-        import jax.random as jr
-        import pyrox_gp as px
-
-        solver = px.preconditioned_cg_solver(rank=500, key=jr.key(0))
-        # X: (1e5, 2); K is never formed, and the noise comes from the system
-        prior = px.GPPrior(px.Matern(nu=1.5), X, solver=solver, matrix_free=True)
-        # inside a NumPyro model: px.gp_factor("y", prior, y, noise_var)
-        ```
-    """
-    if logdet not in ("slq", "nystrom"):
-        raise ValueError(f"logdet must be 'slq' or 'nystrom', got {logdet!r}")
-    if shift is not None and not shift > 0:
-        raise ValueError(f"shift must be positive, got {shift}")
-    if preconditioner not in ("nystrom", "rpcholesky"):
-        raise ValueError(
-            f"preconditioner must be 'nystrom' or 'rpcholesky', got {preconditioner!r}"
-        )
-    precond = _NoiseSplitPreconditioner(preconditioner, rank, shift, key)
-    cg = gx.CGSolver(
-        rtol=rtol,
-        atol=atol,
-        max_steps=max_steps,
-        num_probes=num_probes,
-        lanczos_order=lanczos_order,
-        preconditioner=precond,
-    )
-    if logdet == "slq":
-        return cg
-    nystrom_logdet = _NoiseSplitNystromLogdet(
-        rank, shift, num_probes, lanczos_order, key
-    )
-    return gx.ComposedSolver(solve_strategy=cg, logdet_strategy=nystrom_logdet)
