@@ -79,9 +79,14 @@ class KernelOperator(lx.AbstractLinearOperator):
     def mv(self, vector: Float[Array, " N"]) -> Float[Array, " N"]:
         X = self.X
 
+        # a hyperparameter of a frozen kernel can be a float64 scalar that
+        # loses its weak type inside a lineax solve, so the row is cast to the
+        # operator's dtype (float32 data under x64; pyrox#551)
+        dtype = X.dtype
+
         @jax.checkpoint
         def row(x: Float[Array, " D"]) -> Float[Array, ""]:
-            k_row = self.kernel(x[None, :], X)[0]
+            k_row = self.kernel(x[None, :], X)[0].astype(dtype)
             return einx.dot("n, n ->", k_row, vector)
 
         return jax.lax.map(row, X, batch_size=min(self.block_size, X.shape[0]))
@@ -116,7 +121,7 @@ lx.conj.register(KernelOperator)(lambda operator: operator)
 
 @lx.diagonal.register(KernelOperator)
 def _(operator: KernelOperator) -> Float[Array, " N"]:
-    return operator.kernel.diag(operator.X)
+    return operator.kernel.diag(operator.X).astype(operator.X.dtype)
 
 
 @lx.tridiagonal.register(KernelOperator)
