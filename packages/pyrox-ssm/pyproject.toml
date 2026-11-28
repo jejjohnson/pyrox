@@ -23,7 +23,7 @@ classifiers = [
 # need nothing from the sibling packages (tests/test_ssm_import_guard.py).
 dependencies = [
     "pyrox",
-    "gaussx>=0.8.3",
+    "gaussx>=0.8.4",
     "pyrox-gauss",
     "equinox>=0.13.8",
     "lineax>=0.1.1",
@@ -53,7 +53,7 @@ Repository = "https://github.com/jejjohnson/pyrox"
 [tool.uv.sources]
 # Not on PyPI yet; resolve the release tag from GitHub, in step with the
 # other members' sources (one version per package across the workspace).
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.3" }
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.4" }
 # `markov_implicit_adjoint` is built on `argminax.adjoint.safe_implicit_adjoint`,
 # and the Markov strategies' loop is `argminax.solve.site_fixed_point` (since
 # v0.0.10; its evidence is gaussx v0.8.3's `site_evidence_correction`), at the
