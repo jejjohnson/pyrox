@@ -24,12 +24,12 @@ classifiers = [
 dependencies = [
     "pyrox",
     "einx>=0.4.3",
-    "gaussx>=0.8.2",
+    "gaussx>=0.8.3",
     "pyrox-gauss",
     "kernellib>=0.0.22",
     "matfree>=0.6.0",
     "numpyro>=0.21",
-    "argminax[numpyro]>=0.0.6",
+    "argminax>=0.0.10",
     "optimistix>=0.1.0",
     "functax[jax] @ git+https://github.com/jejjohnson/functax.git@v0.0.7",
 ]
@@ -46,13 +46,13 @@ Repository = "https://github.com/jejjohnson/pyrox"
 [tool.uv.sources]
 # Neither is on PyPI yet; resolve the release tags from GitHub, in step with
 # pyrox-gp's sources (one version per package across the workspace).
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.2" }
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.3" }
 kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.22" }
 # The inner Newton loop of `inla()` (`argminax.solve.laplace_mode`), at the
-# v0.0.8 release, in step with pyrox-nn's and pyrox-ssm's sources. argminax
-# pins gaussx v0.6.13 by URL; the root override keeps the workspace's one
+# v0.0.10 release, in step with pyrox-nn's and pyrox-ssm's sources. argminax
+# pins gaussx v0.8.2 by URL; the root override keeps the workspace's one
 # gaussx instead.
-argminax = { git = "https://github.com/jejjohnson/argminax.git", tag = "v0.0.8" }
+argminax = { git = "https://github.com/jejjohnson/argminax.git", tag = "v0.0.10" }
 
 [build-system]
 requires = ["hatchling>=1.27"]

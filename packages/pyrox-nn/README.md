@@ -105,12 +105,12 @@ We have not put pyrox-nn on PyPI, and the name `pyrox` there belongs to an unrel
 uv add "pyrox-nn @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-nn"
 ```
 
-kernellib v0.0.22 pins geonnax v0.0.8 and argminax v0.0.6 pins gaussx v0.6.13, while pyrox-nn needs geonnax v0.0.11 and gaussx v0.8.2, so add this override to your project's `pyproject.toml`; without it uv cannot resolve the install.
+kernellib v0.0.22 pins geonnax v0.0.8 and argminax v0.0.10 pins gaussx v0.8.2, while pyrox-nn needs geonnax v0.0.11 and gaussx v0.8.3, so add this override to your project's `pyproject.toml`; without it uv cannot resolve the install.
 
 ```toml
 [tool.uv]
 override-dependencies = [
-    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.8.2",
+    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.8.3",
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.11",
 ]
 ```

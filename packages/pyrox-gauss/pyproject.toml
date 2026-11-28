@@ -22,7 +22,7 @@ classifiers = [
 # No pyrox: the distributions take every argument they need and use nothing
 # from the bridge (tests/test_gauss_import_guard.py).
 dependencies = [
-    "gaussx>=0.8.2",
+    "gaussx>=0.8.3",
     "numpyro>=0.21",
     "jax>=0.10.1",
     "equinox>=0.13.8",
@@ -37,7 +37,7 @@ Repository = "https://github.com/jejjohnson/pyrox"
 [tool.uv.sources]
 # Not on PyPI yet; resolve the release tag from GitHub, in step with the
 # other members' sources (one version per package across the workspace).
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.2" }
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.3" }
 
 [build-system]
 requires = ["hatchling>=1.27"]
