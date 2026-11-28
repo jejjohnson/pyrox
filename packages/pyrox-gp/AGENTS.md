@@ -82,6 +82,12 @@ The Markov / state-space track (`MarkovGPPrior`, the SDE kernels, the Markov non
   `LaplaceInference` and `GaussNewtonInference`) and optimistix
   (`optx.LBFGS` for `QuasiNewtonInference`), so those fits trace; their
   `n_iter` and `converged` are arrays (`tests/gp/test_inference_nongauss_argminax.py`).
+- **Cavity loops** (`PosteriorLinearization`, `ExpectationPropagation`) run on
+  `argminax.solve.site_fixed_point` over `gaussx.site_posterior`, with the
+  evidence from `gaussx.site_log_evidence`. Their `solver`, `preconditioner`
+  and `logdet` fall back field by field to the prior's (`_site_solver`), and
+  a stochastic variance raises until gaussx#827
+  (`tests/gp/test_inference_nongauss_sites.py`).
 - **Optional dependencies**: `flows` (`gauss_flows`; tests use
   `pytest.importorskip("gauss_flows")`).
 

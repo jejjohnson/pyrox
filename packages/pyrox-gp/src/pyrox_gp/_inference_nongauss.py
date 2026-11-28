@@ -38,7 +38,7 @@ updates, GGN curvature, Cholesky solves — comes from
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import einx
 import equinox as eqx
@@ -47,16 +47,24 @@ import jax.numpy as jnp
 import lineax as lx
 import numpyro
 import optimistix as optx
-from argminax.solve import laplace_mode_covariance
+from argminax.solve import laplace_mode_covariance, site_fixed_point
 from gaussx import (
     AbstractIntegrator,
+    AbstractLogdetStrategy,
+    AbstractPreconditioner,
+    AbstractSolverStrategy,
+    DenseSolver,
     GaussHermiteIntegrator,
+    SitePosterior,
     cavity_distribution,
     cholesky_logdet,
     damped_natural_update,
     ep_tilted_moments,
     newton_update,
     safe_cholesky,
+    site_log_evidence,
+    site_posterior,
+    solve,
     symmetrize,
 )
 from jaxtyping import Array, Bool, Float, Int, PyTree
@@ -66,6 +74,7 @@ from pyrox.likelihoods import AbstractObservation
 from pyrox_gp._inference import _per_site_expectation
 from pyrox_gp._likelihoods import _site_log_prob
 from pyrox_gp._protocols import Likelihood
+from pyrox_gp._solvers import compose_solver_fields
 
 
 if TYPE_CHECKING:
@@ -111,6 +120,12 @@ class ConditionedNonGaussGP(eqx.Module):
             so a fit runs under ``jax.jit`` and ``jax.vmap``.
         converged: Whether the convergence tolerance was met, a scalar
             boolean array.
+        solver: The iterative solver the fit used, if any. ``None`` (every
+            dense fit) predicts by the Cholesky factor above; otherwise
+            `predict` solves against $K + \\mathrm{diag}(1 / \\Lambda)$ with
+            it, one solve for the mean and one per test point for the
+            variance, through the prior's operator, so a matrix-free prior
+            stays matrix-free.
     """
 
     prior: GPPrior
@@ -122,6 +137,43 @@ class ConditionedNonGaussGP(eqx.Module):
     log_marginal_approx: Float[Array, ""]
     n_iter: Int[Array, ""]
     converged: Bool[Array, ""]
+    solver: AbstractSolverStrategy | None = None
+
+    def _solver_predict(
+        self, X_star: Float[Array, "M D"], *, variance: bool
+    ) -> tuple[Float[Array, " M"], Float[Array, " M"] | None]:
+        r"""The predictive marginals through ``solver``, without a factor.
+
+        $\mu_* = \mu(X_*) + K_{*X} w$ with the weights $w = A^{-1}
+        (\mu_\text{site} - \mu_f)$ of `gaussx.site_posterior`, and
+        $\sigma_*^2 = k_{**} - k_*^\top A^{-1} k_*$, one solve per test point.
+        """
+        prior = self.prior
+        with call_context(prior.kernel):
+            prior_cov = prior._prior_operator()
+            K_cross = prior.kernel(X_star, prior.X)
+            K_diag = prior.kernel.diag(X_star) if variance else None
+            prior_mean_train = prior.mean(prior.X)
+            prior_mean_test = prior.mean(X_star)
+        posterior = site_posterior(
+            jnp.asarray(prior_mean_train),
+            prior_cov,
+            self.site_nat1,
+            self.site_nat2,
+            solver=self.solver,
+        )
+        # μ_* = μ(X_*) + K_{*X} w,  K_{*X}: (M, N), w: (N,) → (M,)
+        mean = prior_mean_test + einx.dot("m n, n -> m", K_cross, posterior.weights)
+        if K_diag is None:
+            return mean, None
+        system = posterior.system
+
+        def reduction(k_star: Float[Array, " N"]) -> Float[Array, ""]:
+            # k_*ᵀ A⁻¹ k_*
+            return k_star @ solve(system, k_star, solver=self.solver)
+
+        var = K_diag - jax.lax.map(reduction, K_cross, batch_size=32)
+        return mean, jnp.maximum(var, 0.0)
 
     def _pseudo_factor(self) -> Float[Array, "N N"]:
         """Cholesky of ``K + diag(1/Λ + jitter)`` via `_psd_safe_cholesky`."""
@@ -133,6 +185,8 @@ class ConditionedNonGaussGP(eqx.Module):
     def predict_mean(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
         r"""$\mu_* = \mu(X_*) + K_{*f}\,\alpha$ with
         ``alpha`` derived from the site naturals."""
+        if self.solver is not None:
+            return self._solver_predict(X_star, variance=False)[0]
         with call_context(self.prior.kernel):
             L = self._pseudo_factor()
             K_cross = self.prior.kernel(X_star, self.prior.X)
@@ -146,6 +200,10 @@ class ConditionedNonGaussGP(eqx.Module):
 
     def predict_var(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
         r"""$\Sigma_{**} - K_{*f} (K + \mathrm{diag}(1/\Lambda))^{-1} K_{f*}$."""
+        if self.solver is not None:
+            var = self._solver_predict(X_star, variance=True)[1]
+            assert var is not None
+            return var
         with call_context(self.prior.kernel):
             L = self._pseudo_factor()
             K_cross = self.prior.kernel(X_star, self.prior.X)
@@ -166,6 +224,10 @@ class ConditionedNonGaussGP(eqx.Module):
         Pattern B / C kernels with prior'd hyperparameters resample
         once and produce a self-consistent ``(mean, var)`` pair.
         """
+        if self.solver is not None:
+            mean, var = self._solver_predict(X_star, variance=True)
+            assert var is not None
+            return mean, var
         with call_context(self.prior.kernel):
             L = self._pseudo_factor()
             K_cross = self.prior.kernel(X_star, self.prior.X)
@@ -202,12 +264,13 @@ _MATRIX_FREE_EPIC = "https://github.com/jejjohnson/pyrox/issues/353"
 
 
 def _reject_matrix_free(prior: GPPrior, strategy: str) -> None:
-    """Refuse ``GPPrior(matrix_free=True)``: every strategy here forms ``K``.
+    """Refuse ``GPPrior(matrix_free=True)`` in the strategies that form ``K``.
 
     A matrix-free prior promises never to form the N × N kernel matrix, and
-    each strategy in this module evaluates it densely (`_prior_K`) and
-    ignores the prior's ``solver``. Raising keeps that promise instead of
-    allocating ``K`` silently.
+    the Newton and quasi-Newton strategies evaluate it densely (`_prior_K`)
+    and ignore the prior's ``solver``; posterior linearisation and EP run on
+    `gaussx.site_posterior` instead and accept it (pyrox#552). Raising keeps
+    that promise instead of allocating ``K`` silently.
     """
     if not prior.matrix_free:
         return
@@ -220,8 +283,9 @@ def _reject_matrix_free(prior: GPPrior, strategy: str) -> None:
     else:
         reason = (
             "it forms the dense N x N kernel matrix and does not yet use the "
-            "prior's solver; matrix-free Laplace, Gauss-Newton, posterior "
-            "linearisation and EP are planned (pyrox#551, pyrox#552)"
+            "prior's solver; matrix-free Laplace and Gauss-Newton are planned "
+            "(pyrox#551), and PosteriorLinearization and ExpectationPropagation "
+            "already take a matrix-free prior"
         )
     raise ValueError(
         f"{strategy} does not support GPPrior(matrix_free=True): {reason}. "
@@ -492,8 +556,7 @@ class LaplaceInference(eqx.Module):
 
     Dense only: the fit forms the N × N kernel matrix and does not use the
     prior's ``solver``, so a ``GPPrior(matrix_free=True)`` raises
-    ``ValueError`` (pyrox#549; pyrox#551 and pyrox#552 plan the
-    matrix-free version).
+    ``ValueError`` (pyrox#549; pyrox#551 plans the matrix-free version).
 
     Attributes:
         max_iter: Newton iterations. Default ``20``.
@@ -552,8 +615,7 @@ class GaussNewtonInference(eqx.Module):
 
     Dense only: the fit forms the N × N kernel matrix and does not use the
     prior's ``solver``, so a ``GPPrior(matrix_free=True)`` raises
-    ``ValueError`` (pyrox#549; pyrox#551 and pyrox#552 plan the
-    matrix-free version).
+    ``ValueError`` (pyrox#549; pyrox#551 plans the matrix-free version).
 
     Attributes:
         max_iter: Iterations. Default ``20``.
@@ -589,7 +651,172 @@ class GaussNewtonInference(eqx.Module):
         )
 
 
-# --- Posterior linearization --------------------------------------------
+# --- Posterior linearization and EP: the site loop ------------------------
+
+
+_VarianceMethod = Literal["auto", "exact", "stochastic"]
+_VARIANCE_METHODS = ("auto", "exact", "stochastic")
+# The size above which gaussx's "auto" variance turns stochastic for an
+# iterative solver (`gaussx.SitePosterior.variance`, `gaussx.diag_inv`).
+_EXACT_VARIANCE_MAX_SIZE = 2048
+_STOCHASTIC_VARIANCE_ISSUE = "https://github.com/jejjohnson/gaussx/issues/827"
+
+_SiteNaturals = tuple[Float[Array, " N"], Float[Array, " N"]]
+
+
+def _check_variance_method(strategy: str, variance: str) -> None:
+    """Reject a ``variance`` that is none of the three methods."""
+    if variance not in _VARIANCE_METHODS:
+        raise ValueError(
+            f"{strategy}: variance must be 'auto', 'exact' or 'stochastic', "
+            f"got {variance!r}."
+        )
+
+
+def _site_solver(
+    strategy: PosteriorLinearization | ExpectationPropagation,
+    prior: GPPrior,
+) -> AbstractSolverStrategy:
+    """The strategy's solver, each unset field taken from the prior.
+
+    ``solver``, ``preconditioner`` and ``logdet`` fall back one by one to
+    the prior's fields, and the three are composed by
+    `gaussx.compose_solver`; none set on either is `gaussx.DenseSolver`.
+    """
+    return compose_solver_fields(
+        type(strategy).__name__,
+        prior.solver if strategy.solver is None else strategy.solver,
+        prior.preconditioner
+        if strategy.preconditioner is None
+        else strategy.preconditioner,
+        prior.logdet if strategy.logdet is None else strategy.logdet,
+    )
+
+
+def _require_exact_variance(
+    strategy: PosteriorLinearization | ExpectationPropagation,
+    solver: AbstractSolverStrategy,
+    size: int,
+) -> None:
+    """Raise unless the marginal variances can be exact.
+
+    ``"auto"`` is exact for a dense solver, and for an iterative one up to
+    N = 2048; above, and for ``"stochastic"``, the variances would be a
+    probe estimate, which waits on the diagonal estimators of gaussx#827.
+
+    Raises:
+        NotImplementedError: For the stochastic branch, naming gaussx#827.
+    """
+    method = strategy.variance
+    if method == "auto":
+        exact = isinstance(solver, DenseSolver) or size <= _EXACT_VARIANCE_MAX_SIZE
+        method = "exact" if exact else "stochastic"
+    if method == "stochastic":
+        raise NotImplementedError(
+            f"{type(strategy).__name__}: the stochastic marginal variances "
+            f"(variance={strategy.variance!r} with an iterative solver at "
+            f"N = {size}) wait on the diagonal estimators of gaussx#827 "
+            f"({_STOCHASTIC_VARIANCE_ISSUE}). Pass variance='exact', which "
+            f"costs N solves per iteration in batches of batch_size."
+        )
+
+
+def _site_marginals(
+    sites: _SiteNaturals,
+    prior_mean: Float[Array, " N"],
+    prior_cov: lx.AbstractLinearOperator,
+    solver: AbstractSolverStrategy,
+    batch_size: int,
+) -> tuple[SitePosterior, Float[Array, " N"]]:
+    """The site posterior of ``sites`` and its exact marginal variances."""
+    information, precision = sites
+    posterior = site_posterior(
+        prior_mean, prior_cov, information, precision, solver=solver
+    )
+    return posterior, posterior.variance(method="exact", batch_size=batch_size)
+
+
+def _fit_cavity_sites(
+    strategy: PosteriorLinearization | ExpectationPropagation,
+    prior: GPPrior,
+    likelihood: Likelihood,
+    y: Float[Array, " N"],
+    key: Array | None,
+) -> ConditionedNonGaussGP:
+    """The fit PL and EP share; they differ only in ``strategy._update``.
+
+    The first update forms its cavities from the prior marginals, with every
+    site at ``(0, precision_floor)``; every later one, inside
+    `argminax.solve.site_fixed_point`, from the site posterior of the
+    current sites (`gaussx.site_posterior`). The evidence is
+    `gaussx.site_log_evidence` at the posterior mean.
+    """
+    _check_scalar_latent(likelihood)
+    solver = _site_solver(strategy, prior)
+    size = prior.X.shape[0]
+    _require_exact_variance(strategy, solver, size)
+    # one hyperparameter draw for the operator and the mean
+    with call_context(prior.kernel):
+        prior_cov = prior._prior_operator()
+        prior_mean = jnp.asarray(prior.mean(prior.X))
+    site_data = _site_data(likelihood, y, prior.X)
+    dtype = prior_cov.in_structure().dtype
+
+    # zero sites with precision ε: the first cavity is the prior
+    sites = (
+        jnp.zeros(size, dtype=dtype),
+        jnp.full((size,), strategy.precision_floor, dtype=dtype),
+    )
+    first = min(strategy.max_iter, 1)
+    if first:
+        sites = strategy._update(
+            sites, prior_mean, lx.diagonal(prior_cov), likelihood, site_data
+        )
+    if strategy.max_iter > first:
+        fit = site_fixed_point(
+            strategy._step,
+            sites,
+            (prior_mean, prior_cov, solver, likelihood, site_data),
+            max_iter=strategy.max_iter - first,
+            tol=strategy.tol,
+            adjoint=strategy.adjoint,
+        )
+        sites, n_steps, converged = fit.sites, fit.n_iter, fit.converged
+    else:
+        # the first update was the whole budget, and no stopping test ran
+        n_steps, converged = jnp.asarray(0), jnp.asarray(False)
+
+    posterior, q_var = _site_marginals(
+        sites, prior_mean, prior_cov, solver, strategy.batch_size
+    )
+    # ∑ₙ log p(yₙ ∣ mₙ) at the posterior mean
+    log_lik = _log_prob_per_point_factory(likelihood)(posterior.mean, site_data).sum()
+    nat1, nat2 = sites
+    return ConditionedNonGaussGP(
+        prior=prior,
+        y=y,
+        site_nat1=nat1,
+        site_nat2=nat2,
+        q_mean=posterior.mean,
+        q_var=q_var,
+        log_marginal_approx=site_log_evidence(posterior, log_lik, key=key),
+        n_iter=n_steps + first,
+        converged=converged,
+        solver=None if isinstance(solver, DenseSolver) else solver,
+    )
+
+
+def _cavity_step(
+    strategy: PosteriorLinearization | ExpectationPropagation,
+    sites: _SiteNaturals,
+    args: PyTree,
+) -> _SiteNaturals:
+    r"""One damped sweep $T_\alpha(s)$ from the site posterior of ``sites``."""
+    prior_mean, prior_cov, solver, likelihood, site_data = args
+    posterior, variance = _site_marginals(
+        sites, prior_mean, prior_cov, solver, strategy.batch_size
+    )
+    return strategy._update(sites, posterior.mean, variance, likelihood, site_data)
 
 
 class PosteriorLinearization(eqx.Module):
@@ -600,53 +827,85 @@ class PosteriorLinearization(eqx.Module):
     statistical-linearization moments
     $\bar g = E_{\rm cav}[\partial_f \log p]$ and
     $\bar h = E_{\rm cav}[\partial^2_f \log p]$ via the integrator,
-    update the site naturals via `gaussx.blr_diag_update` with
+    update the site naturals via `gaussx.newton_update` with
     a damping factor, recompute the global posterior, repeat. This is
     PL/CVI in the sense of Adam/Garcia-Fernandez/Sarkka — equivalent
     in the Gaussian-cavity limit to taking one EP-style step but using
     derivative expectations instead of moment matching.
 
-    Dense only: the fit forms the N × N kernel matrix and does not use the
-    prior's ``solver``, so a ``GPPrior(matrix_free=True)`` raises
-    ``ValueError`` (pyrox#549; pyrox#551 and pyrox#552 plan the
-    matrix-free version).
+    The posterior of the sites is `gaussx.site_posterior` through the
+    strategy's solver, and the loop is `argminax.solve.site_fixed_point`, so
+    ``fit`` runs under ``jax.jit`` and ``jax.vmap`` and its gradient in the
+    kernel hyperparameters is implicit at the fixed point; close over the
+    prior, whose kernel registry does not survive being passed through a
+    transform. The cavities need the posterior *marginal variances* at every
+    iteration, not only at the end: one Cholesky of
+    $A = K + \mathrm{diag}(1 / \Lambda)$ with a dense solver, $N$ solves
+    with an iterative one. The reported ``log_marginal_approx`` is the
+    Laplace-type approximation `gaussx.site_log_evidence` at the posterior
+    mean, not the EP evidence.
 
     Attributes:
         integrator: Cavity integrator. Default
             ``gaussx.GaussHermiteIntegrator(order=20)``.
-        max_iter: Iterations. Default ``20``.
+        max_iter: Iterations. Default ``40`` (``20`` before pyrox#552,
+            whose stopping test on the posterior mean let a fit stop a few
+            iterations earlier: on a 16-point Bernoulli problem the site test
+            needs 23 where the mean test stopped at 20).
         damping: Step size in (0, 1]. Default ``0.5``.
-        tol: ``inf``-norm convergence on the posterior mean.
+        tol: Convergence tolerance: the loop stops at the first iteration
+            where every site natural changed by less than
+            ``0.1 * tol * (1 + |new value|)``. Default ``1e-6``.
         precision_floor: Lower bound on the diagonal precision.
+        solver: The solve of $A$; ``None`` takes the prior's ``solver``.
+        preconditioner: The preconditioner of an iterative ``solver``;
+            ``None`` takes the prior's.
+        logdet: The log-determinant of the evidence; ``None`` takes the
+            prior's (and, if that is unset too, the solver's own). The three
+            are composed by `gaussx.compose_solver`; none set on either side
+            is `gaussx.DenseSolver`.
+        variance: How the marginal variances are computed, ``"auto"``,
+            ``"exact"`` or ``"stochastic"``. ``"auto"`` is exact for a dense
+            solver, and for an iterative one up to $N = 2048$. The stochastic
+            estimate waits on gaussx#827, so ``"stochastic"``, and ``"auto"``
+            above $N = 2048$ with an iterative solver, raise
+            ``NotImplementedError``.
+        num_probes: Probes of the stochastic variance (gaussx#827).
+        adjoint: How gradients pass through the loop; ``None`` is the
+            matrix-free implicit adjoint of `argminax.solve.site_fixed_point`.
+        batch_size: Solves vectorised together for the exact variances of
+            an iterative solver. Default ``32``.
     """
 
     integrator: AbstractIntegrator = eqx.field(
         default_factory=lambda: GaussHermiteIntegrator(order=20)
     )
-    max_iter: int = eqx.field(static=True, default=20)
+    max_iter: int = eqx.field(static=True, default=40)
     damping: float = eqx.field(static=True, default=0.5)
     tol: float = eqx.field(static=True, default=1e-6)
     precision_floor: float = eqx.field(static=True, default=1e-6)
+    solver: AbstractSolverStrategy | None = None
+    preconditioner: AbstractPreconditioner | None = None
+    logdet: AbstractLogdetStrategy | None = None
+    variance: _VarianceMethod = eqx.field(static=True, default="auto")
+    num_probes: int = eqx.field(static=True, default=100)
+    adjoint: optx.AbstractAdjoint | None = None
+    batch_size: int = eqx.field(static=True, default=32)
 
-    def fit(
+    def __check_init__(self) -> None:
+        _check_variance_method("PosteriorLinearization", self.variance)
+
+    def _update(
         self,
-        prior: GPPrior,
+        sites: _SiteNaturals,
+        mean: Float[Array, " N"],
+        variance: Float[Array, " N"],
         likelihood: Likelihood,
-        y: Float[Array, " N"],
-    ) -> ConditionedNonGaussGP:
-        _reject_matrix_free(prior, "PosteriorLinearization")
-        _check_scalar_latent(likelihood)
-        K = _prior_K(prior)
-        prior_mean = prior.mean(prior.X)
+        site_data: PyTree,
+    ) -> _SiteNaturals:
+        """The damped PL sites from the marginals ``(mean, variance)``."""
+        nat1, nat2 = sites
         log_prob_per_point = _log_prob_per_point_factory(likelihood)
-        sites = _site_data(likelihood, y, prior.X)
-
-        N = K.shape[0]
-        # Initialize sites at zero — posterior == prior.
-        nat1 = jnp.zeros(N, dtype=K.dtype)
-        nat2 = jnp.full((N,), self.precision_floor, dtype=K.dtype)
-        q_mean = jnp.asarray(prior_mean)
-        q_var = jnp.diag(K)
 
         def grad_at(f_n: Float[Array, ""], y_n: PyTree) -> Float[Array, ""]:
             return jax.grad(lambda f: log_prob_per_point(f[None], _one_site(y_n))[0])(
@@ -658,63 +917,76 @@ class PosteriorLinearization(eqx.Module):
                 jax.grad(lambda f: log_prob_per_point(f[None], _one_site(y_n))[0])
             )(f_n)
 
-        converged = False
-        n_iter = 0
-        for it in range(self.max_iter):
-            # Cavity for diagonal sites: q_n / site_n.
-            cav_mean, cav_var = cavity_distribution(
-                q_mean, q_var, nat1, nat2, precision_floor=self.precision_floor
-            )
-            assert isinstance(cav_var, jax.Array)  # diagonal path in, diagonal out
-
-            # Statistical-linearization moments under the cavity. Each
-            # site gets its own 1-D ``GaussianState`` and the integrator
-            # returns the propagated mean per site.
-            E_grad = _per_site_expectation(
-                self.integrator, grad_at, cav_mean, cav_var, sites
-            )
-            E_hess = _per_site_expectation(
-                self.integrator, hess_at, cav_mean, cav_var, sites
-            )
-
-            # Site update via BLR (diag): nat1_new = grad - H mu, nat2_new = -H,
-            # damped.
-            nat1_target, nat2_target = newton_update(
-                cav_mean, E_grad, E_hess, precision_floor=self.precision_floor
-            )
-            nat1, nat2 = damped_natural_update(
-                nat1, nat2, nat1_target, nat2_target, lr=self.damping
-            )
-            assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
-            nat2 = jnp.maximum(nat2, self.precision_floor)
-
-            q_mean_new, q_var = _posterior_from_diag_sites(K, nat1, nat2, prior_mean)
-            delta = jnp.max(jnp.abs(q_mean_new - q_mean))
-            q_mean = q_mean_new
-            n_iter = it + 1
-            if delta < self.tol:
-                converged = True
-                break
-
-        # Approximate log marginal via the same Laplace-style identity
-        # at the converged ``q_mean`` (acceptable for small N; not
-        # guaranteed PL-consistent — strategies expose their own marginal
-        # when the user needs strategy-specific values).
-        log_marg = _laplace_log_marginal(
-            log_prob_per_point, q_mean, sites, prior_mean, K, nat2
+        # q₋ₙ(fₙ) = q(fₙ) / siteₙ(fₙ)
+        cav_mean, cav_var = cavity_distribution(
+            mean, variance, nat1, nat2, precision_floor=self.precision_floor
         )
-
-        return ConditionedNonGaussGP(
-            prior=prior,
-            y=y,
-            site_nat1=nat1,
-            site_nat2=nat2,
-            q_mean=q_mean,
-            q_var=q_var,
-            log_marginal_approx=log_marg,
-            n_iter=jnp.asarray(n_iter),
-            converged=jnp.asarray(converged),
+        assert isinstance(cav_var, jax.Array)  # diagonal path in, diagonal out
+        # ḡₙ = 𝔼_{cav}[∂f log p(yₙ | f)], h̄ₙ = 𝔼_{cav}[∂²f log p(yₙ | f)]
+        E_grad = _per_site_expectation(
+            self.integrator, grad_at, cav_mean, cav_var, site_data
         )
+        E_hess = _per_site_expectation(
+            self.integrator, hess_at, cav_mean, cav_var, site_data
+        )
+        # λₙ ← max(−h̄ₙ, ε),  λₙ μ_site,n ← ḡₙ + λₙ μ_cav,n; damped
+        nat1_target, nat2_target = newton_update(
+            cav_mean, E_grad, E_hess, precision_floor=self.precision_floor
+        )
+        nat1, nat2 = damped_natural_update(
+            nat1, nat2, nat1_target, nat2_target, lr=self.damping
+        )
+        assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
+        return nat1, jnp.maximum(nat2, self.precision_floor)
+
+    def _step(self, sites: _SiteNaturals, args: PyTree) -> _SiteNaturals:
+        return _cavity_step(self, sites, args)
+
+    def fit(
+        self,
+        prior: GPPrior,
+        likelihood: Likelihood,
+        y: Float[Array, " N"],
+        *,
+        key: Array | None = None,
+    ) -> ConditionedNonGaussGP:
+        r"""Fit the sites by posterior linearisation.
+
+        Args:
+            prior: The `GPPrior`, dense or ``matrix_free=True``.
+            likelihood: A scalar-latent `Likelihood`.
+            y: Observations, shape ``(N,)``.
+            key: PRNG key of a stochastic log-determinant in the evidence
+                (for example `gaussx.BBMMSolver`); ignored otherwise.
+
+        Returns:
+            The `ConditionedNonGaussGP` of the fitted sites.
+
+        Raises:
+            NotImplementedError: If the marginal variances would be
+                stochastic (see ``variance``), which waits on gaussx#827.
+
+        Examples:
+            >>> import gaussx as gx
+            >>> import jax
+            >>> import jax.numpy as jnp
+            >>> from pyrox_gp import RBF, BernoulliLikelihood, GPPrior
+            >>> from pyrox_gp import PosteriorLinearization
+            >>> X = jnp.linspace(-2.0, 2.0, 10)[:, None]
+            >>> y = (X[:, 0] > 0.0).astype(X.dtype)
+            >>> prior = GPPrior(kernel=RBF(), X=X)
+            >>> strategy = PosteriorLinearization(solver=gx.CGSolver())
+            >>> # return arrays: a fit passed out of a transform rebuilds its
+            >>> # kernel without the parameter registry, so predict outside it
+            >>> q_mean = jax.jit(
+            ...     lambda labels: strategy.fit(
+            ...         prior, BernoulliLikelihood(), labels
+            ...     ).q_mean
+            ... )(y)
+            >>> q_mean.shape
+            (10,)
+        """
+        return _fit_cavity_sites(self, prior, likelihood, y, key)
 
 
 # --- Expectation propagation --------------------------------------------
@@ -750,11 +1022,17 @@ class ExpectationPropagation(eqx.Module):
     a Gaussian, and update site naturals (damped). Parallel-EP is
     embarrassingly vectorizable and converges for well-behaved
     log-concave likelihoods; for problematic models reduce ``damping``.
+    On a non-log-concave likelihood EP can cycle, and ``converged`` is the
+    only signal of it.
 
-    Dense only: the fit forms the N × N kernel matrix and does not use the
-    prior's ``solver``, so a ``GPPrior(matrix_free=True)`` raises
-    ``ValueError`` (pyrox#549; pyrox#551 and pyrox#552 plan the
-    matrix-free version).
+    The posterior of the sites is `gaussx.site_posterior` through the
+    strategy's solver, and the loop is `argminax.solve.site_fixed_point`, so
+    ``fit`` runs under ``jax.jit`` and ``jax.vmap`` and its gradient is
+    implicit at the fixed point. As for `PosteriorLinearization`, the
+    cavities need the marginal variances at every iteration (one Cholesky
+    with a dense solver, $N$ solves with an iterative one), and
+    ``log_marginal_approx`` is the Laplace-type `gaussx.site_log_evidence`
+    at the EP mean, not the EP evidence with the cavity normalisers.
 
     Attributes:
         integrator: Cavity integrator. Default
@@ -763,8 +1041,16 @@ class ExpectationPropagation(eqx.Module):
             raises ``TypeError``.
         max_iter: Iterations. Default ``40``.
         damping: Damping in (0, 1]. Default ``0.5``.
-        tol: ``inf``-norm convergence on the posterior mean.
+        tol: Convergence tolerance on the site naturals, as in
+            `PosteriorLinearization`. Default ``1e-6``.
         precision_floor: Lower bound on the diagonal precision.
+        solver: As in `PosteriorLinearization`; ``None`` takes the prior's.
+        preconditioner: As in `PosteriorLinearization`.
+        logdet: As in `PosteriorLinearization`.
+        variance: As in `PosteriorLinearization`.
+        num_probes: As in `PosteriorLinearization`.
+        adjoint: As in `PosteriorLinearization`.
+        batch_size: As in `PosteriorLinearization`.
     """
 
     integrator: AbstractIntegrator = eqx.field(
@@ -774,32 +1060,29 @@ class ExpectationPropagation(eqx.Module):
     damping: float = eqx.field(static=True, default=0.5)
     tol: float = eqx.field(static=True, default=1e-6)
     precision_floor: float = eqx.field(static=True, default=1e-6)
+    solver: AbstractSolverStrategy | None = None
+    preconditioner: AbstractPreconditioner | None = None
+    logdet: AbstractLogdetStrategy | None = None
+    variance: _VarianceMethod = eqx.field(static=True, default="auto")
+    num_probes: int = eqx.field(static=True, default=100)
+    adjoint: optx.AbstractAdjoint | None = None
+    batch_size: int = eqx.field(static=True, default=32)
 
     def __check_init__(self) -> None:
         _require_gauss_hermite(self.integrator)
+        _check_variance_method("ExpectationPropagation", self.variance)
 
-    def fit(
+    def _update(
         self,
-        prior: GPPrior,
+        sites: _SiteNaturals,
+        mean: Float[Array, " N"],
+        variance: Float[Array, " N"],
         likelihood: Likelihood,
-        y: Float[Array, " N"],
-    ) -> ConditionedNonGaussGP:
-        _reject_matrix_free(prior, "ExpectationPropagation")
-        _check_scalar_latent(likelihood)
-        K = _prior_K(prior)
-        prior_mean = prior.mean(prior.X)
+        site_data: PyTree,
+    ) -> _SiteNaturals:
+        """The damped EP sites from the marginals ``(mean, variance)``."""
+        nat1, nat2 = sites
         log_prob_per_point = _log_prob_per_point_factory(likelihood)
-        sites = _site_data(likelihood, y, prior.X)
-
-        N = K.shape[0]
-        nat1 = jnp.zeros(N, dtype=K.dtype)
-        nat2 = jnp.full((N,), self.precision_floor, dtype=K.dtype)
-        q_mean = jnp.asarray(prior_mean)
-        q_var = jnp.diag(K)
-
-        def lp(f_n: Float[Array, ""], y_n: PyTree) -> Float[Array, ""]:
-            return log_prob_per_point(f_n[None], _one_site(y_n))[0]
-
         order = _require_gauss_hermite(self.integrator).order
 
         def _per_site_tilted(
@@ -807,58 +1090,77 @@ class ExpectationPropagation(eqx.Module):
             v_n: Float[Array, ""],
             y_n: PyTree,
         ) -> tuple[Float[Array, ""], Float[Array, ""]]:
-            return ep_tilted_moments(lambda f: lp(f, y_n), m_n, v_n, order=order)
+            def lp(f: Float[Array, ""]) -> Float[Array, ""]:
+                return log_prob_per_point(f[None], _one_site(y_n))[0]
 
-        converged = False
-        n_iter = 0
-        for it in range(self.max_iter):
-            cav_mean, cav_var = cavity_distribution(
-                q_mean, q_var, nat1, nat2, precision_floor=self.precision_floor
-            )
-            assert isinstance(cav_var, jax.Array)  # diagonal path in, diagonal out
+            return ep_tilted_moments(lp, m_n, v_n, order=order)
 
-            # Tilted moments via `gaussx.ep_tilted_moments`. The
-            # gaussx API expects a ``log_lik_fn(f)`` with the per-site
-            # target baked in, so ``_per_site_tilted`` closes over
-            # ``y_n`` and ``vmap`` recovers the ``(N,)`` shape contract.
-            tilted_mean, tilted_var = jax.vmap(_per_site_tilted)(
-                cav_mean, cav_var, sites
-            )
-
-            # New site naturals from matched moments minus the cavity.
-            new_prec = jnp.reciprocal(tilted_var) - jnp.reciprocal(cav_var)
-            new_prec = jnp.maximum(new_prec, self.precision_floor)
-            new_nat1 = tilted_mean / tilted_var - cav_mean / cav_var
-            nat1, nat2 = damped_natural_update(
-                nat1, nat2, new_nat1, new_prec, lr=self.damping
-            )
-            assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
-            nat2 = jnp.maximum(nat2, self.precision_floor)
-
-            q_mean_new, q_var = _posterior_from_diag_sites(K, nat1, nat2, prior_mean)
-            delta = jnp.max(jnp.abs(q_mean_new - q_mean))
-            q_mean = q_mean_new
-            n_iter = it + 1
-            if delta < self.tol:
-                converged = True
-                break
-
-        # Approximate marginal via Laplace identity at the EP mean.
-        log_marg = _laplace_log_marginal(
-            log_prob_per_point, q_mean, sites, prior_mean, K, nat2
+        # q₋ₙ(fₙ) = q(fₙ) / siteₙ(fₙ)
+        cav_mean, cav_var = cavity_distribution(
+            mean, variance, nat1, nat2, precision_floor=self.precision_floor
         )
-
-        return ConditionedNonGaussGP(
-            prior=prior,
-            y=y,
-            site_nat1=nat1,
-            site_nat2=nat2,
-            q_mean=q_mean,
-            q_var=q_var,
-            log_marginal_approx=log_marg,
-            n_iter=jnp.asarray(n_iter),
-            converged=jnp.asarray(converged),
+        assert isinstance(cav_var, jax.Array)  # diagonal path in, diagonal out
+        # The tilted moments of q₋ₙ(fₙ) p(yₙ ∣ fₙ), one site at a time.
+        tilted_mean, tilted_var = jax.vmap(_per_site_tilted)(
+            cav_mean, cav_var, site_data
         )
+        # λₙ ← max(1 / σ̂ₙ² − 1 / σ²_cav,n, ε), and the matching information
+        new_prec = jnp.reciprocal(tilted_var) - jnp.reciprocal(cav_var)
+        new_prec = jnp.maximum(new_prec, self.precision_floor)
+        new_nat1 = tilted_mean / tilted_var - cav_mean / cav_var
+        nat1, nat2 = damped_natural_update(
+            nat1, nat2, new_nat1, new_prec, lr=self.damping
+        )
+        assert isinstance(nat2, jax.Array)  # pyrox sites are diagonal arrays
+        return nat1, jnp.maximum(nat2, self.precision_floor)
+
+    def _step(self, sites: _SiteNaturals, args: PyTree) -> _SiteNaturals:
+        return _cavity_step(self, sites, args)
+
+    def fit(
+        self,
+        prior: GPPrior,
+        likelihood: Likelihood,
+        y: Float[Array, " N"],
+        *,
+        key: Array | None = None,
+    ) -> ConditionedNonGaussGP:
+        r"""Fit the sites by parallel expectation propagation.
+
+        Args:
+            prior: The `GPPrior`, dense or ``matrix_free=True``.
+            likelihood: A scalar-latent `Likelihood`.
+            y: Observations, shape ``(N,)``.
+            key: PRNG key of a stochastic log-determinant in the evidence
+                (for example `gaussx.BBMMSolver`); ignored otherwise.
+
+        Returns:
+            The `ConditionedNonGaussGP` of the fitted sites.
+
+        Raises:
+            NotImplementedError: If the marginal variances would be
+                stochastic (see ``variance``), which waits on gaussx#827.
+
+        Examples:
+            >>> import jax
+            >>> import jax.numpy as jnp
+            >>> from pyrox_gp import RBF, ExpectationPropagation, GPPrior
+            >>> from pyrox_gp import StudentTLikelihood
+            >>> X = jnp.linspace(-2.0, 2.0, 10)[:, None]
+            >>> y = jnp.sin(X[:, 0]).at[3].set(4.0)
+            >>> prior = GPPrior(kernel=RBF(), X=X)
+            >>> strategy = ExpectationPropagation(damping=0.3)
+            >>> # return arrays: a fit passed out of a transform rebuilds its
+            >>> # kernel without the parameter registry, so predict outside it
+            >>> q_means = jax.jit(jax.vmap(
+            ...     lambda labels: strategy.fit(
+            ...         prior, StudentTLikelihood(df=4.0, scale=0.5), labels
+            ...     ).q_mean
+            ... ))(jnp.stack([y, -y]))
+            >>> q_means.shape
+            (2, 10)
+        """
+        return _fit_cavity_sites(self, prior, likelihood, y, key)
 
 
 # --- Quasi-Newton --------------------------------------------------------

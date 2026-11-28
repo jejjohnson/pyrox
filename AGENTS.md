@@ -151,11 +151,10 @@ fails under a handler, a transform or a second instance.
 
 - **Pure and explicit.** Arrays and modules in, arrays and modules out; keys
   are explicit (`jr.key`, split before reuse); no Python control flow on
-  traced values (the eager `fit` loops of `PosteriorLinearization` and
-  `ExpectationPropagation` in `pyrox_gp._inference_nongauss` are the
-  documented exception; the Laplace, Gauss–Newton and quasi-Newton
-  strategies run on argminax and optimistix, and the Markov strategies in
-  `pyrox_ssm` run on `argminax.solve.site_fixed_point`, so all of those trace).
+  traced values (the Laplace, Gauss–Newton and quasi-Newton strategies run
+  on argminax and optimistix, and posterior linearisation, EP and the Markov
+  strategies in `pyrox_ssm` on `argminax.solve.site_fixed_point`, so all of
+  them trace).
 - **Linear algebra through gaussx.** Wrap Grams as PSD-tagged lineax
   operators and call gaussx; respect the model's `solver=`. A few modules
   still hand-roll `cho_solve` / `solve_triangular`
