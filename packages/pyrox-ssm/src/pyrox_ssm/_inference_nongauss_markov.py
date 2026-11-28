@@ -26,7 +26,10 @@ masking step $k$ fits the same sites at the kept steps as dropping it.
 Each strategy's iteration is a pure map $s \\mapsto T_\\alpha(s)$ on the site
 naturals $s = (\\lambda, \\Lambda)$, with the damping $\\alpha$ inside it,
 $T_\\alpha(s) = (1 - \\alpha)\\, s + \\alpha\\, T(s)$, and the loop is
-`optimistix.fixed_point` with `optimistix.FixedPointIteration`. A fit therefore
+`argminax.solve.site_fixed_point`, the site loop pyrox-gp's posterior
+linearisation and EP share. It stops at the first iteration whose change in
+every site natural is within a tenth of ``tol`` of the new value, absolutely
+and relatively. A fit therefore
 traces under `jax.jit`, and its gradient with respect to the prior's
 hyperparameters $\\theta$ comes from the implicit function theorem at the fixed
 point $s^\\star$ (`markov_implicit_adjoint`, the default ``adjoint`` of every
@@ -51,10 +54,10 @@ cheaper when its capped Newton step converges in a few iterations; its
 from __future__ import annotations
 
 import warnings
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import argminax.adjoint
+import argminax.solve
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -69,6 +72,7 @@ from gaussx import (
     damped_natural_update,
     ep_tilted_moments,
     newton_update,
+    site_evidence_correction,
 )
 from jaxtyping import Array, Bool, Float, Int, PyTree
 from pyrox.likelihoods import Likelihood
@@ -233,96 +237,6 @@ def markov_implicit_adjoint() -> optx.ImplicitAdjoint:
 _IMPLICIT_ADJOINT = markov_implicit_adjoint()
 
 
-def _solve_sites(
-    step: Callable[[_Sites, PyTree], _Sites],
-    sites: _Sites,
-    args: PyTree,
-    *,
-    tol: float,
-    max_steps: int,
-    adjoint: optx.AbstractAdjoint,
-) -> tuple[_Sites, Int[Array, ""], Bool[Array, ""]]:
-    r"""Iterate ``step`` on the site naturals to a fixed point.
-
-    Stops at the first iteration $k$ whose change in every site natural is
-    within a tenth of ``tol`` of the new value, absolutely and relatively,
-
-    $$
-    \max_n \frac{|s^{(k)}_n - s^{(k-1)}_n|}
-      {\tfrac{1}{10}\,\mathrm{tol}\,(1 + |s^{(k)}_n|)} < 1,
-    $$
-
-    over both $\lambda$ and $\Lambda$, or after ``max_steps`` iterations. A
-    masked site holds $(0, 0)$ throughout, so it never holds the loop up. The
-    tenth keeps the posterior marginals within about ``tol`` of the fixed point,
-    where the Python loops this replaced stopped once the posterior mean moved
-    by less than ``tol``: a damped map contracts slowly, and the sites settle
-    one iteration behind the mean.
-
-    Args:
-        step: The damped site update $T_\alpha$, ``step(sites, args) -> sites``.
-        sites: The starting naturals $(\lambda, \Lambda)$, each ``(N,)``.
-        args: Passed to ``step``; the arrays the gradient flows to.
-        tol: The tolerance above.
-        max_steps: The most iterations to run.
-        adjoint: How gradients pass through the loop.
-
-    Returns:
-        The naturals after the last iteration, the number of iterations run, and
-        whether the criterion was met (``False`` also when an iterate turned
-        non-finite).
-    """
-    solver = optx.FixedPointIteration(rtol=0.1 * tol, atol=0.1 * tol)
-    sol = optx.fixed_point(
-        step,
-        solver,
-        sites,
-        args,
-        max_steps=max_steps,
-        adjoint=adjoint,
-        throw=False,
-    )
-    return sol.value, sol.stats["num_steps"], sol.result == optx.RESULTS.successful
-
-
-def _site_corrected_log_marginal(
-    log_marg: Float[Array, ""],
-    q_mean: Float[Array, " N"],
-    nat1: Float[Array, " N"],
-    nat2: Float[Array, " N"],
-    site_lik: CallableLikelihood,
-    observed: Bool[Array, " N"],
-) -> Float[Array, ""]:
-    r"""Turn the pseudo-observation Kalman marginal into an evidence estimate.
-
-    With Gaussian sites $\mathcal{N}(\tilde y_n \mid f_n, \Lambda_n^{-1})$,
-    $\tilde y_n = \lambda_n / \Lambda_n$, the Kalman filter returns
-    $\log \mathcal{N}(\tilde{\mathbf{y}} \mid \boldsymbol{\mu}, K + \Lambda^{-1})$,
-    the marginal of the pseudo-data rather than of $\mathbf{y}$. Swapping
-    the pseudo-data fit for the data fit at the posterior mean $m$,
-
-    $$
-    \log p(\mathbf{y}) \approx
-      \log \mathcal{N}(\tilde{\mathbf{y}} \mid \boldsymbol{\mu}, K + \Lambda^{-1})
-      + \sum_n o_n \log p(y_n \mid m_n)
-      - \sum_n o_n \log \mathcal{N}(\tilde y_n \mid m_n, \Lambda_n^{-1}),
-    $$
-
-    gives the Laplace-style approximation every strategy reports, as the
-    dense strategies in pyrox-gp do. Both sums run over the observed sites
-    $o_n = 1$ only.
-    """
-    ll_data = site_lik.log_prob(q_mean)
-    site_prec = jnp.where(observed, nat2, jnp.ones((), dtype=nat2.dtype))
-    pseudo_targets = nat1 / site_prec
-    ll_pseudo = -0.5 * jnp.sum(
-        jnp.where(observed, jnp.log(2.0 * jnp.pi / site_prec), 0.0)
-    ) - 0.5 * jnp.sum(
-        jnp.where(observed, site_prec * (q_mean - pseudo_targets) ** 2, 0.0)
-    )
-    return log_marg + ll_data - ll_pseudo
-
-
 # --- result type ---------------------------------------------------------
 
 
@@ -476,8 +390,8 @@ class LaplaceMarkovInference(eqx.Module):
     gradient, unchanged. The cap costs one more filter and smoother pass per
     iteration (and, for a non-stationary kernel, one pass per fit for
     $\sigma_n$); ``max_step=None`` turns it off and takes the full step.
-    The loop is `optimistix.fixed_point`, so a fit traces under `jax.jit` and
-    differentiates through ``adjoint`` (see the module notes).
+    The loop is `argminax.solve.site_fixed_point`, so a fit traces under
+    `jax.jit` and differentiates through ``adjoint`` (see the module notes).
 
     Attributes:
         max_iter: Newton iterations. Default ``50``; a capped fit usually
@@ -644,14 +558,15 @@ class LaplaceMarkovInference(eqx.Module):
             None if self.max_step is None else jnp.sqrt(_prior_marginal_variance(prior))
         )
 
-        sites, n_iter, converged = _solve_sites(
+        fit = argminax.solve.site_fixed_point(
             self._step,
             sites,
             (prior, site_lik, observed, prior_sd),
             tol=self.tol,
-            max_steps=self.max_iter,
+            max_iter=self.max_iter,
             adjoint=self.adjoint,
         )
+        sites, n_iter, converged = fit.sites, fit.n_iter, fit.converged
 
         # Final site naturals: the undamped Newton sites at the last mean.
         f, _, _ = _markov_smoothed_posterior(prior, *sites, observed)
@@ -659,8 +574,8 @@ class LaplaceMarkovInference(eqx.Module):
         q_mean, q_var, log_marg = _markov_smoothed_posterior(
             prior, nat1, nat2, observed
         )
-        log_marg_corrected = _site_corrected_log_marginal(
-            log_marg, q_mean, nat1, nat2, site_lik, observed
+        log_marg_corrected = log_marg + site_evidence_correction(
+            site_lik.log_prob(q_mean), q_mean, nat1, nat2, mask=observed
         )
 
         return ConditionedNonGaussMarkovGP(
@@ -825,18 +740,25 @@ def _fit_cavity_sites(
             sites, jnp.asarray(prior_mean), prior_var, site_lik, observed
         )
 
-    sites, n_steps, converged = _solve_sites(
-        strategy._step,
-        sites,
-        (prior, site_lik, observed),
-        tol=strategy.tol,
-        max_steps=strategy.max_iter - first,
-        adjoint=strategy.adjoint,
-    )
+    if strategy.max_iter > first:
+        fit = argminax.solve.site_fixed_point(
+            strategy._step,
+            sites,
+            (prior, site_lik, observed),
+            tol=strategy.tol,
+            max_iter=strategy.max_iter - first,
+            adjoint=strategy.adjoint,
+        )
+        sites, n_steps, converged = fit.sites, fit.n_iter, fit.converged
+    else:
+        # max_iter=1: the first update was the whole budget, and no stopping
+        # test ran
+        n_steps, converged = jnp.asarray(0), jnp.asarray(False)
     nat1, nat2 = sites
     q_mean, q_var, log_marg = _markov_smoothed_posterior(prior, nat1, nat2, observed)
-    log_marg_corrected = _site_corrected_log_marginal(
-        log_marg, q_mean, nat1, nat2, site_lik, observed
+    # log Z = log Z_Kalman + Σₙ oₙ [log p(yₙ ∣ mₙ) − log 𝒩(μ_site,n; mₙ, dₙ)]
+    log_marg_corrected = log_marg + site_evidence_correction(
+        site_lik.log_prob(q_mean), q_mean, nat1, nat2, mask=observed
     )
 
     return ConditionedNonGaussMarkovGP(
@@ -861,8 +783,9 @@ class PosteriorLinearizationMarkov(eqx.Module):
     smoothed marginals ``(m_n, V_n)``, form the cavity
     ``q_{\\setminus n}(f) = N(m_{c,n}, V_{c,n})``, evaluate the *expected*
     per-point gradient and Hessian under the cavity (via the integrator),
-    and update the sites with damping. The loop is `optimistix.fixed_point`,
-    so a fit traces under `jax.jit` and differentiates through ``adjoint``.
+    and update the sites with damping. The loop is
+    `argminax.solve.site_fixed_point`, so a fit traces under `jax.jit` and
+    differentiates through ``adjoint``.
 
     Attributes:
         max_iter: Iterations. Default ``30``.
@@ -976,7 +899,7 @@ class ExpectationPropagationMarkov(eqx.Module):
     Each iteration: run filter + smoother, form cavities at every site,
     match tilted-distribution moments via Gauss-Hermite (with log-space
     stabilisation), and update sites with damping. The loop is
-    `optimistix.fixed_point`, so a fit traces under `jax.jit` and
+    `argminax.solve.site_fixed_point`, so a fit traces under `jax.jit` and
     differentiates through ``adjoint``.
 
     Attributes:

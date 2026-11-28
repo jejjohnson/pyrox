@@ -131,6 +131,18 @@ def test_markov_laplace_matches_dense_laplace_on_matern12() -> None:
     assert jnp.allclose(markov_cond.q_mean, f, atol=1e-3)
     assert jnp.allclose(markov_cond.q_var, dense_var, atol=1e-3)
 
+    # The dense Laplace evidence at the mode (#553): the Kalman marginal of the
+    # pseudo-observations plus gaussx.site_evidence_correction must equal
+    # log p(y | f̂) − ½ f̂ᵀ K⁻¹ f̂ − ½ log det(I + W^½ K W^½).
+    W = p * (1.0 - p)
+    root = jnp.sqrt(W)
+    B = jnp.eye(times.shape[0]) + root[:, None] * K * root[None, :]
+    log_lik = jnp.sum(y * jax.nn.log_sigmoid(f) + (1.0 - y) * jax.nn.log_sigmoid(-f))
+    dense_evidence = (
+        log_lik - 0.5 * f @ K_inv @ f - 0.5 * jnp.linalg.slogdet(B)[1]
+    )
+    assert jnp.allclose(markov_cond.log_marginal_approx, dense_evidence, rtol=1e-6)
+
 
 @pytest.mark.slow
 def test_condition_nongauss_method_dispatches_to_strategy() -> None:
