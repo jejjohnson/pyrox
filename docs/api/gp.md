@@ -65,7 +65,7 @@ prior = GPPrior(
 )
 ```
 
-For a large exact GP, `preconditioned_cg_solver` pairs a CG solve preconditioned by a low-rank approximation of $K$ with a stochastic log-determinant: `logdet="slq"` (the default) runs stochastic Lanczos quadrature on the system itself, and `logdet="nystrom"` uses gaussx's `NystromLogdet`, the exact log-determinant of a Nyström preconditioner plus SLQ on the preconditioned remainder, which has a much smaller error at the same number of probes. Both read the noise from a `matrix_free=True` system; a dense system needs `shift=`.
+For a large exact GP, `preconditioned_cg_solver` pairs a CG solve preconditioned by a low-rank approximation of $K$ with a stochastic log-determinant: `logdet="slq"` (the default) runs stochastic Lanczos quadrature on the system itself, and `logdet="nystrom"` uses gaussx's `NystromLogdet`, the exact log-determinant of a Nyström preconditioner plus SLQ on the preconditioned remainder, which has a much smaller error at the same number of probes. Both read the diagonal from the system with gaussx's `split_diagonal`: the scalar noise of a `matrix_free=True` system, or a diagonal that varies by point, such as site variances or heteroscedastic noise, for which the preconditioner is built by gaussx's per-point shift. A system that is one dense matrix needs `shift=`.
 
 ::: pyrox_gp.GPPrior
 ::: pyrox_gp.ConditionedGP
