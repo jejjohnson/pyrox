@@ -308,8 +308,8 @@ def test_implicit_gradient_equals_the_unrolled_gradient_at_round_off(damping) ->
     implicit = LaplaceMarkovInference(
         max_iter=300, tol=1e-10, damping=damping, adjoint=markov_implicit_adjoint()
     )
-    # argminax's site loop floors tol at 64 machine epsilons (and refuses
-    # tol=0, which the private loop took to mean "never stop", #553), so this
+    # argminax's site loop floors tol at 64 machine epsilons (tol=0, which the
+    # private loop took to mean "never stop", is deprecated, #553), so this
     # loop stops only once the sites move by round-off: 7 iterations at
     # damping 1 and 97 at 0.3, every one of them differentiated through.
     unrolled = LaplaceMarkovInference(
@@ -322,6 +322,18 @@ def test_implicit_gradient_equals_the_unrolled_gradient_at_round_off(damping) ->
     g_implicit = jax.jit(jax.grad(_laplace_evidence(implicit)))(THETA)
     g_unrolled = jax.jit(jax.grad(_laplace_evidence(unrolled)))(THETA)
     assert jnp.allclose(g_implicit, g_unrolled, rtol=1e-8, atol=1e-10)
+
+
+def test_zero_tolerance_is_deprecated_and_runs_to_round_off() -> None:
+    # tol=0.0 once meant "run every iteration"; it now warns and runs to
+    # argminax's floor, the same fit as the smallest positive tol.
+    strategy = LaplaceMarkovInference(max_iter=200, tol=0.0)
+    with pytest.warns(DeprecationWarning, match="tol=0.0"):
+        zero = _fit(THETA, strategy)
+    floor = _fit(THETA, LaplaceMarkovInference(max_iter=200, tol=1e-300))
+    assert bool(zero.converged)
+    assert int(zero.n_iter) == int(floor.n_iter)
+    assert jnp.array_equal(zero.q_mean, floor.q_mean)
 
 
 def test_implicit_gradient_does_not_depend_on_the_damping() -> None:
