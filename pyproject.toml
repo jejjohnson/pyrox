@@ -20,7 +20,7 @@ members = ["packages/*"]
 # git dependency, which conflicts with the newer tags the workspace needs; the
 # override keeps one gaussx and one geonnax for every member. Move it in step with pyrox-gp's gaussx and geonnax sources, and with the
 # override snippet users copy from README.md (Installation).
-# argminax v0.0.10 (pyrox-gp, pyrox-nn, pyrox-lgm, pyrox-ssm) pins gaussx v0.8.2 by URL; the same override replaces it.
+# argminax v0.0.11 (pyrox-gp, pyrox-nn, pyrox-lgm, pyrox-ssm) pins the same gaussx v0.8.3 by its own URL; the same override keeps one source.
 # filterax v0.0.8 (pyrox-ssm's ensemble extra) pins gaussx v0.6.9 by URL; the same override replaces it.
 # functax is pinned here at the tag pyrox-gp, pyrox-nn and pyrox-lgm declare, so one
 # functax serves every member once an upstream (kernellib, geonnax) pins its own.

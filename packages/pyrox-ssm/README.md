@@ -114,7 +114,7 @@ We have not put pyrox-ssm on PyPI, and the name `pyrox` there belongs to an unre
 uv add "pyrox-ssm @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-ssm"
 ```
 
-argminax pins gaussx v0.8.2 (and filterax v0.0.8, behind the `ensemble` extra, pins gaussx v0.6.9), while pyrox-ssm needs gaussx v0.8.3, so add this override to your project's `pyproject.toml`; without it uv cannot resolve the install.
+argminax v0.0.11 pins gaussx v0.8.3 by a URL that uv treats as a different source (and filterax v0.0.8, behind the `ensemble` extra, pins gaussx v0.6.9), while pyrox-ssm needs gaussx v0.8.3 from one source, so add this override to your project's `pyproject.toml`; without it uv cannot resolve the install.
 
 ```toml
 [tool.uv]

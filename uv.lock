@@ -50,8 +50,8 @@ wheels = [
 
 [[package]]
 name = "argminax"
-version = "0.0.10"
-source = { git = "https://github.com/jejjohnson/argminax.git?tag=v0.0.10#bbbdc0526e62a6599dce0e58b4e4e6d8dd78c060" }
+version = "0.0.11"
+source = { git = "https://github.com/jejjohnson/argminax.git?tag=v0.0.11#94c9fa297ce8b52b1770de643e09ece689afe8c8" }
 dependencies = [
     { name = "einx" },
     { name = "equinox" },
@@ -2471,7 +2471,7 @@ flows = [
 
 [package.metadata]
 requires-dist = [
-    { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?tag=v0.0.10" },
+    { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?tag=v0.0.11" },
     { name = "einx", specifier = ">=0.4.3" },
     { name = "flowjax", specifier = ">=0.9" },
     { name = "functax", extras = ["jax"], git = "https://github.com/jejjohnson/functax.git?rev=v0.0.7" },
@@ -2512,7 +2512,7 @@ xarray = [
 
 [package.metadata]
 requires-dist = [
-    { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?tag=v0.0.10" },
+    { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?tag=v0.0.11" },
     { name = "einx", specifier = ">=0.4.3" },
     { name = "functax", extras = ["jax"], git = "https://github.com/jejjohnson/functax.git?rev=v0.0.7" },
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.8.3" },
@@ -2643,7 +2643,7 @@ xarray = [
 
 [package.metadata]
 requires-dist = [
-    { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?tag=v0.0.10" },
+    { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?tag=v0.0.11" },
     { name = "einx", specifier = ">=0.4.3" },
     { name = "functax", extras = ["jax"], git = "https://github.com/jejjohnson/functax.git?rev=v0.0.7" },
     { name = "gaussx", git = "https://github.com/jejjohnson/gaussx.git?tag=v0.8.3" },
@@ -2690,7 +2690,7 @@ flows = [
 
 [package.metadata]
 requires-dist = [
-    { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?tag=v0.0.10" },
+    { name = "argminax", git = "https://github.com/jejjohnson/argminax.git?tag=v0.0.11" },
     { name = "einx", specifier = ">=0.4.3" },
     { name = "equinox", specifier = ">=0.13.8" },
     { name = "filterax", marker = "extra == 'ensemble'", git = "https://github.com/jejjohnson/filterax?rev=v0.0.8" },
