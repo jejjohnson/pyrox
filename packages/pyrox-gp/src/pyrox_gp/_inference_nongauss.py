@@ -55,16 +55,16 @@ from gaussx import (
     AbstractSolverStrategy,
     DenseSolver,
     GaussHermiteIntegrator,
+    PredictionCache,
     SitePosterior,
     cavity_distribution,
-    cholesky_logdet,
     damped_natural_update,
     ep_tilted_moments,
     newton_update,
+    predict_variance,
     safe_cholesky,
     site_log_evidence,
     site_posterior,
-    solve,
     symmetrize,
 )
 from jaxtyping import Array, Bool, Float, Int, PyTree
@@ -72,8 +72,9 @@ from pyrox._core import call_context
 from pyrox.likelihoods import AbstractObservation
 
 from pyrox_gp._inference import _per_site_expectation
+from pyrox_gp._kernel_operator import freeze_kernel
 from pyrox_gp._likelihoods import _site_log_prob
-from pyrox_gp._protocols import Likelihood
+from pyrox_gp._protocols import Kernel, Likelihood
 from pyrox_gp._solvers import compose_solver_fields
 
 
@@ -85,163 +86,132 @@ if TYPE_CHECKING:
 
 
 class ConditionedNonGaussGP(eqx.Module):
-    """GP conditioned on a non-Gaussian likelihood via an advanced strategy.
+    r"""GP conditioned on a non-Gaussian likelihood via an advanced strategy.
 
-    Equivalent role to `pyrox_gp.ConditionedGP` but the
-    posterior over training latents is a generic
-    ``q(f) = N(q_mean, q_cov)`` rather than a Gaussian-likelihood
-    closed form. Predictions at test inputs use the standard
-    *site-as-pseudo-observation* trick: any site-based Gaussian
-    approximation of ``p(f | y)`` looks identical to a Gaussian-
-    likelihood regression with synthetic per-point noise variance
-    $\\sigma_n^2 = 1/\\Lambda_n^{(2)}$ and synthetic targets
-    $\\tilde y_n = \\lambda_n^{(1)} / \\Lambda_n^{(2)}$ (in the
-    zero-mean prior frame). Predictions reconstruct ``K_reg = K +
-    diag(1 / Lambda)`` and Cholesky-factorize it on each call (the
-    full-Cholesky cost is ``O(N^3)`` per ``predict`` invocation; the
-    cross-covariance contributions are ``O(M N)``). Caching the solve
-    on the module would require freezing the kernel hyperparameters at
-    fit time and is intentionally not done here so prior'd-kernel
-    workflows keep resampling correctly.
+    Equivalent role to `pyrox_gp.ConditionedGP` but the posterior over
+    training latents is the Gaussian of diagonal sites, a
+    `gaussx.SitePosterior`: any site-based approximation of $p(f \mid y)$
+    looks like a Gaussian-likelihood regression with per-point noise
+    variance $d_n = 1 / \lambda_n$ and targets
+    $\mu_{\text{site},n} = \lambda^{(1)}_n / \lambda_n$, so with
+    $A = K + \mathrm{diag}(d)$ the fit keeps the weights
+    $w = A^{-1} (\mu_\text{site} - \mu_f)$ and predicts with
+
+    $$
+    \mu_* = \mu(X_*) + K_{*X} w, \qquad
+    \sigma_*^2 = k_{**} - k_*^\top A^{-1} k_* ,
+    $$
+
+    through the solver of the fit: triangular solves with the Cholesky
+    factor of $A$ kept from the fit on the dense path, one solve per test
+    point with an iterative solver, so a matrix-free prior stays matrix-free.
+
+    The kernel's hyperparameters are those the fit used (pyrox#551): the fit
+    resolves them once, and `predict` reuses them. Before pyrox#551 each
+    ``predict`` evaluated the prior's kernel again, so a kernel with priors
+    drew new hyperparameters there; refit to resample.
 
     Attributes:
-        prior: The `GPPrior`.
+        prior: The `GPPrior` the fit was given.
         y: Training targets (kept for round-trip / diagnostics).
-        site_nat1: Diagonal site naturals
-            $\\lambda^{(1)} \\in \\mathbb{R}^N$.
-        site_nat2: Diagonal site precisions
-            $\\Lambda^{(2)} \\in \\mathbb{R}^N$ (positive).
-        q_mean: Posterior mean over training latents.
-        q_var: Marginal posterior variance per training point.
+        site_posterior: The `gaussx.SitePosterior` of the fitted sites: the
+            prior covariance, the sites, the weights $w$, the posterior mean
+            and the solver (with the Cholesky factor of $A$ on the dense
+            path).
         log_marginal_approx: Approximate log marginal likelihood
             (the scalar each strategy reports — interpretation is
             strategy-specific; see the per-class docstring).
         n_iter: Iterations used by the strategy, a scalar integer array,
             so a fit runs under ``jax.jit`` and ``jax.vmap``.
         converged: Whether the convergence tolerance was met, a scalar
-            boolean array.
-        solver: The iterative solver the fit used, if any. ``None`` (every
-            dense fit) predicts by the Cholesky factor above; otherwise
-            `predict` solves against $K + \\mathrm{diag}(1 / \\Lambda)$ with
-            it, one solve for the mean and one per test point for the
-            variance, through the prior's operator, so a matrix-free prior
-            stays matrix-free.
+            boolean array; with an iterative solver it is also false when an
+            inner solve of a Newton fit missed its tolerance.
+        kernel: The prior's kernel with the hyperparameters of the fit, a
+            plain kernellib kernel (``frozen()``); a kernel that cannot be
+            frozen is kept as it is and evaluated once per ``predict``.
+        batch_size: Solves vectorised together when `q_var` is read with an
+            iterative solver.
     """
 
     prior: GPPrior
     y: Float[Array, " N"]
-    site_nat1: Float[Array, " N"]
-    site_nat2: Float[Array, " N"]
-    q_mean: Float[Array, " N"]
-    q_var: Float[Array, " N"]
+    site_posterior: SitePosterior
     log_marginal_approx: Float[Array, ""]
     n_iter: Int[Array, ""]
     converged: Bool[Array, ""]
-    solver: AbstractSolverStrategy | None = None
+    kernel: Kernel
+    batch_size: int = eqx.field(static=True, default=32)
 
-    def _solver_predict(
+    @property
+    def site_nat1(self) -> Float[Array, " N"]:
+        r"""The site information $\lambda^{(1)} = \lambda \odot \mu_\text{site}$."""
+        return self.site_posterior.site_information
+
+    @property
+    def site_nat2(self) -> Float[Array, " N"]:
+        r"""The site precisions $\lambda$, all positive."""
+        return self.site_posterior.site_precision
+
+    @property
+    def q_mean(self) -> Float[Array, " N"]:
+        r"""The posterior mean $\mu_f + K w$ at the training inputs."""
+        return self.site_posterior.mean
+
+    @property
+    def q_var(self) -> Float[Array, " N"]:
+        r"""The posterior marginal variances $\mathrm{diag}(K - K A^{-1} K)$.
+
+        Computed when read, so a fit that needs only the mean or the
+        evidence does no extra solves: triangular solves with the kept
+        factor on the dense path, $N$ solves (``batch_size`` at a time) with
+        an iterative solver.
+        """
+        return self.site_posterior.variance(method="exact", batch_size=self.batch_size)
+
+    def _predict(
         self, X_star: Float[Array, "M D"], *, variance: bool
     ) -> tuple[Float[Array, " M"], Float[Array, " M"] | None]:
-        r"""The predictive marginals through ``solver``, without a factor.
-
-        $\mu_* = \mu(X_*) + K_{*X} w$ with the weights $w = A^{-1}
-        (\mu_\text{site} - \mu_f)$ of `gaussx.site_posterior`, and
-        $\sigma_*^2 = k_{**} - k_*^\top A^{-1} k_*$, one solve per test point.
-        """
-        prior = self.prior
-        with call_context(prior.kernel):
-            prior_cov = prior._prior_operator()
-            K_cross = prior.kernel(X_star, prior.X)
-            K_diag = prior.kernel.diag(X_star) if variance else None
-            prior_mean_train = prior.mean(prior.X)
-            prior_mean_test = prior.mean(X_star)
-        posterior = site_posterior(
-            jnp.asarray(prior_mean_train),
-            prior_cov,
-            self.site_nat1,
-            self.site_nat2,
-            solver=self.solver,
-        )
+        """The predictive mean and, if asked, the marginal variances."""
+        kernel = self.kernel
+        posterior = self.site_posterior
+        # a no-op for a frozen kernel; one draw for one that could not be
+        with call_context(kernel):
+            K_cross = kernel(X_star, self.prior.X)
+            K_diag = kernel.diag(X_star) if variance else None
+            prior_mean_test = self.prior.mean(X_star)
         # μ_* = μ(X_*) + K_{*X} w,  K_{*X}: (M, N), w: (N,) → (M,)
         mean = prior_mean_test + einx.dot("m n, n -> m", K_cross, posterior.weights)
         if K_diag is None:
             return mean, None
-        system = posterior.system
-
-        def reduction(k_star: Float[Array, " N"]) -> Float[Array, ""]:
-            # k_*ᵀ A⁻¹ k_*
-            return k_star @ solve(system, k_star, solver=self.solver)
-
-        var = K_diag - jax.lax.map(reduction, K_cross, batch_size=32)
+        cache = PredictionCache(
+            alpha=posterior.weights,
+            operator=posterior.system,
+            factor=posterior.factor,
+        )
+        # σ²_* = k_** − k_*ᵀ A⁻¹ k_*
+        var = predict_variance(cache, K_cross, K_diag, solver=posterior.solver)
         return mean, jnp.maximum(var, 0.0)
 
-    def _pseudo_factor(self) -> Float[Array, "N N"]:
-        """Cholesky of ``K + diag(1/Λ + jitter)`` via `_psd_safe_cholesky`."""
-        K = self.prior.kernel(self.prior.X, self.prior.X)
-        diag_reg = jnp.reciprocal(self.site_nat2) + self.prior.jitter
-        K_reg = K.at[jnp.diag_indices_from(K)].add(diag_reg)
-        return _psd_safe_cholesky(K_reg)
-
     def predict_mean(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
-        r"""$\mu_* = \mu(X_*) + K_{*f}\,\alpha$ with
-        ``alpha`` derived from the site naturals."""
-        if self.solver is not None:
-            return self._solver_predict(X_star, variance=False)[0]
-        with call_context(self.prior.kernel):
-            L = self._pseudo_factor()
-            K_cross = self.prior.kernel(X_star, self.prior.X)
-            prior_mean_train = self.prior.mean(self.prior.X)
-        # Effective synthetic targets in the centered (zero-mean) frame.
-        y_tilde = self.site_nat1 / self.site_nat2
-        residual = y_tilde - prior_mean_train
-        alpha = jax.scipy.linalg.cho_solve((L, True), residual)
-        # μ_* = μ(X_*) + K_{*f} α,  K_{*f}: (M, N), α: (N,) → (M,).
-        return self.prior.mean(X_star) + einx.dot("m n, n -> m", K_cross, alpha)
+        r"""$\mu_* = \mu(X_*) + K_{*X} w$, from the weights of the fit."""
+        return self._predict(X_star, variance=False)[0]
 
     def predict_var(self, X_star: Float[Array, "M D"]) -> Float[Array, " M"]:
-        r"""$\Sigma_{**} - K_{*f} (K + \mathrm{diag}(1/\Lambda))^{-1} K_{f*}$."""
-        if self.solver is not None:
-            var = self._solver_predict(X_star, variance=True)[1]
-            assert var is not None
-            return var
-        with call_context(self.prior.kernel):
-            L = self._pseudo_factor()
-            K_cross = self.prior.kernel(X_star, self.prior.X)
-            K_diag = self.prior.kernel.diag(X_star)
-        # v = L⁻¹ K_{f*}, shape (N, M); the predictive variance reduction is
-        # the column-wise squared norm Σ_n v_{n,*}².
-        v = jax.scipy.linalg.solve_triangular(
-            L, einx.id("m n -> n m", K_cross), lower=True
-        )
-        return jnp.maximum(K_diag - einx.sum("[n] m", v * v), 0.0)
+        r"""$k_{**} - k_*^\top (K + \mathrm{diag}(1/\lambda))^{-1} k_*$."""
+        var = self._predict(X_star, variance=True)[1]
+        assert var is not None
+        return var
 
     def predict(
         self, X_star: Float[Array, "M D"]
     ) -> tuple[Float[Array, " M"], Float[Array, " M"]]:
         """Joint mean / marginal-variance prediction at ``X_star``.
 
-        Both kernel evaluations share a single kernel context so
-        Pattern B / C kernels with prior'd hyperparameters resample
-        once and produce a self-consistent ``(mean, var)`` pair.
+        Both use the hyperparameters of the fit, so the pair is
+        self-consistent and a kernel with priors registers no new site.
         """
-        if self.solver is not None:
-            mean, var = self._solver_predict(X_star, variance=True)
-            assert var is not None
-            return mean, var
-        with call_context(self.prior.kernel):
-            L = self._pseudo_factor()
-            K_cross = self.prior.kernel(X_star, self.prior.X)
-            K_diag = self.prior.kernel.diag(X_star)
-            prior_mean_train = self.prior.mean(self.prior.X)
-            prior_mean_test = self.prior.mean(X_star)
-        y_tilde = self.site_nat1 / self.site_nat2
-        residual = y_tilde - prior_mean_train
-        alpha = jax.scipy.linalg.cho_solve((L, True), residual)
-        mean = prior_mean_test + einx.dot("m n, n -> m", K_cross, alpha)
-        v = jax.scipy.linalg.solve_triangular(
-            L, einx.id("m n -> n m", K_cross), lower=True
-        )
-        var = jnp.maximum(K_diag - einx.sum("[n] m", v * v), 0.0)
+        mean, var = self._predict(X_star, variance=True)
+        assert var is not None
         return mean, var
 
 
@@ -263,33 +233,23 @@ def _check_scalar_latent(lik: Likelihood) -> None:
 _MATRIX_FREE_EPIC = "https://github.com/jejjohnson/pyrox/issues/353"
 
 
-def _reject_matrix_free(prior: GPPrior, strategy: str) -> None:
-    """Refuse ``GPPrior(matrix_free=True)`` in the strategies that form ``K``.
+def _reject_matrix_free(prior: GPPrior) -> None:
+    """Refuse ``GPPrior(matrix_free=True)`` in `QuasiNewtonInference`.
 
     A matrix-free prior promises never to form the N × N kernel matrix, and
-    the Newton and quasi-Newton strategies evaluate it densely (`_prior_K`)
-    and ignore the prior's ``solver``; posterior linearisation and EP run on
-    `gaussx.site_posterior` instead and accept it (pyrox#552). Raising keeps
-    that promise instead of allocating ``K`` silently.
+    the quasi-Newton search whitens with a Cholesky root of it (pyrox#549).
+    Laplace, Gauss-Newton (pyrox#551), posterior linearisation and EP
+    (pyrox#552) solve through the prior's solver and accept it. Raising
+    keeps that promise instead of allocating ``K`` silently.
     """
     if not prior.matrix_free:
         return
-    if strategy == "QuasiNewtonInference":
-        reason = (
-            "it whitens its L-BFGS search with a Cholesky root of the kernel "
-            "matrix, so it never accepts a matrix-free prior; LaplaceInference "
-            "with an iterative solver is the matrix-free route once it lands"
-        )
-    else:
-        reason = (
-            "it forms the dense N x N kernel matrix and does not yet use the "
-            "prior's solver; matrix-free Laplace and Gauss-Newton are planned "
-            "(pyrox#551), and PosteriorLinearization and ExpectationPropagation "
-            "already take a matrix-free prior"
-        )
     raise ValueError(
-        f"{strategy} does not support GPPrior(matrix_free=True): {reason}. "
-        f"Use matrix_free=False for this fit. See {_MATRIX_FREE_EPIC}."
+        "QuasiNewtonInference does not support GPPrior(matrix_free=True): it "
+        "whitens its L-BFGS search with a Cholesky root of the kernel matrix, "
+        "so it never accepts a matrix-free prior; LaplaceInference with an "
+        "iterative solver is the matrix-free route (pyrox#551). Use "
+        f"matrix_free=False for this fit. See {_MATRIX_FREE_EPIC}."
     )
 
 
@@ -297,39 +257,6 @@ def _prior_K(prior: GPPrior) -> Float[Array, "N N"]:
     with call_context(prior.kernel):
         K = prior.kernel(prior.X, prior.X)
     return K.at[jnp.diag_indices_from(K)].add(prior.jitter)
-
-
-def _posterior_from_diag_sites(
-    K: Float[Array, "N N"],
-    nat1: Float[Array, " N"],
-    nat2: Float[Array, " N"],
-    prior_mean: Float[Array, " N"],
-) -> tuple[Float[Array, " N"], Float[Array, " N"]]:
-    r"""Compute the marginals of ``q(f) = N(m, V)`` from diagonal site naturals.
-
-    Sites contribute a synthetic Gaussian likelihood with mean
-    ``y_tilde = nat1 / nat2`` and variance ``1/nat2``. The posterior
-    mean is
-    $m = \mu + K (K + \mathrm{diag}(1/\Lambda))^{-1} (y_{\rm tilde} - \mu)$,
-    and the marginal posterior variances are the diagonal of
-    $V = K - K (K + \mathrm{diag}(1/\Lambda))^{-1} K$, computed
-    without materializing ``V``: with ``W = L^{-1} K`` the diagonal is
-    ``diag(K) - sum_n W_{n,i}^2``.
-
-    Returns ``(q_mean, q_var)``.
-    """
-    sigma2 = jnp.reciprocal(nat2)
-    K_reg = K.at[jnp.diag_indices_from(K)].add(sigma2)
-    L = _psd_safe_cholesky(K_reg)
-
-    y_tilde = nat1 / nat2
-    residual = y_tilde - prior_mean
-    alpha = jax.scipy.linalg.cho_solve((L, True), residual)
-    q_mean = prior_mean + einx.dot("i j, j -> i", K, alpha)
-
-    W = jax.scipy.linalg.solve_triangular(L, K, lower=True)
-    q_var = jnp.diag(K) - einx.sum("[n] i", W * W)
-    return q_mean, q_var
 
 
 def _one_site(site: PyTree) -> PyTree:
@@ -377,37 +304,6 @@ def _psd_safe_cholesky(M: Float[Array, "N N"]) -> Float[Array, "N N"]:
     return safe_cholesky(_psd_operator(symmetrize(M)))
 
 
-def _laplace_log_marginal(
-    log_prob_per_point: Callable[[Float[Array, " N"], PyTree], Float[Array, " N"]],
-    f: Float[Array, " N"],
-    y: PyTree,
-    prior_mean: Float[Array, " N"],
-    K: Float[Array, "N N"],
-    Lam: Float[Array, " N"],
-) -> Float[Array, ""]:
-    r"""Standard Laplace log-marginal-likelihood approximation.
-
-    Computes
-    $\log p(y) \approx \log p(y \mid \hat f)
-    - \tfrac12 (\hat f - \mu)^\top K^{-1} (\hat f - \mu)
-    - \tfrac12 \log |I + K \Lambda|$
-
-    with both Cholesky factorizations gated through `_psd_safe_cholesky`
-    to survive near-singular ``K`` under float32 + dense data.
-    """
-    ll = log_prob_per_point(f, y).sum()
-    residual = f - prior_mean
-    L_K = _psd_safe_cholesky(K)
-    alpha = jax.scipy.linalg.cho_solve((L_K, True), residual)
-    quad = 0.5 * jnp.dot(residual, alpha)
-    sqrt_lam = jnp.sqrt(Lam)
-    # B = I + √Λ K √Λ (symmetric two-sided diagonal scaling of K).
-    scaled_K = einx.multiply("i, i j, j -> i j", sqrt_lam, K, sqrt_lam)
-    B = scaled_K.at[jnp.diag_indices_from(scaled_K)].add(1.0)
-    L_B = _psd_safe_cholesky(B)
-    return ll - quad - 0.5 * cholesky_logdet(L_B)
-
-
 def _site_data(
     lik: Likelihood, y: Float[Array, " N"], X: Float[Array, "N D"]
 ) -> PyTree:
@@ -451,83 +347,90 @@ def _log_prob_per_point_factory(
     return per_point
 
 
-def _laplace_at_mode(
+def _strategy_solver(
+    strategy: LaplaceInference
+    | GaussNewtonInference
+    | PosteriorLinearization
+    | ExpectationPropagation,
     prior: GPPrior,
-    y: Float[Array, " N"],
-    f: Float[Array, " N"],
-    K: Float[Array, "N N"],
-    prior_mean: Float[Array, " N"],
-    log_prob_per_point: Callable[[Float[Array, " N"], PyTree], Float[Array, " N"]],
-    sites: PyTree,
-    *,
-    precision_floor: float,
-    n_iter: Int[Array, ""],
-    converged: Bool[Array, ""],
-) -> ConditionedNonGaussGP:
-    """The Laplace Gaussian at the mode ``f``: its sites, marginals and evidence."""
-    g, h = _per_point_grad_hess(log_prob_per_point, f, sites)
-    nat1, Lam = newton_update(f, g, h, precision_floor=precision_floor)
-    q_mean, q_var = _posterior_from_diag_sites(K, nat1, Lam, prior_mean)
-    log_marg = _laplace_log_marginal(log_prob_per_point, f, sites, prior_mean, K, Lam)
-    return ConditionedNonGaussGP(
-        prior=prior,
-        y=y,
-        site_nat1=nat1,
-        site_nat2=Lam,
-        q_mean=q_mean,
-        q_var=q_var,
-        log_marginal_approx=log_marg,
-        n_iter=n_iter,
-        converged=converged,
+) -> AbstractSolverStrategy:
+    """The strategy's solver, each unset field taken from the prior.
+
+    ``solver``, ``preconditioner`` and ``logdet`` fall back one by one to
+    the prior's fields, and the three are composed by
+    `gaussx.compose_solver`; none set on either is `gaussx.DenseSolver`.
+    """
+    return compose_solver_fields(
+        type(strategy).__name__,
+        prior.solver if strategy.solver is None else strategy.solver,
+        prior.preconditioner
+        if strategy.preconditioner is None
+        else strategy.preconditioner,
+        prior.logdet if strategy.logdet is None else strategy.logdet,
     )
 
 
+def _fitted_kernel(prior: GPPrior) -> Kernel:
+    """The prior's kernel with its hyperparameters resolved, for `predict`.
+
+    Called inside the fit's `call_context`, so the draw is the fit's. A
+    kernel with no plain kernellib counterpart comes back unchanged.
+    """
+    try:
+        return freeze_kernel(prior.kernel)
+    except NotImplementedError:
+        return prior.kernel
+
+
 def _newton_fit(
+    strategy: LaplaceInference | GaussNewtonInference,
     prior: GPPrior,
     likelihood: Likelihood,
     y: Float[Array, " N"],
-    *,
-    max_iter: int,
-    tol: float,
-    damping: float,
-    precision_floor: float,
-    strategy: str,
+    key: Array | None,
 ) -> ConditionedNonGaussGP:
     """Damped Newton to the Laplace mode, on `argminax.solve.laplace_mode_covariance`.
 
     The loop is a ``lax.while_loop`` and the mode is implicitly
-    differentiable, so the fit runs under ``jax.jit`` and ``jax.vmap`` and
-    a gradient does not unroll it. Only the mode, the iteration count and
-    the convergence flag come from argminax: the sites, the marginals and
-    the Laplace log marginal at the mode are pyrox-gp's own algebra
-    (`_laplace_at_mode`), whose safe Cholesky keeps them finite in float32.
+    differentiable, so the fit runs under ``jax.jit`` and ``jax.vmap`` and a
+    gradient does not unroll it. Every solve against
+    $A = K + \\mathrm{diag}(1 / \\lambda)$ goes through the composed solver,
+    on the prior's own operator, so a matrix-free prior with an iterative
+    solver never forms $K$. The sites, the posterior and the evidence
+    (`gaussx.site_log_evidence`) at the mode come from argminax too; the
+    marginal variances wait until `ConditionedNonGaussGP.q_var` is read.
     """
-    _reject_matrix_free(prior, strategy)
     _check_scalar_latent(likelihood)
-    K = _prior_K(prior)
-    prior_mean = jnp.asarray(prior.mean(prior.X))
+    solver = _strategy_solver(strategy, prior)
+    # one hyperparameter draw for the operator, the mean and the predictions
+    with call_context(prior.kernel):
+        prior_cov = prior._prior_operator()
+        prior_mean = jnp.asarray(prior.mean(prior.X))
+        kernel = _fitted_kernel(prior)
     log_prob_per_point = _log_prob_per_point_factory(likelihood)
-    sites = _site_data(likelihood, y, prior.X)
+    site_data = _site_data(likelihood, y, prior.X)
     fit = laplace_mode_covariance(
-        _psd_operator(K),
+        prior_cov,
         prior_mean,
-        lambda f: log_prob_per_point(f, sites),
-        max_iter=max_iter,
-        tol=tol,
-        damping=damping,
-        precision_floor=precision_floor,
+        lambda f: log_prob_per_point(f, site_data),
+        max_iter=strategy.max_iter,
+        tol=strategy.tol,
+        damping=strategy.damping,
+        precision_floor=strategy.precision_floor,
+        adjoint=strategy.adjoint,
+        solver=solver,
+        with_variance=False,
+        key=key,
     )
-    return _laplace_at_mode(
-        prior,
-        y,
-        fit.mode,
-        K,
-        prior_mean,
-        log_prob_per_point,
-        sites,
-        precision_floor=precision_floor,
+    assert fit.log_marginal is not None  # with_log_marginal defaults to True
+    return ConditionedNonGaussGP(
+        prior=prior,
+        y=y,
+        site_posterior=fit.site_posterior,
+        log_marginal_approx=fit.log_marginal,
         n_iter=fit.n_iter,
         converged=fit.converged,
+        kernel=kernel,
     )
 
 
@@ -539,24 +442,45 @@ class LaplaceInference(eqx.Module):
 
     Iterates the standard GP-Laplace fixed-point loop (Rasmussen &
     Williams Algorithm 3.1): at each iteration evaluate per-point
-    gradient ``g`` and Hessian-diag ``h`` of ``log p(y | f)``, form the
-    Newton update with site precision $\Lambda = -h$ (clipped to
-    a small positive floor for numerical safety), and recompute ``f``
-    as the mean of the implied Gaussian posterior.
+    gradient $g$ and Hessian diagonal $h$ of $\log p(y \mid f)$, set the
+    sites $\lambda_n = \max(-h_n, \epsilon)$ and
+    $\lambda_n \mu_{\text{site},n} = g_n + \lambda_n f_n$ (floor $\epsilon$,
+    ``precision_floor``), and move $f$ towards the posterior mean of those
+    sites, $\mu_f + K A^{-1} (\mu_\text{site} - \mu_f)$ with
+    $A = K + \mathrm{diag}(1 / \lambda)$.
 
     The loop is `argminax.solve.laplace_mode_covariance`, a
     ``lax.while_loop`` with an implicitly differentiable mode, so ``fit``
     runs under ``jax.jit`` and ``jax.vmap``; close over the prior, whose
     kernel registry does not survive being passed through a transform.
+    Every solve against $A$, in the loop, at the mode and in `predict`, goes
+    through the solver composed from ``solver``, ``preconditioner`` and
+    ``logdet`` (each unset one taken from the prior), on the prior's own
+    operator, so ``GPPrior(matrix_free=True)`` with an iterative solver
+    never forms the $N \times N$ kernel matrix (pyrox#551).
 
-    The reported ``log_marginal_approx`` is the standard Laplace
-    log-marginal-likelihood approximation
-    $\log p(y) \approx \log p(y | \hat f) - \tfrac12 \hat f^\top
-    K^{-1} \hat f - \tfrac12 \log |I + K \Lambda|$.
+    The reported ``log_marginal_approx`` is the Laplace evidence
+    `gaussx.site_log_evidence` at the mode,
 
-    Dense only: the fit forms the N × N kernel matrix and does not use the
-    prior's ``solver``, so a ``GPPrior(matrix_free=True)`` raises
-    ``ValueError`` (pyrox#549; pyrox#551 plans the matrix-free version).
+    $$
+    \log p(y) \approx \sum_n \log p(y_n \mid m_n)
+      - \tfrac12 (m - \mu_f)^\top K^{-1} (m - \mu_f)
+      - \tfrac12 \log \lvert I + \Lambda^{1/2} K \Lambda^{1/2} \rvert ,
+    $$
+
+    with $m$ the posterior mean of the sites at the mode, computed without
+    $K^{-1}$. A dense solver (the default) gives it exactly; a stochastic
+    log-determinant (CG's own SLQ, `gaussx.BBMMSolver`) gives the equal
+    pseudo-observation form, an estimate whose probes come from the ``key``
+    of `fit`. Pass ``logdet=gaussx.DenseLogdet()`` beside CG for an exact
+    evidence at moderate $N$.
+
+    With an iterative solver, give it a tolerance at least ten times tighter
+    than ``tol`` (the loop cannot resolve a step below the solves'
+    residual). An inner solve that misses its tolerance makes ``converged``
+    false; the variances and the evidence solve through the solver itself,
+    which raises at ``max_steps`` when built with ``throw=True``, so inside
+    a sampler build it with ``throw=False``.
 
     Attributes:
         max_iter: Newton iterations. Default ``20``.
@@ -569,29 +493,70 @@ class LaplaceInference(eqx.Module):
             ``K + 1/Λ`` well-conditioned even for log-concave-but-flat
             likelihoods (e.g. Bernoulli at extreme logits). Default
             ``1e-6``.
+        solver: The solve of $A$; ``None`` takes the prior's ``solver``.
+        preconditioner: The preconditioner of an iterative ``solver``;
+            ``None`` takes the prior's. A lazy one
+            (``gaussx.NystromPreconditioner.lazy``) reads the site variances
+            from the system at every Newton step.
+        logdet: The log-determinant of the evidence; ``None`` takes the
+            prior's (and, if that is unset too, the solver's own). The three
+            are composed by `gaussx.compose_solver`; none set on either side
+            is `gaussx.DenseSolver`.
+        adjoint: How the mode is differentiated, an
+            ``optimistix.ImplicitAdjoint``; ``None`` is argminax's
+            matrix-free GMRES tangent solve.
     """
 
     max_iter: int = eqx.field(static=True, default=20)
     tol: float = eqx.field(static=True, default=1e-6)
     damping: float = eqx.field(static=True, default=1.0)
     precision_floor: float = eqx.field(static=True, default=1e-6)
+    solver: AbstractSolverStrategy | None = None
+    preconditioner: AbstractPreconditioner | None = None
+    logdet: AbstractLogdetStrategy | None = None
+    adjoint: optx.ImplicitAdjoint | None = None
 
     def fit(
         self,
         prior: GPPrior,
         likelihood: Likelihood,
         y: Float[Array, " N"],
+        *,
+        key: Array | None = None,
     ) -> ConditionedNonGaussGP:
-        return _newton_fit(
-            prior,
-            likelihood,
-            y,
-            max_iter=self.max_iter,
-            tol=self.tol,
-            damping=self.damping,
-            precision_floor=self.precision_floor,
-            strategy="LaplaceInference",
-        )
+        r"""Fit the Laplace approximation at the mode of $p(f \mid y)$.
+
+        Args:
+            prior: The `GPPrior`, dense or ``matrix_free=True``.
+            likelihood: A scalar-latent `Likelihood`.
+            y: Observations, shape ``(N,)``.
+            key: PRNG key of a stochastic log-determinant in the evidence
+                (CG's SLQ, `gaussx.BBMMSolver`); ``None`` uses the solver's
+                own seed. Ignored by an exact log-determinant.
+
+        Returns:
+            The `ConditionedNonGaussGP` at the mode.
+
+        Examples:
+            >>> import gaussx as gx
+            >>> import jax
+            >>> import jax.numpy as jnp
+            >>> import jax.random as jr
+            >>> from pyrox_gp import RBF, BernoulliLikelihood, GPPrior
+            >>> from pyrox_gp import LaplaceInference
+            >>> X = jnp.linspace(-2.0, 2.0, 10)[:, None]
+            >>> y = (X[:, 0] > 0.0).astype(X.dtype)
+            >>> # CG on a matrix-free prior: K is never formed, and the
+            >>> # evidence is CG's stochastic Lanczos estimate from the key
+            >>> prior = GPPrior(kernel=RBF(), X=X, matrix_free=True)
+            >>> strategy = LaplaceInference(solver=gx.CGSolver(rtol=1e-10, atol=1e-10))
+            >>> fit = jax.jit(
+            ...     lambda labels: strategy.fit(
+            ...         prior, BernoulliLikelihood(), labels, key=jr.key(0)
+            ...     )
+            ... )(y)
+        """
+        return _newton_fit(self, prior, likelihood, y, key)
 
 
 # --- Gauss-Newton --------------------------------------------------------
@@ -611,11 +576,10 @@ class GaussNewtonInference(eqx.Module):
     For Bernoulli / Poisson the Fisher information equals the negative
     Hessian, so GGN ≡ Laplace; for StudentT the floor matters. The loop is
     the same `argminax.solve.laplace_mode_covariance` call, so ``fit`` runs
-    under ``jax.jit`` and ``jax.vmap``.
-
-    Dense only: the fit forms the N × N kernel matrix and does not use the
-    prior's ``solver``, so a ``GPPrior(matrix_free=True)`` raises
-    ``ValueError`` (pyrox#549; pyrox#551 plans the matrix-free version).
+    under ``jax.jit`` and ``jax.vmap``, and it takes the same ``solver``,
+    ``preconditioner`` and ``logdet`` as `LaplaceInference`, falling back to
+    the prior's, so a matrix-free prior with an iterative solver never forms
+    the kernel matrix (pyrox#551).
 
     Attributes:
         max_iter: Iterations. Default ``20``.
@@ -626,29 +590,42 @@ class GaussNewtonInference(eqx.Module):
         precision_floor: Lower bound on the diagonal precision. Default
             ``1e-3`` — larger than `LaplaceInference` to ensure
             stable updates on non-log-concave likelihoods.
+        solver: As in `LaplaceInference`; ``None`` takes the prior's.
+        preconditioner: As in `LaplaceInference`.
+        logdet: As in `LaplaceInference`.
+        adjoint: As in `LaplaceInference`.
     """
 
     max_iter: int = eqx.field(static=True, default=20)
     tol: float = eqx.field(static=True, default=1e-6)
     damping: float = eqx.field(static=True, default=1.0)
     precision_floor: float = eqx.field(static=True, default=1e-3)
+    solver: AbstractSolverStrategy | None = None
+    preconditioner: AbstractPreconditioner | None = None
+    logdet: AbstractLogdetStrategy | None = None
+    adjoint: optx.ImplicitAdjoint | None = None
 
     def fit(
         self,
         prior: GPPrior,
         likelihood: Likelihood,
         y: Float[Array, " N"],
+        *,
+        key: Array | None = None,
     ) -> ConditionedNonGaussGP:
-        return _newton_fit(
-            prior,
-            likelihood,
-            y,
-            max_iter=self.max_iter,
-            tol=self.tol,
-            damping=self.damping,
-            precision_floor=self.precision_floor,
-            strategy="GaussNewtonInference",
-        )
+        """Fit the Gauss-Newton approximation; as `LaplaceInference.fit`.
+
+        Args:
+            prior: The `GPPrior`, dense or ``matrix_free=True``.
+            likelihood: A scalar-latent `Likelihood`.
+            y: Observations, shape ``(N,)``.
+            key: PRNG key of a stochastic log-determinant in the evidence;
+                ignored by an exact one.
+
+        Returns:
+            The `ConditionedNonGaussGP` at the mode.
+        """
+        return _newton_fit(self, prior, likelihood, y, key)
 
 
 # --- Posterior linearization and EP: the site loop ------------------------
@@ -671,26 +648,6 @@ def _check_variance_method(strategy: str, variance: str) -> None:
             f"{strategy}: variance must be 'auto', 'exact' or 'stochastic', "
             f"got {variance!r}."
         )
-
-
-def _site_solver(
-    strategy: PosteriorLinearization | ExpectationPropagation,
-    prior: GPPrior,
-) -> AbstractSolverStrategy:
-    """The strategy's solver, each unset field taken from the prior.
-
-    ``solver``, ``preconditioner`` and ``logdet`` fall back one by one to
-    the prior's fields, and the three are composed by
-    `gaussx.compose_solver`; none set on either is `gaussx.DenseSolver`.
-    """
-    return compose_solver_fields(
-        type(strategy).__name__,
-        prior.solver if strategy.solver is None else strategy.solver,
-        prior.preconditioner
-        if strategy.preconditioner is None
-        else strategy.preconditioner,
-        prior.logdet if strategy.logdet is None else strategy.logdet,
-    )
 
 
 def _require_exact_variance(
@@ -752,13 +709,14 @@ def _fit_cavity_sites(
     `gaussx.site_log_evidence` at the posterior mean.
     """
     _check_scalar_latent(likelihood)
-    solver = _site_solver(strategy, prior)
+    solver = _strategy_solver(strategy, prior)
     size = prior.X.shape[0]
     _require_exact_variance(strategy, solver, size)
-    # one hyperparameter draw for the operator and the mean
+    # one hyperparameter draw for the operator, the mean and the predictions
     with call_context(prior.kernel):
         prior_cov = prior._prior_operator()
         prior_mean = jnp.asarray(prior.mean(prior.X))
+        kernel = _fitted_kernel(prior)
     site_data = _site_data(likelihood, y, prior.X)
     dtype = prior_cov.in_structure().dtype
 
@@ -786,23 +744,21 @@ def _fit_cavity_sites(
         # the first update was the whole budget, and no stopping test ran
         n_steps, converged = jnp.asarray(0), jnp.asarray(False)
 
-    posterior, q_var = _site_marginals(
-        sites, prior_mean, prior_cov, solver, strategy.batch_size
+    information, precision = sites
+    posterior = site_posterior(
+        prior_mean, prior_cov, information, precision, solver=solver
     )
     # ∑ₙ log p(yₙ ∣ mₙ) at the posterior mean
     log_lik = _log_prob_per_point_factory(likelihood)(posterior.mean, site_data).sum()
-    nat1, nat2 = sites
     return ConditionedNonGaussGP(
         prior=prior,
         y=y,
-        site_nat1=nat1,
-        site_nat2=nat2,
-        q_mean=posterior.mean,
-        q_var=q_var,
+        site_posterior=posterior,
         log_marginal_approx=site_log_evidence(posterior, log_lik, key=key),
         n_iter=n_steps + first,
         converged=converged,
-        solver=None if isinstance(solver, DenseSolver) else solver,
+        kernel=kernel,
+        batch_size=strategy.batch_size,
     )
 
 
@@ -1180,7 +1136,7 @@ class QuasiNewtonInference(eqx.Module):
     matrix, and the prior's ``solver`` is not used, so a
     ``GPPrior(matrix_free=True)`` raises ``ValueError``, permanently
     (pyrox#549); `LaplaceInference` with an iterative solver is the
-    matrix-free route once pyrox#551 lands.
+    matrix-free route (pyrox#551).
 
     Attributes:
         max_iter: L-BFGS iterations. Default ``50``.
@@ -1199,11 +1155,33 @@ class QuasiNewtonInference(eqx.Module):
         prior: GPPrior,
         likelihood: Likelihood,
         y: Float[Array, " N"],
+        *,
+        key: Array | None = None,
     ) -> ConditionedNonGaussGP:
-        _reject_matrix_free(prior, "QuasiNewtonInference")
+        """Fit by L-BFGS to the mode, then the Laplace Gaussian there.
+
+        Args:
+            prior: A dense `GPPrior`.
+            likelihood: A scalar-latent `Likelihood`.
+            y: Observations, shape ``(N,)``.
+            key: Accepted so that every strategy takes the keyword of
+                `GPPrior.condition_nongauss`; the evidence here is exact,
+                so it is ignored.
+
+        Returns:
+            The `ConditionedNonGaussGP` at the mode.
+
+        Raises:
+            ValueError: For ``GPPrior(matrix_free=True)``.
+        """
+        del key  # the dense evidence needs no probes
+        _reject_matrix_free(prior)
         _check_scalar_latent(likelihood)
-        K = _prior_K(prior)
-        prior_mean = jnp.asarray(prior.mean(prior.X))
+        # one hyperparameter draw for K, the mean and the predictions
+        with call_context(prior.kernel):
+            K = _prior_K(prior)
+            prior_mean = jnp.asarray(prior.mean(prior.X))
+            kernel = _fitted_kernel(prior)
         log_prob_per_point = _log_prob_per_point_factory(likelihood)
         sites = _site_data(likelihood, y, prior.X)
         L_K = _psd_safe_cholesky(K)
@@ -1227,17 +1205,29 @@ class QuasiNewtonInference(eqx.Module):
             max_steps=self.max_iter,
             throw=False,
         )
-        return _laplace_at_mode(
-            prior,
-            y,
-            latent(solution.value).astype(prior_mean.dtype),
-            K,
+        mode = latent(solution.value).astype(prior_mean.dtype)
+        # the Newton sites at the mode: λ = max(−h, ε), λ μ_site = g + λ f̂
+        g, h = _per_point_grad_hess(log_prob_per_point, mode, sites)
+        information, precision = newton_update(
+            mode, g, h, precision_floor=self.precision_floor
+        )
+        posterior = site_posterior(
             prior_mean,
-            log_prob_per_point,
-            sites,
-            precision_floor=self.precision_floor,
+            _psd_operator(K),
+            information,
+            precision,
+            solver=DenseSolver(),
+        )
+        # ∑ₙ log p(yₙ ∣ mₙ) at the posterior mean of the sites
+        log_lik = log_prob_per_point(posterior.mean, sites).sum()
+        return ConditionedNonGaussGP(
+            prior=prior,
+            y=y,
+            site_posterior=posterior,
+            log_marginal_approx=site_log_evidence(posterior, log_lik),
             n_iter=jnp.asarray(solution.stats["num_steps"]),
             converged=solution.result == optx.RESULTS.successful,
+            kernel=kernel,
         )
 
 
@@ -1251,6 +1241,7 @@ def gp_laplace_factor(
     y: Float[Array, " N"],
     *,
     strategy: LaplaceInference | GaussNewtonInference | None = None,
+    key: Array | None = None,
 ) -> None:
     r"""Register the Laplace approximate GP evidence with NumPyro.
 
@@ -1274,6 +1265,11 @@ def gp_laplace_factor(
 
     The value is that of a fit that may not have converged; check
     ``strategy.fit(...).converged`` at the hyperparameters you care about.
+    The strategy's ``solver``, ``preconditioner`` and ``logdet`` (or the
+    prior's) apply, so a matrix-free prior with an iterative solver never
+    forms the kernel matrix (pyrox#551); with a stochastic log-determinant
+    the factor is an estimate, and a fixed ``key`` makes NUTS target a fixed
+    approximation of the posterior.
 
     Args:
         name: The factor site name.
@@ -1281,6 +1277,8 @@ def gp_laplace_factor(
         likelihood: A scalar-latent `Likelihood`.
         y: Observations, shape ``(N,)``.
         strategy: `LaplaceInference` (the default) or `GaussNewtonInference`.
+        key: PRNG key of a stochastic log-determinant in the evidence,
+            passed to ``strategy.fit``; ``None`` uses the solver's own seed.
 
     Examples:
         >>> import jax.numpy as jnp
@@ -1299,4 +1297,5 @@ def gp_laplace_factor(
         ['RBF.lengthscale', 'RBF.variance', 'y']
     """
     strategy = LaplaceInference() if strategy is None else strategy
-    numpyro.factor(name, strategy.fit(prior, likelihood, y).log_marginal_approx)
+    fit = strategy.fit(prior, likelihood, y, key=key)
+    numpyro.factor(name, fit.log_marginal_approx)
