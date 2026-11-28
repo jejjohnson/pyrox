@@ -173,6 +173,15 @@ class PathwiseSampler(eqx.Module):
     (``N_* · F · D``), and the correction term forms a fresh
     ``K(X_*, X)`` block (``N_* · N``).
 
+    The correction solve uses the prior's ``solver``, the strategy that
+    built the cached solve in `GPPrior.condition`, so a
+    ``GPPrior(matrix_free=True)`` with an iterative solver never forms
+    $K_{XX}$. Its tolerance is that solver's own ``rtol`` and ``atol``
+    (``1e-6`` each for `pyrox_gp.preconditioned_cg_solver`); the residual
+    of an iterative solve enters every path as an error that does not
+    shrink with the number of paths. A prior without a ``solver`` keeps
+    gaussx's structural dispatch, a dense Cholesky solve.
+
     Examples:
         >>> posterior = GPPrior(kernel=RBF(), X=X).condition(y, jnp.array(0.05))
         >>> sampler = PathwiseSampler(posterior, n_features=512)
@@ -241,9 +250,16 @@ class PathwiseSampler(eqx.Module):
         residual = (
             self.conditioned_gp.y[None, :] - (mean_train[None, :] + prior_train) - noise
         )
-        # Per-path Matheron correction weights alpha = (K + eps I)^{-1} r
-        # via gaussx.solve_rows — structured dispatch on the cached operator.
-        correction_weights = solve_rows(self.conditioned_gp.operator, residual)
+        # Per-path Matheron correction weights alpha = (K + eps I)^{-1} r,
+        # with the solver that produced the cache, so a matrix-free prior
+        # never forms K (pyrox#558); None keeps gaussx's structural dispatch.
+        # The preconditioner depends on the operator only, so under the vmap
+        # over paths it is built once for the batch.
+        correction_weights = solve_rows(
+            self.conditioned_gp.operator,
+            residual,
+            solver=self.conditioned_gp.prior.solver,
+        )
         return PathwiseFunction(
             kernel_fn=_frozen_kernel_fn(kernel, variance, lengthscale),
             correction_points=X,
@@ -280,6 +296,10 @@ class DecoupledPathwiseSampler(eqx.Module):
     Handles `WhitenedGuide` automatically: whitened guide draws
     ``v ~ q(v)`` are unwhitened to inducing values ``u = L_ZZ v`` via
     `gaussx.unwhiten` before forming the inducing-space residual.
+
+    The inducing-space correction solve uses the prior's ``solver``
+    (structural dispatch when it is ``None``); the Cholesky factor for
+    unwhitening stays, since it is only inducing × inducing.
 
     Examples:
         >>> prior = SparseGPPrior(kernel=RBF(), Z=Z)
@@ -360,10 +380,12 @@ class DecoupledPathwiseSampler(eqx.Module):
         else:
             inducing_samples = guide_samples
 
-        # Per-path Matheron correction weights via gaussx.solve_rows.
+        # Per-path Matheron correction weights, with the prior's solver
+        # (None keeps gaussx's structural dispatch).
         correction_weights = solve_rows(
             inducing_op,
             inducing_samples - prior_inducing,
+            solver=self.prior.solver,
         )
         return PathwiseFunction(
             kernel_fn=_frozen_kernel_fn(self.prior.kernel, variance, lengthscale),

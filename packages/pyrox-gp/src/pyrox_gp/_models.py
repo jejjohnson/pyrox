@@ -101,7 +101,8 @@ class GPPrior(eqx.Module):
             the sum; a dense solver materialises ``K`` again. NumPyro-aware
             kernels are resolved once per call through ``frozen()``.
             Matrix-free entry points: `log_prob`, `log_marginal`,
-            `condition` and its predictions, and `gp_factor`. The
+            `condition` and its predictions, `gp_factor`, and
+            `pyrox_gp.PathwiseSampler` on the conditioned GP. The
             non-Gaussian strategies (`condition_nongauss`,
             `gp_laplace_factor`) form ``K`` and raise ``ValueError`` on a
             matrix-free prior.
