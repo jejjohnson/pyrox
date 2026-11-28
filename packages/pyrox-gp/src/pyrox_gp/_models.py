@@ -15,7 +15,7 @@ in later waves.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal, NamedTuple, Protocol
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Protocol, cast
 
 import einx
 import equinox as eqx
@@ -53,7 +53,11 @@ if TYPE_CHECKING:
 
 
 class _NonGaussStrategy(Protocol):
-    """Structural protocol for non-Gaussian inference strategies."""
+    """Structural protocol for non-Gaussian inference strategies.
+
+    The five strategies of pyrox-gp also take a keyword ``key`` (pyrox#551),
+    which `GPPrior.condition_nongauss` passes only when it is given.
+    """
 
     def fit(
         self,
@@ -142,10 +146,13 @@ class GPPrior(eqx.Module):
             `condition` and its predictions, `gp_factor`,
             `pyrox_gp.PathwiseSampler` on the conditioned GP, and prior
             draws with ``method="krylov"`` (`sample`,
-            ``gp_sample(whitened=True)``). The default Cholesky draws and
-            the non-Gaussian strategies (`condition_nongauss`,
-            `gp_laplace_factor`) form ``K`` and raise ``ValueError`` on a
-            matrix-free prior.
+            ``gp_sample(whitened=True)``), and, with an iterative solver,
+            the non-Gaussian strategies other than quasi-Newton
+            (`condition_nongauss` with Laplace, Gauss-Newton, posterior
+            linearisation or EP, and `gp_laplace_factor`; pyrox#551,
+            pyrox#552). The default Cholesky draws and
+            `pyrox_gp.QuasiNewtonInference` form ``K`` and raise
+            ``ValueError`` on a matrix-free prior.
         block_size: Rows of ``K`` per matvec step when ``matrix_free``.
 
     Examples:
@@ -415,10 +422,14 @@ class GPPrior(eqx.Module):
         y: Float[Array, " N"],
         *,
         strategy: _NonGaussStrategy,
+        key: Array | None = None,
     ) -> ConditionedNonGaussGP:
         """Condition on a non-Gaussian likelihood via a site-based strategy.
 
-        Convenience that forwards to ``strategy.fit(self, likelihood, y)``.
+        Convenience that forwards to ``strategy.fit(self, likelihood, y)``,
+        with ``key=key`` when a key is given: the PRNG key of a stochastic
+        log-determinant in the evidence (CG's SLQ, `gaussx.BBMMSolver`),
+        which every pyrox-gp strategy accepts (pyrox#551).
         Pick any of the site-based strategies in
         `pyrox_gp._inference_nongauss`:
         `pyrox_gp.LaplaceInference`,
@@ -446,7 +457,10 @@ class GPPrior(eqx.Module):
             )
             mean, var = cond.predict(X_star)
         """
-        return strategy.fit(self, likelihood, y)
+        if key is None:
+            return strategy.fit(self, likelihood, y)
+        fit_with_key = cast(Any, strategy).fit
+        return fit_with_key(self, likelihood, y, key=key)
 
 
 def _check_draw_method(method: str) -> None:

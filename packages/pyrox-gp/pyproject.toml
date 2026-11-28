@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "pyrox",
-    "argminax>=0.0.10",
+    "argminax>=0.0.11",
     "gaussx>=0.8.3",
     "pyrox-gauss",
     "kernellib>=0.0.22",
@@ -62,9 +62,12 @@ gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.3" }
 # spectral methods and RFF draws `_basis` delegates to, and needs gaussx >= 0.2.0.
 kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.22" }
 # The Newton loop of `LaplaceInference` and `GaussNewtonInference`
-# (`argminax.solve.laplace_mode_covariance`, v0.0.10), in step with the
-# argminax source of pyrox-lgm, pyrox-nn and pyrox-ssm.
-argminax = { git = "https://github.com/jejjohnson/argminax.git", tag = "v0.0.10" }
+# (`argminax.solve.laplace_mode_covariance`, which takes a gaussx solver and
+# stays matrix-free with an iterative one from v0.0.11), and the site loop of
+# `PosteriorLinearization` and `ExpectationPropagation`
+# (`argminax.solve.site_fixed_point`), in step with the argminax source of
+# pyrox-lgm, pyrox-nn and pyrox-ssm.
+argminax = { git = "https://github.com/jejjohnson/argminax.git", tag = "v0.0.11" }
 
 [build-system]
 requires = ["hatchling>=1.27"]

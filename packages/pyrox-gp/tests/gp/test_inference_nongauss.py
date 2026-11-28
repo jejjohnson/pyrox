@@ -20,7 +20,6 @@ import jax.numpy as jnp
 import jax.random as jr
 import numpy as np
 import pytest
-from numpyro import handlers
 from pyrox_gp import (
     RBF,
     BernoulliLikelihood,
@@ -35,7 +34,6 @@ from pyrox_gp import (
     QuasiNewtonInference,
     SoftmaxLikelihood,
     StudentTLikelihood,
-    gp_laplace_factor,
     preconditioned_cg_solver,
 )
 
@@ -217,8 +215,9 @@ _STRATEGIES = {
 
 
 # PosteriorLinearization and ExpectationPropagation take a matrix-free prior
-# since pyrox#552 (test_inference_nongauss_sites.py).
-_DENSE_ONLY = ["LaplaceInference", "GaussNewtonInference", "QuasiNewtonInference"]
+# since pyrox#552 (test_inference_nongauss_sites.py), and LaplaceInference and
+# GaussNewtonInference since pyrox#551 (test_inference_nongauss_solvers.py).
+_DENSE_ONLY = ["QuasiNewtonInference"]
 
 
 @pytest.mark.parametrize("name", _DENSE_ONLY)
@@ -240,15 +239,6 @@ def test_matrix_free_prior_is_rejected(name, monkeypatch):
     with pytest.raises(ValueError, match=rf"{name}.*matrix_free=True.*issues/353"):
         prior.condition_nongauss(BernoulliLikelihood(), y, strategy=_STRATEGIES[name]())
     assert (60, 60) not in blocks
-    if name in ("LaplaceInference", "GaussNewtonInference"):
-
-        def model():
-            gp_laplace_factor(
-                "y", prior, BernoulliLikelihood(), y, strategy=_STRATEGIES[name]()
-            )
-
-        with pytest.raises(ValueError, match=name):
-            handlers.seed(model, 0)()
 
 
 # log_marginal_approx, q_mean[0], q_var[0], predicted mean and variance at
@@ -304,8 +294,12 @@ def test_dense_prior_is_unchanged(name):
     got = (fit.log_marginal_approx, fit.q_mean[0], fit.q_var[0], mean[0], var[0])
     # PL and EP moved from a stopping test on the posterior mean to one on the
     # sites (pyrox#552), which runs a few iterations further towards the same
-    # fixed point; the issue's tolerance for that move is 1e-5.
-    rtol = 1e-5 if name in _SITE_LOOP else 1e-10
+    # fixed point; the issue's tolerance for that move is 1e-5. Laplace,
+    # Gauss-Newton and quasi-Newton moved onto gaussx.site_posterior and
+    # gaussx.site_log_evidence (pyrox#551), which evaluates the evidence at
+    # the posterior mean of the sites rather than at the last iterate, a
+    # second-order change; 1e-9 is well above CI runners' 3e-10 spread.
+    rtol = 1e-5 if name in _SITE_LOOP else 1e-9
     np.testing.assert_allclose(
         np.asarray(got, dtype=np.float64), _DENSE_REFERENCE[name], rtol=rtol
     )
@@ -314,7 +308,15 @@ def test_dense_prior_is_unchanged(name):
 _SITE_LOOP = ("PosteriorLinearization", "ExpectationPropagation")
 
 
-def test_matrix_free_prior_is_accepted_by_the_site_strategies(monkeypatch):
+@pytest.mark.parametrize(
+    "name",
+    [
+        "LaplaceInference",
+        "GaussNewtonInference",
+        pytest.param("PosteriorLinearization", marks=pytest.mark.slow),
+    ],
+)
+def test_matrix_free_prior_is_accepted_by_the_site_strategies(name, monkeypatch):
     # The (60, 60) kernel block is never evaluated, and the fit predicts.
     blocks = []
     original = Matern.__call__
@@ -328,9 +330,12 @@ def test_matrix_free_prior_is_accepted_by_the_site_strategies(monkeypatch):
     y = (X[:, 0] > 0.5).astype(X.dtype)
     solver = preconditioned_cg_solver(rank=20, key=jr.key(1))
     prior = GPPrior(Matern(nu=1.5), X, solver=solver, matrix_free=True)
-    fit = prior.condition_nongauss(
-        BernoulliLikelihood(), y, strategy=PosteriorLinearization(max_iter=3)
+    strategy = (
+        PosteriorLinearization(max_iter=3)
+        if name == "PosteriorLinearization"
+        else _STRATEGIES[name](max_iter=3)
     )
+    fit = prior.condition_nongauss(BernoulliLikelihood(), y, strategy=strategy)
     mean, var = fit.predict(X[:2] + 0.01)
     assert bool(jnp.all(jnp.isfinite(fit.q_mean))) and bool(jnp.all(var >= 0.0))
     assert bool(jnp.all(jnp.isfinite(mean)))

@@ -69,9 +69,13 @@ The Markov / state-space track (`MarkovGPPrior`, the SDE kernels, the Markov non
   `_diagonal_with_jitter`, and otherwise a PSD-tagged operator (Slepian);
   never `+ jnp.eye` on a diagonal one.
 - **Inference strategies** are `eqx.Module`s with static configuration that
-  satisfy `_NonGaussStrategy.fit(prior, likelihood, y)` and return
-  `ConditionedNonGaussGP`; reuse the helpers in `_inference_nongauss.py`
-  (`_prior_K`, `_per_point_grad_hess`, `_posterior_from_diag_sites`, …).
+  satisfy `_NonGaussStrategy.fit(prior, likelihood, y)` (plus a keyword
+  `key` for a stochastic log-determinant) and return a
+  `ConditionedNonGaussGP` built on a `gaussx.SitePosterior`; reuse the
+  helpers in `_inference_nongauss.py` (`_strategy_solver`, `_fitted_kernel`,
+  `_per_point_grad_hess`, `_log_prob_per_point_factory`, …). The fit
+  resolves the kernel once (`_fitted_kernel`, inside its `call_context`),
+  and `predict` reuses it, so a kernel with priors is drawn once per fit.
 - **Multi-output kernels** join the closed union `MultiOutputKernel` and
   `_latent_kernels` in `_multi_output_models.py`; distinct latent kernels
   need distinct `pyrox_name`s (`RBF(pyrox_name=f"RBF_q{q}")`).
@@ -82,10 +86,13 @@ The Markov / state-space track (`MarkovGPPrior`, the SDE kernels, the Markov non
   `LaplaceInference` and `GaussNewtonInference`) and optimistix
   (`optx.LBFGS` for `QuasiNewtonInference`), so those fits trace; their
   `n_iter` and `converged` are arrays (`tests/gp/test_inference_nongauss_argminax.py`).
+  Laplace and Gauss-Newton pass the composed solver and the prior's operator
+  to `laplace_mode_covariance`, so they accept a matrix-free prior; only
+  quasi-Newton rejects one (`tests/gp/test_inference_nongauss_solvers.py`).
 - **Cavity loops** (`PosteriorLinearization`, `ExpectationPropagation`) run on
   `argminax.solve.site_fixed_point` over `gaussx.site_posterior`, with the
   evidence from `gaussx.site_log_evidence`. Their `solver`, `preconditioner`
-  and `logdet` fall back field by field to the prior's (`_site_solver`), and
+  and `logdet` fall back field by field to the prior's (`_strategy_solver`), and
   a stochastic variance raises until gaussx#827
   (`tests/gp/test_inference_nongauss_sites.py`).
 - **Optional dependencies**: `flows` (`gauss_flows`; tests use

@@ -37,10 +37,11 @@ Rules for all of them:
   `call_contexts` for several latents), from `pyrox._core`.
 - Sites registered by the component use a caller-supplied name (`gp_sample`
   / `gp_factor` style) or the bridge (`pyrox_sample` in a `PyroxModule`).
-- Inference strategies reuse `_prior_K`, `_per_point_grad_hess`,
-  `_posterior_from_diag_sites`, `_psd_safe_cholesky`,
-  `_laplace_log_marginal`; their `fit` loops are eager by design, so say so
-  in the docstring.
+- Inference strategies build their posterior with `gaussx.site_posterior`
+  and their evidence with `gaussx.site_log_evidence`, resolve their solver
+  with `_strategy_solver` and their kernel with `_fitted_kernel`, and run
+  their loop on argminax (`laplace_mode_covariance`, `site_fixed_point`), so
+  `fit` traces.
 - Docstring: the equations, the reference, the sites (if any), an
   `Examples:` block; no Sphinx markup.
 

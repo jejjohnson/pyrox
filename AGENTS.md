@@ -156,9 +156,9 @@ fails under a handler, a transform or a second instance.
   strategies in `pyrox_ssm` on `argminax.solve.site_fixed_point`, so all of
   them trace).
 - **Linear algebra through gaussx.** Wrap Grams as PSD-tagged lineax
-  operators and call gaussx; respect the model's `solver=`. A few modules
-  still hand-roll `cho_solve` / `solve_triangular`
-  (`pyrox_gp._inference_nongauss`, `pyrox_gp._latent_factor`); new code adds
+  operators and call gaussx; respect the model's `solver=`. One module
+  still hand-rolls `cho_solve` / `solve_triangular`
+  (`pyrox_gp._latent_factor`); new code adds
   none, and a change that touches one is a chance to convert it.
 - **One draw per model call.** Evaluate a kernel with priors more than once
   only inside `call_context(kernel)`, or the second call resamples
