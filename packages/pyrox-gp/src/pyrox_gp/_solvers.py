@@ -163,12 +163,15 @@ def matfree_solver(
     per-point $d$ by gaussx's symmetric scaling. A system that is one dense
     matrix does not split, and raises at solve time. Building it costs
     $O(N R^2)$ plus $R$ kernel matvecs, at every solve; reusing a sketch
-    across Newton steps is not implemented. Timing is unmeasured.
+    across Newton steps is not implemented. Errors, times and memory against
+    the dense solver, up to $N = 8000$, are in
+    [the solver guide](https://jejjohnson.github.io/pyrox/gp-solver-choices/).
 
     Args:
         rank: Rank $R$ of the preconditioner (and of the Nyström
-            log-determinant). 200 is a starting point, measured at
-            $N = 400$ only.
+            log-determinant). 200 is a starting point; the rank that lowers
+            the error follows the effective dimension of the system, not
+            $N$ (see the solver guide).
         preconditioner: ``"nystrom"`` (randomized Nyström, one batched
             matvec per build), ``"rpcholesky"`` (randomly pivoted partial
             Cholesky, one matvec per pivot) or ``"fitc"``
@@ -263,14 +266,17 @@ def bbmm_solver(
     $\log \det(P^{-1/2} A P^{-1/2})$ is estimated. A system that is one
     dense matrix does not split, and raises at solve time. The probes run to
     convergence, not to ``lanczos_order`` steps, so the pass can cost more
-    matvecs than a separate solve and SLQ; timing is unmeasured. The
-    gradient of the log-determinant carries $P$ as a control variate
+    matvecs than a separate solve and SLQ; errors, times and memory against
+    the dense solver are in
+    [the solver guide](https://jejjohnson.github.io/pyrox/gp-solver-choices/).
+    The gradient of the log-determinant carries $P$ as a control variate
     (gaussx#826, from gaussx v0.8.4), so its probe noise falls as $P$
     approaches $A$.
 
     Args:
-        rank: Rank $R$ of the preconditioner; 200 is a starting point,
-            measured at $N = 400$ only.
+        rank: Rank $R$ of the preconditioner; 200 is a starting point, and
+            the rank that lowers the error follows the effective dimension
+            of the system (see the solver guide).
         preconditioner: ``"nystrom"``, ``"rpcholesky"`` or ``"fitc"``, as in
             `matfree_solver`.
         num_probes: Probe vectors $N_\text{probe}$.

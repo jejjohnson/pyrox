@@ -66,6 +66,9 @@ dev = [
     "optax>=0.2.8",
     "pandas>=3.0.3",
     "xarray>=2025.1",
+    # scripts/bench_gp_solvers.py, whose smoke test runs in the pyrox-gp suite.
+    "cyclopts>=4",
+    "loguru>=0.7",
 ]
 lint = [
     "ruff>=0.15.15",
