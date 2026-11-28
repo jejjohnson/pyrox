@@ -254,12 +254,16 @@ def bbmm_solver(
 ) -> gx.AbstractSolverStrategy:
     r"""BBMM with a low-rank preconditioner (pyrox#557).
 
-    `gaussx.BBMMSolver` with the preconditioner of `matfree_solver` (Nyström
-    by default, so both presets build the same one): the solve is CG with
+    `gaussx.BBMMSolver` with a rank-``rank`` preconditioner of the kind
+    `matfree_solver` takes (Nyström by default in both): gaussx's lazy
+    `gaussx.NystromPreconditioner` or `gaussx.PartialCholeskyPreconditioner`,
+    rebuilt from $A = K + \mathrm{diag}(d)$ at every solve by symmetric
+    scaling, so its $P$ is at the scale of $A$. The solve is CG with
     $P^{-1}$, and the log-determinant comes from one modified batched CG
     pass over the right-hand side and probes $z^{(i)} \sim \mathcal{N}(0, P)$
     drawn from $P$ itself, so only the near-identity remainder
-    $\log \det(P^{-1/2} A P^{-1/2})$ is estimated. The probes run to
+    $\log \det(P^{-1/2} A P^{-1/2})$ is estimated. A system that is one
+    dense matrix does not split, and raises at solve time. The probes run to
     convergence, not to ``lanczos_order`` steps, so the pass can cost more
     matvecs than a separate solve and SLQ; timing is unmeasured. The
     gradient does not get the preconditioner's variance reduction
@@ -308,9 +312,16 @@ def bbmm_solver(
         optimization. ICML, PMLR 162, 23751–23780.
     """
     _check_preconditioner(preconditioner)
-    assert preconditioner != "fitc"
     sketch_key, probe_key = jr.split(key)
-    built = _NoiseSplitPreconditioner(preconditioner, rank, None, sketch_key)
+    # gaussx's lazy preconditioners, which read A = K + diag(d) per solve and
+    # give P at the scale of A (the shared pass draws its probes from P)
+    built: gx.AbstractPreconditioner
+    if preconditioner == "nystrom":
+        built = gx.NystromPreconditioner.lazy(rank, key=sketch_key)
+    else:
+        built = gx.PartialCholeskyPreconditioner(
+            rank=rank, shift=None, pivoting="random", key=sketch_key
+        )
     bbmm = gx.BBMMSolver(
         rtol=rtol,
         max_steps=max_steps,

@@ -114,9 +114,10 @@ class _NoiseSplitPreconditioner(gx.AbstractPreconditioner):
     point, it is built from ``K`` with the per-point shift ``d``. Otherwise
     it is built from ``A - shift I`` with the user bound ``shift``.
 
-    It knows $P$ itself (the gaussx preconditioner it builds does), so
-    `logdet`, `sample` and `approximation` serve `gaussx.BBMMSolver`'s shared
-    pass and `gaussx.compose_solver`.
+    It serves the CG solve only. On ``K + s I`` it keeps gaussx's scalar
+    Nyström form, whose $P$ is $A$ divided by $\\hat\\gamma_k + s$; CG does
+    not see that scale, but a log-determinant that draws probes from $P$
+    would, so `pyrox_gp.bbmm_solver` uses gaussx's lazy preconditioners.
     """
 
     kind: Literal["nystrom", "rpcholesky"] = eqx.field(static=True)
@@ -151,46 +152,10 @@ class _NoiseSplitPreconditioner(gx.AbstractPreconditioner):
             psd_part, self.rank, shift=shift, pivoting="random", key=self.key
         )
 
-    def _system(
-        self, operator: lx.AbstractLinearOperator | None
-    ) -> lx.AbstractLinearOperator:
-        if operator is None:
-            raise ValueError(
-                "The pyrox-gp preconditioner is built from the system, so it "
-                "needs the system operator."
-            )
-        return operator
-
     def as_operator(self, operator=None):
         if operator is None:
             return None
         return self._built(operator).as_operator()
-
-    def supports_slq(self, operator: lx.AbstractLinearOperator | None = None) -> bool:
-        del operator
-        return True
-
-    def logdet(
-        self, operator: lx.AbstractLinearOperator | None = None
-    ) -> Float[Array, ""]:
-        system = self._system(operator)
-        return self._built(system).logdet(system)
-
-    def sample(
-        self,
-        key: jax.Array,
-        operator: lx.AbstractLinearOperator | None = None,
-        *,
-        shape: tuple[int, ...] = (),
-    ) -> Float[Array, "*batch N"]:
-        system = self._system(operator)
-        return self._built(system).sample(key, system, shape=shape)
-
-    def approximation(
-        self, operator: lx.AbstractLinearOperator | None = None
-    ) -> lx.AbstractLinearOperator:
-        system = self._system(operator)
-        return self._built(system).approximation(system)
 
 
 class _NoiseSplitNystromLogdet(gx.AbstractLogdetStrategy):
