@@ -109,11 +109,29 @@ lx.is_lower_triangular.register(KernelOperator)(lambda _operator: False)
 lx.is_upper_triangular.register(KernelOperator)(lambda _operator: False)
 lx.linearise.register(KernelOperator)(lambda operator: operator)
 lx.materialise.register(KernelOperator)(lambda operator: operator)
+# A kernel matrix is real, so its conjugate is itself; LSMR and some
+# adjoints take it (pyrox#554).
+lx.conj.register(KernelOperator)(lambda operator: operator)
 
 
 @lx.diagonal.register(KernelOperator)
 def _(operator: KernelOperator) -> Float[Array, " N"]:
     return operator.kernel.diag(operator.X)
+
+
+@lx.tridiagonal.register(KernelOperator)
+def _(
+    operator: KernelOperator,
+) -> tuple[Float[Array, " N"], Float[Array, " N-1"], Float[Array, " N-1"]]:
+    X = operator.X
+
+    def pair(left: Float[Array, " D"], right: Float[Array, " D"]) -> Float[Array, ""]:
+        return operator.kernel(left[None, :], right[None, :])[0, 0]
+
+    # K_{n, n+1} = k(x_n, x_{n+1}), O(N) kernel evaluations, never K itself
+    off_diagonal = jax.vmap(pair)(X[:-1], X[1:])
+    # K is symmetric, so the lower and upper bands agree
+    return operator.kernel.diag(X), off_diagonal, off_diagonal
 
 
 def matrix_free_operator(
