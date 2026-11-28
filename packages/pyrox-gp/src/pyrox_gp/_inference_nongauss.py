@@ -818,6 +818,7 @@ def _cavity_step(
     )
     return strategy._update(sites, posterior.mean, variance, likelihood, site_data)
 
+
 class PosteriorLinearization(eqx.Module):
     r"""Iterated statistical-linearization site updates.
 

@@ -93,11 +93,11 @@ def test_defaults_converge_at_least_as_close_as_the_eager_loop(case) -> None:
     """The defaults converge, a few iterations later, nearer the fixed point.
 
     The eager loops stopped once the posterior mean moved by less than ``tol``
-    in one iteration, which a damped map does while still ``tol / (1 - ρ)``
-    from its fixed point; on Poisson EP that left ``q_mean`` 2.8e-4 away. The
-    site test (every natural within a tenth of ``tol``) runs at most 7 more
-    iterations on these problems, and every field lands at least as close to
-    the fixed point (here a fit at ``tol=1e-10``).
+    in one iteration, which a damped map with contraction rate r does while
+    still ``tol / (1 - r)`` from its fixed point; on Poisson EP that left
+    ``q_mean`` 2.8e-4 away. The site test (every natural within a tenth of
+    ``tol``) runs at most 7 more iterations on these problems, and every field
+    lands at least as close to the fixed point (here a fit at ``tol=1e-10``).
     """
     key = "__".join(case)
     fit = _fit_case(case)
@@ -116,9 +116,7 @@ def test_defaults_converge_at_least_as_close_as_the_eager_loop(case) -> None:
 # --- jit and vmap ---------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "name", ["pl", pytest.param("ep", marks=pytest.mark.slow)]
-)
+@pytest.mark.parametrize("name", ["pl", pytest.param("ep", marks=pytest.mark.slow)])
 def test_jit_and_vmap_equal_eager(name) -> None:
     """``jax.jit(jax.vmap(fit))`` over datasets equals the eager fits.
 

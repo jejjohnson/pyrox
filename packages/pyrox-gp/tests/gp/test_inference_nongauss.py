@@ -333,4 +333,5 @@ def test_matrix_free_prior_is_accepted_by_the_site_strategies(monkeypatch):
     )
     mean, var = fit.predict(X[:2] + 0.01)
     assert bool(jnp.all(jnp.isfinite(fit.q_mean))) and bool(jnp.all(var >= 0.0))
+    assert bool(jnp.all(jnp.isfinite(mean)))
     assert (60, 60) not in blocks
