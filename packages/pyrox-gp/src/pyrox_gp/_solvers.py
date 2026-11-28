@@ -38,6 +38,7 @@ import jax.random as jr
 from pyrox_gp._preconditioned import (
     _NoiseSplitNystromLogdet,
     _NoiseSplitPreconditioner,
+    _SystemFITCPreconditioner,
 )
 
 
@@ -84,18 +85,8 @@ def compose_solver_fields(
         ) from error
 
 
-_FITC_MESSAGE = (
-    'preconditioner="fitc" needs inducing inputs and a kernel, which a system '
-    "does not carry, so no preset can build it. Pass the preconditioner object "
-    "itself to the prior instead: GPPrior(..., solver=gaussx.CGSolver(), "
-    "preconditioner=...), with a FITC preconditioner once gaussx#824 lands."
-)
-
-
 def _check_preconditioner(preconditioner: str) -> None:
-    if preconditioner == "fitc":
-        raise ValueError(_FITC_MESSAGE)
-    if preconditioner not in ("nystrom", "rpcholesky"):
+    if preconditioner not in ("nystrom", "rpcholesky", "fitc"):
         raise ValueError(
             "preconditioner must be 'nystrom', 'rpcholesky' or 'fitc', "
             f"got {preconditioner!r}"
@@ -119,8 +110,11 @@ def _matfree_solver(
     if logdet not in ("slq", "nystrom"):
         raise ValueError(f"logdet must be 'slq' or 'nystrom', got {logdet!r}")
     _check_preconditioner(preconditioner)
-    assert preconditioner != "fitc"
-    built = _NoiseSplitPreconditioner(preconditioner, rank, shift, key)
+    built: gx.AbstractPreconditioner
+    if preconditioner == "fitc":
+        built = _SystemFITCPreconditioner(rank, key)
+    else:
+        built = _NoiseSplitPreconditioner(preconditioner, rank, shift, key)
     cg = gx.CGSolver(
         rtol=rtol,
         atol=atol,
@@ -176,10 +170,15 @@ def matfree_solver(
             log-determinant). 200 is a starting point, measured at
             $N = 400$ only.
         preconditioner: ``"nystrom"`` (randomized Nyström, one batched
-            matvec per build) or ``"rpcholesky"`` (randomly pivoted partial
-            Cholesky, one matvec per pivot). ``"fitc"`` needs inducing
-            inputs and a kernel, which a system does not carry, so it
-            raises; pass a preconditioner object to the prior instead.
+            matvec per build), ``"rpcholesky"`` (randomly pivoted partial
+            Cholesky, one matvec per pivot) or ``"fitc"``
+            (`gaussx.FITCPreconditioner`: the Nyström approximation at
+            ``rank`` training inputs drawn by ``key``, plus the prior
+            variance it misses on the diagonal, so $P$ matches $A$ there;
+            only $K_{ZZ}$, $K_{XZ}$ and $\mathrm{diag}(K)$ are evaluated).
+            To choose the inducing inputs yourself, pass
+            ``gaussx.FITCPreconditioner.from_kernel(...)`` as the prior's
+            ``preconditioner`` instead.
         logdet: ``"nystrom"`` (the default, `gaussx.NystromLogdet` with the
             same shift: the exact $\log \det P$ plus SLQ on the
             near-identity $P^{-1/2} A P^{-1/2}$, the more accurate at equal
@@ -204,8 +203,7 @@ def matfree_solver(
         `gaussx.KeyedSolver` work on it.
 
     Raises:
-        ValueError: For an unknown ``preconditioner`` or ``logdet``, and for
-            ``preconditioner="fitc"``.
+        ValueError: For an unknown ``preconditioner`` or ``logdet``.
 
     Examples:
         ```python
@@ -266,14 +264,15 @@ def bbmm_solver(
     dense matrix does not split, and raises at solve time. The probes run to
     convergence, not to ``lanczos_order`` steps, so the pass can cost more
     matvecs than a separate solve and SLQ; timing is unmeasured. The
-    gradient does not get the preconditioner's variance reduction
-    (gaussx#826).
+    gradient of the log-determinant carries $P$ as a control variate
+    (gaussx#826, from gaussx v0.8.4), so its probe noise falls as $P$
+    approaches $A$.
 
     Args:
         rank: Rank $R$ of the preconditioner; 200 is a starting point,
             measured at $N = 400$ only.
-        preconditioner: ``"nystrom"`` or ``"rpcholesky"``, as in
-            `matfree_solver`; ``"fitc"`` raises.
+        preconditioner: ``"nystrom"``, ``"rpcholesky"`` or ``"fitc"``, as in
+            `matfree_solver`.
         num_probes: Probe vectors $N_\text{probe}$.
         lanczos_order: Lanczos order of the quadrature.
         rtol: CG relative tolerance.
@@ -289,8 +288,7 @@ def bbmm_solver(
         A `gaussx.KeyedSolver` around the preconditioned `gaussx.BBMMSolver`.
 
     Raises:
-        ValueError: For an unknown ``preconditioner``, and for
-            ``preconditioner="fitc"``.
+        ValueError: For an unknown ``preconditioner``.
 
     Examples:
         ```python
@@ -318,6 +316,9 @@ def bbmm_solver(
     built: gx.AbstractPreconditioner
     if preconditioner == "nystrom":
         built = gx.NystromPreconditioner.lazy(rank, key=sketch_key)
+    elif preconditioner == "fitc":
+        # P = U Uᵀ + diag(r + d) matches A on the diagonal, at its scale
+        built = _SystemFITCPreconditioner(rank, sketch_key)
     else:
         built = gx.PartialCholeskyPreconditioner(
             rank=rank, shift=None, pivoting="random", key=sketch_key
