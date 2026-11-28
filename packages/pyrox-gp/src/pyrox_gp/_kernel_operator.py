@@ -157,4 +157,3 @@ def matrix_free_operator(
     identity = lx.IdentityLinearOperator(K_op.in_structure())
     scaled = identity * jnp.asarray(diagonal, dtype=X.dtype)
     return lx.TaggedLinearOperator(K_op + scaled, _PSD_TAGS)
-

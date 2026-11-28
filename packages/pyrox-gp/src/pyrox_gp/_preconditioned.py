@@ -236,9 +236,10 @@ def preconditioned_cg_solver(
             count). Its shift is read from the system like the
             preconditioner's: the exact noise for ``matrix_free=True``, the
             per-point $d$ of a sum $K + \\mathrm{diag}(d)$, and ``shift``
-            for a dense system, which raises at solve time without one. Its sketch has the preconditioner's ``rank`` but
-            is drawn separately (a shared sketch would save one
-            factorisation and is not implemented).
+            for a dense system, which raises at solve time without one. Its
+            sketch has the preconditioner's ``rank`` but is drawn separately
+            (a shared sketch would save one factorisation and is not
+            implemented).
         key: PRNG key for the sketch / the random pivots. With
             ``logdet="nystrom"`` and no key passed to ``logdet``, the
             log-determinant's sketch and probes are split from it as well,
