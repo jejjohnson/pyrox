@@ -14,7 +14,8 @@ import pytest
 from numpyro.infer import SVI, Trace_ELBO
 from numpyro.optim import Adam
 from pyrox_gp import GPPrior, Matern, gp_factor, preconditioned_cg_solver
-from pyrox_gp._kernel_operator import KernelOperator, split_noise
+from pyrox_gp._kernel_operator import KernelOperator
+from pyrox_gp._preconditioned import _NoiseSplitPreconditioner, _split_system
 
 
 jax.config.update("jax_enable_x64", True)
@@ -155,6 +156,86 @@ def test_nystrom_logdet_gradient_matches_dense():
     assert np.all(np.abs(grads.mean(axis=0) - dense_grad) < 3 * standard_error)
 
 
+# --- A diagonal that varies by point (pyrox#555) -----------------------------
+
+
+def _heteroscedastic_system(site_variance):
+    # the reproducer of pyrox#555: K_op + diag(d), d different at every point
+    kernel_op = KernelOperator(Matern(nu=1.5).frozen(), X[:60])
+    return lx.TaggedLinearOperator(
+        kernel_op + lx.DiagonalLinearOperator(site_variance),
+        lx.positive_semidefinite_tag,
+    )
+
+
+SITE_VARIANCE = jnp.linspace(1.0, 4.0, 60)
+SITE_TARGET = (X[:60, 0] > 0.5).astype(float)
+
+
+@pytest.mark.parametrize("preconditioner", ["nystrom", "rpcholesky"])
+def test_heteroscedastic_diagonal(preconditioner):
+    # Before pyrox#555 this raised "the system is not a sum K + s I". The CG
+    # solve matches the dense one at CG's tolerance (rtol 1e-6 here, checked
+    # at the issue's 1e-5).
+    system = _heteroscedastic_system(SITE_VARIANCE)
+    expected = jnp.linalg.solve(system.as_matrix(), SITE_TARGET)
+    solver = preconditioned_cg_solver(
+        rank=20, preconditioner=preconditioner, key=jr.key(1)
+    )
+    solution = solver.solve(system, SITE_TARGET)
+    np.testing.assert_allclose(solution, expected, rtol=1e-5)
+
+
+def test_heteroscedastic_diagonal_under_jit():
+    # The diagonal is traced, so the split and the per-point shift are read
+    # by type, never by value.
+    solver = preconditioned_cg_solver(rank=20, key=jr.key(1))
+
+    @jax.jit
+    def solve(site_variance):
+        return solver.solve(_heteroscedastic_system(site_variance), SITE_TARGET)
+
+    for site_variance in (SITE_VARIANCE, SITE_VARIANCE[::-1] * 2.0):
+        system = _heteroscedastic_system(site_variance)
+        expected = jnp.linalg.solve(system.as_matrix(), SITE_TARGET)
+        np.testing.assert_allclose(solve(site_variance), expected, rtol=1e-5)
+
+
+def test_heteroscedastic_nystrom_logdet():
+    # logdet="nystrom" takes the per-point d too: rank 50 of 60 leaves a
+    # near-identity remainder, so 1 % of the exact value holds with margin.
+    system = _heteroscedastic_system(SITE_VARIANCE)
+    exact = jnp.linalg.slogdet(system.as_matrix())[1]
+    solver = preconditioned_cg_solver(rank=50, logdet="nystrom", key=jr.key(0))
+    estimate = solver.logdet(system)
+    assert abs(float(estimate - exact)) < 0.01 * abs(float(exact))
+
+
+@pytest.mark.parametrize("kind", ["nystrom", "rpcholesky"])
+def test_scalar_noise_unchanged(kind):
+    # A Gaussian-noise system K_op + s I keeps the scalar shift, so its
+    # preconditioner is the one built before pyrox#555, bit for bit.
+    operator = _matrix_free_system(80, 0.3, 0.04)
+    split = _split_system(operator)
+    assert split is not None
+    kernel_op, noise = split
+    key = jr.key(3)
+    psd_part = lx.TaggedLinearOperator(kernel_op, lx.positive_semidefinite_tag)
+    if kind == "nystrom":
+        reference = gx.NystromPreconditioner.from_operator(
+            psd_part, 30, shift=noise, key=key
+        )
+    else:
+        reference = gx.PartialCholeskyPreconditioner.from_operator(
+            psd_part, 30, shift=noise, pivoting="random", key=key
+        )
+    got = _NoiseSplitPreconditioner(kind, 30, None, key).as_operator(operator)
+    assert got is not None
+    expected = reference.as_operator()
+    assert expected is not None
+    np.testing.assert_array_equal(got.as_matrix(), expected.as_matrix())
+
+
 # --- Matrix-free GPPrior (pyrox#277) ----------------------------------------
 
 
@@ -181,13 +262,15 @@ def test_matrix_free_operator_is_a_noise_sum():
     np.testing.assert_allclose(
         op.mv(v), dense._noisy_operator(0.04).mv(v), rtol=1e-12, atol=1e-12
     )
-    split = split_noise(op)
+    split = _split_system(op)
     assert split is not None
     K_op, diagonal = split
     assert isinstance(K_op, KernelOperator)
+    # the scalar of K_op + s I, not a vector: the Gaussian-noise path
+    assert jnp.ndim(diagonal) == 0
     np.testing.assert_allclose(diagonal, 0.04 + noisy.jitter)
     np.testing.assert_allclose(lx.diagonal(K_op), jnp.diag(K_op.as_matrix()))
-    assert split_noise(dense._noisy_operator(0.04)) is None
+    assert _split_system(dense._noisy_operator(0.04)) is None
     np.testing.assert_allclose(
         noisy._prior_operator().as_matrix(), dense._prior_operator().as_matrix()
     )
