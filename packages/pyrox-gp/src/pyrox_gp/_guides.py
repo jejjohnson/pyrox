@@ -53,13 +53,15 @@ is used directly without ever materializing $\\Sigma$. The same
 primitives back the future natural-gradient and CVI inference paths.
 
 Each guide accepts an optional ``solver`` field
-(`gaussx.AbstractSolverStrategy`) so the user can pick the
-``solve`` / ``logdet`` strategy for paths that consume a solver
-(``natural_to_mean_cov``, ``gaussian_log_prob``,
-``MultivariateNormalPrecision``). ``None`` defaults to
-`gaussx.DenseSolver`. Unused fields are still exposed on the
-guide for downstream consumers (e.g.\\ inference loops) that need to
-solve against the variational covariance.
+(`gaussx.AbstractSolverStrategy`). In `FullRankGuide`, `MeanFieldGuide`
+and `DeltaGuide` it is the solver of every solve and log-determinant
+against the inducing covariance $K_{ZZ}$ in ``predict`` and
+``kl_divergence`` (pyrox#560), and of ``log_prob``; ``None`` keeps
+today's routes (a Cholesky factor of $K_{ZZ}$, with gaussx's structural
+dispatch, so a diagonal $K_{ZZ}$ stays $O(M)$). `WhitenedGuide` uses it
+only in ``log_prob``: its ``u = L_{ZZ} v`` needs the Cholesky factor, and
+its KL against $\\mathcal{N}(0, I)$ has no $K_{ZZ}$. `NaturalGuide` uses
+it on its precision $\\Lambda$.
 
 The sparse ELBO entry point that wires these into NumPyro lands in the
 Wave 3 inference issue. Until then the user assembles the ELBO manually:
@@ -83,6 +85,7 @@ from gaussx import (
     gaussian_log_prob,
     natural_to_mean_cov,
     safe_cholesky,
+    solve_matrix,
     symmetrize,
     whitened_svgp_predict,
 )
@@ -170,6 +173,57 @@ def _svgp_predict_unwhitened(
     return whitened_svgp_predict(K_zz_op, K_xz, m_v, Lv, K_xx_diag)
 
 
+def _svgp_predict_with_solver(
+    K_xz: Float[Array, "N M"],
+    K_zz_op: lx.AbstractLinearOperator,
+    K_xx_diag: Float[Array, " N"],
+    u_mean: Float[Array, " M"],
+    u_scale: Float[Array, "M R"] | None,
+    solver: AbstractSolverStrategy,
+) -> tuple[Float[Array, " N"], Float[Array, " N"]]:
+    r"""Predictive moments of an unwhitened guide, every solve through ``solver``.
+
+    With $B = K_{ZZ}^{-1} K_{ZX}$ from one matrix right-hand side
+    (`gaussx.solve_matrix`) and $S = R R^\top$,
+
+    $$
+    \mu_n = b_n^\top m, \qquad
+    \sigma_n^2 = k_{nn} - k_n^\top b_n + \lVert R^\top b_n \rVert^2 ,
+    $$
+
+    so no root of $K_{ZZ}$ is needed and any solver serves (pyrox#560).
+    The difference can go slightly negative in float32, so it is clipped
+    at zero. An iterative solver's relative error $\delta$ in $B$ moves
+    $\sigma_n^2$ by about $\delta k_{nn}$, so its tolerance should sit
+    well below the variance resolution the ELBO needs.
+
+    Args:
+        K_xz: Cross-covariance $K_{XZ}$, shape ``(N, M)``.
+        K_zz_op: Inducing covariance $K_{ZZ}$ as an operator.
+        K_xx_diag: Prior variances $k_{nn}$, shape ``(N,)``.
+        u_mean: Guide mean $m$, shape ``(M,)``.
+        u_scale: A factor $R$ of the guide covariance $S = R R^\top$, or
+            ``None`` for a point mass ($S = 0$).
+        solver: The solver of every solve against $K_{ZZ}$.
+
+    Returns:
+        The predictive means and variances, shape ``(N,)`` each.
+    """
+    # B = K_ZZ⁻¹ K_ZX, (M, N)
+    B = solve_matrix(K_zz_op, einx.id("n m -> m n", K_xz), solver=solver)
+    # μₙ = bₙᵀ m
+    mean = einx.dot("m n, m -> n", B, u_mean)
+    # kₙᵀ bₙ = kₙᵀ K_ZZ⁻¹ kₙ
+    explained = einx.dot("n m, m n -> n", K_xz, B)
+    variance = K_xx_diag - explained
+    if u_scale is not None:
+        # Rᵀ bₙ, (R, N)
+        projected = einx.dot("m r, m n -> r n", u_scale, B)
+        # ‖Rᵀ bₙ‖² = bₙᵀ S bₙ
+        variance = variance + einx.sum("[r] n", projected**2)
+    return mean, jnp.maximum(variance, 0.0)
+
+
 class FullRankGuide(Guide):
     r"""Full-rank Gaussian variational posterior over inducing values ``u``.
 
@@ -185,12 +239,14 @@ class FullRankGuide(Guide):
         scale_tril: Lower-triangular Cholesky factor of the variational
             covariance, shape ``(M, M)``. The covariance is
             ``S = scale_tril @ scale_tril.T``.
-        solver: Optional `gaussx.AbstractSolverStrategy` exposed
-            so downstream consumers (e.g.\\ inference loops that solve
-            against this guide's covariance) can pick the solver. The
-            guide's own ``log_prob`` / ``kl_divergence`` use the
-            hand-rolled Cholesky path; the field is ``None`` by default
-            and is read by callers who need it.
+        solver: Optional `gaussx.AbstractSolverStrategy`. ``log_prob``
+            solves against $S$ with it, and ``predict`` and
+            ``kl_divergence`` solve against $K_{ZZ}$ with it (pyrox#560);
+            ``None`` keeps a Cholesky factor of $K_{ZZ}$ in those two and
+            `gaussx.DenseSolver` in ``log_prob``. An iterative solver's
+            tolerance enters the ELBO: a relative error $\delta$ in
+            $K_{ZZ}^{-1} K_{ZX}$ moves each predictive variance by about
+            $\delta k_{nn}$.
     """
 
     mean: Float[Array, " M"]
@@ -237,14 +293,14 @@ class FullRankGuide(Guide):
     def kl_divergence(self, prior_cov: lx.AbstractLinearOperator) -> Float[Array, ""]:
         r"""``KL(q(u) || p(u))`` against an inducing prior with zero mean.
 
-        Falls back to `gaussx.gaussian_kl`, which dispatches
-        on operator structure for the trace and logdet terms but does
-        not yet take an explicit solver.
+        `gaussx.gaussian_kl`, whose solves and log-determinant against
+        ``prior_cov`` go through ``solver`` (structural dispatch when
+        ``None``).
         """
         q_loc = self.mean
         q_cov = _full_cov_operator(self.scale_tril)
         p_loc = jnp.zeros_like(self.mean)
-        return gaussian_kl(q_loc, q_cov, p_loc, prior_cov)
+        return gaussian_kl(q_loc, q_cov, p_loc, prior_cov, solver=self.solver)
 
     def predict(
         self,
@@ -254,12 +310,15 @@ class FullRankGuide(Guide):
     ) -> tuple[Float[Array, " N"], Float[Array, " N"]]:
         r"""Predictive ``(mean, variance)`` at points with cross-cov ``K_xz``.
 
-        Routes through `_svgp_predict_unwhitened`, which dispatches
-        on the structure of ``K_zz_op`` via `gaussx.cholesky` /
-        `gaussx.whitened_svgp_predict`. These primitives do not
-        currently accept an explicit solver — the `solver` field
-        is exposed for downstream consumers.
+        With ``solver=None`` it reduces to the whitened predictive with a
+        Cholesky factor of ``K_zz_op`` (`gaussx.whitened_svgp_predict`);
+        with a solver, every solve against $K_{ZZ}$ goes through it and
+        no root is formed (`_svgp_predict_with_solver`).
         """
+        if self.solver is not None:
+            return _svgp_predict_with_solver(
+                K_xz, K_zz_op, K_xx_diag, self.mean, self.scale_tril, self.solver
+            )
         u_cov = einx.dot("i j, k j -> i k", self.scale_tril, self.scale_tril)
         return _svgp_predict_unwhitened(K_xz, K_zz_op, K_xx_diag, self.mean, u_cov)
 
@@ -278,8 +337,8 @@ class MeanFieldGuide(Guide):
         mean: Variational mean ``m`` of shape ``(M,)``.
         scale: Per-coordinate standard deviations ``s`` of shape ``(M,)``.
             Must be strictly positive.
-        solver: Optional `gaussx.AbstractSolverStrategy` — see
-            `FullRankGuide` for usage. ``None`` by default.
+        solver: Optional `gaussx.AbstractSolverStrategy`, as in
+            `FullRankGuide`. ``None`` by default.
     """
 
     mean: Float[Array, " M"]
@@ -321,11 +380,15 @@ class MeanFieldGuide(Guide):
         )
 
     def kl_divergence(self, prior_cov: lx.AbstractLinearOperator) -> Float[Array, ""]:
-        r"""``KL(q(u) || p(u))`` against an inducing prior with zero mean."""
+        r"""``KL(q(u) || p(u))`` against an inducing prior with zero mean.
+
+        Through ``solver`` against ``prior_cov``, as in
+        `FullRankGuide.kl_divergence`.
+        """
         q_loc = self.mean
         q_cov = _diag_cov_operator(self.scale)
         p_loc = jnp.zeros_like(self.mean)
-        return gaussian_kl(q_loc, q_cov, p_loc, prior_cov)
+        return gaussian_kl(q_loc, q_cov, p_loc, prior_cov, solver=self.solver)
 
     def predict(
         self,
@@ -333,7 +396,14 @@ class MeanFieldGuide(Guide):
         K_zz_op: lx.AbstractLinearOperator,
         K_xx_diag: Float[Array, " N"],
     ) -> tuple[Float[Array, " N"], Float[Array, " N"]]:
-        """Predictive ``(mean, variance)`` at the points whose cross-cov is ``K_xz``."""
+        """Predictive ``(mean, variance)`` at the points whose cross-cov is ``K_xz``.
+
+        Through ``solver`` when one is set, as in `FullRankGuide.predict`.
+        """
+        if self.solver is not None:
+            return _svgp_predict_with_solver(
+                K_xz, K_zz_op, K_xx_diag, self.mean, jnp.diag(self.scale), self.solver
+            )
         u_cov = jnp.diag(self.scale**2)
         return _svgp_predict_unwhitened(K_xz, K_zz_op, K_xx_diag, self.mean, u_cov)
 
@@ -354,8 +424,12 @@ class WhitenedGuide(Guide):
         scale_tril: Lower-triangular Cholesky factor of the whitened
             variational covariance, shape ``(M, M)``. The covariance in
             whitened space is ``L_v @ L_v.T``.
-        solver: Optional `gaussx.AbstractSolverStrategy` — see
-            `FullRankGuide` for usage. ``None`` by default.
+        solver: Optional `gaussx.AbstractSolverStrategy` for ``log_prob``,
+            which solves against $L_v L_v^\top$. It does not apply to
+            ``predict`` or ``kl_divergence`` (pyrox#560): ``u = L_{ZZ} v``
+            needs the Cholesky factor of $K_{ZZ}$, which no other solver
+            gives, and the KL against $\mathcal{N}(0, I)$ has no $K_{ZZ}$.
+            ``None`` by default.
     """
 
     mean: Float[Array, " M"]
@@ -433,7 +507,11 @@ class WhitenedGuide(Guide):
         K_zz_op: lx.AbstractLinearOperator,
         K_xx_diag: Float[Array, " N"],
     ) -> tuple[Float[Array, " N"], Float[Array, " N"]]:
-        """Predictive ``(mean, variance)`` via `gaussx.whitened_svgp_predict`."""
+        """Predictive ``(mean, variance)`` via `gaussx.whitened_svgp_predict`.
+
+        Always on the Cholesky factor of ``K_zz_op``, which the whitened
+        coordinates are defined by; ``solver`` does not apply here.
+        """
         return whitened_svgp_predict(
             K_zz_op, K_xz, self.mean, self.scale_tril, K_xx_diag
         )
@@ -565,10 +643,9 @@ class NaturalGuide(Guide):
     def kl_divergence(self, prior_cov: lx.AbstractLinearOperator) -> Float[Array, ""]:
         r"""``KL(q(u) || p(u))`` against an inducing prior with zero mean.
 
-        Falls back to `gaussx.gaussian_kl` in moment form —
-        ``gaussian_kl`` does not yet take an explicit solver, but
-        it dispatches on operator structure for the trace and logdet
-        terms.
+        `gaussx.gaussian_kl` in moment form, with structural dispatch
+        against ``prior_cov``: this guide's ``solver`` is the solver of
+        its precision $\Lambda$, not of $K_{ZZ}$.
         """
         m, cov = self._moments()
         p_loc = jnp.zeros_like(m)
@@ -644,8 +721,9 @@ class DeltaGuide(Guide):
         solver: Optional `gaussx.AbstractSolverStrategy` passed
             to `gaussx.gaussian_log_prob` when computing
             ``-log p(loc)`` against the prior covariance in
-            `kl_divergence`. ``None`` defaults to
-            `gaussx.DenseSolver`.
+            `kl_divergence` (``None`` is `gaussx.DenseSolver` there), and
+            the solver of ``predict`` against $K_{ZZ}$ (pyrox#560; ``None``
+            keeps its Cholesky factor).
     """
 
     loc: Float[Array, " M"]
@@ -726,8 +804,14 @@ class DeltaGuide(Guide):
         which injects jitter to make the input PD and would add a tiny
         spurious variance term. Bypassing that path keeps the
         `DeltaGuide` predictive numerically equal to the prior
-        conditional.
+        conditional. With a ``solver`` the same moments come from
+        $K_{ZZ}^{-1} K_{ZX}$ through it, with no root
+        (`_svgp_predict_with_solver`).
         """
+        if self.solver is not None:
+            return _svgp_predict_with_solver(
+                K_xz, K_zz_op, K_xx_diag, self.loc, None, self.solver
+            )
         m_size = self.loc.shape[0]
         L_zz = cholesky(K_zz_op)
         u_mean_white = lx.linear_solve(L_zz, self.loc).value

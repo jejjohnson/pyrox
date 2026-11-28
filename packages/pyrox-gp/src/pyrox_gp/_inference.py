@@ -27,6 +27,7 @@ import lineax as lx
 import numpyro
 from gaussx import (
     AbstractIntegrator as GaussxIntegrator,
+    AbstractSolverStrategy,
     GaussianState,
     mean_expectation,
     solve_matrix,
@@ -268,6 +269,17 @@ def svgp_factor(
     )
 
 
+def _prior_solver(prior: SparseGPPrior) -> AbstractSolverStrategy | None:
+    """The prior's composed solver, or ``None`` when it sets none of the three.
+
+    ``None`` keeps gaussx's structural dispatch on $K_{ZZ}$ (an $O(M)$
+    diagonal for inter-domain features) exactly as before pyrox#560.
+    """
+    if prior.solver is None and prior.preconditioner is None and prior.logdet is None:
+        return None
+    return prior.solver_strategy()
+
+
 class ConjugateVI:
     r"""Natural-gradient / CVI update for sparse variational GPs.
 
@@ -357,9 +369,11 @@ class ConjugateVI:
 
         # B = K_zz^{-1} K_zx via gaussx.solve_matrix: one Cholesky
         # factorization shared across the matrix RHS for dense PSD
-        # K_zz, structured dispatch (O(M) diagonal) otherwise.
+        # K_zz, structured dispatch (O(M) diagonal) otherwise, unless the
+        # prior sets a solver, which then does every solve (pyrox#560).
+        solver = _prior_solver(prior)
         K_zx = einx.id("n m -> m n", K_xz)  # (N, M) → (M, N)
-        B = solve_matrix(K_zz_op, K_zx)
+        B = solve_matrix(K_zz_op, K_zx, solver=solver)
 
         # Prior natural parameters: p(u) = N(0, K_zz)
         # => eta1_prior = 0, eta2_prior = -0.5 K_zz^{-1}
@@ -368,7 +382,7 @@ class ConjugateVI:
         M = K_zz_op.in_size()
         nat1_prior = jnp.zeros_like(guide.nat1)
         eye = jnp.eye(M, dtype=guide.nat2.dtype)
-        nat2_prior = -0.5 * symmetrize(solve_matrix(K_zz_op, eye))
+        nat2_prior = -0.5 * symmetrize(solve_matrix(K_zz_op, eye, solver=solver))
 
         # Project per-point site natural parameters into inducing
         # space. The site λ₁ = grad1 - f_loc * grad2 (not just grad1);
