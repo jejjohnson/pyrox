@@ -158,6 +158,16 @@ class ConditionedNonGaussGP(eqx.Module):
         return self.site_posterior.mean
 
     @property
+    def solver(self) -> AbstractSolverStrategy | None:
+        """The iterative solver the fit used; ``None`` for a dense fit.
+
+        A dense fit predicts by the Cholesky factor of $A$ kept from the fit,
+        an iterative one by one solve per test point through this solver.
+        """
+        solver = self.site_posterior.solver
+        return None if isinstance(solver, DenseSolver) else solver
+
+    @property
     def q_var(self) -> Float[Array, " N"]:
         r"""The posterior marginal variances $\mathrm{diag}(K - K A^{-1} K)$.
 

@@ -23,13 +23,37 @@ from pyrox_gp import (
     StudentTLikelihood,
 )
 from pyrox_gp._inference_nongauss import (
-    _laplace_log_marginal,
     _log_prob_per_point_factory,
     _per_point_grad_hess,
-    _posterior_from_diag_sites,
     _prior_K,
     _site_data,
 )
+
+
+def _dense_site_posterior(K, nat1, precision, prior_mean):
+    """The posterior marginals of diagonal sites, by dense Cholesky (a reference).
+
+    The algebra pyrox-gp's own ``_posterior_from_diag_sites`` did before
+    pyrox#551 moved it to ``gaussx.site_posterior``.
+    """
+    K_reg = K + jnp.diag(1.0 / precision)
+    L = jnp.linalg.cholesky(K_reg)
+    alpha = jax.scipy.linalg.cho_solve((L, True), nat1 / precision - prior_mean)
+    W = jax.scipy.linalg.solve_triangular(L, K, lower=True)
+    return prior_mean + K @ alpha, jnp.diag(K) - jnp.sum(W * W, axis=0)
+
+
+def _dense_laplace_log_marginal(log_prob, f, sites, prior_mean, K, precision):
+    """The standard Laplace evidence at ``f``, by dense algebra (a reference).
+
+    ``log p(y | f) - (f - mu)^T K^{-1} (f - mu) / 2 - log det B / 2`` with
+    ``B = I + Lambda^(1/2) K Lambda^(1/2)``.
+    """
+    residual = f - prior_mean
+    quad = residual @ jnp.linalg.solve(K, residual)
+    root = jnp.sqrt(precision)
+    B = jnp.eye(K.shape[0]) + root[:, None] * K * root[None, :]
+    return log_prob(f, sites).sum() - 0.5 * quad - 0.5 * jnp.linalg.slogdet(B)[1]
 
 
 def _classification(n: int = 12):
@@ -64,7 +88,7 @@ def _eager_newton(prior, likelihood, y, *, max_iter, tol, damping, floor):
     for it in range(max_iter):
         g, h = _per_point_grad_hess(log_prob, f, sites)
         nat1, precision = newton_update(f, g, h, precision_floor=floor)
-        f_newton, _ = _posterior_from_diag_sites(K, nat1, precision, prior_mean)
+        f_newton, _ = _dense_site_posterior(K, nat1, precision, prior_mean)
         f_new = (1.0 - damping) * f + damping * f_newton
         delta = jnp.max(jnp.abs(f_new - f))
         f = f_new
@@ -73,8 +97,10 @@ def _eager_newton(prior, likelihood, y, *, max_iter, tol, damping, floor):
             break
     g, h = _per_point_grad_hess(log_prob, f, sites)
     nat1, precision = newton_update(f, g, h, precision_floor=floor)
-    q_mean, q_var = _posterior_from_diag_sites(K, nat1, precision, prior_mean)
-    log_marginal = _laplace_log_marginal(log_prob, f, sites, prior_mean, K, precision)
+    q_mean, q_var = _dense_site_posterior(K, nat1, precision, prior_mean)
+    log_marginal = _dense_laplace_log_marginal(
+        log_prob, f, sites, prior_mean, K, precision
+    )
     return q_mean, q_var, log_marginal, n_iter
 
 
