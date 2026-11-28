@@ -19,10 +19,12 @@ import optax
 import pytest
 from pyrox_gp import (
     RBF,
+    ConjugateVI,
     DeltaGuide,
     FullRankGuide,
     GaussianLikelihood,
     MeanFieldGuide,
+    NaturalGuide,
     SparseGPPrior,
     WhitenedGuide,
     svgp_elbo,
@@ -121,11 +123,11 @@ def test_dense_solver_form_matches_the_cholesky_route(cls) -> None:
     )
 
 
-def _elbo_problem(dtype=jnp.float64):
+def _elbo_problem(dtype=jnp.float64, solver=None):
     X = jr.uniform(jr.key(0), (200, 1), minval=-3.0, maxval=3.0, dtype=dtype)
     y = jnp.sin(2.0 * X[:, 0]) + 0.1 * jr.normal(jr.key(1), (200,), dtype=dtype)
     Z = jnp.linspace(-3.0, 3.0, 30, dtype=dtype)[:, None]
-    prior = SparseGPPrior(RBF(init_lengthscale=0.5), Z=Z, jitter=1e-4)
+    prior = SparseGPPrior(RBF(init_lengthscale=0.5), Z=Z, solver=solver, jitter=1e-4)
     return prior, X, y
 
 
@@ -224,3 +226,22 @@ def test_svgp_elbo_trains_without_nan(name) -> None:
     values = jnp.stack(values)
     assert bool(jnp.all(jnp.isfinite(values)))
     assert float(values[-1]) < float(values[0])
+
+
+def test_conjugate_vi_step_uses_the_prior_solver() -> None:
+    """ConjugateVI.step solves against K_ZZ with the prior's solver, if it sets one."""
+    prior, X, y = _elbo_problem()
+    likelihood = GaussianLikelihood(0.1)
+    guide = NaturalGuide.init(30)
+    want = ConjugateVI(damping=0.5).step(prior, guide, likelihood, X, y)
+    # a new prior each time: rebuilding one with eqx.tree_at empties its
+    # kernel's parameter registry
+    raising, _, _ = _elbo_problem(solver=Raising())
+    with pytest.raises(RuntimeError, match="solver used"):
+        ConjugateVI(damping=0.5).step(raising, guide, likelihood, X, y)
+    cg = gx.CGSolver(rtol=1e-12, atol=1e-12, max_steps=2000)
+    with_cg, _, _ = _elbo_problem(solver=cg)
+    got = ConjugateVI(damping=0.5).step(with_cg, guide, likelihood, X, y)
+    # CG at 1e-12 on K_ZZ (condition number 6e4) against its Cholesky
+    np.testing.assert_allclose(got.nat1, want.nat1, rtol=1e-6, atol=1e-8)
+    np.testing.assert_allclose(got.nat2, want.nat2, rtol=1e-6, atol=1e-8)
