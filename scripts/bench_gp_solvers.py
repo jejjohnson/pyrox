@@ -42,11 +42,11 @@ keeps the rows already in ``out`` and runs the rest):
   once at the evaluation point, so the control variate has no gradient),
   ``matfree-r50``, ``matfree-r800`` and ``matfree-lanczos60``;
 - from ``large_n`` up it runs the Gaussian likelihood only, with
-  ``large_keys`` keys, plus ``matfree-lanczos60`` on the rough kernel, whose
-  first key gives the same probes as ``matfree``'s, so the difference of the
-  two is the truncation bias of 30 Lanczos steps.
+  ``large_keys`` keys: ``dense``, ``matfree`` and ``bbmm`` on the smooth
+  kernel, and ``dense`` and ``matfree`` on the rough one, where one
+  ``matfree`` row takes about eight minutes on the reference VM.
 
-Usage (one process, four cores, about half an hour on the reference VM):
+Usage (one process, four cores; about 45 minutes on the reference VM):
 
     taskset -c 0-3 uv run --group docs python scripts/bench_gp_solvers.py \
         --out docs/notebooks/gp_solver_choices.csv
@@ -252,9 +252,10 @@ def plan(
     if n >= large_n:
         if likelihood != "gaussian":
             return []
-        configs = ["dense", "matfree", "bbmm"]
-        # the Lanczos truncation bias, on the kernel that needs the most steps
-        return configs + (["matfree-lanczos60"] if kernel == "rough" else [])
+        # the rough kernel at this size takes minutes per call, so one preset
+        return (
+            ["dense", "matfree", "bbmm"] if kernel == "smooth" else ["dense", "matfree"]
+        )
     configs = ["dense", "matfree", "bbmm", "cg"]
     if likelihood == "bernoulli":
         return configs + (["cg-nystrom"] if n < sweep_n else [])
