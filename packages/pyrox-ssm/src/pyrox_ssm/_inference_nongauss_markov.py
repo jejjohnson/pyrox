@@ -566,10 +566,10 @@ class LaplaceMarkovInference(eqx.Module):
             max_iter=self.max_iter,
             adjoint=self.adjoint,
         )
-        sites, n_iter, converged = fit.sites, fit.n_iter, fit.converged
+        (nat1, nat2), n_iter, converged = fit.sites, fit.n_iter, fit.converged
 
         # Final site naturals: the undamped Newton sites at the last mean.
-        f, _, _ = _markov_smoothed_posterior(prior, *sites, observed)
+        f, _, _ = _markov_smoothed_posterior(prior, nat1, nat2, observed)
         nat1, nat2 = self._newton_sites(f, site_lik, observed)
         q_mean, q_var, log_marg = _markov_smoothed_posterior(
             prior, nat1, nat2, observed
