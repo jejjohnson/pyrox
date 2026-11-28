@@ -44,6 +44,7 @@ import einx
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import jax.random as jr
 import lineax as lx
 import numpyro
 import optimistix as optx
@@ -80,6 +81,153 @@ from pyrox_gp._solvers import compose_solver_fields
 
 if TYPE_CHECKING:
     from pyrox_gp._models import GPPrior
+
+
+# --- marginal variances ----------------------------------------------------
+
+
+_VarianceMethod = Literal["auto", "exact", "stochastic"]
+_VARIANCE_METHODS = ("auto", "exact", "stochastic")
+_VarianceEstimator = Literal["auto", "sbpv", "spv"]
+_VARIANCE_ESTIMATORS = ("auto", "sbpv", "spv")
+# The size above which gaussx's "auto" variance turns stochastic for an
+# iterative solver (`gaussx.SitePosterior.variance`, `gaussx.diag_inv`).
+_EXACT_VARIANCE_MAX_SIZE = 2048
+# The cavity clamps of a stochastic variance (pyrox#552): at most
+# (1 − 10⁻³) / λ, so that the cavity precision 1 / σ² − λ stays positive,
+# and at least 10⁻⁶ diag(K), so that a noisy estimate near zero cannot
+# make the cavity precision infinite.
+_CAVITY_CEILING = 1.0 - 1e-3
+_CAVITY_FLOOR = 1e-6
+
+
+class _MarginalVariance(eqx.Module):
+    """How a fit computes its marginal variances, resolved for one prior.
+
+    ``method`` is ``"exact"`` (a dense Cholesky, or $N$ solves in batches of
+    ``batch_size``) or ``"stochastic"`` (the ``estimator`` of
+    `gaussx.SitePosterior.variance_and_error` over ``num_probes`` solves,
+    with one ``key`` for the whole fit, so the estimate is a fixed function
+    of the sites).
+    """
+
+    method: Literal["exact", "stochastic"] = eqx.field(static=True, default="exact")
+    estimator: Literal["sbpv", "spv"] = eqx.field(static=True, default="sbpv")
+    num_probes: int = eqx.field(static=True, default=100)
+    batch_size: int = eqx.field(static=True, default=32)
+    key: Array | None = None
+
+    def _stochastic_key(self) -> Array:
+        if self.key is None:
+            raise ValueError(
+                "The stochastic marginal variances need a PRNG key: pass "
+                "fit(..., key=...), or variance='exact'."
+            )
+        return self.key
+
+    def __call__(self, posterior: SitePosterior) -> Float[Array, " N"]:
+        """diag(Σ_f|y), exact or stochastic and clamped at zero."""
+        if self.method == "exact":
+            return posterior.variance(method="exact", batch_size=self.batch_size)
+        return posterior.variance(
+            method="stochastic",
+            num_probes=self.num_probes,
+            estimator=self.estimator,
+            key=self._stochastic_key(),
+        )
+
+    def cavity(
+        self, posterior: SitePosterior, prior_variance: Float[Array, " N"]
+    ) -> Float[Array, " N"]:
+        """diag(Σ_f|y) for the cavities: exact, or stochastic with both clamps."""
+        if self.method == "exact":
+            return self(posterior)
+        estimate, _ = posterior.variance_and_error(
+            num_probes=self.num_probes,
+            estimator=self.estimator,
+            key=self._stochastic_key(),
+        )
+        return _clamp_cavity_variance(
+            estimate, posterior.site_precision, prior_variance
+        )
+
+
+def _clamp_cavity_variance(
+    estimate: Float[Array, " N"],
+    site_precision: Float[Array, " N"],
+    prior_variance: Float[Array, " N"],
+) -> Float[Array, " N"]:
+    r"""A stochastic marginal variance clamped for a cavity (pyrox#552).
+
+    $$
+    10^{-6} [K]_{nn} \le \sigma_n^2 \le (1 - 10^{-3}) / \lambda_n
+    $$
+
+    The exact variance satisfies $\sigma_n^2 < 1 / \lambda_n$, so the cavity
+    precision $1 / \sigma_n^2 - \lambda_n$ is positive; an estimate does
+    not, and its error is amplified exactly there. Where the two bounds
+    cross (a site far stronger than the prior), the upper one wins.
+    """
+    lower = _CAVITY_FLOOR * prior_variance
+    upper = _CAVITY_CEILING / site_precision
+    return jnp.minimum(jnp.maximum(estimate, lower), upper)
+
+
+def _check_variance_options(strategy: str, variance: str, estimator: str) -> None:
+    """Reject a ``variance`` or ``estimator`` that is not one of its options."""
+    if variance not in _VARIANCE_METHODS:
+        raise ValueError(
+            f"{strategy}: variance must be 'auto', 'exact' or 'stochastic', "
+            f"got {variance!r}."
+        )
+    if estimator not in _VARIANCE_ESTIMATORS:
+        raise ValueError(
+            f"{strategy}: estimator must be 'auto', 'sbpv' or 'spv', got {estimator!r}."
+        )
+
+
+def _untagged(operator: lx.AbstractLinearOperator) -> lx.AbstractLinearOperator:
+    while isinstance(operator, lx.TaggedLinearOperator):
+        operator = operator.operator
+    return operator
+
+
+def _marginal_variance(
+    strategy: LaplaceInference
+    | GaussNewtonInference
+    | PosteriorLinearization
+    | ExpectationPropagation,
+    solver: AbstractSolverStrategy,
+    prior_cov: lx.AbstractLinearOperator,
+    key: Array | None,
+) -> _MarginalVariance:
+    """The strategy's ``variance`` and ``estimator``, resolved for this prior.
+
+    ``"auto"`` is exact for a dense solver, and for an iterative one up to
+    N = 2048; stochastic above, as in `gaussx.SitePosterior.variance`. The
+    ``"auto"`` estimator is SBPV (the more accurate) for a prior that is one
+    dense matrix, whose draws need no extra densifying, and SPV otherwise,
+    which needs only products with K and so keeps a matrix-free prior
+    matrix-free. The stochastic key is ``fold_in(key, 1)``, so it is
+    independent of the probes the same ``key`` gives a stochastic
+    log-determinant.
+    """
+    method = strategy.variance
+    size = prior_cov.in_structure().shape[0]
+    if method == "auto":
+        exact = isinstance(solver, DenseSolver) or size <= _EXACT_VARIANCE_MAX_SIZE
+        method = "exact" if exact else "stochastic"
+    estimator = strategy.estimator
+    if estimator == "auto":
+        dense = isinstance(_untagged(prior_cov), lx.MatrixLinearOperator)
+        estimator = "sbpv" if dense else "spv"
+    return _MarginalVariance(
+        method=method,
+        estimator=estimator,
+        num_probes=strategy.num_probes,
+        batch_size=strategy.batch_size,
+        key=None if key is None or method == "exact" else jr.fold_in(key, 1),
+    )
 
 
 # --- result type ---------------------------------------------------------
@@ -129,8 +277,9 @@ class ConditionedNonGaussGP(eqx.Module):
         kernel: The prior's kernel with the hyperparameters of the fit, a
             plain kernellib kernel (``frozen()``); a kernel that cannot be
             frozen is kept as it is and evaluated once per ``predict``.
-        batch_size: Solves vectorised together when `q_var` is read with an
-            iterative solver.
+        marginal_variance: How `q_var` is computed: exactly, or by the
+            stochastic estimate of `gaussx.SitePosterior.variance` with the
+            fit's estimator, probes and key (gaussx#827).
     """
 
     prior: GPPrior
@@ -140,7 +289,14 @@ class ConditionedNonGaussGP(eqx.Module):
     n_iter: Int[Array, ""]
     converged: Bool[Array, ""]
     kernel: Kernel
-    batch_size: int = eqx.field(static=True, default=32)
+    marginal_variance: _MarginalVariance = eqx.field(
+        default_factory=lambda: _MarginalVariance()
+    )
+
+    @property
+    def batch_size(self) -> int:
+        """Solves vectorised together for the exact variances of an iterative fit."""
+        return self.marginal_variance.batch_size
 
     @property
     def site_nat1(self) -> Float[Array, " N"]:
@@ -174,9 +330,14 @@ class ConditionedNonGaussGP(eqx.Module):
         Computed when read, so a fit that needs only the mean or the
         evidence does no extra solves: triangular solves with the kept
         factor on the dense path, $N$ solves (``batch_size`` at a time) with
-        an iterative solver.
+        an iterative solver, or, for a fit whose ``variance`` resolved to
+        ``"stochastic"``, ``num_probes`` solves and the estimate of
+        `gaussx.SitePosterior.variance`, clamped at zero.
+
+        Raises:
+            ValueError: For stochastic variances of a fit given no ``key``.
         """
-        return self.site_posterior.variance(method="exact", batch_size=self.batch_size)
+        return self.marginal_variance(self.site_posterior)
 
     def _predict(
         self, X_star: Float[Array, "M D"], *, variance: bool
@@ -408,7 +569,8 @@ def _newton_fit(
     on the prior's own operator, so a matrix-free prior with an iterative
     solver never forms $K$. The sites, the posterior and the evidence
     (`gaussx.site_log_evidence`) at the mode come from argminax too; the
-    marginal variances wait until `ConditionedNonGaussGP.q_var` is read.
+    marginal variances wait until `ConditionedNonGaussGP.q_var` is read,
+    exact or stochastic as the strategy's ``variance`` resolves.
     """
     _check_scalar_latent(likelihood)
     solver = _strategy_solver(strategy, prior)
@@ -417,6 +579,7 @@ def _newton_fit(
         prior_cov = prior._prior_operator()
         prior_mean = jnp.asarray(prior.mean(prior.X))
         kernel = _fitted_kernel(prior)
+    marginal_variance = _marginal_variance(strategy, solver, prior_cov, key)
     log_prob_per_point = _log_prob_per_point_factory(likelihood)
     site_data = _site_data(likelihood, y, prior.X)
     fit = laplace_mode_covariance(
@@ -441,6 +604,7 @@ def _newton_fit(
         n_iter=fit.n_iter,
         converged=fit.converged,
         kernel=kernel,
+        marginal_variance=marginal_variance,
     )
 
 
@@ -515,6 +679,21 @@ class LaplaceInference(eqx.Module):
         adjoint: How the mode is differentiated, an
             ``optimistix.ImplicitAdjoint``; ``None`` is argminax's
             matrix-free GMRES tangent solve.
+        variance: How `ConditionedNonGaussGP.q_var` computes the marginal
+            variances, ``"auto"``, ``"exact"`` or ``"stochastic"``.
+            ``"auto"`` is exact for a dense solver, and for an iterative one
+            up to $N = 2048$; above, it is the stochastic estimate of
+            `gaussx.SitePosterior.variance` (gaussx#827), which needs the
+            ``key`` of `fit`. The Newton loop itself needs no variances.
+        estimator: The stochastic estimator, ``"auto"``, ``"sbpv"`` or
+            ``"spv"``. ``"auto"`` is SBPV (draws from the prior and the
+            sites, the more accurate) on a dense prior and SPV (sign probes,
+            products with $K$ only) on any other, so a matrix-free prior is
+            never densified.
+        num_probes: Draws or probes of the stochastic variance, one solve
+            each. Default ``100``.
+        batch_size: Solves vectorised together for the exact variances of
+            an iterative solver. Default ``32``.
     """
 
     max_iter: int = eqx.field(static=True, default=20)
@@ -525,6 +704,13 @@ class LaplaceInference(eqx.Module):
     preconditioner: AbstractPreconditioner | None = None
     logdet: AbstractLogdetStrategy | None = None
     adjoint: optx.ImplicitAdjoint | None = None
+    variance: _VarianceMethod = eqx.field(static=True, default="auto")
+    estimator: _VarianceEstimator = eqx.field(static=True, default="auto")
+    num_probes: int = eqx.field(static=True, default=100)
+    batch_size: int = eqx.field(static=True, default=32)
+
+    def __check_init__(self) -> None:
+        _check_variance_options("LaplaceInference", self.variance, self.estimator)
 
     def fit(
         self,
@@ -542,7 +728,9 @@ class LaplaceInference(eqx.Module):
             y: Observations, shape ``(N,)``.
             key: PRNG key of a stochastic log-determinant in the evidence
                 (CG's SLQ, `gaussx.BBMMSolver`); ``None`` uses the solver's
-                own seed. Ignored by an exact log-determinant.
+                own seed. Ignored by an exact log-determinant. Stochastic
+                marginal variances use ``fold_in(key, 1)``, and without a
+                key `ConditionedNonGaussGP.q_var` raises for them.
 
         Returns:
             The `ConditionedNonGaussGP` at the mode.
@@ -604,6 +792,10 @@ class GaussNewtonInference(eqx.Module):
         preconditioner: As in `LaplaceInference`.
         logdet: As in `LaplaceInference`.
         adjoint: As in `LaplaceInference`.
+        variance: As in `LaplaceInference`.
+        estimator: As in `LaplaceInference`.
+        num_probes: As in `LaplaceInference`.
+        batch_size: As in `LaplaceInference`.
     """
 
     max_iter: int = eqx.field(static=True, default=20)
@@ -614,6 +806,13 @@ class GaussNewtonInference(eqx.Module):
     preconditioner: AbstractPreconditioner | None = None
     logdet: AbstractLogdetStrategy | None = None
     adjoint: optx.ImplicitAdjoint | None = None
+    variance: _VarianceMethod = eqx.field(static=True, default="auto")
+    estimator: _VarianceEstimator = eqx.field(static=True, default="auto")
+    num_probes: int = eqx.field(static=True, default=100)
+    batch_size: int = eqx.field(static=True, default=32)
+
+    def __check_init__(self) -> None:
+        _check_variance_options("GaussNewtonInference", self.variance, self.estimator)
 
     def fit(
         self,
@@ -629,8 +828,9 @@ class GaussNewtonInference(eqx.Module):
             prior: The `GPPrior`, dense or ``matrix_free=True``.
             likelihood: A scalar-latent `Likelihood`.
             y: Observations, shape ``(N,)``.
-            key: PRNG key of a stochastic log-determinant in the evidence;
-                ignored by an exact one.
+            key: PRNG key of a stochastic log-determinant in the evidence,
+                ignored by an exact one, and of stochastic marginal
+                variances, as in `LaplaceInference.fit`.
 
         Returns:
             The `ConditionedNonGaussGP` at the mode.
@@ -641,66 +841,23 @@ class GaussNewtonInference(eqx.Module):
 # --- Posterior linearization and EP: the site loop ------------------------
 
 
-_VarianceMethod = Literal["auto", "exact", "stochastic"]
-_VARIANCE_METHODS = ("auto", "exact", "stochastic")
-# The size above which gaussx's "auto" variance turns stochastic for an
-# iterative solver (`gaussx.SitePosterior.variance`, `gaussx.diag_inv`).
-_EXACT_VARIANCE_MAX_SIZE = 2048
-_STOCHASTIC_VARIANCE_ISSUE = "https://github.com/jejjohnson/gaussx/issues/827"
-
 _SiteNaturals = tuple[Float[Array, " N"], Float[Array, " N"]]
-
-
-def _check_variance_method(strategy: str, variance: str) -> None:
-    """Reject a ``variance`` that is none of the three methods."""
-    if variance not in _VARIANCE_METHODS:
-        raise ValueError(
-            f"{strategy}: variance must be 'auto', 'exact' or 'stochastic', "
-            f"got {variance!r}."
-        )
-
-
-def _require_exact_variance(
-    strategy: PosteriorLinearization | ExpectationPropagation,
-    solver: AbstractSolverStrategy,
-    size: int,
-) -> None:
-    """Raise unless the marginal variances can be exact.
-
-    ``"auto"`` is exact for a dense solver, and for an iterative one up to
-    N = 2048; above, and for ``"stochastic"``, the variances would be a
-    probe estimate, which waits on the diagonal estimators of gaussx#827.
-
-    Raises:
-        NotImplementedError: For the stochastic branch, naming gaussx#827.
-    """
-    method = strategy.variance
-    if method == "auto":
-        exact = isinstance(solver, DenseSolver) or size <= _EXACT_VARIANCE_MAX_SIZE
-        method = "exact" if exact else "stochastic"
-    if method == "stochastic":
-        raise NotImplementedError(
-            f"{type(strategy).__name__}: the stochastic marginal variances "
-            f"(variance={strategy.variance!r} with an iterative solver at "
-            f"N = {size}) wait on the diagonal estimators of gaussx#827 "
-            f"({_STOCHASTIC_VARIANCE_ISSUE}). Pass variance='exact', which "
-            f"costs N solves per iteration in batches of batch_size."
-        )
 
 
 def _site_marginals(
     sites: _SiteNaturals,
     prior_mean: Float[Array, " N"],
     prior_cov: lx.AbstractLinearOperator,
+    prior_variance: Float[Array, " N"],
     solver: AbstractSolverStrategy,
-    batch_size: int,
+    marginal_variance: _MarginalVariance,
 ) -> tuple[SitePosterior, Float[Array, " N"]]:
-    """The site posterior of ``sites`` and its exact marginal variances."""
+    """The site posterior of ``sites`` and its marginal variances for the cavities."""
     information, precision = sites
     posterior = site_posterior(
         prior_mean, prior_cov, information, precision, solver=solver
     )
-    return posterior, posterior.variance(method="exact", batch_size=batch_size)
+    return posterior, marginal_variance.cavity(posterior, prior_variance)
 
 
 def _fit_cavity_sites(
@@ -717,18 +874,32 @@ def _fit_cavity_sites(
     `argminax.solve.site_fixed_point`, from the site posterior of the
     current sites (`gaussx.site_posterior`). The evidence is
     `gaussx.site_log_evidence` at the posterior mean.
+
+    Stochastic marginal variances use one key for the whole fit, so the
+    update is a fixed function of the sites and the stopping test can pass;
+    ``converged`` then refers to that surrogate.
     """
     _check_scalar_latent(likelihood)
     solver = _strategy_solver(strategy, prior)
     size = prior.X.shape[0]
-    _require_exact_variance(strategy, solver, size)
     # one hyperparameter draw for the operator, the mean and the predictions
     with call_context(prior.kernel):
         prior_cov = prior._prior_operator()
         prior_mean = jnp.asarray(prior.mean(prior.X))
         kernel = _fitted_kernel(prior)
+    marginal_variance = _marginal_variance(strategy, solver, prior_cov, key)
+    if marginal_variance.method == "stochastic" and key is None:
+        raise ValueError(
+            f"{type(strategy).__name__}: the marginal variances are stochastic "
+            f"(variance={strategy.variance!r} with an iterative solver at "
+            f"N = {size}), and their probes need a PRNG key: pass "
+            "fit(..., key=...), or variance='exact', which costs N solves per "
+            "iteration in batches of batch_size."
+        )
     site_data = _site_data(likelihood, y, prior.X)
     dtype = prior_cov.in_structure().dtype
+    # [K]ₙₙ: the first cavities, and the floor of a stochastic variance
+    prior_variance = lx.diagonal(prior_cov)
 
     # zero sites with precision ε: the first cavity is the prior
     sites = (
@@ -738,13 +909,21 @@ def _fit_cavity_sites(
     first = min(strategy.max_iter, 1)
     if first:
         sites = strategy._update(
-            sites, prior_mean, lx.diagonal(prior_cov), likelihood, site_data
+            sites, prior_mean, prior_variance, likelihood, site_data
         )
     if strategy.max_iter > first:
         fit = site_fixed_point(
             strategy._step,
             sites,
-            (prior_mean, prior_cov, solver, likelihood, site_data),
+            (
+                prior_mean,
+                prior_cov,
+                prior_variance,
+                solver,
+                marginal_variance,
+                likelihood,
+                site_data,
+            ),
             max_iter=strategy.max_iter - first,
             tol=strategy.tol,
             adjoint=strategy.adjoint,
@@ -768,7 +947,7 @@ def _fit_cavity_sites(
         n_iter=n_steps + first,
         converged=converged,
         kernel=kernel,
-        batch_size=strategy.batch_size,
+        marginal_variance=marginal_variance,
     )
 
 
@@ -778,9 +957,17 @@ def _cavity_step(
     args: PyTree,
 ) -> _SiteNaturals:
     r"""One damped sweep $T_\alpha(s)$ from the site posterior of ``sites``."""
-    prior_mean, prior_cov, solver, likelihood, site_data = args
+    (
+        prior_mean,
+        prior_cov,
+        prior_variance,
+        solver,
+        marginal_variance,
+        likelihood,
+        site_data,
+    ) = args
     posterior, variance = _site_marginals(
-        sites, prior_mean, prior_cov, solver, strategy.batch_size
+        sites, prior_mean, prior_cov, prior_variance, solver, marginal_variance
     )
     return strategy._update(sites, posterior.mean, variance, likelihood, site_data)
 
@@ -807,7 +994,8 @@ class PosteriorLinearization(eqx.Module):
     transform. The cavities need the posterior *marginal variances* at every
     iteration, not only at the end: one Cholesky of
     $A = K + \mathrm{diag}(1 / \Lambda)$ with a dense solver, $N$ solves
-    with an iterative one. The reported ``log_marginal_approx`` is the
+    with an iterative one, or ``num_probes`` solves for the stochastic
+    estimate (``variance``). The reported ``log_marginal_approx`` is the
     Laplace-type approximation `gaussx.site_log_evidence` at the posterior
     mean, not the EP evidence.
 
@@ -832,11 +1020,19 @@ class PosteriorLinearization(eqx.Module):
             is `gaussx.DenseSolver`.
         variance: How the marginal variances are computed, ``"auto"``,
             ``"exact"`` or ``"stochastic"``. ``"auto"`` is exact for a dense
-            solver, and for an iterative one up to $N = 2048$. The stochastic
-            estimate waits on gaussx#827, so ``"stochastic"``, and ``"auto"``
-            above $N = 2048$ with an iterative solver, raise
-            ``NotImplementedError``.
-        num_probes: Probes of the stochastic variance (gaussx#827).
+            solver, and for an iterative one up to $N = 2048$; above, it is
+            the stochastic estimate of `gaussx.SitePosterior.variance_and_error`
+            (gaussx#827), $N$-independent in its solve count, which needs the
+            ``key`` of `fit`. A stochastic estimate is clamped for the
+            cavities to $[10^{-6} K_{nn}, (1 - 10^{-3}) / \lambda_n]$, so
+            every cavity precision stays positive.
+        estimator: The stochastic estimator, ``"auto"``, ``"sbpv"`` or
+            ``"spv"``. ``"auto"`` is SBPV (draws from the prior and the
+            sites, the more accurate) on a dense prior and SPV (sign probes,
+            products with $K$ only) on any other, so a matrix-free prior is
+            never densified.
+        num_probes: Draws or probes of the stochastic variance, one solve
+            each. Default ``100``.
         adjoint: How gradients pass through the loop; ``None`` is the
             matrix-free implicit adjoint of `argminax.solve.site_fixed_point`.
         batch_size: Solves vectorised together for the exact variances of
@@ -857,9 +1053,10 @@ class PosteriorLinearization(eqx.Module):
     num_probes: int = eqx.field(static=True, default=100)
     adjoint: optx.AbstractAdjoint | None = None
     batch_size: int = eqx.field(static=True, default=32)
+    estimator: _VarianceEstimator = eqx.field(static=True, default="auto")
 
     def __check_init__(self) -> None:
-        _check_variance_method("PosteriorLinearization", self.variance)
+        _check_variance_options("PosteriorLinearization", self.variance, self.estimator)
 
     def _update(
         self,
@@ -923,14 +1120,16 @@ class PosteriorLinearization(eqx.Module):
             likelihood: A scalar-latent `Likelihood`.
             y: Observations, shape ``(N,)``.
             key: PRNG key of a stochastic log-determinant in the evidence
-                (for example `gaussx.BBMMSolver`); ignored otherwise.
+                (for example `gaussx.BBMMSolver`) and, as
+                ``fold_in(key, 1)``, of stochastic marginal variances, one
+                key for every iteration; ignored otherwise.
 
         Returns:
             The `ConditionedNonGaussGP` of the fitted sites.
 
         Raises:
-            NotImplementedError: If the marginal variances would be
-                stochastic (see ``variance``), which waits on gaussx#827.
+            ValueError: If the marginal variances are stochastic (see
+                ``variance``) and ``key`` is ``None``.
 
         Examples:
             >>> import gaussx as gx
@@ -990,7 +1189,8 @@ class ExpectationPropagation(eqx.Module):
     ``fit`` runs under ``jax.jit`` and ``jax.vmap`` and its gradient is
     implicit at the fixed point. As for `PosteriorLinearization`, the
     cavities need the marginal variances at every iteration (one Cholesky
-    with a dense solver, $N$ solves with an iterative one), and
+    with a dense solver, $N$ solves with an iterative one, ``num_probes``
+    for the stochastic estimate), and
     ``log_marginal_approx`` is the Laplace-type `gaussx.site_log_evidence`
     at the EP mean, not the EP evidence with the cavity normalisers.
 
@@ -1011,6 +1211,7 @@ class ExpectationPropagation(eqx.Module):
         num_probes: As in `PosteriorLinearization`.
         adjoint: As in `PosteriorLinearization`.
         batch_size: As in `PosteriorLinearization`.
+        estimator: As in `PosteriorLinearization`.
     """
 
     integrator: AbstractIntegrator = eqx.field(
@@ -1027,10 +1228,11 @@ class ExpectationPropagation(eqx.Module):
     num_probes: int = eqx.field(static=True, default=100)
     adjoint: optx.AbstractAdjoint | None = None
     batch_size: int = eqx.field(static=True, default=32)
+    estimator: _VarianceEstimator = eqx.field(static=True, default="auto")
 
     def __check_init__(self) -> None:
         _require_gauss_hermite(self.integrator)
-        _check_variance_method("ExpectationPropagation", self.variance)
+        _check_variance_options("ExpectationPropagation", self.variance, self.estimator)
 
     def _update(
         self,
@@ -1092,14 +1294,16 @@ class ExpectationPropagation(eqx.Module):
             likelihood: A scalar-latent `Likelihood`.
             y: Observations, shape ``(N,)``.
             key: PRNG key of a stochastic log-determinant in the evidence
-                (for example `gaussx.BBMMSolver`); ignored otherwise.
+                (for example `gaussx.BBMMSolver`) and, as
+                ``fold_in(key, 1)``, of stochastic marginal variances, one
+                key for every iteration; ignored otherwise.
 
         Returns:
             The `ConditionedNonGaussGP` of the fitted sites.
 
         Raises:
-            NotImplementedError: If the marginal variances would be
-                stochastic (see ``variance``), which waits on gaussx#827.
+            ValueError: If the marginal variances are stochastic (see
+                ``variance``) and ``key`` is ``None``.
 
         Examples:
             >>> import jax
