@@ -180,17 +180,27 @@ def test_solvers_agree_on_elbo(cls, name) -> None:
 
 
 def test_float32_variance_is_never_negative() -> None:
-    """The contraction form k_nn - k_n^T b_n + ... is clipped at zero."""
+    """The contraction form k_nn - k_n^T b_n + ... is clipped at zero.
+
+    The clip must not hide a real error, so the float32 variances are also
+    compared with the dense float64 ones: the largest gap measured was 6 % of
+    the largest variance (7e-6 on 1.1e-4), so 10 % of it bounds the gap
+    while a clipped-to-zero or sign-flipped variance still fails.
+    """
     prior, X, _ = _elbo_problem(jnp.float32)
     K_zz_op, K_xz, K_xx_diag = prior.predictive_blocks(X)
+    # the same points in float64 (a float64 draw from the same key differs)
+    prior64, _, _ = _elbo_problem()
+    blocks64 = prior64.predictive_blocks(X.astype(jnp.float64))
     solver = gx.CGSolver(rtol=1e-6, atol=1e-6, max_steps=2000)
     for cls in _UNWHITENED:
-        guide = _small_guide(cls, jr.key(5))
+        reference = _small_guide(cls, jr.key(5))
+        _, variance64 = reference.predict(blocks64[1], blocks64[0], blocks64[2])
         guide = jax.tree.map(
             lambda leaf: (
                 leaf.astype(jnp.float32) if eqx.is_inexact_array(leaf) else leaf
             ),
-            guide,
+            reference,
         )
         guide = eqx.tree_at(
             lambda g: g.solver, guide, solver, is_leaf=lambda x: x is None
@@ -198,6 +208,8 @@ def test_float32_variance_is_never_negative() -> None:
         mean, variance = guide.predict(K_xz, K_zz_op, K_xx_diag)
         assert mean.dtype == variance.dtype == jnp.float32
         assert bool(jnp.all(variance >= 0.0))
+        gap = jnp.max(jnp.abs(variance.astype(variance64.dtype) - variance64))
+        assert float(gap) <= 0.1 * float(jnp.max(variance64)) + 1e-7
 
 
 @pytest.mark.parametrize("name", ["cg", "pcg", "bbmm"])

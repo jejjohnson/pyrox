@@ -240,6 +240,36 @@ _IMPLICIT_ADJOINT = markov_implicit_adjoint()
 # --- result type ---------------------------------------------------------
 
 
+# The smallest tolerance handed to argminax, which floors it at 64 machine
+# epsilons of the sites' dtype: the loop then stops only at that floor.
+_ZERO_TOLERANCE_STANDIN = 1e-300
+
+
+def _loop_tolerance(tol: float) -> float:
+    """``tol`` for `argminax.solve.site_fixed_point`, which needs ``tol > 0``.
+
+    ``tol=0.0`` once ran every iteration of ``max_iter``; it is deprecated and
+    now runs until the change falls below argminax's floor of 64 machine
+    epsilons, which is the same fit to rounding.
+
+    Args:
+        tol: The strategy's tolerance.
+
+    Returns:
+        ``tol``, or a positive stand-in for a deprecated ``tol=0.0``.
+    """
+    if tol != 0.0:
+        return tol
+    warnings.warn(
+        "tol=0.0 is deprecated and will be refused in a later release; pass a "
+        "positive tol (argminax floors it at 64 machine epsilons) and bound "
+        "the loop with max_iter.",
+        DeprecationWarning,
+        stacklevel=4,
+    )
+    return _ZERO_TOLERANCE_STANDIN
+
+
 class ConditionedNonGaussMarkovGP(eqx.Module):
     """Markov GP conditioned on a non-Gaussian likelihood via a site-based strategy.
 
@@ -562,7 +592,7 @@ class LaplaceMarkovInference(eqx.Module):
             self._step,
             sites,
             (prior, site_lik, observed, prior_sd),
-            tol=self.tol,
+            tol=_loop_tolerance(self.tol),
             max_iter=self.max_iter,
             adjoint=self.adjoint,
         )
@@ -745,7 +775,7 @@ def _fit_cavity_sites(
             strategy._step,
             sites,
             (prior, site_lik, observed),
-            tol=strategy.tol,
+            tol=_loop_tolerance(strategy.tol),
             max_iter=strategy.max_iter - first,
             adjoint=strategy.adjoint,
         )
