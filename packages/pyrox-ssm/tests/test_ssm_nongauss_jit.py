@@ -304,22 +304,23 @@ def test_laplace_gradient_matches_central_differences(implicit) -> None:
 
 
 @pytest.mark.parametrize("damping", [1.0, pytest.param(0.3, marks=SLOW)])
-def test_implicit_gradient_equals_200_unrolled_iterations(damping) -> None:
+def test_implicit_gradient_equals_the_unrolled_gradient_at_round_off(damping) -> None:
     implicit = LaplaceMarkovInference(
         max_iter=300, tol=1e-10, damping=damping, adjoint=markov_implicit_adjoint()
     )
-    # tol=0 never stops early, so the loop runs all 200 iterations and the
-    # gradient differentiates through every one of them.
+    # argminax's site loop floors tol at 64 machine epsilons (and refuses
+    # tol=0, which the private loop took to mean "never stop", #553), so this
+    # loop stops only once the sites move by round-off: 7 iterations at
+    # damping 1 and 97 at 0.3, every one of them differentiated through.
     unrolled = LaplaceMarkovInference(
         max_iter=200,
-        tol=0.0,
+        tol=1e-300,
         damping=damping,
         adjoint=optx.RecursiveCheckpointAdjoint(),
     )
-    assert int(_fit(THETA, unrolled).n_iter) == 200
+    assert bool(_fit(THETA, unrolled).converged)
     g_implicit = jax.jit(jax.grad(_laplace_evidence(implicit)))(THETA)
     g_unrolled = jax.jit(jax.grad(_laplace_evidence(unrolled)))(THETA)
-    # 200 iterations converge to round-off even at damping 0.3 (0.7^200).
     assert jnp.allclose(g_implicit, g_unrolled, rtol=1e-8, atol=1e-10)
 
 
