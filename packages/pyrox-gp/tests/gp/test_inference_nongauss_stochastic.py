@@ -19,6 +19,7 @@ import numpy as np
 import pytest
 from jax.scipy.special import ndtri
 from pyrox_gp import (
+    RBF,
     BernoulliLikelihood,
     ExpectationPropagation,
     GaussNewtonInference,
@@ -230,3 +231,21 @@ def test_matrix_free_auto_turns_stochastic_without_n_by_n(name) -> None:
     shapes = {tuple(aval.shape) for aval in _avals(jax.make_jaxpr(fit)(y).jaxpr)}
     assert (n,) in shapes
     assert not any(len(shape) >= 2 and shape[-2:] == (n, n) for shape in shapes)
+
+
+@pytest.mark.parametrize("name", ["pl", "ep"])
+@pytest.mark.parametrize("variance", ["exact", "stochastic"])
+def test_float32_matrix_free_cavity_fit_stays_float32(name, variance) -> None:
+    # The jitter's I in a matrix-free prior has a default-float diagonal in
+    # lineax, so under x64 the first cavities came out float64 and the next
+    # site system no longer matched the float32 KernelOperator.
+    X = jr.uniform(jr.key(0), (40, 1), dtype=jnp.float32)
+    y = (X[:, 0] > 0.5).astype(jnp.float32)
+    prior = GPPrior(RBF(), X, matrix_free=True)
+    solver = gx.CGSolver(rtol=1e-5, atol=1e-5, max_steps=200)
+    strategy = _CLASSES[name](
+        solver=solver, variance=variance, estimator="sbpv", num_probes=20
+    )
+    fit = strategy.fit(prior, BernoulliLikelihood(), y, key=jr.key(1))
+    assert fit.q_mean.dtype == jnp.float32
+    assert bool(fit.converged)

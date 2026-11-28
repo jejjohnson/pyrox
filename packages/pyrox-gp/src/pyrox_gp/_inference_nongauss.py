@@ -898,8 +898,10 @@ def _fit_cavity_sites(
         )
     site_data = _site_data(likelihood, y, prior.X)
     dtype = prior_cov.in_structure().dtype
-    # [K]ₙₙ: the first cavities, and the floor of a stochastic variance
-    prior_variance = lx.diagonal(prior_cov)
+    # [K]ₙₙ: the first cavities, and the floor of a stochastic variance. In
+    # the operator's dtype: lineax gives the jitter's I a default-float
+    # diagonal, which under x64 would turn float32 sites into float64 ones.
+    prior_variance = lx.diagonal(prior_cov).astype(dtype)
 
     # zero sites with precision ε: the first cavity is the prior
     sites = (
