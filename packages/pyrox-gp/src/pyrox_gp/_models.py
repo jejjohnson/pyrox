@@ -34,6 +34,7 @@ from gaussx import (
     predict_mean,
     predict_variance,
     solve_columns,
+    sqrt,
     unwhiten,
 )
 from jaxtyping import Array, Float
@@ -101,9 +102,11 @@ class GPPrior(eqx.Module):
             the sum; a dense solver materialises ``K`` again. NumPyro-aware
             kernels are resolved once per call through ``frozen()``.
             Matrix-free entry points: `log_prob`, `log_marginal`,
-            `condition` and its predictions, `gp_factor`, and
-            `pyrox_gp.PathwiseSampler` on the conditioned GP. The
-            non-Gaussian strategies (`condition_nongauss`,
+            `condition` and its predictions, `gp_factor`,
+            `pyrox_gp.PathwiseSampler` on the conditioned GP, and prior
+            draws with ``method="krylov"`` (`sample`,
+            ``gp_sample(whitened=True)``). The default Cholesky draws and
+            the non-Gaussian strategies (`condition_nongauss`,
             `gp_laplace_factor`) form ``K`` and raise ``ValueError`` on a
             matrix-free prior.
         block_size: Rows of ``K`` per matvec step when ``matrix_free``.
@@ -185,16 +188,53 @@ class GPPrior(eqx.Module):
             solver=self._resolved_solver(),
         )
 
-    def sample(self, key: Array) -> Float[Array, " N"]:
+    def sample(
+        self,
+        key: Array,
+        *,
+        method: Literal["cholesky", "krylov"] = "cholesky",
+        lanczos_order: int = 100,
+    ) -> Float[Array, " N"]:
         r"""Draw ``f \sim p(f) = \mathcal{N}(\mu(X), K + \text{jitter}\,I)``.
 
-        Wraps the prior in a `pyrox_gauss.MultivariateNormal` with
-        the configured `solver`. This is the non-NumPyro analogue
-        of `gp_sample` — useful for tests, diagnostics, and
-        prior-sample initialization without registering a sample site.
+        This is the non-NumPyro analogue of `gp_sample` — useful for tests,
+        diagnostics, and prior-sample initialization without registering a
+        sample site.
+
+        Args:
+            key: PRNG key.
+            method: ``"cholesky"`` (default) wraps the prior in a
+                `pyrox_gauss.MultivariateNormal` with the configured
+                `solver`, which factorises the dense ``K``, so it raises on
+                a matrix-free prior. ``"krylov"`` draws
+                $f = \mu + \hat K^{1/2} v$, $v \sim \mathcal{N}(0, I)$,
+                with the symmetric root applied by Lanczos
+                (`gaussx.sqrt` with ``lanczos_order``): matrix-free, and
+                exact up to the Lanczos error.
+            lanczos_order: Lanczos steps of ``method="krylov"``. The error
+                falls with the condition number of $K + \text{jitter}\,I$,
+                so the jitter sets the cost: at $N = 1000$, 100 steps gave
+                a relative error of the draws below $10^{-5}$ for an RBF
+                and a Matérn-1/2 kernel (condition numbers $2 \cdot 10^8$
+                and $2 \cdot 10^4$), and 30 steps about $10^{-2}$.
+
+        Returns:
+            One draw of ``f`` at the training inputs, shape ``(N,)``.
+
+        Raises:
+            ValueError: For an unknown ``method``, or for
+                ``method="cholesky"`` on a matrix-free prior.
         """
+        _check_draw_method(method)
         op = self._prior_operator()
         loc = self.mean(self.X)
+        if method == "krylov":
+            # v ~ N(0, I)
+            normals = jax.random.normal(key, loc.shape, dtype=self.X.dtype)
+            # f = μ + K̂^½ v, the root applied by Lanczos
+            return loc + sqrt(op, lanczos_order=lanczos_order).mv(normals)
+        if self.matrix_free:
+            raise ValueError(_dense_draw_message("GPPrior.sample"))
         mvn = MultivariateNormal(loc, op, solver=self._resolved_solver())
         return mvn.sample(key)
 
@@ -314,6 +354,23 @@ class GPPrior(eqx.Module):
             mean, var = cond.predict(X_star)
         """
         return strategy.fit(self, likelihood, y)
+
+
+def _check_draw_method(method: str) -> None:
+    if method not in ("cholesky", "krylov"):
+        raise ValueError(f"method must be 'cholesky' or 'krylov', got {method!r}")
+
+
+def _dense_draw_message(entry: str) -> str:
+    """Why a Cholesky prior draw refuses a matrix-free prior (pyrox#559)."""
+    return (
+        f"{entry} on GPPrior(matrix_free=True) needs a Cholesky factor of the "
+        "N x N kernel matrix, which a matrix-free prior never forms. Use "
+        'method="krylov" (a matrix-free Lanczos square root), a dense prior '
+        "(matrix_free=False), gp_sample(whitened=False) inside a model "
+        "(inference needs only its log-density), or pathwise draws "
+        "(pyrox_gp.PathwiseSampler) for posterior paths."
+    )
 
 
 def _resolve_kernel_hyperparams(
@@ -786,6 +843,8 @@ def gp_sample(
     *,
     whitened: bool = False,
     guide: object | None = None,
+    method: Literal["cholesky", "krylov"] = "cholesky",
+    lanczos_order: int = 100,
 ) -> Float[Array, " N"]:
     r"""Sample a latent function ``f`` at the prior's training inputs.
 
@@ -810,7 +869,23 @@ def gp_sample(
 
     Use this inside a NumPyro model for non-conjugate likelihoods, where
     the latent function cannot be marginalized analytically.
+
+    The Cholesky factor of the whitened mode needs the dense kernel
+    matrix, so ``whitened=True`` raises on a matrix-free prior unless
+    ``method="krylov"``, which uses the symmetric root
+    ``f = mu(X) + (K + jitter I)^{1/2} u`` applied by Lanczos
+    (``lanczos_order`` steps, see `GPPrior.sample`). The prior over ``f``
+    is the same, but the posterior over ``u`` is rotated relative to the
+    Cholesky form, and a mean-field guide is not invariant under that
+    rotation, so a fitted variational posterior differs between the two
+    methods. ``method`` applies to ``whitened=True`` only.
     """
+    _check_draw_method(method)
+    if method != "cholesky" and not whitened:
+        raise ValueError(
+            'gp_sample: method="krylov" applies to whitened=True only; the '
+            "unwhitened site is a MultivariateNormal on the prior's solver."
+        )
     if guide is not None:
         if whitened:
             raise ValueError(
@@ -821,7 +896,14 @@ def gp_sample(
         return guide.register(name, prior)  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]
 
     if whitened:
-        L = cholesky(prior._prior_operator())
+        if method == "cholesky" and prior.matrix_free:
+            raise ValueError(_dense_draw_message("gp_sample(whitened=True)"))
+        # the kernel's sites register before f_u, in the same order as ever
+        operator = prior._prior_operator()
+        if method == "krylov":
+            root = sqrt(operator, lanczos_order=lanczos_order)
+        else:
+            root = cholesky(operator)
         n = prior.X.shape[0]
         dtype = prior.X.dtype
         u = numpyro.sample(
@@ -830,7 +912,12 @@ def gp_sample(
                 1
             ),
         )
-        f = prior.mean(prior.X) + unwhiten(jnp.asarray(u), L)
+        if method == "krylov":
+            # f = μ + K̂^½ u, the symmetric root applied by Lanczos
+            f = prior.mean(prior.X) + root.mv(jnp.asarray(u))
+        else:
+            # f = μ + L u, L Lᵀ = K̂
+            f = prior.mean(prior.X) + unwhiten(jnp.asarray(u), root)
         return numpyro.deterministic(name, f)  # ty: ignore[invalid-return-type]
 
     return numpyro.sample(  # ty: ignore[invalid-return-type]

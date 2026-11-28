@@ -8,9 +8,11 @@ for latent-function workflows, and (3) that solvers are pluggable (any
 
 from __future__ import annotations
 
+import einx
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import numpy as np
 import numpyro.distributions as dist
 import pytest
 from gaussx import CGSolver, ComposedSolver, DenseLogdet, DenseSolver
@@ -23,9 +25,12 @@ from pyrox_gp import (
     RBF,
     ConditionedGP,
     GPPrior,
+    Matern,
     gp_factor,
     gp_sample,
+    preconditioned_cg_solver,
 )
+from pyrox_gp._kernel_operator import KernelOperator
 
 
 # --- Fixtures --------------------------------------------------------------
@@ -567,3 +572,112 @@ def test_gpprior_sample_invariant_to_dense_solver_choice():
     p_dense = GPPrior(kernel=RBF(), X=X, solver=DenseSolver())
     key = jr.PRNGKey(9)
     assert jnp.allclose(p_default.sample(key), p_dense.sample(key), atol=1e-5)
+
+
+# --- Prior draws on a matrix-free prior (pyrox#559) -------------------------
+
+_X_DRAWS = jr.uniform(jr.key(0), (30, 2))
+
+
+def _count_as_matrix(monkeypatch):
+    count = [0]
+    original = KernelOperator.as_matrix
+
+    def counted(self):
+        count[0] += 1
+        return original(self)
+
+    monkeypatch.setattr(KernelOperator, "as_matrix", counted)
+    return count
+
+
+def _matrix_free_prior(kernel=None):
+    solver = preconditioned_cg_solver(rank=10, key=jr.key(1))
+    kernel = RBF() if kernel is None else kernel
+    return GPPrior(kernel, _X_DRAWS, solver=solver, matrix_free=True)
+
+
+def test_matrix_free_draws_raise(monkeypatch):
+    # The issue's reproducer: each draw called as_matrix once before
+    # pyrox#559, for a Cholesky factor of the N x N kernel matrix.
+    count = _count_as_matrix(monkeypatch)
+    prior = _matrix_free_prior()
+    alternatives = r'method="krylov".*matrix_free=False.*whitened=False.*Pathwise'
+    with pytest.raises(ValueError, match=alternatives):
+        handlers.seed(lambda: gp_sample("f", prior, whitened=True), 0)()
+    with pytest.raises(ValueError, match=alternatives):
+        prior.sample(jr.key(0))
+    assert count[0] == 0
+    with pytest.raises(ValueError, match="method must be"):
+        prior.sample(jr.key(0), method="eigh")  # ty: ignore[invalid-argument-type]
+    with pytest.raises(ValueError, match="whitened=True only"):
+        handlers.seed(lambda: gp_sample("f", prior, method="krylov"), 0)()
+
+
+def test_krylov_draws_never_densify(monkeypatch):
+    # The Lanczos draw uses the same normals as the dense symmetric root, so
+    # it matches K^½ v to the Lanczos error (30 steps on 30 points: exact).
+    count = _count_as_matrix(monkeypatch)
+    prior = _matrix_free_prior()
+    draw = prior.sample(jr.key(0), method="krylov", lanczos_order=30)
+    whitened = handlers.seed(
+        lambda: gp_sample("f", prior, whitened=True, method="krylov"), 0
+    )()
+    assert count[0] == 0
+    dense = GPPrior(RBF(), _X_DRAWS)._prior_operator().as_matrix()
+    eigenvalues, eigenvectors = jnp.linalg.eigh(dense)
+    # K̂^½ = Q diag(√λ) Qᵀ
+    scaled = einx.multiply(
+        "row k, k -> row k", eigenvectors, jnp.sqrt(jnp.clip(eigenvalues, 0.0))
+    )
+    root = einx.dot("row k, col k -> row col", scaled, eigenvectors)
+    normals = jr.normal(jr.key(0), (30,), dtype=_X_DRAWS.dtype)
+    expected = einx.dot("row col, col -> row", root, normals)
+    np.testing.assert_allclose(draw, expected, rtol=1e-6, atol=1e-8)
+    assert whitened.shape == (30,)
+    assert jnp.all(jnp.isfinite(whitened))
+
+
+# Draws recorded at edbbd6d (before pyrox#559) in float64, first four entries
+_SAMPLE_REFERENCE = [
+    -3.406391693729876,
+    -2.824321647318514,
+    -3.2914172632830434,
+    -2.846107339264218,
+]
+_WHITENED_REFERENCE = [
+    -1.4008848032695442,
+    -0.28677881007928907,
+    -1.100888532454295,
+    -0.29557131907434797,
+]
+
+
+def test_dense_draws_unchanged():
+    prior = GPPrior(RBF(), _X_DRAWS)
+    draw = prior.sample(jr.key(5))
+    whitened = handlers.seed(lambda: gp_sample("f", prior, whitened=True), 0)()
+    np.testing.assert_allclose(draw[:4], _SAMPLE_REFERENCE, rtol=1e-12)
+    np.testing.assert_allclose(whitened[:4], _WHITENED_REFERENCE, rtol=1e-12)
+
+
+@pytest.mark.slow
+def test_krylov_draws_have_the_prior_covariance():
+    # 10 000 Lanczos draws on a 30 x 30 Matérn-3/2 problem: every entry of
+    # the sample covariance is within z standard errors of K + jitter I. The
+    # issue asks for z = 3, but with 465 distinct entries even exact draws
+    # would miss that on some entry most of the time; z = 4.5 is the
+    # Bonferroni bound for a 0.3 % family-wise false failure.
+    prior = _matrix_free_prior(Matern(nu=1.5, init_lengthscale=0.3))
+    keys = jr.split(jr.key(7), 10_000)
+    draws = jax.vmap(lambda key: prior.sample(key, method="krylov"))(keys)
+    covariance = (
+        GPPrior(Matern(nu=1.5, init_lengthscale=0.3), _X_DRAWS)
+        ._prior_operator()
+        .as_matrix()
+    )
+    products = einx.multiply("draw row, draw col -> draw row col", draws, draws)
+    sample_covariance = einx.mean("[draw] row col", products)
+    standard_error = einx.std("[draw] row col", products) / np.sqrt(len(keys))
+    z = jnp.abs(sample_covariance - covariance) / standard_error
+    assert float(jnp.max(z)) < 4.5

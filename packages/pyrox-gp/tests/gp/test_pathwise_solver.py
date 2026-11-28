@@ -137,10 +137,12 @@ _DECOUPLED_REFERENCE = [
 
 
 def test_dense_paths_unchanged():
+    # Frozen on one machine; CI's runners differ from it by up to 3e-10
+    # relative (BLAS), so 1e-12 failed there and 1e-9 is the bound.
     posterior = GPPrior(RBF(), X).condition(Y, jnp.asarray(0.1))
     paths = PathwiseSampler(posterior, n_features=64).sample_paths(jr.key(2), n_paths=3)
-    np.testing.assert_allclose(paths(X[:4]), _EXACT_REFERENCE, rtol=1e-12)
+    np.testing.assert_allclose(paths(X[:4]), _EXACT_REFERENCE, rtol=1e-9)
     sparse = SparseGPPrior(kernel=RBF(), Z=X[:8])
     sampler = DecoupledPathwiseSampler(sparse, FullRankGuide.init(8), n_features=64)
     decoupled = sampler.sample_paths(jr.key(3), n_paths=2)
-    np.testing.assert_allclose(decoupled(X[:4]), _DECOUPLED_REFERENCE, rtol=1e-12)
+    np.testing.assert_allclose(decoupled(X[:4]), _DECOUPLED_REFERENCE, rtol=1e-9)
