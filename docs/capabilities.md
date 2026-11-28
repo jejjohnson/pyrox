@@ -1206,7 +1206,7 @@ compose it; if it is almost here, extend it where it lives. Regenerate with
 
 <!-- upstream -->
 
-Listed at gaussx 0.8.3, kernellib 0.0.22, geonnax 0.0.11, functax 0.0.7.
+Listed at gaussx 0.8.4, kernellib 0.0.22, geonnax 0.0.11, functax 0.0.7.
 
 ## Upstream: `gaussx`
 
@@ -1252,6 +1252,7 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `DiagonalizedOperator` | class | Linear operator A = W⁻¹ diag(γ) W given by a transform pair. |
 | `EigenDecomposition` | class | Precomputed eigendecomposition A = V diag(γ) V⁻¹ of a square matrix. |
 | `EmissionModel` | class | Linear observation (emission) model with a dense observation operator H. |
+| `FITCPreconditioner` | class | Nyström-plus-diagonal ("FITC") preconditioner of A = K_XX + Λ. |
 | `FifthOrderCubatureIntegrator` | class | Fifth-order fully symmetric cubature on 2 D_x² + 1 points. |
 | `FilterState` | class | Output of ``kalman_filter``: the filtered and predicted moments of x_t. |
 | `GaussHermiteIntegrator` | class | Gauss-Hermite integrator: a tensor-product rule on order^D_x points. |
@@ -1505,6 +1506,8 @@ Structured linear algebra and Gaussians: solve / logdet / Cholesky on structured
 | `positive_semidefinite_tag` | constant | Re-exported from `lineax`. |
 | `predict_mean` | function | Predictive mean of a GP at the test inputs, from a prediction cache. |
 | `predict_variance` | function | Predictive variance of a GP at the test inputs, from a prediction cache. |
+| `predictive_variance_sbpv` | function | Simulation-based predictive variance (SBPV), unbiased and consistent. |
+| `predictive_variance_spv` | function | Stochastic predictive variance (SPV) by Rademacher diagonal probes. |
 | `process_noise_covariance` | function | Model-noise covariance Σ_η,t of a step, from the stationary covariance. |
 | `product_operator` | function | Lazy product A B, applied right to left. |
 | `project` | function | Projection A_X = K_Xℐ K_ℐℐ⁻¹ onto the inducing inputs via Cholesky solves. |
