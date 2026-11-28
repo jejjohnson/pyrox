@@ -216,7 +216,12 @@ _STRATEGIES = {
 }
 
 
-@pytest.mark.parametrize("name", list(_STRATEGIES))
+# PosteriorLinearization and ExpectationPropagation take a matrix-free prior
+# since pyrox#552 (test_inference_nongauss_sites.py).
+_DENSE_ONLY = ["LaplaceInference", "GaussNewtonInference", "QuasiNewtonInference"]
+
+
+@pytest.mark.parametrize("name", _DENSE_ONLY)
 def test_matrix_free_prior_is_rejected(name, monkeypatch):
     # Before pyrox#549 each strategy evaluated the (60, 60) kernel block of a
     # matrix-free prior and ignored its solver.
@@ -297,6 +302,35 @@ def test_dense_prior_is_unchanged(name):
     )
     mean, var = fit.predict(X[:1] + 0.01)
     got = (fit.log_marginal_approx, fit.q_mean[0], fit.q_var[0], mean[0], var[0])
+    # PL and EP moved from a stopping test on the posterior mean to one on the
+    # sites (pyrox#552), which runs a few iterations further towards the same
+    # fixed point; the issue's tolerance for that move is 1e-5.
+    rtol = 1e-5 if name in _SITE_LOOP else 1e-10
     np.testing.assert_allclose(
-        np.asarray(got, dtype=np.float64), _DENSE_REFERENCE[name], rtol=1e-10
+        np.asarray(got, dtype=np.float64), _DENSE_REFERENCE[name], rtol=rtol
     )
+
+
+_SITE_LOOP = ("PosteriorLinearization", "ExpectationPropagation")
+
+
+def test_matrix_free_prior_is_accepted_by_the_site_strategies(monkeypatch):
+    # The (60, 60) kernel block is never evaluated, and the fit predicts.
+    blocks = []
+    original = Matern.__call__
+
+    def spy(self, a, b):
+        blocks.append((a.shape[0], b.shape[0]))
+        return original(self, a, b)
+
+    monkeypatch.setattr(Matern, "__call__", spy)
+    X = jr.uniform(jr.key(0), (60, 2))
+    y = (X[:, 0] > 0.5).astype(X.dtype)
+    solver = preconditioned_cg_solver(rank=20, key=jr.key(1))
+    prior = GPPrior(Matern(nu=1.5), X, solver=solver, matrix_free=True)
+    fit = prior.condition_nongauss(
+        BernoulliLikelihood(), y, strategy=PosteriorLinearization(max_iter=3)
+    )
+    mean, var = fit.predict(X[:2] + 0.01)
+    assert bool(jnp.all(jnp.isfinite(fit.q_mean))) and bool(jnp.all(var >= 0.0))
+    assert (60, 60) not in blocks
