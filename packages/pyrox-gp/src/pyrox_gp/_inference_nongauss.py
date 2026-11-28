@@ -898,8 +898,10 @@ def _fit_cavity_sites(
         )
     site_data = _site_data(likelihood, y, prior.X)
     dtype = prior_cov.in_structure().dtype
-    # [K]ₙₙ: the first cavities, and the floor of a stochastic variance
-    prior_variance = lx.diagonal(prior_cov)
+    # [K]ₙₙ: the first cavities, and the floor of a stochastic variance. In
+    # the operator's dtype: lineax gives the jitter's I a default-float
+    # diagonal, which under x64 would turn float32 sites into float64 ones.
+    prior_variance = lx.diagonal(prior_cov).astype(dtype)
 
     # zero sites with precision ε: the first cavity is the prior
     sites = (
@@ -1141,9 +1143,15 @@ class PosteriorLinearization(eqx.Module):
             >>> y = (X[:, 0] > 0.0).astype(X.dtype)
             >>> prior = GPPrior(kernel=RBF(), X=X)
             >>> strategy = PosteriorLinearization(solver=gx.CGSolver())
-            >>> fit = jax.jit(
-            ...     lambda labels: strategy.fit(prior, BernoulliLikelihood(), labels)
+            >>> # return arrays: a fit passed out of a transform rebuilds its
+            >>> # kernel without the parameter registry, so predict outside it
+            >>> q_mean = jax.jit(
+            ...     lambda labels: strategy.fit(
+            ...         prior, BernoulliLikelihood(), labels
+            ...     ).q_mean
             ... )(y)
+            >>> q_mean.shape
+            (10,)
         """
         return _fit_cavity_sites(self, prior, likelihood, y, key)
 
@@ -1314,9 +1322,15 @@ class ExpectationPropagation(eqx.Module):
             >>> y = jnp.sin(X[:, 0]).at[3].set(4.0)
             >>> prior = GPPrior(kernel=RBF(), X=X)
             >>> strategy = ExpectationPropagation(damping=0.3)
-            >>> fits = jax.jit(jax.vmap(
-            ...     lambda labels: strategy.fit(prior, StudentTLikelihood(), labels)
+            >>> # return arrays: a fit passed out of a transform rebuilds its
+            >>> # kernel without the parameter registry, so predict outside it
+            >>> q_means = jax.jit(jax.vmap(
+            ...     lambda labels: strategy.fit(
+            ...         prior, StudentTLikelihood(df=4.0, scale=0.5), labels
+            ...     ).q_mean
             ... ))(jnp.stack([y, -y]))
+            >>> q_means.shape
+            (2, 10)
         """
         return _fit_cavity_sites(self, prior, likelihood, y, key)
 
