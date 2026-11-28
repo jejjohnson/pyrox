@@ -71,6 +71,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as jr
 import kernellib as kl
+import lineax as lx
 import numpy as np
 import pyrox_gp as px
 from loguru import logger
@@ -328,9 +329,9 @@ def effective_dimension(theta: jax.Array, X: jax.Array, d: jax.Array) -> float:
     """$\\mathrm{tr}(K A^{-1}) = N - \\sum_n d_n (A^{-1})_{nn}$, densely."""
     K = _kernel(theta)(X, X) + JITTER * jnp.eye(X.shape[0], dtype=X.dtype)
     A = K + jnp.diag(jnp.broadcast_to(d, X.shape[:1]))
-    L = jnp.linalg.cholesky(A)
-    L_inv = jax.scipy.linalg.solve_triangular(L, jnp.eye(X.shape[0]), lower=True)
-    diag_inv = jnp.sum(L_inv**2, axis=0)
+    system = lx.MatrixLinearOperator(A, lx.positive_semidefinite_tag)
+    # diag(A⁻¹), exact through the dense Cholesky at every N of the plan
+    diag_inv = gx.diag_inv(system, method="cholesky")
     return float(X.shape[0] - jnp.sum(d * diag_inv))
 
 
