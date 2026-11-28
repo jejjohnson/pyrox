@@ -112,6 +112,9 @@ class GPPrior(eqx.Module):
             ``PreconditionedCGSolver``, ``BBMMSolver``) is the sensible
             choice; ``MINRESSolver`` and ``LSMRSolver`` also converge, and
             LSMR works on the squared condition number, so it is slower.
+            Which solver, preconditioner and log-determinant to pick for a
+            size and a kernel, with measured errors and times, is the guide
+            [Choosing the solver](https://jejjohnson.github.io/pyrox/gp-solver-choices/).
         preconditioner: Optional ``gaussx.AbstractPreconditioner`` for the
             solve, and for the log-determinant of a ``BBMMSolver``, whose
             shared pass uses $P$ itself. Keyword only. A lazy one

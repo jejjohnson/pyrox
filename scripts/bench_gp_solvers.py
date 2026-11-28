@@ -27,19 +27,24 @@ For each row the script measures, on the CPU it runs on:
 - the effective dimension $d_\text{eff} = \mathrm{tr}(K (K + \mathrm{diag}(d))^{-1})$
   at the evaluation point, $d$ the noise or the Laplace site variances.
 
-The plan is fixed, so one call reproduces the saved table:
+The plan is fixed, so one call reproduces the saved table (``--resume``
+keeps the rows already in ``out`` and runs the rest):
 
 - every size runs ``dense``, ``matfree`` and ``bbmm`` (the presets at rank
-  200, Nyström) at both lengthscales, on both likelihoods below ``large_n``
-  and on the Gaussian one from ``large_n`` up;
-- below ``large_n`` it adds ``cg`` (unpreconditioned CG and its own SLQ) and
-  ``cg-nystrom`` (CG, a lazy rank-200 Nyström preconditioner and a
-  preconditioned ``SLQLogdet``, whose gradient carries the control variate
-  of gaussx#826);
-- at ``sweep_n`` it adds ``matfree-fitc``, and on the Gaussian likelihood
-  ``cg-nystrom-fixedP`` (the same preconditioner built once at the
-  evaluation point, so the control variate has no gradient),
-  ``matfree-r50``, ``matfree-r800`` and ``matfree-lanczos60``.
+  200, Nyström) and, below ``large_n``, ``cg`` (unpreconditioned CG and its
+  own SLQ), at both lengthscales;
+- on the Gaussian likelihood below ``large_n``, and on the Bernoulli one
+  below ``sweep_n``, it adds ``cg-nystrom`` (CG, a lazy rank-200 Nyström
+  preconditioner and a preconditioned ``SLQLogdet``, whose gradient carries
+  the control variate of gaussx#826);
+- at ``sweep_n``, on the Gaussian likelihood, it adds ``matfree-fitc``,
+  ``cg-nystrom-fixedP`` (the same preconditioner as ``cg-nystrom``, built
+  once at the evaluation point, so the control variate has no gradient),
+  ``matfree-r50``, ``matfree-r800`` and ``matfree-lanczos60``;
+- from ``large_n`` up it runs the Gaussian likelihood only, with
+  ``large_keys`` keys, plus ``matfree-lanczos60`` on the rough kernel, whose
+  first key gives the same probes as ``matfree``'s, so the difference of the
+  two is the truncation bias of 30 Lanczos steps.
 
 Usage (one process, four cores, about half an hour on the reference VM):
 
@@ -67,9 +72,8 @@ import jax.numpy as jnp
 import jax.random as jr
 import kernellib as kl
 import numpy as np
-from loguru import logger
-
 import pyrox_gp as px
+from loguru import logger
 from pyrox_gp._kernel_operator import KernelOperator
 
 
@@ -222,9 +226,7 @@ def build_solver(config: str, key: jax.Array, problem: Problem) -> Any:
     if config in ("matfree", "matfree-r50", "matfree-r800"):
         return px.matfree_solver(rank=rank, key=key, throw=False)
     if config == "matfree-fitc":
-        return px.matfree_solver(
-            rank=rank, preconditioner="fitc", key=key, throw=False
-        )
+        return px.matfree_solver(rank=rank, preconditioner="fitc", key=key, throw=False)
     if config == "matfree-lanczos60":
         return px.matfree_solver(rank=rank, lanczos_order=60, key=key, throw=False)
     if config == "bbmm":
@@ -243,16 +245,23 @@ def config_rank(config: str) -> int | None:
     return RANK
 
 
-def plan(n: int, likelihood: str, *, large_n: int, sweep_n: int) -> list[str]:
-    """The configurations run at one size and likelihood."""
+def plan(
+    n: int, likelihood: str, kernel: str, *, large_n: int, sweep_n: int
+) -> list[str]:
+    """The configurations run at one size, likelihood and kernel."""
     if n >= large_n:
-        return ["dense", "matfree", "bbmm"] if likelihood == "gaussian" else []
-    configs = ["dense", "matfree", "bbmm", "cg", "cg-nystrom"]
+        if likelihood != "gaussian":
+            return []
+        configs = ["dense", "matfree", "bbmm"]
+        # the Lanczos truncation bias, on the kernel that needs the most steps
+        return configs + (["matfree-lanczos60"] if kernel == "rough" else [])
+    configs = ["dense", "matfree", "bbmm", "cg"]
+    if likelihood == "bernoulli":
+        return configs + (["cg-nystrom"] if n < sweep_n else [])
+    configs += ["cg-nystrom"]
     if n == sweep_n:
-        configs += ["matfree-fitc"]
-        if likelihood == "gaussian":
-            configs += ["cg-nystrom-fixedP", "matfree-r50", "matfree-r800"]
-            configs += ["matfree-lanczos60"]
+        configs += ["matfree-fitc", "cg-nystrom-fixedP", "matfree-r50"]
+        configs += ["matfree-r800", "matfree-lanczos60"]
     return configs
 
 
@@ -276,11 +285,11 @@ def counting_passes() -> Iterator[None]:
         jax.debug.callback(_tally)
         return original(self, vector)
 
-    KernelOperator.mv = mv  # ty: ignore[invalid-assignment]
+    KernelOperator.mv = mv
     try:
         yield
     finally:
-        KernelOperator.mv = original  # ty: ignore[invalid-assignment]
+        KernelOperator.mv = original
 
 
 class Compiled(NamedTuple):
@@ -358,7 +367,7 @@ def measure(
         gradient = compile_fn(run.gradient, theta, solvers[0])
     values, grads, t_evidence, t_grad, iters = [], [], [], [], []
     passes_evidence = passes_grad = 0
-    first_out = None
+    outputs: list[Any] = []
     for solver in solvers:
         _PASSES[0] = 0
         out, seconds = timed(evidence.call, theta, solver)
@@ -369,25 +378,25 @@ def measure(
         else:
             values.append(float(out[0]))
             iters.append(int(out[2]))
-        first_out = out if first_out is None else first_out
+        outputs.append(out)
         _PASSES[0] = 0
         (_, grad), seconds = timed(gradient.call, theta, solver)
         passes_grad = _PASSES[0]
         t_grad.append(seconds)
         grads.append(np.asarray(grad))
 
+    first_out = outputs[0]
     if gaussian:
-        mean, var = (np.asarray(a) for a in compile_fn(run.predict, theta, solvers[0]).call(theta, solvers[0]))
+        mean, var = (
+            np.asarray(a)
+            for a in compile_fn(run.predict, theta, solvers[0]).call(theta, solvers[0])
+        )
     else:
         mean, var = np.asarray(first_out[1]), None
 
     d_eff = float("nan")
     if dense:
-        d = (
-            jnp.asarray(NOISE_VAR)
-            if gaussian
-            else 1.0 / jnp.asarray(first_out[3])
-        )
+        d = jnp.asarray(NOISE_VAR) if gaussian else 1.0 / jnp.asarray(first_out[3])
         d_eff = effective_dimension(theta, problem.X, d)
         reference = Reference(values[0], grads[0], mean, var)
     assert reference is not None
@@ -417,7 +426,9 @@ def measure(
         "grad_rel_rms_max": float(grad_rel.max()),
         "pred_mean_rel_err": _rel(mean, reference.mean),
         "pred_var_rel_err": (
-            _rel(var, reference.var) if var is not None and reference.var is not None else ""
+            _rel(var, reference.var)
+            if var is not None and reference.var is not None
+            else ""
         ),
         "t_evidence_s": statistics.median(t_evidence),
         "t_grad_s": statistics.median(t_grad),
@@ -427,7 +438,7 @@ def measure(
         "mem_grad_mb": gradient.temp_mb,
         "d_eff": d_eff if dense else "",
         "newton_iters": statistics.median(iters) if iters else "",
-        "device": f"{jax.devices()[0].platform}:{platform.processor() or platform.machine()}",
+        "device": f"{jax.devices()[0].platform}:{platform.machine()}",
     }
     for name, value in zip(names, grad_rel, strict=False):
         row[f"grad_rel_rms_{name}"] = float(value)
@@ -447,9 +458,10 @@ def main(
     likelihoods: tuple[str, ...] = ("gaussian", "bernoulli"),
     kernels: tuple[str, ...] = ("smooth", "rough"),
     keys: int = 3,
-    large_keys: int = 2,
+    large_keys: int = 1,
     large_n: int = 4000,
     sweep_n: int = 2000,
+    resume: bool = False,
 ) -> list[dict[str, Any]]:
     """Run the plan and write one CSV row per configuration.
 
@@ -464,11 +476,16 @@ def main(
             reference run, on the Gaussian likelihood, with ``large_keys``
             keys.
         sweep_n: The size of the rank, preconditioner and Lanczos-order sweep.
+        resume: Keep the rows already in ``out`` and run only the others.
 
     Returns:
         The rows written.
     """
     out.parent.mkdir(parents=True, exist_ok=True)
+    done: dict[str, dict[str, Any]] = {}
+    if resume and out.is_file():
+        with out.open(newline="") as handle:
+            done = {row["id"]: row for row in csv.DictReader(handle)}
     rows: list[dict[str, Any]] = []
     start = time.perf_counter()
     with out.open("w", newline="") as handle:
@@ -478,29 +495,42 @@ def main(
             large = n >= large_n
             for likelihood in likelihoods:
                 for kernel in kernels:
+                    configs = plan(
+                        n, likelihood, kernel, large_n=large_n, sweep_n=sweep_n
+                    )
                     problem = make_problem(likelihood, kernel, n)
                     reference = None
-                    for config in plan(n, likelihood, large_n=large_n, sweep_n=sweep_n):
-                        row, reference = measure(
-                            problem,
-                            config,
-                            keys=large_keys if large else keys,
-                            reference=reference,
+                    for config in configs:
+                        row_id = f"{likelihood}-{kernel}-{n}-{config}"
+                        pending = any(
+                            f"{likelihood}-{kernel}-{n}-{c}" not in done
+                            for c in configs
                         )
+                        if row_id in done and not (config == "dense" and pending):
+                            row = done[row_id]
+                        else:
+                            row, reference = measure(
+                                problem,
+                                config,
+                                keys=large_keys if large else keys,
+                                reference=reference,
+                            )
+                            # a dense row rerun only for its reference is kept
+                            row = done.get(row_id, row)
+                            logger.info(
+                                "{} logZ rel {:.2e} grad rel {:.2e} "
+                                "t {:.2f}s / {:.2f}s passes {} ({:.0f}s so far)",
+                                row["id"],
+                                float(row["logz_rel_rms"]),
+                                float(row["grad_rel_rms_max"]),
+                                float(row["t_evidence_s"]),
+                                float(row["t_grad_s"]),
+                                row["passes_evidence"],
+                                time.perf_counter() - start,
+                            )
                         writer.writerow(row)
                         handle.flush()
                         rows.append(row)
-                        logger.info(
-                            "{} logZ rel {:.2e} grad rel {:.2e} t {:.2f}s / {:.2f}s "
-                            "passes {} ({:.0f}s so far)",
-                            row["id"],
-                            row["logz_rel_rms"],
-                            row["grad_rel_rms_max"],
-                            row["t_evidence_s"],
-                            row["t_grad_s"],
-                            row["passes_evidence"],
-                            time.perf_counter() - start,
-                        )
     logger.success("{} rows -> {}", len(rows), out)
     return rows
 

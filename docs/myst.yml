@@ -75,6 +75,10 @@ project:
               title: Pathwise sampling in NumPyro
             - file: notebooks/gp_derivatives.ipynb
               title: The gradient posterior
+        - title: Scaling up
+          children:
+            - file: notebooks/gp_solver_choices.ipynb
+              title: Choosing the solver
         - title: Non-conjugate inference
           children:
             - file: notebooks/advanced_gp_laplace.ipynb
