@@ -847,7 +847,10 @@ class PosteriorLinearization(eqx.Module):
     Attributes:
         integrator: Cavity integrator. Default
             ``gaussx.GaussHermiteIntegrator(order=20)``.
-        max_iter: Iterations. Default ``20``.
+        max_iter: Iterations. Default ``40`` (``20`` before pyrox#552,
+            whose stopping test on the posterior mean let a fit stop a few
+            iterations earlier: on a 16-point Bernoulli problem the site test
+            needs 23 where the mean test stopped at 20).
         damping: Step size in (0, 1]. Default ``0.5``.
         tol: Convergence tolerance: the loop stops at the first iteration
             where every site natural changed by less than
@@ -876,7 +879,7 @@ class PosteriorLinearization(eqx.Module):
     integrator: AbstractIntegrator = eqx.field(
         default_factory=lambda: GaussHermiteIntegrator(order=20)
     )
-    max_iter: int = eqx.field(static=True, default=20)
+    max_iter: int = eqx.field(static=True, default=40)
     damping: float = eqx.field(static=True, default=0.5)
     tol: float = eqx.field(static=True, default=1e-6)
     precision_floor: float = eqx.field(static=True, default=1e-6)

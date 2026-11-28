@@ -50,40 +50,67 @@ def _classification(n: int = 12):
 # --- the eager fixed points ------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "case",
-    [
-        pytest.param(case, marks=() if case[1] == "bernoulli" else pytest.mark.slow)
-        for case in _make.CASES
-    ],
-    ids=lambda case: "-".join(case),
-)
-def test_fixed_points_match_the_eager_loops(case) -> None:
-    """The defaults reach the eager loops' fixed points at ``rtol=1e-5`` (#552).
-
-    The eager loops stopped once the posterior mean moved by less than
-    ``tol``; the site loop stops once every site natural moves by less than a
-    tenth of ``tol``, so it runs a few iterations longer and lands closer to
-    the fixed point. Where the eager loop ran out of iterations, both run the
-    same iterates and agree to round-off.
-    """
+def _fit_case(case, **settings):
     strategy, likelihood = case
     prior, lik, y = _make.problem(likelihood)
-    fit = _CLASSES[strategy]().fit(prior, lik, y)
-    key = f"{strategy}__{likelihood}"
+    return _CLASSES[strategy](**settings).fit(prior, lik, y)
+
+
+def _case_params():
+    return [
+        pytest.param(case, marks=() if case[1] == "bernoulli" else pytest.mark.slow)
+        for case in _make.CASES
+    ]
+
+
+def _ids(case) -> str:
+    return "-".join(case)
+
+
+@pytest.mark.parametrize("case", _case_params(), ids=_ids)
+def test_same_iterates_as_the_eager_loop(case) -> None:
+    """Run as many iterations as the eager loop ran, and land where it landed.
+
+    The site update and its first iteration (cavities from the prior) are
+    those of the eager loop, so only the stopping test differs: with the
+    budget capped at the eager loop's iteration count both run the same
+    iterates, and agree to round-off.
+    """
+    key = "__".join(case)
+    fit = _fit_case(case, max_iter=int(_FROZEN[f"{key}__n_iter"]))
     for field in _make.FIELDS:
         np.testing.assert_allclose(
             np.asarray(getattr(fit, field)),
             _FROZEN[f"{key}__{field}"],
-            rtol=1e-5,
-            atol=1e-7,
+            rtol=1e-9,
+            atol=1e-12,
             err_msg=f"{key}: {field}",
         )
+
+
+@pytest.mark.parametrize("case", _case_params(), ids=_ids)
+def test_defaults_converge_at_least_as_close_as_the_eager_loop(case) -> None:
+    """The defaults converge, a few iterations later, nearer the fixed point.
+
+    The eager loops stopped once the posterior mean moved by less than ``tol``
+    in one iteration, which a damped map does while still ``tol / (1 - ρ)``
+    from its fixed point; on Poisson EP that left ``q_mean`` 2.8e-4 away. The
+    site test (every natural within a tenth of ``tol``) runs at most 7 more
+    iterations on these problems, and every field lands at least as close to
+    the fixed point (here a fit at ``tol=1e-10``).
+    """
+    key = "__".join(case)
+    fit = _fit_case(case)
+    fixed_point = _fit_case(case, max_iter=300, tol=1e-10)
+    assert bool(fit.converged) and bool(fixed_point.converged)
     if bool(_FROZEN[f"{key}__converged"]):
-        assert bool(fit.converged)
-        # the site test is stricter than the mean test, never looser
         extra = int(fit.n_iter) - int(_FROZEN[f"{key}__n_iter"])
-        assert 0 <= extra <= 12, extra
+        assert 0 <= extra <= 7, extra
+    for field in _make.FIELDS:
+        target = np.asarray(getattr(fixed_point, field))
+        new = np.max(np.abs(np.asarray(getattr(fit, field)) - target))
+        old = np.max(np.abs(_FROZEN[f"{key}__{field}"] - target))
+        assert new <= old + 1e-12, (field, new, old)
 
 
 # --- jit and vmap ---------------------------------------------------------
