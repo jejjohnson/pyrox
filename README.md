@@ -121,7 +121,7 @@ kernellib v0.0.22 pins older tags of gaussx and geonnax than we need, and argmin
 ```toml
 [tool.uv]
 override-dependencies = [
-    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.8.3",
+    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.8.4",
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.11",
 ]
 ```

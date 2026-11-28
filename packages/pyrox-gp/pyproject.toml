@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
     "pyrox",
     "argminax>=0.0.11",
-    "gaussx>=0.8.3",
+    "gaussx>=0.8.4",
     "pyrox-gauss",
     "kernellib>=0.0.22",
     "functax[jax] @ git+https://github.com/jejjohnson/functax.git@v0.0.7",
@@ -57,7 +57,10 @@ Repository = "https://github.com/jejjohnson/pyrox"
 [tool.uv.sources]
 # gaussx is not yet on PyPI; resolve the release tag from GitHub. The
 # `>=` floor in `dependencies` is what a PyPI release will satisfy later.
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.3" }
+# v0.8.4 carries the stochastic site variances (`SitePosterior.variance`,
+# gaussx#827), `FITCPreconditioner` (gaussx#824) and `gaussian_kl(solver=)`
+# (gaussx#884) that the non-Gaussian fits, the presets and the guides use.
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.4" }
 # kernellib is not yet on PyPI either; same pattern. 0.0.5 carries the
 # spectral methods and RFF draws `_basis` delegates to, and needs gaussx >= 0.2.0.
 kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.22" }

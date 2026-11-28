@@ -36,8 +36,12 @@ from typing import Literal
 import equinox as eqx
 import gaussx as gx
 import jax
+import jax.numpy as jnp
+import jax.random as jr
 import lineax as lx
 from jaxtyping import Array, Float
+
+from pyrox_gp._kernel_operator import KernelOperator
 
 
 def _scalar_noise(
@@ -204,3 +208,129 @@ class _NoiseSplitNystromLogdet(gx.AbstractLogdetStrategy):
         # fixed function of the hyperparameters (common random numbers)
         logdet_key = self.key if key is None else key
         return strategy.logdet(operator, key=logdet_key)
+
+
+def _untagged(operator: lx.AbstractLinearOperator) -> lx.AbstractLinearOperator:
+    while isinstance(operator, lx.TaggedLinearOperator):
+        operator = operator.operator
+    return operator
+
+
+class _SystemFITCPreconditioner(gx.AbstractPreconditioner):
+    r"""`gaussx.FITCPreconditioner` of $A = K + \mathrm{diag}(d)$, built per system.
+
+    $$
+    P = U U^\top + \mathrm{diag}(r + d), \qquad
+    U = K_{XZ} L_{ZZ}^{-\top}, \qquad
+    r = \max(\mathrm{diag}(K) - \mathrm{rowsum}(U \odot U), 0),
+    $$
+
+    with the $R$ = ``rank`` inducing inputs $Z$ drawn by ``key`` from the
+    training inputs, without replacement. The kernel part $K$ and $d$ are
+    read from the system with `gaussx.split_diagonal`, so one object serves
+    a Gaussian prior and every Newton step of a non-Gaussian fit. For a
+    ``GPPrior(..., matrix_free=True)`` system, $K$ is a `KernelOperator`
+    and only $K_{ZZ}$, $K_{XZ}$ and $\mathrm{diag}(K)$ are evaluated,
+    $O(N R)$ kernel entries; for a dense prior they are read from its
+    matrix. $P$ matches $A$ on the diagonal and is at its scale, so
+    `gaussx.BBMMSolver` can draw its probes from it.
+    """
+
+    rank: int = eqx.field(static=True)
+    key: jax.Array
+
+    def _built(
+        self, operator: lx.AbstractLinearOperator | None
+    ) -> gx.FITCPreconditioner:
+        """The gaussx FITC preconditioner of this system."""
+        split = None if operator is None else gx.split_diagonal(operator)
+        if split is None:
+            raise ValueError(
+                'preconditioner="fitc" reads the kernel part K and the diagonal '
+                "d from the system, which must be a sum K + diag(d) (a "
+                "GPPrior(..., matrix_free=True) system, or the site system of "
+                "a non-Gaussian fit)."
+            )
+        # a prior that is itself K + diag(j) (the jitter of a matrix-free
+        # GPPrior) is one tagged summand: peel it, and keep j for P
+        base, inner_diagonal = split.base, None
+        while (inner := gx.split_diagonal(base)) is not None:
+            base = inner.base
+            inner_diagonal = (
+                inner.diagonal
+                if inner_diagonal is None
+                else inner_diagonal + inner.diagonal
+            )
+        fitc = self._from_kernel_part(_untagged(base))
+        if inner_diagonal is None:
+            return fitc
+        # r + j, so P still matches A on the diagonal
+        return eqx.tree_at(
+            lambda built: built.prior_residual,
+            fitc,
+            fitc.prior_residual + inner_diagonal,
+        )
+
+    def _from_kernel_part(
+        self, kernel_part: lx.AbstractLinearOperator
+    ) -> gx.FITCPreconditioner:
+        """U and r from R drawn training inputs of the kernel part K."""
+        size = kernel_part.in_structure().shape[0]
+        if self.rank > size:
+            raise ValueError(
+                f'preconditioner="fitc": rank {self.rank} exceeds the {size} '
+                "training inputs it draws its inducing inputs from."
+            )
+        # Z: R training inputs, drawn without replacement
+        index = jr.choice(self.key, size, (self.rank,), replace=False)
+        if isinstance(kernel_part, KernelOperator):
+            inputs = kernel_part.X
+            frozen = kernel_part.kernel
+
+            def kernel(left: Array, right: Array) -> Array:
+                # the operator's dtype, as in KernelOperator.mv
+                return frozen(left, right).astype(inputs.dtype)
+
+            return gx.FITCPreconditioner.from_kernel(kernel, inputs, inputs[index])
+        if not isinstance(kernel_part, lx.MatrixLinearOperator):
+            raise ValueError(
+                'preconditioner="fitc" builds its inducing blocks from a '
+                "KernelOperator (GPPrior(..., matrix_free=True)) or a dense "
+                f"kernel matrix, not a {type(kernel_part).__name__}."
+            )
+        matrix = kernel_part.as_matrix()
+
+        def entries(left: Array, right: Array) -> Array:
+            # the "inputs" are row positions, so K(X₁, X₂) is a block of K
+            return matrix[left[:, 0][:, None], right[:, 0][None, :]]
+
+        positions = jnp.arange(size)[:, None]
+        return gx.FITCPreconditioner.from_kernel(entries, positions, positions[index])
+
+    def as_operator(
+        self, operator: lx.AbstractLinearOperator | None = None
+    ) -> lx.AbstractLinearOperator:
+        return self._built(operator).as_operator(operator)
+
+    def supports_slq(self, operator: lx.AbstractLinearOperator | None = None) -> bool:
+        del operator
+        return True
+
+    def logdet(
+        self, operator: lx.AbstractLinearOperator | None = None
+    ) -> Float[Array, ""]:
+        return self._built(operator).logdet(operator)
+
+    def sample(
+        self,
+        key: jax.Array,
+        operator: lx.AbstractLinearOperator | None = None,
+        *,
+        shape: tuple[int, ...] = (),
+    ) -> Float[Array, "*batch n"]:
+        return self._built(operator).sample(key, operator, shape=shape)
+
+    def approximation(
+        self, operator: lx.AbstractLinearOperator | None = None
+    ) -> lx.AbstractLinearOperator:
+        return self._built(operator).approximation(operator)

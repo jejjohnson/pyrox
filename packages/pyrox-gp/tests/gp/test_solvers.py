@@ -111,9 +111,103 @@ def test_presets_on_a_site_system(name, monkeypatch):
 
 
 @pytest.mark.parametrize("name", list(PRESETS))
-def test_fitc_raises(name):
-    with pytest.raises(ValueError, match=r"inducing inputs and a kernel"):
-        PRESETS[name](preconditioner="fitc", key=jr.key(0))
+def test_fitc_preset(name, monkeypatch):
+    """preconditioner="fitc" builds gaussx's FITCPreconditioner (gaussx#824).
+
+    Before gaussx v0.8.4 both presets raised for it. On a matrix-free
+    Gaussian prior it predicts as the dense GP does, with the tolerance of
+    `test_preset_smoke`, and on the per-point system of a site posterior it
+    reaches the dense mean; the N x N kernel matrix is never formed.
+    """
+    lml, mean, variance = _dense()
+    solver = PRESETS[name](preconditioner="fitc", rank=150, rtol=1e-8, key=jr.key(0))
+    _no_kernel_matrix(monkeypatch)
+    prior = GPPrior(KERNEL, X, solver=solver, matrix_free=True)
+    got_lml = prior.log_marginal(Y, NOISE_VAR)
+    got_mean, got_variance = prior.condition(Y, NOISE_VAR).predict(X_STAR)
+    assert abs(float(got_lml - lml)) < 1.0
+    np.testing.assert_allclose(got_mean, mean, rtol=1e-4, atol=1e-8)
+    np.testing.assert_allclose(got_variance, variance, rtol=1e-4, atol=1e-8)
+
+    site_precision = jnp.linspace(0.1, 0.25, 60)
+    site_information = site_precision * (X[:60, 0] > 0.5)
+    kernel_op = lx.TaggedLinearOperator(
+        KernelOperator(KERNEL, X[:60]), lx.positive_semidefinite_tag
+    )
+    reference = KERNEL(X[:60], X[:60])
+    dense = gx.site_posterior(
+        jnp.zeros(60),
+        lx.MatrixLinearOperator(reference, lx.positive_semidefinite_tag),
+        site_information,
+        site_precision,
+    )
+    site_solver = PRESETS[name](
+        preconditioner="fitc", rank=20, rtol=1e-10, key=jr.key(0)
+    )
+    got = gx.site_posterior(
+        jnp.zeros(60), kernel_op, site_information, site_precision, solver=site_solver
+    )
+    # CG at rtol 1e-10, so 1e-6 holds with margin
+    np.testing.assert_allclose(got.mean, dense.mean, atol=1e-6)
+
+
+def test_fitc_is_gaussx_fitc_at_drawn_training_inputs():
+    """The preset's P is `FITCPreconditioner.from_kernel` at R drawn inputs.
+
+    The same P whether the kernel part is a `KernelOperator` (kernel entries
+    evaluated) or a dense matrix (entries read), and the diagonal is read
+    from the system.
+    """
+    from pyrox_gp._preconditioned import _SystemFITCPreconditioner
+
+    rank, n = 12, 60
+    pre = _SystemFITCPreconditioner(rank, jr.key(3))
+    shift = lx.DiagonalLinearOperator(jnp.linspace(0.05, 0.3, n))
+    psd = lx.positive_semidefinite_tag
+    matrix_free = lx.TaggedLinearOperator(KernelOperator(KERNEL, X[:n]) + shift, psd)
+    dense = lx.TaggedLinearOperator(
+        lx.MatrixLinearOperator(KERNEL(X[:n], X[:n])) + shift, psd
+    )
+    index = jr.choice(jr.key(3), n, (rank,), replace=False)
+    expected = gx.FITCPreconditioner.from_kernel(KERNEL, X[:n], X[:n][index])
+    want = expected.approximation(matrix_free).as_matrix()
+    for system in (matrix_free, dense):
+        # same blocks of the same K, so equal to round-off
+        np.testing.assert_allclose(
+            pre.approximation(system).as_matrix(), want, rtol=1e-10, atol=1e-12
+        )
+    np.testing.assert_allclose(pre.logdet(dense), expected.logdet(dense), rtol=1e-10)
+    # a matrix-free prior is K_op + jitter I inside the site system: the
+    # jitter stays on P's diagonal, so P still matches A there
+    prior_cov = GPPrior(KERNEL, X[:n], matrix_free=True)._prior_operator()
+    nested = lx.TaggedLinearOperator(prior_cov + shift, psd)
+    jitter = GPPrior(KERNEL, X[:n]).jitter
+    np.testing.assert_allclose(
+        pre.approximation(nested).as_matrix(),
+        want + jitter * jnp.eye(n),
+        rtol=1e-10,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        jnp.diag(pre.approximation(nested).as_matrix()),
+        jnp.diag(nested.as_matrix()),
+        rtol=1e-10,
+    )
+    vector = Y[:n]
+    np.testing.assert_allclose(
+        pre(vector, dense), jnp.linalg.solve(want, vector), rtol=1e-8
+    )
+
+
+def test_fitc_rejects_what_it_cannot_build():
+    from pyrox_gp._preconditioned import _SystemFITCPreconditioner
+
+    one_matrix = GPPrior(KERNEL, X[:30])._noisy_operator(NOISE_VAR)
+    with pytest.raises(ValueError, match=r"sum K \+ diag\(d\)"):
+        _SystemFITCPreconditioner(10, jr.key(0)).as_operator(one_matrix)
+    system = GPPrior(KERNEL, X[:30], matrix_free=True)._noisy_operator(NOISE_VAR)
+    with pytest.raises(ValueError, match="rank 40 exceeds the 30"):
+        _SystemFITCPreconditioner(40, jr.key(0)).as_operator(system)
 
 
 def test_unknown_options_raise():
