@@ -32,13 +32,19 @@ from collections.abc import Callable
 import equinox as eqx
 import jax.numpy as jnp
 import lineax as lx
-from gaussx import AbstractSolverStrategy, DenseSolver, gaussian_log_prob
+from gaussx import (
+    AbstractLogdetStrategy,
+    AbstractPreconditioner,
+    AbstractSolverStrategy,
+    gaussian_log_prob,
+)
 from jaxtyping import Array, Float
 from pyrox._core import call_context
 from pyrox_gauss import MultivariateNormal
 
 from pyrox_gp._inducing import InducingFeatures
 from pyrox_gp._protocols import Guide, Kernel
+from pyrox_gp._solvers import compose_solver_fields
 
 
 def _psd_operator(K: Float[Array, "M M"]) -> lx.AbstractLinearOperator:
@@ -83,6 +89,11 @@ class SparseGPPrior(eqx.Module):
         solver: Any ``gaussx.AbstractSolverStrategy``. Defaults to
             ``gaussx.DenseSolver()``. Used by guides that need to solve
             against ``K_zz`` (e.g.\ for KL or unwhitening).
+        preconditioner: Optional ``gaussx.AbstractPreconditioner``, composed
+            with ``solver`` by `gaussx.compose_solver` (see
+            `pyrox_gp.GPPrior`). Keyword only.
+        logdet: Optional ``gaussx.AbstractLogdetStrategy`` in place of the
+            solver's own log-determinant. Keyword only.
         jitter: Diagonal regularization added to ``K_zz`` for numerical
             stability. Not a noise model — sparse SVGP does not put
             observation noise on the inducing-value prior.
@@ -94,8 +105,14 @@ class SparseGPPrior(eqx.Module):
     mean_fn: Callable[[Float[Array, "N D"]], Float[Array, " N"]] | None = None
     solver: AbstractSolverStrategy | None = None
     jitter: float = 1e-6
+    # keyword only, so positional calls keep working
+    preconditioner: AbstractPreconditioner | None = eqx.field(
+        default=None, kw_only=True
+    )
+    logdet: AbstractLogdetStrategy | None = eqx.field(default=None, kw_only=True)
 
     def __check_init__(self) -> None:
+        self.solver_strategy()
         if (self.Z is None) == (self.inducing is None):
             raise ValueError(
                 "SparseGPPrior must be constructed with exactly one of `Z` "
@@ -212,8 +229,23 @@ class SparseGPPrior(eqx.Module):
             K_xx_diag = self.kernel.diag(X)
         return K_zz_op, K_xz, K_xx_diag
 
+    def solver_strategy(self) -> AbstractSolverStrategy:
+        """The ``solver``, ``preconditioner`` and ``logdet`` fields as one strategy.
+
+        Returns:
+            The `gaussx.compose_solver` composition; `gaussx.DenseSolver`
+            when none of the three is set.
+
+        Raises:
+            ValueError: For a combination `gaussx.compose_solver` rejects,
+                naming the three fields.
+        """
+        return compose_solver_fields(
+            "SparseGPPrior", self.solver, self.preconditioner, self.logdet
+        )
+
     def _resolved_solver(self) -> AbstractSolverStrategy:
-        return DenseSolver() if self.solver is None else self.solver
+        return self.solver_strategy()
 
     def log_prob(self, u: Float[Array, " M"]) -> Float[Array, ""]:
         r"""Log-density under $p(u) = \mathcal{N}(0, K_{ZZ} + \text{jitter}\,I)$.

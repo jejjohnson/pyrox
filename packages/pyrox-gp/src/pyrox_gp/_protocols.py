@@ -12,6 +12,11 @@ Solver strategies intentionally live in `gaussx`, not here. Use
 like ``gaussx.DenseSolver``, ``gaussx.CGSolver``, ``gaussx.BBMMSolver``,
 and ``gaussx.ComposedSolver``. The pyrox model entry points
 (``GPPrior``, ``gp_factor``, ``gp_sample``) accept any solver strategy.
+A prior takes the linear-algebra choices as three separate fields,
+``solver``, ``preconditioner`` (a ``gaussx.AbstractPreconditioner``) and
+``logdet`` (a ``gaussx.AbstractLogdetStrategy``), which its
+``solver_strategy()`` composes into one strategy with
+``gaussx.compose_solver`` (pyrox#550).
 
 Gaussian-expectation integrators live in `gaussx` too — use
 ``gaussx.AbstractIntegrator`` (and its concretes

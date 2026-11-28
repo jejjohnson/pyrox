@@ -255,10 +255,11 @@ class PathwiseSampler(eqx.Module):
         # never forms K (pyrox#558); None keeps gaussx's structural dispatch.
         # The preconditioner depends on the operator only, so under the vmap
         # over paths it is built once for the batch.
+        prior = self.conditioned_gp.prior
         correction_weights = solve_rows(
             self.conditioned_gp.operator,
             residual,
-            solver=self.conditioned_gp.prior.solver,
+            solver=None if prior.solver is None else prior.solver_strategy(),
         )
         return PathwiseFunction(
             kernel_fn=_frozen_kernel_fn(kernel, variance, lengthscale),
@@ -380,12 +381,12 @@ class DecoupledPathwiseSampler(eqx.Module):
         else:
             inducing_samples = guide_samples
 
-        # Per-path Matheron correction weights, with the prior's solver
-        # (None keeps gaussx's structural dispatch).
+        # Per-path Matheron correction weights, with the prior's solver and
+        # preconditioner (None keeps gaussx's structural dispatch).
         correction_weights = solve_rows(
             inducing_op,
             inducing_samples - prior_inducing,
-            solver=self.prior.solver,
+            solver=None if self.prior.solver is None else self.prior.solver_strategy(),
         )
         return PathwiseFunction(
             kernel_fn=_frozen_kernel_fn(self.prior.kernel, variance, lengthscale),

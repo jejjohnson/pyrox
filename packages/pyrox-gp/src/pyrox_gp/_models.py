@@ -25,8 +25,9 @@ import kernellib as kl
 import lineax as lx
 import numpyro
 from gaussx import (
+    AbstractLogdetStrategy,
+    AbstractPreconditioner,
     AbstractSolverStrategy,
-    DenseSolver,
     PredictionCache,
     build_prediction_cache,
     cholesky,
@@ -44,6 +45,7 @@ from pyrox_gauss import MultivariateNormal
 
 from pyrox_gp._kernel_operator import freeze_kernel, matrix_free_operator
 from pyrox_gp._protocols import Kernel, Likelihood
+from pyrox_gp._solvers import compose_solver_fields
 
 
 if TYPE_CHECKING:
@@ -73,9 +75,25 @@ def _psd_operator(K: Float[Array, "N N"]) -> lx.AbstractLinearOperator:
 class GPPrior(eqx.Module):
     """Finite-dimensional GP prior over a fixed training input set.
 
-    Holds a kernel, training inputs ``X``, an optional mean function, an
-    optional solver strategy, and a small diagonal jitter for numerical
-    stability on otherwise-singular prior covariances.
+    Holds a kernel, training inputs ``X``, an optional mean function, the
+    three linear-algebra choices (a solver, a preconditioner and a
+    log-determinant), and a small diagonal jitter for numerical stability on
+    otherwise-singular prior covariances.
+
+    The three choices are separate fields, composed once by
+    `solver_strategy` with `gaussx.compose_solver`, and every quantity of
+    the prior uses the result. With the system
+    $A = K + (\\text{jitter} + \\sigma^2) I$:
+
+    | Quantity | Solve | Log-determinant |
+    | --- | --- | --- |
+    | `log_marginal`, `gp_factor`, `log_prob` | yes | yes |
+    | `condition`, `ConditionedGP.predict` | yes | no |
+    | pathwise sampling | yes | no |
+
+    ``solver`` with ``preconditioner`` sets the solves, and ``logdet`` (or
+    the solver's own) the determinant. None of the three set is
+    `gaussx.DenseSolver`, as before.
 
     Attributes:
         kernel: Any `pyrox_gp.Kernel` — evaluated on ``X``.
@@ -90,6 +108,25 @@ class GPPrior(eqx.Module):
             ``PreconditionedCGSolver``, ``BBMMSolver``) is the sensible
             choice; ``MINRESSolver`` and ``LSMRSolver`` also converge, and
             LSMR works on the squared condition number, so it is slower.
+        preconditioner: Optional ``gaussx.AbstractPreconditioner`` for the
+            solve, and for the log-determinant of a ``BBMMSolver``, whose
+            shared pass uses $P$ itself. Keyword only. A lazy one
+            (``gaussx.NystromPreconditioner.lazy(rank, key=key)``) is
+            rebuilt from the system at every solve, so it follows the
+            kernel's hyperparameters; gaussx stops its gradient, so a
+            stale one changes the iteration count and not the result. It
+            needs an iterative ``solver``: with ``solver=None``
+            (``DenseSolver``) the prior raises at construction. A lazy
+            preconditioner reads the system as $K + \\mathrm{diag}(d)$
+            (`gaussx.split_diagonal`), so it needs ``matrix_free=True``; a
+            dense prior takes one built with ``from_operator``.
+        logdet: Optional ``gaussx.AbstractLogdetStrategy`` for
+            $\\log \\det A$ in place of the solver's own (for example
+            ``gaussx.SLQLogdet`` or ``gaussx.DenseLogdet`` next to a CG
+            solve). Keyword only. A stochastic estimator without a key
+            reuses its probes at every call, so NUTS then samples a fixed
+            approximation of the posterior and not the posterior; wrap it in
+            ``gaussx.KeyedSolver`` with a key per step to vary them.
         jitter: Diagonal regularization added to the prior covariance
             for numerical stability. Not a noise model — use
             ``noise_var`` on `condition` for that.
@@ -112,6 +149,35 @@ class GPPrior(eqx.Module):
         block_size: Rows of ``K`` per matvec step when ``matrix_free``.
 
     Examples:
+        BBMM with a preconditioner, or CG with a separate stochastic
+        log-determinant, on $10^5$ stations:
+
+        ```python
+        import gaussx as gx
+        import jax.random as jr
+        import pyrox_gp as px
+
+        # X: (100_000, 2) station coordinates
+        preconditioner = gx.NystromPreconditioner.lazy(rank=300, key=jr.key(0))
+        prior = px.GPPrior(
+            px.Matern(nu=1.5),
+            X,
+            solver=gx.BBMMSolver(num_probes=50),
+            preconditioner=preconditioner,
+            matrix_free=True,
+        )
+        prior = px.GPPrior(
+            px.Matern(nu=1.5),
+            X,
+            solver=gx.CGSolver(rtol=1e-4),
+            preconditioner=preconditioner,
+            logdet=gx.SLQLogdet(num_probes=50),
+            matrix_free=True,
+        )
+        log_marginal = prior.log_marginal(y, noise_var)
+        mean, variance = prior.condition(y, noise_var).predict(X_star)
+        ```
+
         Exact GP regression on $10^5$ stations, hyperparameters by SVI:
 
         ```python
@@ -143,6 +209,15 @@ class GPPrior(eqx.Module):
     jitter: float = 1e-6
     matrix_free: bool = eqx.field(static=True, default=False)
     block_size: int = eqx.field(static=True, default=256)
+    # keyword only, so positional calls up to block_size keep working
+    preconditioner: AbstractPreconditioner | None = eqx.field(
+        default=None, kw_only=True
+    )
+    logdet: AbstractLogdetStrategy | None = eqx.field(default=None, kw_only=True)
+
+    def __check_init__(self) -> None:
+        # rejected combinations raise here, naming the fields (type checks only)
+        self.solver_strategy()
 
     def mean(self, X: Float[Array, "N D"]) -> Float[Array, " N"]:
         """Evaluate the mean function at ``X``; zero by default."""
@@ -171,8 +246,26 @@ class GPPrior(eqx.Module):
         K = K.at[jnp.diag_indices_from(K)].add(self.jitter + noise_var)
         return _psd_operator(K)
 
+    def solver_strategy(self) -> AbstractSolverStrategy:
+        """The ``solver``, ``preconditioner`` and ``logdet`` fields as one strategy.
+
+        Composed by `gaussx.compose_solver`: none of the three set is
+        `gaussx.DenseSolver`, and a ``solver`` alone is returned unchanged.
+
+        Returns:
+            The `gaussx.AbstractSolverStrategy` every quantity of the prior
+            uses.
+
+        Raises:
+            ValueError: For a combination `gaussx.compose_solver` rejects,
+                naming the three fields.
+        """
+        return compose_solver_fields(
+            "GPPrior", self.solver, self.preconditioner, self.logdet
+        )
+
     def _resolved_solver(self) -> AbstractSolverStrategy:
-        return DenseSolver() if self.solver is None else self.solver
+        return self.solver_strategy()
 
     def log_prob(self, f: Float[Array, " N"]) -> Float[Array, ""]:
         r"""Marginal log-density of ``f`` under the GP prior.
