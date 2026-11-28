@@ -104,7 +104,7 @@ class GPPrior(eqx.Module):
             ``BBMMSolver``, ``ComposedSolver(solve=..., logdet=...)``, etc.
             Every gaussx solver runs on the matrix-free operator, but the
             system is symmetric positive definite, so CG
-            (`pyrox_gp.preconditioned_cg_solver`, ``CGSolver``,
+            (`pyrox_gp.matfree_solver`, `pyrox_gp.bbmm_solver`, ``CGSolver``,
             ``PreconditionedCGSolver``, ``BBMMSolver``) is the sensible
             choice; ``MINRESSolver`` and ``LSMRSolver`` also converge, and
             LSMR works on the squared condition number, so it is slower.
@@ -134,9 +134,9 @@ class GPPrior(eqx.Module):
             `lineax.AddLinearOperator` of a matrix-free kernel operator
             (row blocks of ``K`` evaluated per matvec, ``O(block_size N)``
             memory, gradients included) and ``(jitter + noise_var) I``. Pair
-            it with an iterative solver, normally
-            `pyrox_gp.preconditioned_cg_solver`, which reads the noise from
-            the sum; a dense solver materialises ``K`` again. NumPyro-aware
+            it with an iterative solver, normally `pyrox_gp.matfree_solver`
+            or `pyrox_gp.bbmm_solver`, which read the noise from the sum; a
+            dense solver materialises ``K`` again. NumPyro-aware
             kernels are resolved once per call through ``frozen()``.
             Matrix-free entry points: `log_prob`, `log_marginal`,
             `condition` and its predictions, `gp_factor`,
@@ -187,7 +187,7 @@ class GPPrior(eqx.Module):
         import pyrox_gp as px
 
         # X: (100_000, 2) station coordinates, y: (100_000,) readings
-        solver = px.preconditioned_cg_solver(rank=500, key=jr.key(0))
+        solver = px.matfree_solver(rank=500, key=jr.key(0))
 
         def model(X, y):
             kernel = px.Matern(nu=1.5, init_lengthscale=0.1)

@@ -151,11 +151,15 @@ from pyrox_gp._pathwise import (
     PathwiseFunction,
     PathwiseSampler,
 )
-from pyrox_gp._preconditioned import preconditioned_cg_solver
 from pyrox_gp._protocols import (
     Guide,
     Kernel,
     Likelihood,
+)
+from pyrox_gp._solvers import (
+    bbmm_solver,
+    matfree_solver,
+    preconditioned_cg_solver,
 )
 from pyrox_gp._sparse import ConditionedSparseGP, SparseGPPrior
 from pyrox_gp._warped import (
@@ -293,6 +297,7 @@ __all__ = [
     "White",
     "WhitenedGuide",
     "__version__",
+    "bbmm_solver",
     "collapsed_lfr_log_prob",
     "decoder_posterior",
     "funk_hecke_coefficients",
@@ -305,6 +310,7 @@ __all__ = [
     "lfr_factor",
     "lfr_model",
     "lfr_predictive_moments",
+    "matfree_solver",
     "mo_gp_factor",
     "mo_svgp_elbo",
     "mo_svgp_factor",

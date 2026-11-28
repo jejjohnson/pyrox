@@ -85,13 +85,15 @@ prior = GPPrior(kernel, X, solver=gx.CGSolver(rtol=1e-4), preconditioner=precond
 
 `preconditioner` and `logdet` are keyword-only. A combination that cannot work, such as a preconditioner with the default `DenseSolver`, raises `ValueError` at construction, naming the three fields. A stochastic log-determinant without a key reuses its probes at every call, so NUTS then targets a fixed approximation of the posterior; `gx.KeyedSolver` binds a key per step.
 
-For a large exact GP, `preconditioned_cg_solver` pairs a CG solve preconditioned by a low-rank approximation of $K$ with a stochastic log-determinant: `logdet="slq"` (the default) runs stochastic Lanczos quadrature on the system itself, and `logdet="nystrom"` uses gaussx's `NystromLogdet`, the exact log-determinant of a Nyström preconditioner plus SLQ on the preconditioned remainder, which has a much smaller error at the same number of probes. Both read the diagonal from the system with gaussx's `split_diagonal`: the scalar noise of a `matrix_free=True` system, or a diagonal that varies by point, such as site variances or heteroscedastic noise, for which the preconditioner is built by gaussx's per-point shift. A system that is one dense matrix needs `shift=`.
+For a large exact GP there are two presets, each one call that returns an ordinary gaussx strategy. `matfree_solver` is lineax conjugate gradients preconditioned by a low-rank approximation of $K$ plus a log-determinant through matfree: `logdet="nystrom"` (the default) is gaussx's `NystromLogdet`, the exact log-determinant of a Nyström preconditioner plus stochastic Lanczos quadrature on the preconditioned remainder, and `logdet="slq"` is stochastic Lanczos quadrature on the system itself. The library matfree has no conjugate gradients of its own, so "matfree" means lineax CG plus the matfree-backed log-determinant. `bbmm_solver` is gaussx's `BBMMSolver` with the same preconditioner, whose one batched pass gives both the solve and the log-determinant from probes drawn from the preconditioner. Both read the diagonal from the system with gaussx's `split_diagonal`: the scalar noise of a `matrix_free=True` system, or a diagonal that varies by point, such as site variances or heteroscedastic noise, for which the preconditioner is built by gaussx's per-point shift. `preconditioner="fitc"` raises, since a FITC preconditioner needs inducing inputs and a kernel that a system does not carry. `preconditioned_cg_solver` is a deprecated alias of `matfree_solver` with its old defaults, kept for one release; its `shift=` is used only for a system that is one dense matrix.
 
 ::: pyrox_gp.GPPrior
 ::: pyrox_gp.ConditionedGP
 ::: pyrox_gp.gp_factor
 ::: pyrox_gp.gp_laplace_factor
 ::: pyrox_gp.gp_sample
+::: pyrox_gp.matfree_solver
+::: pyrox_gp.bbmm_solver
 ::: pyrox_gp.preconditioned_cg_solver
 
 ## Derivatives
