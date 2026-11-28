@@ -93,6 +93,12 @@ class LastLayerLaplace(eqx.Module):
         structure: ``"full"`` or ``"diag"``.
         jitter: $\epsilon$, added to the diagonal of $G$, and so of $H$,
             everywhere it is used.
+        solver: The gaussx solver strategy for $H_\lambda$ with
+            ``structure="full"``: the mode solve, one solve per output point
+            in `predict`, and the log-determinant of the evidence. ``None``
+            (the default) keeps gaussx's structural dispatch and the
+            Cholesky factor of `predict`. Ignored for ``structure="diag"``,
+            whose precision is diagonal.
     """
 
     predict_fn: Callable[[PyTree, Array], Array] = eqx.field(static=True)
@@ -107,11 +113,16 @@ class LastLayerLaplace(eqx.Module):
     prior_precision: Float[Array, ""]
     structure: Literal["full", "diag"] = eqx.field(static=True)
     jitter: float = eqx.field(static=True)
+    solver: gaussx.AbstractSolverStrategy | None = None
 
     def _lam(self, prior_precision: Array | float | None) -> Array:
         if prior_precision is None:
             return self.prior_precision
         return jnp.asarray(prior_precision, dtype=self.w_map.dtype)
+
+    def _strategy(self) -> gaussx.AbstractSolverStrategy | None:
+        """The solver for H_λ, or ``None`` for structural dispatch."""
+        return None if self.structure == "diag" else self.solver
 
     def _g_matvec(self, v: Array) -> Array:
         """$G v$, jitter included."""
@@ -147,7 +158,10 @@ class LastLayerLaplace(eqx.Module):
             # lineax does not infer PSD for a diagonal; G + λ I has a
             # non-negative one, and argminax requires the tag
             precision = lx.TaggedLinearOperator(precision, lx.positive_semidefinite_tag)
-        return argminax.curvature.Laplace(self.mode(lam), precision)
+        strategy = self._strategy()
+        if strategy is None:
+            return argminax.curvature.Laplace(self.mode(lam), precision)
+        return argminax.curvature.Laplace(self.mode(lam), precision, solver=strategy)
 
     def mode(self, prior_precision: Array | float | None = None) -> Array:
         r"""$w_\lambda = H_\lambda^{-1} (G w^* + b)$, shape ``(P,)``.
@@ -161,8 +175,14 @@ class LastLayerLaplace(eqx.Module):
         Returns:
             The mode of the quadratic-model posterior.
         """
+        # G w⋆ + b
         rhs = self._g_matvec(self.w_map) + self.loglik_grad
-        return gaussx.solve(self.precision(prior_precision), rhs)
+        strategy = self._strategy()
+        if strategy is None:
+            # w_λ = H_λ⁻¹ (G w⋆ + b)
+            return gaussx.solve(self.precision(prior_precision), rhs)
+        # w_λ = H_λ⁻¹ (G w⋆ + b), by the posterior's solver
+        return strategy.solve(self.precision(prior_precision), rhs)
 
     def predict(self, x: Array) -> tuple[Array, Array]:
         r"""Linearized predictive mean and variance of $f$ at ``x``.
@@ -189,9 +209,15 @@ class LastLayerLaplace(eqx.Module):
         shift = einx.dot("m p, p -> m", jac, self.w_mean - self.w_map)
         jac_t = einx.id("m p -> p m", jac)
         h = self.precision()
+        strategy = self._strategy()
         if self.structure == "diag":
             # H⁻¹ is diagonal: Var = Σ_p J_*² / h_p.
             var = einx.sum("[p] m", jac_t * gaussx.solve_columns(h, jac_t))
+        elif strategy is not None:
+            # H⁻¹ J_*ᵀ, one solve per output point
+            solved = gaussx.solve_columns(h, jac_t, solver=strategy)
+            # Var = diag(J_* H⁻¹ J_*ᵀ)
+            var = einx.sum("[p] m", jac_t * solved)
         else:
             # H = L Lᵀ, so J_* H⁻¹ J_*ᵀ has diagonal Σ_p (L⁻¹ J_*ᵀ)².
             v = gaussx.solve_columns(gaussx.cholesky(h), jac_t)
@@ -220,7 +246,11 @@ class LastLayerLaplace(eqx.Module):
         minimum of the quadratic model's cost, so this is
         ``argminax.diagnose.evidence`` at that minimum, with the prior
         $\mathcal{N}(0, \lambda^{-1} I)$ and the Gaussian normaliser
-        carried by $\ell^*$.
+        carried by $\ell^*$. With a ``solver`` (``structure="full"``),
+        $\log\det H_\lambda$ is the solver's own (``solver.logdet``,
+        stochastic for `gaussx.CGSolver`: fix its ``seed`` when comparing
+        values of $\lambda$), since ``argminax.diagnose.evidence`` always
+        takes the exact one.
 
         Args:
             prior_precision: $\lambda$ to evaluate at; defaults to the
@@ -242,9 +272,17 @@ class LastLayerLaplace(eqx.Module):
             - 0.5 * jnp.dot(delta, self._g_matvec(delta))
         ) + 0.5 * lam * jnp.sum(w_lam**2)
         # ℓ⋆ already holds −½ log |2π σ² I|, and log |Sₐ| = −P log λ
+        # log |Sₐ| = −P log λ
+        prior_cov_logdet = -p * jnp.log(lam)
+        if self._strategy() is not None:
+            # argminax.diagnose.evidence takes gaussx.logdet, not the
+            # posterior's solver; the same formula with the solver's logdet,
+            # log p(y) ≈ −𝒥 − ½ (log det H_λ + log |Sₐ|)
+            logdet = posterior.logdet_precision()
+            return -cost - 0.5 * (logdet + prior_cov_logdet)
         zero = jnp.zeros((), dtype=self.w_map.dtype)
         return argminax.diagnose.evidence(
-            posterior, cost, zero, prior_cov_logdet=-p * jnp.log(lam)
+            posterior, cost, zero, prior_cov_logdet=prior_cov_logdet
         ).value
 
     def optimize_prior_precision(
@@ -273,6 +311,12 @@ class LastLayerLaplace(eqx.Module):
         either side of the best point; pyrox-nn supplies the eigenvalues
         $g$ and the fit terms in $\omega$. For a model linear in $w$ this
         maximizes the exact evidence.
+
+        The search does not use ``solver``: after one eigendecomposition of
+        $G$ each $\lambda$ costs $O(P)$, while an iterative solver would
+        re-solve and re-estimate the log-determinant at every grid point.
+        The returned copy keeps ``solver``, and its mode at the tuned
+        $\lambda$ is solved with it.
 
         Args:
             num_grid: Grid points on $\log \lambda$.
@@ -333,6 +377,7 @@ def last_layer_laplace(
     prior_precision: Float[Array, ""] | float = 1.0,
     structure: Literal["full", "diag"] = "full",
     jitter: float = 1e-8,
+    solver: gaussx.AbstractSolverStrategy | None = None,
 ) -> LastLayerLaplace:
     r"""Fit a post-hoc GGN Laplace posterior over a parameter group.
 
@@ -377,6 +422,14 @@ def last_layer_laplace(
             diagonal (``gaussx.ggn_diagonal``).
         jitter: Added to the diagonal of the GGN (so of the precision)
             before factorizing, consistently in every use.
+        solver: Optional gaussx solver strategy for the precision
+            $H_\lambda$ with ``structure="full"``, e.g.
+            ``gaussx.CGSolver(rtol=1e-6)``: the mode, the predictive
+            variance (one solve per output point) and the evidence's
+            log-determinant go through it, and it is passed to the argminax
+            posterior. ``None`` keeps gaussx's dense dispatch. ``"diag"``
+            ignores it. $G$ is still formed densely ($O(N P^2)$ time,
+            $P^2$ memory) before any solver runs.
 
     Returns:
         A `LastLayerLaplace` posterior.
@@ -444,4 +497,5 @@ def last_layer_laplace(
         prior_precision=jnp.asarray(prior_precision, dtype=w.dtype),
         structure=structure,
         jitter=jitter,
+        solver=solver,
     )

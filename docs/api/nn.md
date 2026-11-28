@@ -230,6 +230,8 @@ deviation.
 
 A Gaussian posterior over a chosen parameter group (typically the last layer) of one fitted model, from the generalized Gauss-Newton Hessian, with a linearized predictive and evidence-tuned prior precision.
 
+`solver=` takes any gaussx solver strategy for the posterior precision with `structure="full"`, for example `gaussx.CGSolver(rtol=1e-6)`: the mode, the predictive variance (one solve per output point) and the evidence's log-determinant go through it, and `None` keeps the dense Cholesky route. `structure="diag"` ignores it, and `optimize_prior_precision` keeps its single eigendecomposition, since an iterative solver would re-solve at every grid point. The GGN itself is still formed densely before any solver runs.
+
 ::: pyrox_nn.last_layer_laplace
 
 ::: pyrox_nn.LastLayerLaplace
