@@ -2419,7 +2419,7 @@ provides-extras = ["optax", "colab"]
 
 [[package]]
 name = "pyrox-gauss"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/pyrox-gauss" }
 dependencies = [
     { name = "einx" },
@@ -2444,7 +2444,7 @@ requires-dist = [
 
 [[package]]
 name = "pyrox-gp"
-version = "0.3.2"
+version = "0.3.3"
 source = { editable = "packages/pyrox-gp" }
 dependencies = [
     { name = "argminax" },
@@ -2490,7 +2490,7 @@ provides-extras = ["colab", "flows"]
 
 [[package]]
 name = "pyrox-lgm"
-version = "0.1.5"
+version = "0.1.6"
 source = { editable = "packages/pyrox-lgm" }
 dependencies = [
     { name = "argminax" },
@@ -2609,7 +2609,7 @@ typecheck = [{ name = "ty", specifier = ">=0.0.42" }]
 
 [[package]]
 name = "pyrox-nn"
-version = "0.2.1"
+version = "0.2.2"
 source = { editable = "packages/pyrox-nn" }
 dependencies = [
     { name = "argminax" },
@@ -2665,7 +2665,7 @@ provides-extras = ["optax", "bnf", "xarray", "colab"]
 
 [[package]]
 name = "pyrox-ssm"
-version = "0.2.2"
+version = "0.2.3"
 source = { editable = "packages/pyrox-ssm" }
 dependencies = [
     { name = "argminax" },

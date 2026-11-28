@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.3.3](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.3.2...pyrox-gp-v0.3.3) (2026-11-28)
+
+
+### Features
+
+* **gp:** laplace and gauss-newton fits take a solver choice and run on a matrix-free prior ([#583](https://github.com/jejjohnson/pyrox/issues/583)) ([d75552a](https://github.com/jejjohnson/pyrox/commit/d75552a515e10985e0e7327382d0b72fab09bd51)), closes [#551](https://github.com/jejjohnson/pyrox/issues/551)
+* **gp:** matfree_solver and bbmm_solver presets ([#580](https://github.com/jejjohnson/pyrox/issues/580)) ([e2342a6](https://github.com/jejjohnson/pyrox/commit/e2342a6c948e5b6b3b63528954277b1c5a9ace92)), closes [#557](https://github.com/jejjohnson/pyrox/issues/557)
+* **gp:** posterior linearisation and EP run under jit on the site posterior, with a solver choice ([#582](https://github.com/jejjohnson/pyrox/issues/582)) ([17a6008](https://github.com/jejjohnson/pyrox/commit/17a60086c05be82f9ec8db2f7408ea03e0248c17)), closes [#552](https://github.com/jejjohnson/pyrox/issues/552)
+* **gp:** solver, preconditioner and logdet fields on the GP priors ([#579](https://github.com/jejjohnson/pyrox/issues/579)) ([5bea8d0](https://github.com/jejjohnson/pyrox/commit/5bea8d0646692065f17da07d29ecbbc13fd4a828)), closes [#550](https://github.com/jejjohnson/pyrox/issues/550)
+* **gp:** stochastic site variances from gaussx 0.8.4 for posterior linearisation, EP and Laplace ([#584](https://github.com/jejjohnson/pyrox/issues/584)) ([5c51534](https://github.com/jejjohnson/pyrox/commit/5c51534bb5979d6e4fe329c5587f8369818673e0))
+
+
+### Bug Fixes
+
+* **gp:** preconditioned_cg_solver builds logdet="nystrom" from gaussx NystromLogdet ([#570](https://github.com/jejjohnson/pyrox/issues/570)) ([ea8ca68](https://github.com/jejjohnson/pyrox/commit/ea8ca681d905de7ad195c4da31964592f4cd5f25)), closes [#556](https://github.com/jejjohnson/pyrox/issues/556)
+* **gp:** preconditioned_cg_solver takes a diagonal that varies by point ([#578](https://github.com/jejjohnson/pyrox/issues/578)) ([5de2f03](https://github.com/jejjohnson/pyrox/commit/5de2f037f3669148ed3c67b52731f24030917c26)), closes [#555](https://github.com/jejjohnson/pyrox/issues/555)
+* **gp:** prior draws on a matrix-free prior raise, or draw with method="krylov" without forming the kernel matrix ([#574](https://github.com/jejjohnson/pyrox/issues/574)) ([724d455](https://github.com/jejjohnson/pyrox/commit/724d455afd769d881f44db0ace0e93d7b0424809)), closes [#559](https://github.com/jejjohnson/pyrox/issues/559)
+* **gp:** register lineax.conj for KernelOperator so LSMRSolver runs on a matrix-free GP ([#571](https://github.com/jejjohnson/pyrox/issues/571)) ([439b963](https://github.com/jejjohnson/pyrox/commit/439b96307c4bb8d6cfe3ccb9493f2e15fbc0855f)), closes [#554](https://github.com/jejjohnson/pyrox/issues/554)
+* **gp:** the non-Gaussian strategies refuse a matrix-free prior instead of forming the kernel matrix ([#572](https://github.com/jejjohnson/pyrox/issues/572)) ([3d41a21](https://github.com/jejjohnson/pyrox/commit/3d41a21431452373566c1f2f89a943cce1fb424d)), closes [#549](https://github.com/jejjohnson/pyrox/issues/549)
+* **gp:** the pathwise sampler solves with the prior's solver and no longer forms the kernel matrix ([#573](https://github.com/jejjohnson/pyrox/issues/573)) ([ecdeb75](https://github.com/jejjohnson/pyrox/commit/ecdeb75be58c5409a2a163b321d7db042b4f033d)), closes [#558](https://github.com/jejjohnson/pyrox/issues/558)
+* **gp:** the sparse guides' solver reaches predict and kl_divergence ([#585](https://github.com/jejjohnson/pyrox/issues/585)) ([9b34578](https://github.com/jejjohnson/pyrox/commit/9b34578e5fd568564c3cbc53052ae11750be01e5)), closes [#560](https://github.com/jejjohnson/pyrox/issues/560)
+
 ## [0.3.2](https://github.com/jejjohnson/pyrox/compare/pyrox-gp-v0.3.1...pyrox-gp-v0.3.2) (2026-11-26)
 
 

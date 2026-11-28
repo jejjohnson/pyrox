@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.6](https://github.com/jejjohnson/pyrox/compare/pyrox-lgm-v0.1.5...pyrox-lgm-v0.1.6) (2026-11-28)
+
+
+### Features
+
+* **gp:** laplace and gauss-newton fits take a solver choice and run on a matrix-free prior ([#583](https://github.com/jejjohnson/pyrox/issues/583)) ([d75552a](https://github.com/jejjohnson/pyrox/commit/d75552a515e10985e0e7327382d0b72fab09bd51)), closes [#551](https://github.com/jejjohnson/pyrox/issues/551)
+* **gp:** stochastic site variances from gaussx 0.8.4 for posterior linearisation, EP and Laplace ([#584](https://github.com/jejjohnson/pyrox/issues/584)) ([5c51534](https://github.com/jejjohnson/pyrox/commit/5c51534bb5979d6e4fe329c5587f8369818673e0))
+
 ## [0.1.5](https://github.com/jejjohnson/pyrox/compare/pyrox-lgm-v0.1.4...pyrox-lgm-v0.1.5) (2026-11-26)
 
 
