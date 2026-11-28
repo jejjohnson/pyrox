@@ -52,6 +52,8 @@ import lineax as lx
 import numpyro
 from gaussx import (
     AbstractIntegrator as GaussxIntegrator,
+    AbstractLogdetStrategy,
+    AbstractPreconditioner,
     AbstractSolverStrategy,
     BlockDiag,
     DenseSolver,
@@ -79,6 +81,7 @@ from pyrox_gp._multi_output import (
     SharedInducingPoints,
 )
 from pyrox_gp._protocols import Guide, Kernel, Likelihood
+from pyrox_gp._solvers import compose_solver_fields
 
 
 MultiOutputKernel = LMCKernel | ICMKernel | OILMMKernel
@@ -214,6 +217,11 @@ class MultiOutputGPPrior(eqx.Module):
         mean_fn: Callable ``X -> (N, P)`` or ``None`` for the zero mean.
         solver: Any ``gaussx.AbstractSolverStrategy``. Defaults to
             ``gaussx.DenseSolver()``.
+        preconditioner: Optional ``gaussx.AbstractPreconditioner``, composed
+            with ``solver`` by `gaussx.compose_solver` (see
+            `pyrox_gp.GPPrior`). Keyword only.
+        logdet: Optional ``gaussx.AbstractLogdetStrategy`` in place of the
+            solver's own log-determinant. Keyword only.
         jitter: Diagonal regularization added to the prior covariance.
             Not a noise model — use ``noise_var`` on `condition`
             for that.
@@ -224,6 +232,14 @@ class MultiOutputGPPrior(eqx.Module):
     mean_fn: Callable[[Float[Array, "N D"]], Float[Array, "N P"]] | None = None
     solver: AbstractSolverStrategy | None = None
     jitter: float = 1e-6
+    # keyword only, so positional calls keep working
+    preconditioner: AbstractPreconditioner | None = eqx.field(
+        default=None, kw_only=True
+    )
+    logdet: AbstractLogdetStrategy | None = eqx.field(default=None, kw_only=True)
+
+    def __check_init__(self) -> None:
+        self.solver_strategy()
 
     @property
     def num_outputs(self) -> int:
@@ -277,8 +293,23 @@ class MultiOutputGPPrior(eqx.Module):
         K = K.at[jnp.diag_indices_from(K)].add(self.jitter + noise)
         return _psd_operator(K)
 
+    def solver_strategy(self) -> AbstractSolverStrategy:
+        """The ``solver``, ``preconditioner`` and ``logdet`` fields as one strategy.
+
+        Returns:
+            The `gaussx.compose_solver` composition; `gaussx.DenseSolver`
+            when none of the three is set.
+
+        Raises:
+            ValueError: For a combination `gaussx.compose_solver` rejects,
+                naming the three fields.
+        """
+        return compose_solver_fields(
+            "MultiOutputGPPrior", self.solver, self.preconditioner, self.logdet
+        )
+
     def _resolved_solver(self) -> AbstractSolverStrategy:
-        return DenseSolver() if self.solver is None else self.solver
+        return self.solver_strategy()
 
     def log_prob(self, F: Float[Array, "N P"]) -> Float[Array, ""]:
         r"""Marginal log-density of the latent functions ``F`` under the prior.
@@ -827,6 +858,10 @@ class OILMMGPPrior(eqx.Module):
             onto predictions.
         solver: Any ``gaussx.AbstractSolverStrategy``, forwarded to the
             per-latent `pyrox_gp.GPPrior` instances.
+        preconditioner: Optional ``gaussx.AbstractPreconditioner``,
+            forwarded to the per-latent priors. Keyword only.
+        logdet: Optional ``gaussx.AbstractLogdetStrategy``, forwarded to the
+            per-latent priors. Keyword only.
         jitter: Diagonal regularization forwarded to each latent prior.
     """
 
@@ -835,6 +870,11 @@ class OILMMGPPrior(eqx.Module):
     mean_fn: Callable[[Float[Array, "N D"]], Float[Array, "N P"]] | None = None
     solver: AbstractSolverStrategy | None = None
     jitter: float = 1e-6
+    # keyword only, so positional calls keep working
+    preconditioner: AbstractPreconditioner | None = eqx.field(
+        default=None, kw_only=True
+    )
+    logdet: AbstractLogdetStrategy | None = eqx.field(default=None, kw_only=True)
 
     @property
     def num_outputs(self) -> int:
@@ -855,7 +895,14 @@ class OILMMGPPrior(eqx.Module):
     def latent_priors(self) -> tuple[GPPrior, ...]:
         """Return one scalar `pyrox_gp.GPPrior` per latent process."""
         return tuple(
-            GPPrior(kernel=kernel, X=self.X, solver=self.solver, jitter=self.jitter)
+            GPPrior(
+                kernel=kernel,
+                X=self.X,
+                solver=self.solver,
+                jitter=self.jitter,
+                preconditioner=self.preconditioner,
+                logdet=self.logdet,
+            )
             for kernel in self.kernel.kernels
         )
 

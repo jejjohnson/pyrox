@@ -65,6 +65,26 @@ prior = GPPrior(
 )
 ```
 
+The solver, the preconditioner and the log-determinant are three separate fields of `GPPrior` (and of `SparseGPPrior`, `MultiOutputGPPrior` and `OILMMGPPrior`), so each can be changed on its own. `GPPrior.solver_strategy()` composes them with gaussx's `compose_solver`, and every quantity of the prior uses the result:
+
+| Quantity | Solve | Log-determinant |
+| --- | --- | --- |
+| `log_marginal`, `gp_factor`, `log_prob` | yes | yes |
+| `condition`, `predict` | yes | no |
+| pathwise sampling | yes | no |
+
+```python
+import gaussx as gx
+
+preconditioner = gx.NystromPreconditioner.lazy(rank=300, key=key)
+# BBMM with a preconditioner, which its shared pass also uses for the log-determinant
+prior = GPPrior(kernel, X, solver=gx.BBMMSolver(num_probes=50), preconditioner=preconditioner, matrix_free=True)
+# CG with the preconditioner, plus a separate stochastic log-determinant
+prior = GPPrior(kernel, X, solver=gx.CGSolver(rtol=1e-4), preconditioner=preconditioner, logdet=gx.SLQLogdet(num_probes=50), matrix_free=True)
+```
+
+`preconditioner` and `logdet` are keyword-only. A combination that cannot work, such as a preconditioner with the default `DenseSolver`, raises `ValueError` at construction, naming the three fields. A stochastic log-determinant without a key reuses its probes at every call, so NUTS then targets a fixed approximation of the posterior; `gx.KeyedSolver` binds a key per step.
+
 For a large exact GP, `preconditioned_cg_solver` pairs a CG solve preconditioned by a low-rank approximation of $K$ with a stochastic log-determinant: `logdet="slq"` (the default) runs stochastic Lanczos quadrature on the system itself, and `logdet="nystrom"` uses gaussx's `NystromLogdet`, the exact log-determinant of a Nyström preconditioner plus SLQ on the preconditioned remainder, which has a much smaller error at the same number of probes. Both read the diagonal from the system with gaussx's `split_diagonal`: the scalar noise of a `matrix_free=True` system, or a diagonal that varies by point, such as site variances or heteroscedastic noise, for which the preconditioner is built by gaussx's per-point shift. A system that is one dense matrix needs `shift=`.
 
 ::: pyrox_gp.GPPrior

@@ -41,7 +41,9 @@
 stable matrix assembly, implicit operators, batched matvec, Cholesky /
 CG / BBMM / LSMR, etc. — live in ``gaussx``. pyrox model entry points
 accept any ``gaussx.AbstractSolverStrategy``; the default is
-``gaussx.DenseSolver()``.
+``gaussx.DenseSolver()``. The priors take a ``preconditioner`` and a
+``logdet`` as separate fields too, composed with the ``solver`` by
+``gaussx.compose_solver`` (``GPPrior.solver_strategy``).
 
 `NonGaussConditionedGP` is now `ConditionedNonGaussGP` and
 `MultiOutputConditionedGP` is `ConditionedMultiOutputGP`, the
