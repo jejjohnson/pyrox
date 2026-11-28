@@ -166,7 +166,7 @@ def test_laplace_reads_the_key_only_for_q_var() -> None:
     )
     assert bool(jnp.all(jnp.isfinite(fit.q_mean)))
     with pytest.raises(ValueError, match="PRNG key"):
-        fit.q_var
+        _ = fit.q_var
     with pytest.raises(ValueError, match="variance must be"):
         GaussNewtonInference(variance="sampled")
 
