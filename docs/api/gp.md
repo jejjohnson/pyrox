@@ -241,6 +241,8 @@ SVGP ELBO. `WhitenedGuide` parameterizes in whitened coordinates
 `NaturalGuide` parameterizes in natural form for natural-gradient / CVI
 workflows; `DeltaGuide` is a point mass for MAP-style training.
 
+A guide's `solver` is the solver of every solve against $K_{ZZ}$ in `predict` and `kl_divergence` for `FullRankGuide`, `MeanFieldGuide` and `DeltaGuide` ([#560](https://github.com/jejjohnson/pyrox/issues/560)): `predict` forms $B = K_{ZZ}^{-1} K_{ZX}$ from one matrix right-hand side and needs no root, and the KL of the first two is `gaussx.gaussian_kl(..., solver=)` (`DeltaGuide`'s $-\log p(\mathrm{loc})$ already went through `gaussx.gaussian_log_prob` with it). With `solver=None` both keep the Cholesky route, and a diagonal $K_{ZZ}$ of inter-domain features stays $O(M)$; an explicit solver overrides that structure. An iterative solver's tolerance enters the ELBO, since a relative error $\delta$ in $B$ moves each predictive variance by about $\delta k_{nn}$, and its own log-determinant (stochastic Lanczos for CG and BBMM) moves the KL by half its error, so pass `logdet=gaussx.DenseLogdet()` through `gaussx.compose_solver` for an exact KL at moderate $M$. `WhitenedGuide` has nothing to choose there: $u = L_{ZZ} v$ needs the Cholesky factor, and its KL is against $\mathcal{N}(0, I)$. `ConjugateVI.step` solves against $K_{ZZ}$ with the prior's `solver` when it sets one.
+
 ::: pyrox_gp.FullRankGuide
 ::: pyrox_gp.MeanFieldGuide
 ::: pyrox_gp.WhitenedGuide
