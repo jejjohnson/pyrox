@@ -21,8 +21,8 @@ classifiers = [
 ]
 dependencies = [
     "pyrox",
-    "argminax>=0.0.8",
-    "gaussx>=0.8.2",
+    "argminax>=0.0.10",
+    "gaussx>=0.8.3",
     "pyrox-gauss",
     "kernellib>=0.0.22",
     "functax[jax] @ git+https://github.com/jejjohnson/functax.git@v0.0.7",
@@ -57,14 +57,14 @@ Repository = "https://github.com/jejjohnson/pyrox"
 [tool.uv.sources]
 # gaussx is not yet on PyPI; resolve the release tag from GitHub. The
 # `>=` floor in `dependencies` is what a PyPI release will satisfy later.
-gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.2" }
+gaussx = { git = "https://github.com/jejjohnson/gaussx.git", tag = "v0.8.3" }
 # kernellib is not yet on PyPI either; same pattern. 0.0.5 carries the
 # spectral methods and RFF draws `_basis` delegates to, and needs gaussx >= 0.2.0.
 kernellib = { git = "https://github.com/jejjohnson/kernellib.git", tag = "v0.0.22" }
 # The Newton loop of `LaplaceInference` and `GaussNewtonInference`
-# (`argminax.solve.laplace_mode_covariance`, v0.0.8), in step with the
+# (`argminax.solve.laplace_mode_covariance`, v0.0.10), in step with the
 # argminax source of pyrox-lgm, pyrox-nn and pyrox-ssm.
-argminax = { git = "https://github.com/jejjohnson/argminax.git", tag = "v0.0.8" }
+argminax = { git = "https://github.com/jejjohnson/argminax.git", tag = "v0.0.10" }
 
 [build-system]
 requires = ["hatchling>=1.27"]

@@ -116,12 +116,12 @@ In your own project, add the package you want. Each one pulls in the others it n
 uv add "pyrox-gp @ git+https://github.com/jejjohnson/pyrox.git#subdirectory=packages/pyrox-gp"
 ```
 
-kernellib v0.0.22 and argminax v0.0.8 pin older tags of gaussx and geonnax than we need. So for `pyrox-gp`, `pyrox-nn`, `pyrox-lgm` and `pyrox-ssm` add this override to your `pyproject.toml` first, otherwise uv cannot resolve the install; `pyrox`, `pyrox-gauss` and `pyrox-xtreme` need none.
+kernellib v0.0.22 and argminax v0.0.10 pin older tags of gaussx and geonnax than we need. So for `pyrox-gp`, `pyrox-nn`, `pyrox-lgm` and `pyrox-ssm` add this override to your `pyproject.toml` first, otherwise uv cannot resolve the install; `pyrox`, `pyrox-gauss` and `pyrox-xtreme` need none.
 
 ```toml
 [tool.uv]
 override-dependencies = [
-    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.8.2",
+    "gaussx @ git+https://github.com/jejjohnson/gaussx.git@v0.8.3",
     "geonnax @ git+https://github.com/jejjohnson/geonnax.git@v0.0.11",
 ]
 ```
