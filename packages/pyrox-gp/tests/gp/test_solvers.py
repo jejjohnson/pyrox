@@ -177,6 +177,22 @@ def test_fitc_is_gaussx_fitc_at_drawn_training_inputs():
             pre.approximation(system).as_matrix(), want, rtol=1e-10, atol=1e-12
         )
     np.testing.assert_allclose(pre.logdet(dense), expected.logdet(dense), rtol=1e-10)
+    # a matrix-free prior is K_op + jitter I inside the site system: the
+    # jitter stays on P's diagonal, so P still matches A there
+    prior_cov = GPPrior(KERNEL, X[:n], matrix_free=True)._prior_operator()
+    nested = lx.TaggedLinearOperator(prior_cov + shift, psd)
+    jitter = GPPrior(KERNEL, X[:n]).jitter
+    np.testing.assert_allclose(
+        pre.approximation(nested).as_matrix(),
+        want + jitter * jnp.eye(n),
+        rtol=1e-10,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        jnp.diag(pre.approximation(nested).as_matrix()),
+        jnp.diag(nested.as_matrix()),
+        rtol=1e-10,
+    )
     vector = Y[:n]
     np.testing.assert_allclose(
         pre(vector, dense), jnp.linalg.solve(want, vector), rtol=1e-8

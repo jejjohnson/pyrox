@@ -251,7 +251,30 @@ class _SystemFITCPreconditioner(gx.AbstractPreconditioner):
                 "GPPrior(..., matrix_free=True) system, or the site system of "
                 "a non-Gaussian fit)."
             )
-        kernel_part = _untagged(split.base)
+        # a prior that is itself K + diag(j) (the jitter of a matrix-free
+        # GPPrior) is one tagged summand: peel it, and keep j for P
+        base, inner_diagonal = split.base, None
+        while (inner := gx.split_diagonal(base)) is not None:
+            base = inner.base
+            inner_diagonal = (
+                inner.diagonal
+                if inner_diagonal is None
+                else inner_diagonal + inner.diagonal
+            )
+        fitc = self._from_kernel_part(_untagged(base))
+        if inner_diagonal is None:
+            return fitc
+        # r + j, so P still matches A on the diagonal
+        return eqx.tree_at(
+            lambda built: built.prior_residual,
+            fitc,
+            fitc.prior_residual + inner_diagonal,
+        )
+
+    def _from_kernel_part(
+        self, kernel_part: lx.AbstractLinearOperator
+    ) -> gx.FITCPreconditioner:
+        """U and r from R drawn training inputs of the kernel part K."""
         size = kernel_part.in_structure().shape[0]
         if self.rank > size:
             raise ValueError(
