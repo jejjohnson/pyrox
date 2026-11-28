@@ -120,7 +120,9 @@ def test_float32_sites_fit_under_x64(strategy) -> None:
     mask = jnp.ones(16, dtype=bool).at[3].set(False)
     y = y.at[3].set(jnp.nan)
     sde = MaternSDE(jnp.float32(1.0), jnp.float32(0.7), order=1)
-    cond = strategy().fit(MarkovGPPrior(sde, times), BernoulliLikelihood(), y, mask=mask)
+    cond = strategy().fit(
+        MarkovGPPrior(sde, times), BernoulliLikelihood(), y, mask=mask
+    )
     assert cond.q_mean.dtype == jnp.float32
     assert cond.site_nat1.dtype == jnp.float32
     assert bool(cond.converged)

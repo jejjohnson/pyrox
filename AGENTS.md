@@ -155,7 +155,7 @@ fails under a handler, a transform or a second instance.
   `ExpectationPropagation` in `pyrox_gp._inference_nongauss` are the
   documented exception; the Laplace, Gauss–Newton and quasi-Newton
   strategies run on argminax and optimistix, and the Markov strategies in
-  `pyrox_ssm` run on `optimistix.fixed_point`, so all of those trace).
+  `pyrox_ssm` run on `argminax.solve.site_fixed_point`, so all of those trace).
 - **Linear algebra through gaussx.** Wrap Grams as PSD-tagged lineax
   operators and call gaussx; respect the model's `solver=`. A few modules
   still hand-roll `cho_solve` / `solve_triangular`

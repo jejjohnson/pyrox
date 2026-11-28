@@ -23,9 +23,9 @@ import jax
 
 jax.config.update("jax_enable_x64", True)
 
-import jax.numpy as jnp  # noqa: E402
-import numpy as np  # noqa: E402
-from pyrox_ssm import (  # noqa: E402
+import jax.numpy as jnp
+import numpy as np
+from pyrox_ssm import (
     ExpectationPropagationMarkov,
     GaussNewtonMarkovInference,
     LaplaceMarkovInference,
@@ -36,7 +36,7 @@ from pyrox_ssm import (  # noqa: E402
 
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
-from ssm_reference import (  # noqa: E402
+from ssm_reference import (
     BernoulliLikelihood,
     PoissonLikelihood,
     StudentTLikelihood,
@@ -110,9 +110,9 @@ def main() -> None:
             arrays[f"{key}__n_iter"] = np.asarray(cond.n_iter)
             arrays[f"{key}__converged"] = np.asarray(cond.converged)
             grad = jax.grad(
-                lambda ell, s=strategy, li=likelihood, m=masked: fit(
-                    s, li, m, ell
-                ).log_marginal_approx
+                lambda ell, s=strategy, li=likelihood, m=masked: (
+                    fit(s, li, m, ell).log_marginal_approx
+                )
             )(0.7)
             arrays[f"{key}__grad_lengthscale"] = np.asarray(grad)
     np.savez(FIXTURE, **arrays)

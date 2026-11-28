@@ -138,9 +138,7 @@ def test_markov_laplace_matches_dense_laplace_on_matern12() -> None:
     root = jnp.sqrt(W)
     B = jnp.eye(times.shape[0]) + root[:, None] * K * root[None, :]
     log_lik = jnp.sum(y * jax.nn.log_sigmoid(f) + (1.0 - y) * jax.nn.log_sigmoid(-f))
-    dense_evidence = (
-        log_lik - 0.5 * f @ K_inv @ f - 0.5 * jnp.linalg.slogdet(B)[1]
-    )
+    dense_evidence = log_lik - 0.5 * f @ K_inv @ f - 0.5 * jnp.linalg.slogdet(B)[1]
     assert jnp.allclose(markov_cond.log_marginal_approx, dense_evidence, rtol=1e-6)
 
 
